@@ -6,8 +6,9 @@
 // which the demo Connection of `muster dev` uses, and SecondToken. getInfo answers the configured info — the
 // messenger "Fake chat", every feature on and both event delivery modes by default — checkChannel answers the
 // configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
-// their edits and Thread replies (messages.go), and every request with any other token, none or a revoked one gets
-// 401. Operations that no story has added yet answer 501.
+// their edits and Thread replies (messages.go), pollEvents and answerEvent serve the events of each bot (events.go),
+// and every request with any other token, none or a revoked one gets 401. Operations that no story has added yet
+// answer 501.
 //
 // Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
 // its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
@@ -15,12 +16,25 @@
 // application/problem+json, and a fault with a delay_ms and no status posts and then holds the answer, so that a
 // client that stops waiting retries into a replay.
 //
+// Events are what people do in the fake messenger, made through control endpoints, each queued for the bot of its
+// message under the id e<N>: POST /_fake/press {message_id, user_id, button[, data][, occurred_at][, bot]} presses the
+// button of that label in the message's latest content, or a Thread reply's, with its data unchanged, or sends the data
+// given; POST /_fake/thread-message {message_id, user_id, text[, occurred_at]} writes in the Thread of a message; and
+// DELETE /_fake/messages/{id} deletes a message, which queues message_deleted when capabilities.deletion_events is on.
+// The people are alice (u-alice, "Alice Smith"), bob (u-bob, "Bob Brown") and vera (u-vera, "Vera Viewer").
+// pollEvents answers the events of the token's bot after the cursor, the index of the next event, and waits up to
+// wait seconds for one when there are none; answerEvent records each answer and where it was shown. With push set in
+// /_fake/config to {url, secret}, every later event of either bot is also posted to that one url, in order and signed
+// as Standard Webhooks does with the secret, retried with a back-off until it is answered 204, and dropped on 400;
+// push null stops pushing and drops what waits. Close stops the pusher.
+//
 // The control endpoints under /_fake/ come from the fake-server harness (requests, faults) and add GET and PUT
 // /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the event delivery modes, the
-// revoked tokens, a padding that makes info larger, the channels, which both bots share, and replays; GET
-// /_fake/messages, the messages of both bots with their edits and replies, and DELETE /_fake/messages/{id}, which
-// deletes a message as a person would. The fake answers what it is configured to, also when that breaks the
-// protocol, so that the checks of Muster can be tried against a broken bridge.
+// revoked tokens, a padding that makes info larger, the channels, which both bots share, replays and the push target;
+// GET /_fake/messages, the messages of both bots with their edits and replies, and DELETE /_fake/messages/{id}, which
+// deletes a message as a person would; the event endpoints above; GET /_fake/events, the events of both bots with their
+// bot; and GET /_fake/answers, the answers Muster made. The fake answers what it is configured to, also when that breaks
+// the protocol, so that the checks of Muster can be tried against a broken bridge.
 package fakebridge
 
 import (
@@ -32,6 +46,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oapi-codegen/nullable"
 
@@ -76,7 +91,8 @@ const defaultConfig = `{
   "revoked": [],
   "info_padding_bytes": 0,
   "channels": {"ch-alerts": "alerts", "ch-alerts-prod": "alerts-prod", "ch-nobot": null},
-  "replays": true
+  "replays": true,
+  "push": null
 }`
 
 // Config is the configuration of the fake, as GET and PUT /_fake/config show it. ProtocolVersion, Capabilities,
@@ -84,7 +100,8 @@ const defaultConfig = `{
 // member "padding" of that many bytes to info, which the protocol allows and Muster ignores, to make it larger.
 // Channels are the channels checkChannel knows, by id: the name of one the bot can use, or null for one it cannot;
 // any other id is one it cannot use either; postMessage posts only to a channel the bot can use. With Replays, a
-// repeated Idempotency-Key answers the first result; without, every request posts again.
+// repeated Idempotency-Key answers the first result; without, every request posts again. Push is where the events of
+// both bots are pushed to, nil for nowhere.
 type Config struct {
 	ProtocolVersion  string                  `json:"protocol_version"`
 	Capabilities     gen.Capabilities        `json:"capabilities"`
@@ -95,25 +112,28 @@ type Config struct {
 	InfoPaddingBytes int                     `json:"info_padding_bytes"`
 	Channels         map[string]*string      `json:"channels"`
 	Replays          bool                    `json:"replays"`
+	Push             *PushTarget             `json:"push"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
-// channels, whose entries are added or replaced one by one: a name adds or renames a channel, null forbids it.
+// channels, whose entries are added or replaced one by one: a name adds or renames a channel, null forbids it; push
+// null stops pushing.
 type configPatch struct {
-	ProtocolVersion  *string                  `json:"protocol_version"`
-	Capabilities     *gen.Capabilities        `json:"capabilities"`
-	Limits           *gen.Limits              `json:"limits"`
-	UserLookup       *gen.InfoUserLookup      `json:"user_lookup"`
-	EventDelivery    *[]gen.InfoEventDelivery `json:"event_delivery"`
-	Revoked          *[]string                `json:"revoked"`
-	InfoPaddingBytes *int                     `json:"info_padding_bytes"`
-	Channels         map[string]*string       `json:"channels"`
-	Replays          *bool                    `json:"replays"`
+	ProtocolVersion  *string                       `json:"protocol_version"`
+	Capabilities     *gen.Capabilities             `json:"capabilities"`
+	Limits           *gen.Limits                   `json:"limits"`
+	UserLookup       *gen.InfoUserLookup           `json:"user_lookup"`
+	EventDelivery    *[]gen.InfoEventDelivery      `json:"event_delivery"`
+	Revoked          *[]string                     `json:"revoked"`
+	InfoPaddingBytes *int                          `json:"info_padding_bytes"`
+	Channels         map[string]*string            `json:"channels"`
+	Replays          *bool                         `json:"replays"`
+	Push             nullable.Nullable[PushTarget] `json:"push"`
 }
 
 // DefaultConfig is the configuration of a new fake: protocol version 1, every feature on, a body of up to 4000 code
 // points, edits that never expire, user lookup by login, both event delivery modes, the channels ChannelAlerts and
-// ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot, and replays on.
+// ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot, replays on and no push target.
 func DefaultConfig() Config {
 	var c Config
 	if err := json.Unmarshal([]byte(defaultConfig), &c); err != nil {
@@ -123,18 +143,23 @@ func DefaultConfig() Config {
 }
 
 // bot is the state of one bot, named by its token, apart from the other bot's: its number, 1 for Token and 2 for
-// SecondToken, which /_fake/messages shows in place of the token, and the answers of its Idempotency-Keys.
+// SecondToken, which /_fake/messages shows in place of the token, the answers of its Idempotency-Keys, and its events
+// in the order they happened, whose index is the cursor of pollEvents, with the channel that a new event closes to wake
+// the long polls.
 type bot struct {
-	token string
-	n     int
-	keys  map[string]stored
+	token   string
+	n       int
+	keys    map[string]stored
+	events  []json.RawMessage
+	changed chan struct{}
 }
 
 // Fake is the fake bridge.
 type Fake struct {
 	*fakeserver.Server
 
-	api *http.ServeMux
+	api    *http.ServeMux
+	client *http.Client
 
 	mu     sync.Mutex
 	config Config
@@ -143,18 +168,39 @@ type Fake struct {
 	messages []*Message
 	posted   int
 	replies  int
+	// events are the events of both bots in the order they happened, sent the events by id and eventIDs counts the
+	// ids given; answers are the answers Muster made.
+	events   []Event
+	sent     map[string]sent
+	eventIDs int
+	answers  []Answer
+	// toPush are the events waiting to be pushed; a pusher runs while pushing, in pushCtx, which pushStop ends and
+	// pushers waits for; pushWake makes it retry at once after the target changed; pushStopped once the fake closed.
+	toPush      []pending
+	pushing     bool
+	pushCtx     context.Context
+	pushStop    context.CancelFunc
+	pushers     sync.WaitGroup
+	pushWake    chan struct{}
+	pushStopped bool
 }
 
 // New returns the fake with DefaultConfig.
 func New() *Fake {
 	f := &Fake{api: http.NewServeMux(), config: DefaultConfig(), bots: map[string]*bot{
-		Token:       {token: Token, n: 1, keys: map[string]stored{}},
-		SecondToken: {token: SecondToken, n: 2, keys: map[string]stored{}}}}
+		Token:       {token: Token, n: 1, keys: map[string]stored{}, changed: make(chan struct{})},
+		SecondToken: {token: SecondToken, n: 2, keys: map[string]stored{}, changed: make(chan struct{})}},
+		sent: map[string]sent{}, pushWake: make(chan struct{}, 1),
+		client: &http.Client{Timeout: pushTimeout + time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}}
 	f.api.HandleFunc("GET /v1/info", f.getInfo)
 	f.api.HandleFunc("POST /v1/channels/{channel_id}/check", f.checkChannel)
 	f.api.HandleFunc("POST /v1/messages", f.postMessage)
 	f.api.HandleFunc("PATCH /v1/messages/{message_id}", f.editMessage)
 	f.api.HandleFunc("POST /v1/messages/{message_id}/thread-replies", f.replyInThread)
+	f.api.HandleFunc("GET /v1/events", f.pollEvents)
+	f.api.HandleFunc("POST /v1/answers", f.answerEvent)
 	f.api.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
 			r.Method+" "+r.URL.Path+" is not implemented by the fake bridge")
@@ -168,7 +214,30 @@ func New() *Fake {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Messages())
 	})
 	f.HandleControl("DELETE /_fake/messages/{id}", f.deleteMessage)
+	f.HandleControl("POST /_fake/press", f.postPress)
+	f.HandleControl("POST /_fake/thread-message", f.postThreadMessage)
+	f.HandleControl("GET /_fake/events", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.Events())
+	})
+	f.HandleControl("GET /_fake/answers", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.Answers())
+	})
 	return f
+}
+
+// Close stops the pusher, waiting for it until ctx ends, and then the server.
+func (f *Fake) Close(ctx context.Context) error {
+	f.stopPushing()
+	stopped := make(chan struct{})
+	go func() {
+		f.pushers.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+	}
+	return f.Server.Close(ctx)
 }
 
 // Config is the configuration in force.
@@ -178,15 +247,23 @@ func (f *Fake) Config() Config {
 	return clone(f.config)
 }
 
-// SetConfig replaces the whole configuration; it fails on a padding outside 0…MaxPadding.
+// SetConfig replaces the whole configuration; it fails on a padding outside 0…MaxPadding and on a push target the fake
+// cannot push to. A pusher for a new target starts with the next event.
 func (f *Fake) SetConfig(c Config) error {
 	if err := checkPadding(c.InfoPaddingBytes); err != nil {
 		return err
 	}
+	if c.Push != nil {
+		if err := c.Push.check(); err != nil {
+			return err
+		}
+	}
 	c = clone(normalize(c))
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	old := f.config.Push
 	f.config = c
+	f.retarget(old)
 	return nil
 }
 
@@ -238,6 +315,15 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var push *PushTarget
+	if p.Push.IsSpecified() && !p.Push.IsNull() {
+		target := p.Push.MustGet()
+		if err := target.check(); err != nil {
+			fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		push = &target
+	}
 	f.mu.Lock()
 	c := f.config
 	if p.ProtocolVersion != nil {
@@ -272,7 +358,13 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 		maps.Copy(channels, p.Channels)
 		c.Channels = channels
 	}
+	old := c.Push
+	if p.Push.IsSpecified() {
+		c.Push = push
+	}
 	f.config = normalize(c)
+	f.retarget(old)
+	f.startPusher(r.Context())
 	f.mu.Unlock()
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
 }

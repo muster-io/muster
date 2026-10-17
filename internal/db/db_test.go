@@ -298,8 +298,8 @@ func TestCheckSchema(t *testing.T) {
 
 func TestKnownVersion(t *testing.T) {
 	v, err := KnownVersion()
-	if err != nil || v != 10 {
-		t.Errorf("KnownVersion = %d, %v; want 10", v, err)
+	if err != nil || v != 11 {
+		t.Errorf("KnownVersion = %d, %v; want 11", v, err)
 	}
 	fsys := fstest.MapFS{
 		"m/0001_init.up.sql":   {Data: []byte("SELECT 1;")},
@@ -596,12 +596,12 @@ func TestSchemaVersion(t *testing.T) {
 		})
 	}
 	d, pool, _ := fakeDB()
-	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(11), false}}
+	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(12), false}}
 	var out bytes.Buffer
 	err := d.CheckSchema(t.Context(), logging.New(&out, logging.LevelInfo))
-	if err == nil || !strings.Contains(err.Error(), "database schema version 11 is newer than this binary knows (10)") ||
+	if err == nil || !strings.Contains(err.Error(), "database schema version 12 is newer than this binary knows (11)") ||
 		!strings.Contains(out.String(), `"event":"schema_too_new"`) {
-		t.Errorf("CheckSchema on version 11: %v, logged %s", err, out.String())
+		t.Errorf("CheckSchema on version 12: %v, logged %s", err, out.String())
 	}
 }
 
@@ -650,7 +650,7 @@ func TestMigrate(t *testing.T) {
 		{name: "current", m: &fakeMigrator{versions: []uint{2, 2}, upErr: migrate.ErrNoChange}, wantUps: 1,
 			wantLine: `"event":"migrations_current","version":2`},
 		{name: "newer", m: &fakeMigrator{versions: []uint{999}},
-			wantErr: "database schema version 999 is newer than this binary knows (10)", wantLine: `"event":"schema_too_new"`},
+			wantErr: "database schema version 999 is newer than this binary knows (11)", wantLine: `"event":"schema_too_new"`},
 		{name: "dirty", m: &fakeMigrator{versions: []uint{1}, dirty: true},
 			wantErr: "the database schema is dirty at version 1", wantLine: `"event":"schema_dirty"`},
 		{name: "up fails", m: &fakeMigrator{versions: []uint{0}, upErr: errors.New("syntax error")}, wantUps: 1,
@@ -720,7 +720,7 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("Up: %v", err)
 	}
 	_, _ = m.Close()
-	if len(c.execs) != 31 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
+	if len(c.execs) != 34 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
 		c.execs[1] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, true)" ||
 		!strings.Contains(c.execs[2], "CREATE EXTENSION IF NOT EXISTS pg_trgm") ||
 		c.execs[3] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, false)" ||
@@ -750,7 +750,10 @@ func TestDriver(t *testing.T) {
 		c.execs[27] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (9, false)" ||
 		c.execs[28] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (10, true)" ||
 		!strings.Contains(c.execs[29], "ADD COLUMN actual_status") ||
-		c.execs[30] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (10, false)" {
+		c.execs[30] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (10, false)" ||
+		c.execs[31] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (11, true)" ||
+		!strings.Contains(c.execs[32], "CREATE TABLE bridge_events_seen") ||
+		c.execs[33] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (11, false)" {
 		t.Errorf("statements %q", c.execs)
 	}
 

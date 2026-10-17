@@ -29,7 +29,13 @@ func SpaceMattermost(connectionID int64) string {
 	return "mattermost:" + strconv.FormatInt(connectionID, 10)
 }
 
-// User is the User an account is linked to: its id and public_id, login, display name, Role and status.
+// SpaceBridge is the identity space of the accounts of the Bridge Connection connectionID (C-22.FR-15).
+func SpaceBridge(connectionID int64) string {
+	return "bridge:" + strconv.FormatInt(connectionID, 10)
+}
+
+// User is the User an account is linked to: its id and public_id, login, display name, Role and status, and the
+// language of its profile, empty when it has none.
 type User struct {
 	ID       int64
 	PublicID string
@@ -37,6 +43,7 @@ type User struct {
 	Name     string
 	Role     string
 	Status   string
+	Language string
 }
 
 // ErrNotLinked is an account without an Account link, or linked to a deleted User.
@@ -60,5 +67,6 @@ func (s *Service) Lookup(ctx context.Context, identitySpace, externalID string) 
 			return User{}, fmt.Errorf("record the use of the account link in %s: %w", identitySpace, err)
 		}
 	}
-	return User{ID: r.ID, PublicID: r.PublicID, Login: r.Login, Name: r.Name, Role: r.Role, Status: r.Status}, nil
+	return User{ID: r.ID, PublicID: r.PublicID, Login: r.Login, Name: r.Name, Role: r.Role, Status: r.Status,
+		Language: r.Language.String}, nil
 }

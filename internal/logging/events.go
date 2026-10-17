@@ -661,6 +661,79 @@ var BridgeRepublishedPastEditWindow = newEvent("bridge_republished_past_edit_win
 		"working. Logged once the republication was recorded.",
 	"destination", "group", "old_message_id", "new_message_id")
 
+// BridgePress is logged for each press event of a Bridge Connection that was not dropped (C-22.FR-12, FR-13, FR-24).
+var BridgePress = newEvent("bridge_press", LevelInfo, "C-22",
+	"A press event of a Bridge Connection — a button press the bridge had already confirmed to its messenger — was "+
+		"handled, once its id was recorded: connection is the public_id of the Connection, external_id the "+
+		"messenger account that pressed; group the public_id of the Alert Group and command the Command, once the "+
+		"button data is verified against the pressed message; outcome done or unchanged for a Command that ran, "+
+		"which is not answered; refused, forbidden, not_linked, disabled or not_verified for a press that changed "+
+		"nothing; expired for a press on a Reminder whose button was signed by a key that is no longer in the "+
+		"Keyring; test for a press of a test message; unknown_message for a press on a message Muster did not post "+
+		"through the Connection, which is not answered; failed when the Command failed. Every outcome but done, "+
+		"unchanged and unknown_message is answered through answerEvent; error, when present, says why the press "+
+		"failed or why its answer was not made — no limiter token within the interactive budget, or the bridge "+
+		"refusing it — masked of the token. An answer that failed is not sent again.",
+	"connection", "group", "command", "outcome", "external_id", "error")
+
+// BridgePressDropped is logged when a press event of a Bridge Connection was dropped as too old (C-22.FR-12).
+var BridgePressDropped = newEvent("bridge_press_dropped", LevelInfo, "C-22",
+	"A press event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's "+
+		"real clock, and was dropped without an answer: acting on it now could undo what people did since. "+
+		"connection is the public_id of the Connection, external_id the messenger account that pressed and "+
+		"age_seconds how old the press was. Nothing changed; the person can press again.",
+	"connection", "external_id", "age_seconds")
+
+// BridgeTextCommand is logged for each Text command in a Thread of a Bridge Connection (C-22.FR-14, FR-24).
+var BridgeTextCommand = newEvent("bridge_text_command", LevelInfo, "C-22",
+	"A thread_message event of a Bridge Connection was a Text command — one of the words of bridge.text_commands — "+
+		"and was handled once its id was recorded: connection is the public_id of the Connection, external_id the "+
+		"messenger account that wrote it, group the public_id of the Alert Group of the message whose Thread it is "+
+		"in, command the Command; outcome done or unchanged for a Command that ran, answered \"Done: {command} #N\"; "+
+		"refused, forbidden, not_linked, disabled or unknown_duration — a Snooze duration that is not one of the "+
+		"Route's — for a Text command that changed nothing; unknown_message for one in the Thread of a message "+
+		"Muster did not post through the Connection, which is not answered; dropped for one older than "+
+		"bridge.event_max_age, which is not answered; failed when the Command failed. error, when present, says "+
+		"why the Command failed or why its answer was not made, masked of the token. Any other text in a Thread is "+
+		"neither answered nor logged.",
+	"connection", "group", "command", "outcome", "external_id", "error")
+
+// BridgeEventRejected is logged when Muster refused a pushed Bridge event, or skipped a polled one that is no event
+// (C-22.FR-11, FR-24).
+var BridgeEventRejected = newEvent("bridge_event_rejected", LevelInfo, "C-22",
+	"A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is "+
+		"not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a "+
+		"deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is "+
+		"missing or no signature matches the push secret), timestamp (webhook-timestamp is further than "+
+		"bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of "+
+		"the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A "+
+		"polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the "+
+		"signature, the push secret, the headers or the body.",
+	"connection", "reason")
+
+// BridgeEventFailed is logged when the handling of a Bridge event failed and its id was not recorded
+// (C-22.FR-11, FR-24).
+var BridgeEventFailed = newEvent("bridge_event_failed", LevelWarn, "C-22",
+	"The handling of a Bridge event failed — the read of a pushed event's Connection or of its secrets, its "+
+		"claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its "+
+		"id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, "+
+		"type its type and error what failed; a failed read of the Connection comes before the event is "+
+		"authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is "+
+		"polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming "+
+		"for one event mean that the database refuses it.",
+	"connection", "event_id", "type", "error")
+
+// BridgePollFailed is logged when a poll of the events of a Bridge Connection failed (C-22.FR-11, FR-24).
+var BridgePollFailed = newEvent("bridge_poll_failed", LevelWarn, "C-22",
+	"A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the "+
+		"cursor after a batch could not be stored, or the Connection's client could not be built: connection is "+
+		"the public_id of the Connection, failures how many calls in a row failed — for a client that cannot be "+
+		"built, how many reads of the Connections in a row found it so, counted for each version of the "+
+		"Connection, which is not polled meanwhile — and error what failed, masked of the token and the push "+
+		"secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and "+
+		"polls again from the stored cursor. A failed poll makes no Destination Broken.",
+	"connection", "failures", "error")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

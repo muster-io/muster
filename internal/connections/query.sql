@@ -246,3 +246,53 @@ SELECT coalesce((SELECT rs.alive_at FROM runtime_state rs),
                 '0001-01-01 00:00:00+00')::timestamptz AS downtime_started_at,
        coalesce((SELECT d.ended_at FROM downtime_periods d ORDER BY d.ended_at DESC, d.id DESC LIMIT 1),
                 '0001-01-01 00:00:00+00')::timestamptz AS downtime_ended_at;
+
+-- ListBridgePollingConnections lists the Bridge Connections that are not deleted and receive their events by polling,
+-- with their secrets as stored, the cursor of their events and their version, for the Leader's poller (C-22.FR-11).
+-- name: ListBridgePollingConnections :many
+SELECT id, public_id, bridge_base_url, bridge_events_cursor, bot_token_ciphertext, bot_token_key_id,
+       bot_token_updated_at, proxy, proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at,
+       version
+FROM connections
+WHERE org_id = @org_id AND type = 'bridge' AND bridge_event_delivery = 'poll' AND deleted_at IS NULL
+ORDER BY id;
+
+-- StoreBridgeEventsCursor stores where the poller of a Bridge Connection goes on — null drops the cursor — unless the
+-- Connection changed since the poller read it: a poller of an earlier version, or of a frozen old Leader, writes
+-- nothing. It is not a change of the configuration.
+-- name: StoreBridgeEventsCursor :execrows
+UPDATE connections
+SET bridge_events_cursor = sqlc.narg('cursor')::text
+WHERE org_id = @org_id AND id = @id AND type = 'bridge' AND version = @version AND deleted_at IS NULL;
+
+-- LockBridgeEvent takes, until the transaction ends, the claim lock of one event of a Bridge Connection (the class
+-- bridgeEventLockClass of internal/connections, 0x6d75_0007, keyed by hashtext of the Connection's id and the event
+-- id), so that a second copy of the event — a push retried while the first runs, or an overlapping poll — waits for
+-- the first and then finds its id recorded. It never locks a row; a collision of the hash only serializes two events.
+-- name: LockBridgeEvent :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(format('%s/%s', @connection_id::bigint, @event_id::text)));
+
+-- BridgeEventSeen reports whether the event id of a Bridge Connection was handled within bridge.event_dedup_window.
+-- name: BridgeEventSeen :one
+SELECT EXISTS (SELECT 1
+               FROM bridge_events_seen
+               WHERE org_id = @org_id AND connection_id = @connection_id AND event_id = @event_id)::boolean AS seen;
+
+-- RecordBridgeEvent records the event id of a Bridge Connection as handled at seen_at, on the business clock.
+-- name: RecordBridgeEvent :exec
+INSERT INTO bridge_events_seen (org_id, connection_id, event_id, seen_at)
+VALUES (@org_id, @connection_id, @event_id, @seen_at::timestamptz)
+ON CONFLICT (org_id, connection_id, event_id) DO NOTHING;
+
+-- PruneBridgeEventsSeen deletes at most @batch_size records of Bridge event ids seen before @before, skipping rows
+-- another transaction holds.
+-- name: PruneBridgeEventsSeen :execrows
+DELETE FROM bridge_events_seen e
+WHERE e.org_id = @org_id
+  AND (e.connection_id, e.event_id) IN (
+      SELECT s.connection_id, s.event_id
+      FROM bridge_events_seen s
+      WHERE s.org_id = @org_id AND s.seen_at < @before::timestamptz
+      ORDER BY s.seen_at
+      LIMIT @batch_size
+      FOR UPDATE SKIP LOCKED);

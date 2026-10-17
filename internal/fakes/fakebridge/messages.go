@@ -169,7 +169,8 @@ func (f *Fake) replyInThread(w http.ResponseWriter, r *http.Request) {
 		Truncated: reply.Truncated})
 }
 
-// deleteMessage deletes the message id as a person in the messenger would: its later edits and replies are gone.
+// deleteMessage deletes the message id as a person in the messenger would: its later edits and replies are gone, and
+// the first deletion queues a message_deleted event when capabilities.deletion_events is on (events.go).
 func (f *Fake) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	f.mu.Lock()
@@ -179,7 +180,10 @@ func (f *Fake) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteError(w, http.StatusNotFound, "unknown message "+id)
 		return
 	}
-	f.messages[i].Deleted = true
+	if m := f.messages[i]; !m.Deleted {
+		m.Deleted = true
+		f.deleted(r.Context(), m)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

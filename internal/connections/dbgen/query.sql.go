@@ -12,6 +12,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bridgeEventSeen = `-- name: BridgeEventSeen :one
+SELECT EXISTS (SELECT 1
+               FROM bridge_events_seen
+               WHERE org_id = $1 AND connection_id = $2 AND event_id = $3)::boolean AS seen
+`
+
+type BridgeEventSeenParams struct {
+	OrgID        int64
+	ConnectionID int64
+	EventID      string
+}
+
+// BridgeEventSeen reports whether the event id of a Bridge Connection was handled within bridge.event_dedup_window.
+func (q *Queries) BridgeEventSeen(ctx context.Context, arg BridgeEventSeenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, bridgeEventSeen, arg.OrgID, arg.ConnectionID, arg.EventID)
+	var seen bool
+	err := row.Scan(&seen)
+	return seen, err
+}
+
 const countConnectionDestinations = `-- name: CountConnectionDestinations :one
 SELECT count(*)
 FROM destinations
@@ -515,6 +535,65 @@ func (q *Queries) ListBridgeDestinations(ctx context.Context, orgID int64) ([]Li
 	return items, nil
 }
 
+const listBridgePollingConnections = `-- name: ListBridgePollingConnections :many
+SELECT id, public_id, bridge_base_url, bridge_events_cursor, bot_token_ciphertext, bot_token_key_id,
+       bot_token_updated_at, proxy, proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at,
+       version
+FROM connections
+WHERE org_id = $1 AND type = 'bridge' AND bridge_event_delivery = 'poll' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListBridgePollingConnectionsRow struct {
+	ID                      int64
+	PublicID                string
+	BridgeBaseUrl           pgtype.Text
+	BridgeEventsCursor      pgtype.Text
+	BotTokenCiphertext      []byte
+	BotTokenKeyID           pgtype.Text
+	BotTokenUpdatedAt       time.Time
+	Proxy                   []byte
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	Version                 int64
+}
+
+// ListBridgePollingConnections lists the Bridge Connections that are not deleted and receive their events by polling,
+// with their secrets as stored, the cursor of their events and their version, for the Leader's poller (C-22.FR-11).
+func (q *Queries) ListBridgePollingConnections(ctx context.Context, orgID int64) ([]ListBridgePollingConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, listBridgePollingConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBridgePollingConnectionsRow{}
+	for rows.Next() {
+		var i ListBridgePollingConnectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.BridgeBaseUrl,
+			&i.BridgeEventsCursor,
+			&i.BotTokenCiphertext,
+			&i.BotTokenKeyID,
+			&i.BotTokenUpdatedAt,
+			&i.Proxy,
+			&i.ProxyPasswordCiphertext,
+			&i.ProxyPasswordKeyID,
+			&i.ProxyPasswordUpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConnections = `-- name: ListConnections :many
 
 
@@ -790,6 +869,25 @@ func (q *Queries) ListTelegramDestinations(ctx context.Context, orgID int64) ([]
 	return items, nil
 }
 
+const lockBridgeEvent = `-- name: LockBridgeEvent :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s', $2::bigint, $3::text)))
+`
+
+type LockBridgeEventParams struct {
+	LockClass    int32
+	ConnectionID int64
+	EventID      string
+}
+
+// LockBridgeEvent takes, until the transaction ends, the claim lock of one event of a Bridge Connection (the class
+// bridgeEventLockClass of internal/connections, 0x6d75_0007, keyed by hashtext of the Connection's id and the event
+// id), so that a second copy of the event — a push retried while the first runs, or an overlapping poll — waits for
+// the first and then finds its id recorded. It never locks a row; a collision of the hash only serializes two events.
+func (q *Queries) LockBridgeEvent(ctx context.Context, arg LockBridgeEventParams) error {
+	_, err := q.db.Exec(ctx, lockBridgeEvent, arg.LockClass, arg.ConnectionID, arg.EventID)
+	return err
+}
+
 const lockConnection = `-- name: LockConnection :one
 SELECT id, public_id, type, version
 FROM connections
@@ -874,6 +972,58 @@ func (q *Queries) MarkConnectionDeleted(ctx context.Context, arg MarkConnectionD
 	return err
 }
 
+const pruneBridgeEventsSeen = `-- name: PruneBridgeEventsSeen :execrows
+DELETE FROM bridge_events_seen e
+WHERE e.org_id = $1
+  AND (e.connection_id, e.event_id) IN (
+      SELECT s.connection_id, s.event_id
+      FROM bridge_events_seen s
+      WHERE s.org_id = $1 AND s.seen_at < $2::timestamptz
+      ORDER BY s.seen_at
+      LIMIT $3
+      FOR UPDATE SKIP LOCKED)
+`
+
+type PruneBridgeEventsSeenParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PruneBridgeEventsSeen deletes at most @batch_size records of Bridge event ids seen before @before, skipping rows
+// another transaction holds.
+func (q *Queries) PruneBridgeEventsSeen(ctx context.Context, arg PruneBridgeEventsSeenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneBridgeEventsSeen, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordBridgeEvent = `-- name: RecordBridgeEvent :exec
+INSERT INTO bridge_events_seen (org_id, connection_id, event_id, seen_at)
+VALUES ($1, $2, $3, $4::timestamptz)
+ON CONFLICT (org_id, connection_id, event_id) DO NOTHING
+`
+
+type RecordBridgeEventParams struct {
+	OrgID        int64
+	ConnectionID int64
+	EventID      string
+	SeenAt       time.Time
+}
+
+// RecordBridgeEvent records the event id of a Bridge Connection as handled at seen_at, on the business clock.
+func (q *Queries) RecordBridgeEvent(ctx context.Context, arg RecordBridgeEventParams) error {
+	_, err := q.db.Exec(ctx, recordBridgeEvent,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.EventID,
+		arg.SeenAt,
+	)
+	return err
+}
+
 const setBotIdentity = `-- name: SetBotIdentity :exec
 UPDATE connections
 SET bot_user_id = $1, bot_username = $2
@@ -918,6 +1068,35 @@ func (q *Queries) SetBridgeInfo(ctx context.Context, arg SetBridgeInfoParams) (i
 	result, err := q.db.Exec(ctx, setBridgeInfo,
 		arg.Info,
 		arg.ReadAt,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const storeBridgeEventsCursor = `-- name: StoreBridgeEventsCursor :execrows
+UPDATE connections
+SET bridge_events_cursor = $1::text
+WHERE org_id = $2 AND id = $3 AND type = 'bridge' AND version = $4 AND deleted_at IS NULL
+`
+
+type StoreBridgeEventsCursorParams struct {
+	Cursor  pgtype.Text
+	OrgID   int64
+	ID      int64
+	Version int64
+}
+
+// StoreBridgeEventsCursor stores where the poller of a Bridge Connection goes on — null drops the cursor — unless the
+// Connection changed since the poller read it: a poller of an earlier version, or of a frozen old Leader, writes
+// nothing. It is not a change of the configuration.
+func (q *Queries) StoreBridgeEventsCursor(ctx context.Context, arg StoreBridgeEventsCursorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, storeBridgeEventsCursor,
+		arg.Cursor,
 		arg.OrgID,
 		arg.ID,
 		arg.Version,

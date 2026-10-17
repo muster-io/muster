@@ -308,7 +308,9 @@ RETURNING d.state, d.published_at;
 
 -- RecordRepublished records a Root message published again past its bridge's edit window (C-22.FR-9): the new
 -- message, its url and its `thread_ref`, which later Thread replies go under, replace the old one, whose id joins
--- superseded_message_ids, so that presses and Text commands on it still reach the delivery; the Publication count grows
+-- superseded_message_ids, so that presses and Text commands on it still reach the delivery, and the key that signed its
+-- buttons joins superseded_button_key_ids, one element per older Root message with buttons, since they still verify
+-- with it (C-20.FR-6); the Publication count grows
 -- and the new message's edit window starts now — or, when the bridge @replayed it, at the start of the republication,
 -- when the message was really posted (C-22.FR-6), and the start is cleared. It is delivered unless the Desired state
 -- grew meanwhile, the Destination left (desired_retire) or the answer was @replayed, after which the status it shows
@@ -321,6 +323,11 @@ SET superseded_message_ids   = CASE
                                    WHEN message_id IS NULL THEN superseded_message_ids
                                    ELSE array_append(superseded_message_ids, message_id)
                                END,
+    superseded_button_key_ids = CASE
+                                    WHEN message_id IS NULL OR actual_button_key_id IS NULL
+                                        THEN superseded_button_key_ids
+                                    ELSE array_append(superseded_button_key_ids, actual_button_key_id)
+                                END,
     message_id               = @message_id::text,
     message_url              = sqlc.narg('message_url')::text,
     thread_anchor_id         = sqlc.narg('thread_ref')::text,
@@ -1442,6 +1449,69 @@ SELECT ds.id, ds.public_id, ds.name
 FROM destinations ds
 WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
   AND ds.public_id = @public_id::text AND ds.mattermost_channel_id = @channel_id::text;
+
+-- GetBridgeRootBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
+-- the current Root message (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection that
+-- is not deleted whose Root message it is, with the Alert Group and its Route's Snooze durations. A message id names
+-- one message of a bot, so at most one delivery has it.
+-- name: GetBridgeRootBinding :one
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+FROM destinations ds
+JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND d.message_id = @message_id::text
+ORDER BY d.id
+LIMIT 1;
+
+-- GetBridgeSupersededBinding is GetBridgeRootBinding for an older Root message that a republication past the bridge's
+-- edit window replaced (C-22.FR-9). The emptiness check beside @> lets the partial GIN index deliveries_superseded_idx
+-- serve it; it is a query of its own because an OR with the current message id would scan the deliveries.
+-- name: GetBridgeSupersededBinding :one
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+FROM destinations ds
+JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND d.superseded_message_ids <> '{}' AND d.superseded_message_ids @> ARRAY[@message_id::text]
+ORDER BY d.id
+LIMIT 1;
+
+-- GetBridgeReminderBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
+-- a Reminder (C-22.FR-12, C-17.FR-6): a sent Reminder of an Alert Group to a Bridge Destination of the Connection that
+-- is not deleted, with the Alert Group and its Route's Snooze durations, found through the partial index
+-- thread_replies_reminder_message_idx.
+-- name: GetBridgeReminderBinding :one
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+FROM destinations ds
+JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = t.org_id AND g.id = t.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND t.event = 'reminder' AND t.state = 'sent' AND t.message_id = @message_id::text
+ORDER BY t.id
+LIMIT 1;
+
+-- LockBridgeDeletedRoot locks, for a message_deleted event of the Bridge Connection (C-22.FR-10), the delivery whose
+-- current Root message is message_id, to a Bridge Destination of the Connection that is not deleted, while the delivery
+-- is neither retiring nor ended, with what the deleted Root message flow needs. It locks the delivery row only, never
+-- its Alert Group, whose status it reads without a lock, as the worker does after a gone answer (D307): the dispatcher
+-- locks the Alert Group first and then the delivery. An older Root message, a Thread reply or a message of another
+-- Connection is no row.
+-- name: LockBridgeDeletedRoot :one
+SELECT d.id, d.destination_id, d.alert_group_id, d.storm_id, coalesce(g.public_id, '')::text AS group_public_id,
+       coalesce(g.status = 'resolved', false)::boolean AS resolved, d.republished_after_delete
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND d.message_id = @message_id::text AND NOT d.desired_retire
+  AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+ORDER BY d.id
+LIMIT 1
+FOR NO KEY UPDATE OF d;
 
 -- Telegram comment Threads (C-14.FR-3, schema.md §4.11): the automatic copy of a channel post in the discussion group
 -- meets the answer to sendMessage in telegram_post_copies, keyed by the Connection, the channel and the post, in either

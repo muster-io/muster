@@ -51,10 +51,11 @@ var (
 	by = connections.Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportAPI}
 )
 
-// memRow is a stored Connection and whether it is deleted.
+// memRow is a stored Connection, whether it is deleted and, for a Bridge, the cursor of its events.
 type memRow struct {
 	row     dbgen.GetConnectionRow
 	deleted bool
+	cursor  *string
 }
 
 // memStore is the connections table in memory, with the Destinations counted per Connection, the Audit log and the
@@ -79,6 +80,16 @@ type memStore struct {
 	brTargets map[int64]memBRTarget
 	// outage is what GetOutage reads.
 	outage dbgen.GetOutageRow
+	// seen are the recorded Bridge event ids, by Connection and event id, with when they were seen, and locks the
+	// claim locks taken.
+	seen  map[memEvent]time.Time
+	locks []dbgen.LockBridgeEventParams
+}
+
+// memEvent is an event id of a Bridge Connection.
+type memEvent struct {
+	connection int64
+	id         string
 }
 
 // memTGTarget is a Telegram Destination: its Connection, its channel as entered and the ids its check learned.
@@ -102,7 +113,8 @@ type memTarget struct {
 
 func newMemStore() *memStore {
 	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{},
-		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}, brTargets: map[int64]memBRTarget{}}
+		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}, brTargets: map[int64]memBRTarget{},
+		seen: map[memEvent]time.Time{}}
 }
 
 // txHandle stands for the transaction that the Abandon hook writes through.
@@ -127,9 +139,11 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 	}
 	nAudit, nHints, nUpdates, nBots, nInfos, next := len(s.audit), len(s.hints), len(s.updates), len(s.bots),
 		len(s.infos), s.next
+	seen := maps.Clone(s.seen)
 	if err := f(s); err != nil {
 		s.rows, s.audit, s.hints, s.updates, s.bots, s.infos, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
 			s.updates[:nUpdates], s.bots[:nBots], s.infos[:nInfos], next
+		s.seen = seen
 		return err
 	}
 	s.committed++
@@ -262,6 +276,7 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	if a.ForgetBot {
 		r.BotUserID, r.BotUsername = pgtype.Text{}, pgtype.Text{}
 		r.BridgeInfo, r.BridgeInfoReadAt = nil, pgtype.Timestamptz{}
+		s.rows[a.ID].cursor = nil
 	}
 	if a.ForgetUpdates {
 		r.TelegramUpdateOffset = pgtype.Int8{}
@@ -438,6 +453,89 @@ func (s *memStore) GetBridgeDestinationTarget(_ context.Context, a dbgen.GetBrid
 		BridgePushSecretUpdatedAt: c.BridgePushSecretUpdatedAt, Proxy: c.Proxy,
 		ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
+}
+
+func (s *memStore) ListBridgePollingConnections(_ context.Context, org int64) (
+	[]dbgen.ListBridgePollingConnectionsRow, error) {
+	if err := s.fail["ListBridgePollingConnections"]; err != nil || org != 1 {
+		return nil, err
+	}
+	var out []dbgen.ListBridgePollingConnectionsRow
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		r := s.rows[id]
+		if r.deleted || r.row.Type != connections.TypeBridge ||
+			r.row.BridgeEventDelivery.String != connections.EventDeliveryPoll {
+			continue
+		}
+		c := r.row
+		row := dbgen.ListBridgePollingConnectionsRow{ID: c.ID, PublicID: c.PublicID, BridgeBaseUrl: c.BridgeBaseUrl,
+			BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID,
+			BotTokenUpdatedAt: c.BotTokenUpdatedAt, Proxy: c.Proxy, ProxyPasswordCiphertext: c.ProxyPasswordCiphertext,
+			ProxyPasswordKeyID: c.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt,
+			Version: c.Version}
+		if r.cursor != nil {
+			row.BridgeEventsCursor = pgtype.Text{String: *r.cursor, Valid: true}
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (s *memStore) StoreBridgeEventsCursor(_ context.Context, a dbgen.StoreBridgeEventsCursorParams) (int64, error) {
+	if err := s.fail["StoreBridgeEventsCursor"]; err != nil {
+		return 0, err
+	}
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || r.row.Type != connections.TypeBridge || r.row.Version != a.Version || a.OrgID != 1 {
+		return 0, nil
+	}
+	r.cursor = nil
+	if a.Cursor.Valid {
+		r.cursor = &a.Cursor.String
+	}
+	return 1, nil
+}
+
+func (s *memStore) LockBridgeEvent(_ context.Context, a dbgen.LockBridgeEventParams) error {
+	if a.LockClass != 0x6d75_0007 {
+		return errors.New("the wrong lock class")
+	}
+	s.locks = append(s.locks, a)
+	return s.fail["LockBridgeEvent"]
+}
+
+func (s *memStore) BridgeEventSeen(_ context.Context, a dbgen.BridgeEventSeenParams) (bool, error) {
+	if err := s.fail["BridgeEventSeen"]; err != nil {
+		return false, err
+	}
+	_, ok := s.seen[memEvent{connection: a.ConnectionID, id: a.EventID}]
+	return ok && a.OrgID == 1, nil
+}
+
+func (s *memStore) RecordBridgeEvent(_ context.Context, a dbgen.RecordBridgeEventParams) error {
+	if err := s.fail["RecordBridgeEvent"]; err != nil {
+		return err
+	}
+	if k := (memEvent{connection: a.ConnectionID, id: a.EventID}); a.OrgID == 1 {
+		if _, ok := s.seen[k]; !ok {
+			s.seen[k] = a.SeenAt
+		}
+	}
+	return nil
+}
+
+func (s *memStore) PruneBridgeEventsSeen(_ context.Context, a dbgen.PruneBridgeEventsSeenParams) (int64, error) {
+	if err := s.fail["PruneBridgeEventsSeen"]; err != nil || a.OrgID != 1 {
+		return 0, err
+	}
+	var n int64
+	for k, at := range s.seen {
+		if at.Before(a.Before) && n < int64(a.BatchSize) {
+			delete(s.seen, k)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (s *memStore) InsertAuditEntry(_ context.Context, a auditdb.InsertAuditEntryParams) error {

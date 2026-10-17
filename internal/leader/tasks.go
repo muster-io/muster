@@ -42,6 +42,10 @@ const (
 // as a failed read of the Connections; while it runs, it polls without pause.
 const TelegramPollingInterval = 10 * time.Second
 
+// BridgePollingInterval is how soon the Leader runs the polling of Bridge events again after it stopped with an error,
+// such as a failed read of the Connections; while it runs, it polls without pause.
+const BridgePollingInterval = 10 * time.Second
+
 // OIDCSecretExpiryInterval is how often the Leader checks the expiry date of the OIDC client secret (C-19.FR-5); a
 // change of the OIDC settings is seen at the next run.
 const OIDCSecretExpiryInterval = 5 * time.Minute
@@ -125,6 +129,9 @@ type Work struct {
 	PruneDelivery []PruneTable
 	// PruneAccountLinks are the short-lived tables of internal/accountlinks: the Account link requests.
 	PruneAccountLinks []PruneTable
+	// PruneConnections are the short-lived tables of internal/connections: the ids of the events of Bridge
+	// Connections handled within bridge.event_dedup_window.
+	PruneConnections []PruneTable
 
 	// IngestBacklog sets muster_ingest_backlog from the pending Stored Snapshots of the Organizations.
 	IngestBacklog func(ctx context.Context, orgs []int64) error
@@ -165,6 +172,10 @@ type Work struct {
 	RerenderAfterRotation func(ctx context.Context, orgID int64) error
 	// KeyringChanged wakes the re-render after a rotation when a key was activated, on any replica's notification.
 	KeyringChanged *Wakes
+	// BridgePolling runs the polling of the events of the Bridge Connections in poll mode of the Organization orgID
+	// until ctx ends (C-22.FR-11): it stops every poll before it returns, and a failed read of the Connections returns
+	// early.
+	BridgePolling func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
 	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
 	// secret expiry check and the outgoing heartbeat when the development clock moved, so that the alive mark keeps up
@@ -182,7 +193,8 @@ type PruneTable struct {
 }
 
 func (w Work) shortLived() []PruneTable {
-	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC, w.PruneDelivery, w.PruneAccountLinks)
+	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC, w.PruneDelivery, w.PruneAccountLinks,
+		w.PruneConnections)
 }
 
 // pruneShortLived runs every short-lived table in every Organization at the same now, deleting in batches until a
@@ -228,11 +240,11 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
-// Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10) and the re-render of the open
-// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated. Later capabilities add
-// theirs at the end of the list. The Keeper calls the result at every leadership, so each one
-// starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
-// downtime the takeover records (C-07.FR-4).
+// Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open
+// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated, and the polling of the
+// events of Bridge Connections in poll mode (C-22.FR-11). Later capabilities add theirs at the end of the list. The
+// Keeper calls the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it,
+// so that it measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
@@ -290,6 +302,7 @@ func Tasks(w Work) func() []Task {
 				Run: func(ctx context.Context) error {
 					return w.perOrganization(ctx, "the re-render after a key rotation", w.RerenderAfterRotation)
 				}},
+			{Name: "bridge_polling", Every: BridgePollingInterval, Run: w.bridgePolling},
 		}
 	}
 }
@@ -469,17 +482,31 @@ func (w Work) alertRetention(ctx context.Context) error {
 // is lost or the process stops. Running it on a frozen old Leader and its successor at once is safe: Telegram answers
 // one poller per bot with 409, and the update offset only rises.
 func (w Work) telegramPolling(ctx context.Context) error {
-	if w.TelegramPolling == nil {
+	return w.everyOrganizationAtOnce(ctx, "poll telegram for", w.TelegramPolling)
+}
+
+// bridgePolling polls the events of the Bridge Connections of every Organization at once until ctx ends, which is when
+// the lock is lost or the process stops. Running it on a frozen old Leader and its successor at once is safe: an event
+// polled twice is handled once by its id, and a cursor stored late only makes the bridge send events again.
+func (w Work) bridgePolling(ctx context.Context) error {
+	return w.everyOrganizationAtOnce(ctx, "poll bridge events for", w.BridgePolling)
+}
+
+// everyOrganizationAtOnce runs f for every Organization at once and waits for each to return; a nil f does nothing.
+func (w Work) everyOrganizationAtOnce(ctx context.Context, what string,
+	f func(ctx context.Context, orgID int64) error,
+) error {
+	if f == nil {
 		return nil
 	}
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
-		return fmt.Errorf("list the organizations to poll telegram for: %w", err)
+		return fmt.Errorf("list the organizations to %s: %w", what, err)
 	}
 	errs := make([]error, len(orgs))
 	var wg sync.WaitGroup
 	for i, org := range orgs {
-		wg.Go(func() { errs[i] = w.TelegramPolling(ctx, org) })
+		wg.Go(func() { errs[i] = f(ctx, org) })
 	}
 	wg.Wait()
 	return errors.Join(errs...)

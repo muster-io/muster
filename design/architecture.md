@@ -194,6 +194,7 @@ flowchart TB
         apiH["API handlers<br/>generated server"]
         mmCb["Mattermost<br/>callback handler"]
         tgUp["Telegram updates<br/>poller on the Leader or webhook"]
+        brEv["Bridge events<br/>poller on the Leader or push"]
     end
 
     processing["snapshot processing<br/>(ingest)"]
@@ -214,7 +215,7 @@ flowchart TB
         interactive["interactive path"]
     end
 
-    adapters["adapters<br/>Mattermost, Telegram,<br/>outgoing webhook"]
+    adapters["adapters<br/>Mattermost, Telegram, Bridge,<br/>outgoing webhook"]
     outbound["outbound HTTP package"]
     db[("PostgreSQL")]
 
@@ -224,13 +225,15 @@ flowchart TB
     apiH -- "Commands" --> dispatcher
     mmCb -- "Commands" --> dispatcher
     tgUp -- "Commands" --> dispatcher
+    brEv -- "Commands" --> dispatcher
+    brEv -- "deleted Root messages" --> desired
     timers -- "system transitions" --> dispatcher
     dispatcher -- "lifecycle events" --> desired
     desired -. "render" .-> messages
     worker --> desired
     worker -- "records" --> devents
     worker --> adapters
-    mmCb & tgUp -- "private answers" --> interactive
+    mmCb & tgUp & brEv -- "private answers" --> interactive
     interactive --> adapters
     adapters --> outbound
 ```
@@ -258,8 +261,18 @@ flowchart TB
   `delivery`. They are not lifecycle events, so they reach neither delivery nor outgoing webhooks ([C-09].FR-22,
   [C-11].FR-21).
 - **adapters** escape alert data for the messenger's markup, map responses to error classes and run Destination checks
-  ([C-13], [C-14], [C-15]). The Telegram adapter also keeps the buffer that links a channel post to its automatic copy
-  in the discussion group ([flow e](#e-telegram-thread-mapping)).
+  ([C-13], [C-14], [C-15], [C-22]). The Telegram adapter also keeps the buffer that links a channel post to its
+  automatic copy in the discussion group ([flow e](#e-telegram-thread-mapping)).
+- **Bridge delivery** sits beside the messengers: for a Bridge Destination the adapters speak the Bridge protocol to
+  the bridge, a separate service, which posts, edits and replies in a messenger Muster has no native support for, from
+  a JSON envelope that it renders ([ADR-0017], [C-22]). Past the messenger's edit window delivery publishes the Root
+  message again and keeps the older one's id, so that its buttons and Text commands still act on the Alert Group.
+- **Bridge events** are the inbound adapter of a Bridge Connection: the Leader's poller calls `pollEvents` for each
+  Connection in poll mode, and the push callback on the ingest listener of any replica takes signed events for each one
+  in push mode; both hand every event to one handler, which claims its id, maps the person through their Account link,
+  runs presses and Text commands through the dispatcher with the Transport `bridge`, starts the deleted Root message
+  flow for `message_deleted`, and answers the person through the interactive path before it acknowledges the event
+  ([C-22].FR-10 to FR-14, [flow c'](#c-bridge-press-through-polling-or-push)).
 
 ### 3.2 Access, configuration and secrets
 
@@ -559,6 +572,80 @@ sequenceDiagram
         end
     end
 ```
+
+### c'. Bridge press through polling or push
+
+The bridge confirms a press to its messenger itself and reports it as an event: the Leader polls each Connection in
+poll mode, and a bridge in push mode posts each event to the ingest listener of any replica; both paths end in the same
+handler ([ADR-0017], [C-22].FR-11 to FR-13). A Text command in the Thread of a Root message takes the same path from the
+claim on.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Responder
+    participant MS as messenger
+    participant BR as bridge
+    participant EV as Bridge events (poller on the Leader, or push on any replica)
+    participant DB as PostgreSQL
+    participant AL as account links
+    participant GR as groups dispatcher
+    participant IP as interactive path
+    participant DW as delivery worker
+
+    U->>MS: presses Ack on the Root message
+    MS->>BR: the press
+    BR-->>MS: confirmed within the messenger's deadline, at most 3 s
+    alt poll mode
+        EV->>BR: pollEvents with the stored cursor and bridge.poll_wait
+        BR-->>EV: the press event, at once or as soon as it arrives
+    else push mode
+        BR->>EV: POST to MUSTER_INGEST_URL/api/v1/callbacks/bridge/{connection_id},<br/>signed with the push secret
+        EV->>EV: verify the signature and the timestamp (bridge.push_tolerance)<br/>401 for a bad one, an unknown Connection or one in poll mode
+    end
+    EV->>DB: claim: advisory lock on the Connection and the event id, then is the id seen?
+    alt seen within bridge.event_dedup_window
+        EV->>EV: acknowledge without handling
+    else new
+        alt older than bridge.event_max_age
+            EV->>EV: drop, unanswered
+        else recent
+            EV->>EV: verify the data with the key it names (must be in the Keyring)
+            alt the data of a test message
+                EV->>EV: change nothing
+            else any other data
+                EV->>DB: bind the message to a current or older Root message or a Reminder of the Connection
+                alt a message Muster did not post through the Connection
+                    EV->>EV: ignore, unanswered
+                else bound
+                    EV->>AL: external_id to User, through the link in the Connection's identity space
+                    EV->>GR: Acknowledge, Transport bridge, in its own transaction,<br/>when the data was issued for that message
+                    GR-->>EV: done, or a refusal code
+                end
+            end
+        end
+        EV->>DB: record the event id and commit the claim
+        opt a refusal, a failure, no Account link, a test message or a Text command
+            EV->>IP: answerEvent with the key answer-<event id>, in the profile language
+            IP->>BR: limiter token first, fails fast within delivery.interactive_budget, never retried
+            BR->>MS: privately, or in the Thread
+        end
+    end
+    alt poll mode
+        EV->>DB: store next_cursor after the batch
+    else push mode
+        EV-->>BR: 204, also for an id handled before
+    end
+    opt the command changed the Alert Group
+        DW->>BR: editMessage of the current Root message, never an older one
+        BR->>MS: the edited message
+    end
+```
+
+A crash between the Command and the record of the id runs the Command once more on redelivery, which the dispatcher's
+preconditions turn into a refusal or a no-op; an event whose handling fails is not recorded, so the poller keeps its
+cursor and the push is answered `500`, and the event comes again. A failing poll backs off from 1 s to 1 min in the
+background client class and makes no Destination Broken.
 
 ### d. Delivery reconciliation
 
@@ -875,9 +962,9 @@ sequenceDiagram
     PG->>PG: the silent session ends within leader.server_bound, the lock is released
     B->>PG: try the advisory lock
     PG-->>B: granted
-    B->>B: Leader: Telegram polling, Heartbeat lost and Stale checks,<br/>partitions, gauges, alive mark, outgoing heartbeat,<br/>OIDC secret expiry check
+    B->>B: Leader: Telegram polling, Bridge polling, Heartbeat lost and Stale checks,<br/>partitions, gauges, alive mark, outgoing heartbeat,<br/>OIDC secret expiry check
     Note over B,PG: rows leased by A are claimed again when their lease runs out
-    Note over A,B: A process frozen beyond the bound can overlap with its successor for a moment, so every Leader task<br/>is safe to run twice: Telegram answers a second poller with 409, partitions and Stale resolutions are idempotent.
+    Note over A,B: A process frozen beyond the bound can overlap with its successor for a moment, so every Leader task<br/>is safe to run twice: Telegram answers a second poller with 409, a Bridge event is claimed once by its id,<br/>partitions and Stale resolutions are idempotent.
 ```
 
 The Leader writes an "alive" mark every 30 seconds; after a full outage the next Leader records the period, opens the
@@ -1473,6 +1560,7 @@ These are engineering terms used in the ADRs and in this document; domain terms 
 [ADR-0014]: adr/0014-metrics-and-logging-policy.md
 [ADR-0015]: adr/0015-outbound-http-and-ssrf-policy.md
 [ADR-0016]: adr/0016-flat-domain-packages-command-layer-and-architecture-lints.md
+[ADR-0017]: adr/0017-bridge-protocol-for-messengers-without-native-support.md
 [C-01]: prd/l1/C-01-project-skeleton-and-releases.md
 [C-02]: prd/l1/C-02-process-startup-and-runtime.md
 [C-03]: prd/l1/C-03-sign-in-and-access.md
@@ -1492,3 +1580,4 @@ These are engineering terms used in the ADRs and in this document; domain terms 
 [C-18]: prd/l1/C-18-account-links.md
 [C-19]: prd/l1/C-19-self-observation.md
 [C-20]: prd/l1/C-20-organization-settings-and-security.md
+[C-22]: prd/l1/C-22-bridge.md

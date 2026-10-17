@@ -561,6 +561,10 @@ type process struct {
 	// is the long polling the Leader task telegram_polling runs.
 	updates *telegram.Router
 	poller  *telegram.Poller
+	// bridgeEvents handles the events of Bridge Connections, from the Leader's bridgePoller in poll mode or the push
+	// callback of the ingest listener; bridgePoller is the polling the Leader task bridge_polling runs.
+	bridgeEvents *bridge.Events
+	bridgePoller *bridge.Poller
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -760,8 +764,9 @@ func (p *process) messengerAdapters() {
 }
 
 // callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
-// every method, since the callback answers each request 200 with an empty JSON object; and the webhook of Telegram
-// Connections in the webhook update mode (C-14.FR-1), on POST.
+// every method, since the callback answers each request 200 with an empty JSON object; the webhook of Telegram
+// Connections in the webhook update mode (C-14.FR-1), on POST; and the events of Bridge Connections in push mode
+// (bridgeEvent, C-22.FR-11), on POST. The API's request validation never sees them: each handler decides every answer.
 func (p *process) callbacks() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
@@ -770,6 +775,8 @@ func (p *process) callbacks() http.Handler {
 		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log}))
 	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
 		Router: p.updates, Outages: p.connections, Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log}))
+	mux.Handle(bridge.PushPattern, bridge.NewPush(bridge.PushConfig{Connections: p.connections,
+		Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log}))
 	return mux
 }
 
@@ -923,6 +930,13 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.updates.Handle(telegram.KindPrivateMessage, (&telegram.Start{Links: p.links, Path: interactive}).Handle)
 	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Outages: conns, Clock: p.clocks.Business,
 		Log: p.log}
+	// The events of Bridge Connections reach one handler, from the Leader's poller or from the push callback, which
+	// claims each event id once per Connection (C-22.FR-11), runs the Commands of presses as the linked Users through
+	// the dispatcher and answers the people behind them on the interactive path (C-22.FR-12, FR-13).
+	p.bridgeEvents = &bridge.Events{Store: conns, Bindings: p.delivery, Links: p.links, Commands: p.groups,
+		Roles: roles, Keys: p.keyring, Path: interactive, PublicURL: p.cfg.PublicURL.String(), Clocks: p.clocks,
+		Log: p.log}
+	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,
@@ -1081,6 +1095,12 @@ func (p *process) newKeeper() *leader.Keeper {
 		ClockMoved:            p.clockMoved,
 		KeyringChanged:        p.keyringChanged,
 		RerenderAfterRotation: p.rerenderAfterRotation,
+		BridgePolling: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.bridgePoller.Run(ctx)
+		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -1096,6 +1116,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		PruneAccountLinks: []leader.PruneTable{
 			{Name: "account_link_requests", Delete: accountlinks.NewPruner(p.db.AccountLinksDB()).Requests},
+		},
+		PruneConnections: []leader.PruneTable{
+			{Name: "bridge_events_seen", Delete: p.pruneBridgeEvents},
 		},
 	}))
 }
@@ -1150,6 +1173,15 @@ func (p *process) prunePostCopies(ctx context.Context, orgID int64, now time.Tim
 		return 0, nil
 	}
 	return p.delivery.PrunePostCopies(ctx, now, limit)
+}
+
+// pruneBridgeEvents deletes the ids of the Bridge events of the Organization orgID handled longer than
+// bridge.event_dedup_window before now, for short-lived pruning.
+func (p *process) pruneBridgeEvents(ctx context.Context, orgID int64, now time.Time, limit int32) (int64, error) {
+	if orgID != p.orgID {
+		return 0, nil
+	}
+	return p.connections.PruneEventsSeen(ctx, now, limit)
 }
 
 // threadReplyRetention is the Leader task thread_reply_retention for the Organization orgID.
@@ -1233,6 +1265,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.destinations.InfoChanged()
 			case connections.Hint:
 				p.poller.Wake()
+				p.bridgePoller.Wake()
 			}
 		}, func(restored bool) {
 			p.hub.Listening(restored)
@@ -1243,6 +1276,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.routes.InfoChanged()
 				p.destinations.InfoChanged()
 				p.poller.Wake()
+				p.bridgePoller.Wake()
 				p.loadDevClock(ctx)
 				p.replica.Wake()
 				p.keyringChanged.Wake()

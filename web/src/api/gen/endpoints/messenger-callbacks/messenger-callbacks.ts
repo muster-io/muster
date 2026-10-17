@@ -29,6 +29,8 @@ import type {
 
 import type {
   BadRequestResponse,
+  BridgeEvent,
+  InternalErrorResponse,
   MattermostActionAnswer,
   MattermostActionRequest,
   TelegramUpdate,
@@ -219,4 +221,93 @@ export const useTelegramWebhook = <TError = BadRequestResponse | UnauthorizedRes
         TContext
       > => {
       return useMutation(getTelegramWebhookMutationOptions(options), queryClient);
+    }
+    export const getBridgeEventUrl = (connectionId: string,) => {
+
+
+
+
+  return `/api/v1/callbacks/bridge/${connectionId}`
+}
+
+/**
+ * Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+ * @summary Receive a Bridge event (push event delivery)
+ */
+export const bridgeEvent = async (connectionId: string,
+    bridgeEventBody: BridgeEvent, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<void>(getBridgeEventUrl(connectionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(bridgeEventBody)
+  }
+);}
+
+
+
+
+
+export const getBridgeEventMutationKey = () => ['bridgeEvent'] as const;
+
+export const getBridgeEventMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bridgeEvent>>, TError,BridgeEventMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof bridgeEvent>>, TError,BridgeEventMutationVariables, TContext> => {
+
+const mutationKey = getBridgeEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof bridgeEvent>>, BridgeEventMutationVariables> = (props) => {
+          const {connectionId,data} = props ?? {};
+
+          return  bridgeEvent(connectionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BridgeEventMutationResult = NonNullable<Awaited<ReturnType<typeof bridgeEvent>>>
+    export type BridgeEventMutationBody = BridgeEvent
+    export type BridgeEventMutationError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse
+    export type BridgeEventMutationVariables = {connectionId: string;data: BridgeEvent}
+
+    /**
+ * @summary Receive a Bridge event (push event delivery)
+ */
+export const useBridgeEvent = <TError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bridgeEvent>>, TError,BridgeEventMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof bridgeEvent>>,
+        TError,
+        BridgeEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getBridgeEventMutationOptions(options), queryClient);
     }

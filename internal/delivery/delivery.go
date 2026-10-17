@@ -397,6 +397,7 @@ type queries interface {
 	membershipQueries
 	rerenderQueries
 	editWindowQueries
+	bridgePressQueries
 	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
 	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
 		[]dbgen.SetDestinationTemplateErrorRow, error)

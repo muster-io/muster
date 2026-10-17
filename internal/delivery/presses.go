@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 )
 
@@ -144,4 +145,96 @@ func (s *Service) TestDestination(ctx context.Context, connectionID int64, publi
 	}
 	return Destination{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: TypeMattermost,
 		Connection: &connectionID}, true, nil
+}
+
+// bridgePressQueries are the reads of what an event about a message of a Bridge Connection is bound to, and the lock of
+// the delivery whose Root message a message_deleted event names.
+type bridgePressQueries interface {
+	GetBridgeRootBinding(ctx context.Context, arg dbgen.GetBridgeRootBindingParams) (dbgen.GetBridgeRootBindingRow,
+		error)
+	GetBridgeSupersededBinding(ctx context.Context, arg dbgen.GetBridgeSupersededBindingParams) (
+		dbgen.GetBridgeSupersededBindingRow, error)
+	GetBridgeReminderBinding(ctx context.Context, arg dbgen.GetBridgeReminderBindingParams) (
+		dbgen.GetBridgeReminderBindingRow, error)
+	LockBridgeDeletedRoot(ctx context.Context, arg dbgen.LockBridgeDeletedRootParams) (dbgen.LockBridgeDeletedRootRow,
+		error)
+}
+
+// BridgeBinding is what a press or a Thread message on a message of a Bridge Connection is bound to (C-22.FR-12,
+// FR-14): the kind of the message — a Root message, buttons.SubjectRoot, or a sent Reminder, buttons.SubjectReply — the
+// Alert Group, by public_id, and its Route's Snooze durations. An older Root message that a republication past the
+// bridge's edit window replaced (C-22.FR-9) is bound as the current one is: a press or a Text command there acts on
+// the Alert Group as on the current one, and nothing ever edits it again, since the worker reconciles only the current
+// Root message of a delivery.
+type BridgeBinding struct {
+	Kind          buttons.Subject
+	GroupPublicID string
+	SnoozeSeconds []int64
+}
+
+// bridgeBound is the binding of a message of the kind kind from the columns its reads share.
+func bridgeBound(kind buttons.Subject, r dbgen.GetBridgeRootBindingRow) BridgeBinding {
+	return BridgeBinding{Kind: kind, GroupPublicID: r.GroupPublicID, SnoozeSeconds: r.SnoozeDurationsSeconds}
+}
+
+// BridgePressBinding reads the binding of a press on the message messageID of the Bridge Connection connectionID
+// (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection, not deleted, whose current
+// Root message it is, else whose older Root message it is, else a sent Reminder of such a Destination whose message it
+// is; ErrNotBound when there is none, as for a message Muster did not post through the Connection, a test message or a
+// Storm summary.
+func (s *Service) BridgePressBinding(ctx context.Context, connectionID int64, messageID string) (BridgeBinding,
+	error) {
+	b, err := s.bridgeRootBinding(ctx, connectionID, messageID, "a press")
+	if !errors.Is(err, ErrNotBound) {
+		return b, err
+	}
+	r, err := s.store.q().GetBridgeReminderBinding(ctx, dbgen.GetBridgeReminderBindingParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, MessageID: messageID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return BridgeBinding{}, ErrNotBound
+	case err != nil:
+		return BridgeBinding{}, fmt.Errorf("read the binding of a press on a reminder of the connection %d: %w",
+			connectionID, err)
+	}
+	return bridgeBound(buttons.SubjectReply, dbgen.GetBridgeRootBindingRow(r)), nil
+}
+
+// BridgeThreadBinding reads the binding of a Thread message in the Thread of the message messageID of the Bridge
+// Connection connectionID (C-22.FR-14): the delivery of an Alert Group to a Bridge Destination of the Connection, not
+// deleted, whose current Root message it is, else whose older Root message it is; ErrNotBound when there is none, as
+// for a Thread reply, a message Muster did not post through the Connection, a test message or a Storm summary.
+func (s *Service) BridgeThreadBinding(ctx context.Context, connectionID int64, messageID string) (BridgeBinding,
+	error) {
+	return s.bridgeRootBinding(ctx, connectionID, messageID, "a thread message")
+}
+
+// bridgeRootBinding reads the binding of the current Root message messageID of the Bridge Connection connectionID,
+// else of the older Root message messageID, for what — a press or a Thread message; ErrNotBound when there is none.
+// The two are separate reads, each through its own index: one with an OR would scan the deliveries.
+func (s *Service) bridgeRootBinding(ctx context.Context, connectionID int64, messageID, what string) (BridgeBinding,
+	error) {
+	conn := pgtype.Int8{Int64: connectionID, Valid: true}
+	q := s.store.q()
+	failed := func(which string, err error) (BridgeBinding, error) {
+		return BridgeBinding{}, fmt.Errorf("read the binding of %s on %s of the connection %d: %w", what, which,
+			connectionID, err)
+	}
+	r, err := q.GetBridgeRootBinding(ctx, dbgen.GetBridgeRootBindingParams{OrgID: s.orgID, ConnectionID: conn,
+		MessageID: messageID})
+	switch {
+	case err == nil:
+		return bridgeBound(buttons.SubjectRoot, r), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return failed("a root message", err)
+	}
+	o, err := q.GetBridgeSupersededBinding(ctx, dbgen.GetBridgeSupersededBindingParams{OrgID: s.orgID,
+		ConnectionID: conn, MessageID: messageID})
+	switch {
+	case err == nil:
+		return bridgeBound(buttons.SubjectRoot, dbgen.GetBridgeRootBindingRow(o)), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return failed("an older root message", err)
+	}
+	return BridgeBinding{}, ErrNotBound
 }

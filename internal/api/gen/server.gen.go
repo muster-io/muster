@@ -2678,6 +2678,7 @@ func (e TotpPolicy) Valid() bool {
 // Defines values for Transport.
 const (
 	TransportApi        Transport = "api"
+	TransportBridge     Transport = "bridge"
 	TransportCli        Transport = "cli"
 	TransportMattermost Transport = "mattermost"
 	TransportSystem     Transport = "system"
@@ -2689,6 +2690,8 @@ const (
 func (e Transport) Valid() bool {
 	switch e {
 	case TransportApi:
+		return true
+	case TransportBridge:
 		return true
 	case TransportCli:
 		return true
@@ -3456,7 +3459,7 @@ type AuditEntry struct {
 	TokenId   nullable.Nullable[NullablePublicId] `json:"token_id,omitempty"`
 	TokenName nullable.Nullable[string]           `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -3464,6 +3467,20 @@ type AuditEntry struct {
 type AuditEntryList struct {
 	Items      []AuditEntry              `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// BridgeAccountLinkEvent defines model for BridgeAccountLinkEvent.
+type BridgeAccountLinkEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Token      string      `json:"token"`
+	Type       interface{} `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
 }
 
 // BridgeButtonStyle A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.
@@ -3660,6 +3677,21 @@ type BridgeDestinationInput struct {
 // BridgeDestinationInputType defines model for BridgeDestinationInput.Type.
 type BridgeDestinationInputType string
 
+// BridgeEvent An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol (`api/bridge.yaml`). `type` selects the variant.
+type BridgeEvent struct {
+	union json.RawMessage
+}
+
+// BridgeEventBase The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.
+type BridgeEventBase struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time `json:"occurred_at"`
+	Type       string    `json:"type"`
+}
+
 // BridgeEventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
 type BridgeEventDelivery string
 
@@ -3715,6 +3747,67 @@ type BridgeLimits struct {
 
 	// SendPerSecondPerChannel A hint for the Destination limiter; `rate_limited` stays the truth.
 	SendPerSecondPerChannel *float32 `json:"send_per_second_per_channel,omitempty"`
+}
+
+// BridgeMessageDeletedEvent defines model for BridgeMessageDeletedEvent.
+type BridgeMessageDeletedEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id        string `json:"id"`
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Type       interface{} `json:"type"`
+}
+
+// BridgePerson A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+type BridgePerson struct {
+	DisplayName string `json:"display_name"`
+
+	// ExternalId The account's stable id in the messenger.
+	ExternalId string `json:"external_id"`
+
+	// Handle The account's handle of the kind `user_lookup` declares, when the bridge knows it.
+	Handle nullable.Nullable[string] `json:"handle,omitempty"`
+}
+
+// BridgePressEvent defines model for BridgePressEvent.
+type BridgePressEvent struct {
+	// Data The button's `data`, unchanged.
+	Data string `json:"data"`
+
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// MessageId The message the button belongs to, a Root message or a Thread reply.
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Type       interface{} `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
+}
+
+// BridgeThreadMessageEvent defines model for BridgeThreadMessageEvent.
+type BridgeThreadMessageEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// MessageId The message whose Thread it is in, usually a Root message, never the id of a reply.
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time `json:"occurred_at"`
+
+	// Text The message as plain text, mentions of the bot removed.
+	Text      string                    `json:"text"`
+	ThreadRef nullable.Nullable[string] `json:"thread_ref"`
+	Type      interface{}               `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
 }
 
 // BrokenDestination defines model for BrokenDestination.
@@ -4748,7 +4841,7 @@ type Note struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -6127,7 +6220,7 @@ type TimelineActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -6372,7 +6465,7 @@ type TotpStatus struct {
 	RecoveryCodesRemaining int                          `json:"recovery_codes_remaining"`
 }
 
-// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
 // User defines model for User.
@@ -6483,7 +6576,7 @@ type WebhookActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -7036,6 +7129,18 @@ type ListAuditLogParams struct {
 	ResourceId *string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
 }
 
+// BridgeEventParams defines parameters for BridgeEvent.
+type BridgeEventParams struct {
+	// WebhookId The event's `id`, kept across retries.
+	WebhookId string `json:"webhook-id"`
+
+	// WebhookTimestamp Unix time of this attempt, in seconds.
+	WebhookTimestamp string `json:"webhook-timestamp"`
+
+	// WebhookSignature `v1,<base64 HMAC-SHA256>`; several signatures separated by spaces are allowed while a secret is rotated.
+	WebhookSignature string `json:"webhook-signature"`
+}
+
 // ListConnectionsParams defines parameters for ListConnections.
 type ListConnectionsParams struct {
 	// Cursor Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.
@@ -7374,6 +7479,9 @@ type ResolveAlertGroupJSONRequestBody = ResolveRequest
 
 // SnoozeAlertGroupJSONRequestBody defines body for SnoozeAlertGroup for application/json ContentType.
 type SnoozeAlertGroupJSONRequestBody = SnoozeRequest
+
+// BridgeEventJSONRequestBody defines body for BridgeEvent for application/json ContentType.
+type BridgeEventJSONRequestBody = BridgeEvent
 
 // MattermostActionJSONRequestBody defines body for MattermostAction for application/json ContentType.
 type MattermostActionJSONRequestBody = MattermostActionRequest
@@ -8117,6 +8225,179 @@ func (a TelegramUpdate) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsBridgePressEvent returns the union data inside the BridgeEvent as a BridgePressEvent
+func (t BridgeEvent) AsBridgePressEvent() (BridgePressEvent, error) {
+	var body BridgePressEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgePressEvent overwrites any union data inside the BridgeEvent as the provided BridgePressEvent
+func (t *BridgeEvent) FromBridgePressEvent(v BridgePressEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"press"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgePressEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgePressEvent
+func (t *BridgeEvent) MergeBridgePressEvent(v BridgePressEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"press"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeThreadMessageEvent returns the union data inside the BridgeEvent as a BridgeThreadMessageEvent
+func (t BridgeEvent) AsBridgeThreadMessageEvent() (BridgeThreadMessageEvent, error) {
+	var body BridgeThreadMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeThreadMessageEvent overwrites any union data inside the BridgeEvent as the provided BridgeThreadMessageEvent
+func (t *BridgeEvent) FromBridgeThreadMessageEvent(v BridgeThreadMessageEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"thread_message"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeThreadMessageEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeThreadMessageEvent
+func (t *BridgeEvent) MergeBridgeThreadMessageEvent(v BridgeThreadMessageEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"thread_message"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeAccountLinkEvent returns the union data inside the BridgeEvent as a BridgeAccountLinkEvent
+func (t BridgeEvent) AsBridgeAccountLinkEvent() (BridgeAccountLinkEvent, error) {
+	var body BridgeAccountLinkEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeAccountLinkEvent overwrites any union data inside the BridgeEvent as the provided BridgeAccountLinkEvent
+func (t *BridgeEvent) FromBridgeAccountLinkEvent(v BridgeAccountLinkEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"account_link"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeAccountLinkEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeAccountLinkEvent
+func (t *BridgeEvent) MergeBridgeAccountLinkEvent(v BridgeAccountLinkEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"account_link"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeMessageDeletedEvent returns the union data inside the BridgeEvent as a BridgeMessageDeletedEvent
+func (t BridgeEvent) AsBridgeMessageDeletedEvent() (BridgeMessageDeletedEvent, error) {
+	var body BridgeMessageDeletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeMessageDeletedEvent overwrites any union data inside the BridgeEvent as the provided BridgeMessageDeletedEvent
+func (t *BridgeEvent) FromBridgeMessageDeletedEvent(v BridgeMessageDeletedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"message_deleted"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeMessageDeletedEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeMessageDeletedEvent
+func (t *BridgeEvent) MergeBridgeMessageDeletedEvent(v BridgeMessageDeletedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"message_deleted"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BridgeEvent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t BridgeEvent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "account_link":
+		return t.AsBridgeAccountLinkEvent()
+	case "message_deleted":
+		return t.AsBridgeMessageDeletedEvent()
+	case "press":
+		return t.AsBridgePressEvent()
+	case "thread_message":
+		return t.AsBridgeThreadMessageEvent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t BridgeEvent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BridgeEvent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // AsMattermostConnection returns the union data inside the Connection as a MattermostConnection
@@ -9043,6 +9324,9 @@ type ServerInterface interface {
 	// ListAuditLog List Audit log entries
 	// (GET /audit-log)
 	ListAuditLog(w http.ResponseWriter, r *http.Request, params ListAuditLogParams)
+	// BridgeEvent Receive a Bridge event (push event delivery)
+	// (POST /callbacks/bridge/{connection_id})
+	BridgeEvent(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params BridgeEventParams)
 	// MattermostAction Receive a Mattermost button press
 	// (POST /callbacks/mattermost/{connection_id})
 	MattermostAction(w http.ResponseWriter, r *http.Request, connectionId ConnectionId)
@@ -10698,6 +10982,106 @@ func (siw *ServerInterfaceWrapper) ListAuditLog(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditLog(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BridgeEvent operation middleware
+func (siw *ServerInterfaceWrapper) BridgeEvent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection_id" -------------
+	var connectionId ConnectionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection_id", r.PathValue("connection_id"), &connectionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params BridgeEventParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "webhook-id" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("webhook-id")]; found {
+		var WebhookId string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "webhook-id", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "webhook-id", valueList[0], &WebhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhook-id", Err: err})
+			return
+		}
+
+		params.WebhookId = WebhookId
+
+	} else {
+		err := fmt.Errorf("Header parameter webhook-id is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "webhook-id", Err: err})
+		return
+	}
+
+	// ------------- Required header parameter "webhook-timestamp" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("webhook-timestamp")]; found {
+		var WebhookTimestamp string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "webhook-timestamp", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "webhook-timestamp", valueList[0], &WebhookTimestamp, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhook-timestamp", Err: err})
+			return
+		}
+
+		params.WebhookTimestamp = WebhookTimestamp
+
+	} else {
+		err := fmt.Errorf("Header parameter webhook-timestamp is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "webhook-timestamp", Err: err})
+		return
+	}
+
+	// ------------- Required header parameter "webhook-signature" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("webhook-signature")]; found {
+		var WebhookSignature string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "webhook-signature", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "webhook-signature", valueList[0], &WebhookSignature, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhook-signature", Err: err})
+			return
+		}
+
+		params.WebhookSignature = WebhookSignature
+
+	} else {
+		err := fmt.Errorf("Header parameter webhook-signature is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "webhook-signature", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BridgeEvent(w, r, connectionId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14788,6 +15172,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/heartbeat/{ingest_token}", wrapper.HeartbeatPostWithPathToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/mattermost/{connection_id}", wrapper.MattermostAction)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/telegram/{connection_id}", wrapper.TelegramWebhook)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/bridge/{connection_id}", wrapper.BridgeEvent)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/routes", wrapper.ListRoutes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/routes", wrapper.CreateRoute)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/routes/{route_id}", wrapper.DeleteRoute)
@@ -17060,6 +17445,72 @@ func (response ListAuditLog429ApplicationProblemPlusJSONResponse) VisitListAudit
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
 	}
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BridgeEventRequestObject struct {
+	ConnectionId ConnectionId `json:"connection_id"`
+	Params       BridgeEventParams
+	Body         *BridgeEventJSONRequestBody
+}
+
+type BridgeEventResponseObject interface {
+	VisitBridgeEventResponse(w http.ResponseWriter) error
+}
+
+type BridgeEvent204Response struct {
+}
+
+func (response BridgeEvent204Response) VisitBridgeEventResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type BridgeEvent400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response BridgeEvent400ApplicationProblemPlusJSONResponse) VisitBridgeEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BridgeEvent401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response BridgeEvent401ApplicationProblemPlusJSONResponse) VisitBridgeEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BridgeEvent500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response BridgeEvent500ApplicationProblemPlusJSONResponse) VisitBridgeEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -30492,6 +30943,9 @@ type StrictServerInterface interface {
 	// ListAuditLog List Audit log entries
 	// (GET /audit-log)
 	ListAuditLog(ctx context.Context, request ListAuditLogRequestObject) (ListAuditLogResponseObject, error)
+	// BridgeEvent Receive a Bridge event (push event delivery)
+	// (POST /callbacks/bridge/{connection_id})
+	BridgeEvent(ctx context.Context, request BridgeEventRequestObject) (BridgeEventResponseObject, error)
 	// MattermostAction Receive a Mattermost button press
 	// (POST /callbacks/mattermost/{connection_id})
 	MattermostAction(ctx context.Context, request MattermostActionRequestObject) (MattermostActionResponseObject, error)
@@ -31443,6 +31897,40 @@ func (sh *strictHandler) ListAuditLog(w http.ResponseWriter, r *http.Request, pa
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditLogResponseObject); ok {
 		if err := validResponse.VisitListAuditLogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BridgeEvent operation middleware
+func (sh *strictHandler) BridgeEvent(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params BridgeEventParams) {
+	var request BridgeEventRequestObject
+
+	request.ConnectionId = connectionId
+	request.Params = params
+
+	var body BridgeEventJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BridgeEvent(ctx, request.(BridgeEventRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BridgeEvent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BridgeEventResponseObject); ok {
+		if err := validResponse.VisitBridgeEventResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -151,21 +151,99 @@ func TestRepublicationAgainstDispatcherLockOrder(t *testing.T) {
 			!strings.HasSuffix(keys[1], "-1") || keys[2] != "" {
 			t.Errorf("keys %v", keys)
 		}
+		// The older Root message keeps the key that signed its buttons needed: one element per older message.
 		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
 			WHERE g.public_id = $1 AND g.status = 'acknowledged' AND d.state = 'delivered' AND d.publications = 2
 			AND cardinality(d.superseded_message_ids) = 1 AND d.actual_status = 'acknowledged'
-			AND NOT d.past_edit_window AND d.actual_hash = d.desired_hash`, gid) != 1 ||
+			AND NOT d.past_edit_window AND d.actual_hash = d.desired_hash
+			AND d.superseded_button_key_ids = ARRAY[$2::text]`, gid, l.keys.ActiveKeyID()) != 1 ||
 			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished_past_edit_window'`) != 1 {
 			t.Errorf("the republication or the edit after it is missing\n%s", l.log)
 		}
 	})
 }
 
-// againstDispatcher acknowledges the Alert Group publicID through the dispatcher and holds that transaction after it
-// locked the Alert Group, before Enqueue; meanwhile a round of the worker runs until it ends or waits for a lock; then
-// the acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock. Only the acknowledgement is
-// held: a later change through the dispatcher, such as the worker's mark of the first Publication, goes straight on.
+// TestRootDeletedAgainstDispatcherLockOrder (D307, C-22.FR-10): a message_deleted event of a Bridge Connection starts
+// the deleted Root message flow for the current Root message of an open Alert Group — the delivery reset to publish
+// again, the republished delivery event, the wake of the workers — while an acknowledgement holds the Alert Group and
+// then waits for the delivery row in Enqueue. RootDeleted locks the delivery row only, never the Alert Group before it:
+// nothing ends in a deadlock, and the next round publishes the Root message again, Quietly, with the deletion note and
+// the acknowledgement's status.
+func TestRootDeletedAgainstDispatcherLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		conn, dest := l.bridgeDestination(t)
+		l.attach(t, dest)
+		l.fire(t, "lockdeleted", "LockDeleted/a")
+		gid := l.group(t, "LockDeleted")
+		w := l.worker("rb")
+		w.Adapters[delivery.TypeBridge] = l.rec
+		l.round(t, w)
+		var message string
+		if err := l.d.Pool.QueryRow(t.Context(), `SELECT message_id FROM deliveries WHERE destination_id = $1
+			AND state = 'delivered'`, dest).Scan(&message); err != nil {
+			t.Fatalf("not published: %v\n%s", err, l.log)
+		}
+		l.rec.Reset()
+		l.againstDispatcherDo(t, gid, func(ctx context.Context) error {
+			return l.svc.RootDeleted(ctx, conn, message)
+		})
+		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND g.status = 'acknowledged' AND d.destination_id = $2 AND d.state = 'pending'
+			AND d.republished_after_delete AND d.message_id IS NULL AND d.desired_version = 2`, gid, dest) != 1 ||
+			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished'`) != 1 {
+			t.Fatalf("not reset for a republication\n%s", l.log)
+		}
+		l.round(t, w)
+		l.noDeadlock(t)
+		calls := l.rec.Calls()
+		if callMethods(calls) != "publish" || calls[0].Loudness != groups.Quiet || len(calls[0].Message.Notices) == 0 ||
+			!strings.HasPrefix(calls[0].Message.Notices[len(calls[0].Message.Notices)-1],
+				"The previous message was deleted at ") || calls[0].Message.Colour != "acknowledged" {
+			t.Errorf("calls %s %+v", callMethods(calls), calls)
+		}
+		if err := l.svc.RootDeleted(t.Context(), conn, message); err != nil ||
+			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind IN ('republished', 'deleted_in_messenger')`) != 1 {
+			t.Errorf("RootDeleted(%s) of the deleted message again = %v\n%s", message, err, l.log)
+		}
+	})
+}
+
+// bridgeDestination adds a Bridge Connection and a Bridge Destination of it, and returns their ids.
+func (l *live) bridgeDestination(t *testing.T) (conn, dest int64) {
+	t.Helper()
+	ctx := t.Context()
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url,
+		bridge_event_delivery, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+		limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAB1', 'bridge', 'br',
+		'https://bridge.example.org', 'poll', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, l.orgID, t0).Scan(
+		&conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+		bridge_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+		VALUES ($1, 'DSAAAAAAAAAAB1', 'bridge', 'alerts', $2, 'c-1', '{}', 1000, 1, 'healthy', $3, $3)
+		RETURNING id`, l.orgID, conn, t0).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	return conn, dest
+}
+
+// againstDispatcher is againstDispatcherDo with a round of the worker as the work.
 func (l *live) againstDispatcher(t *testing.T, publicID string) {
+	t.Helper()
+	l.againstDispatcherDo(t, publicID, func(ctx context.Context) error {
+		_, err := l.a.Round(ctx)
+		return err
+	})
+}
+
+// againstDispatcherDo acknowledges the Alert Group publicID through the dispatcher and holds that transaction after it
+// locked the Alert Group, before Enqueue; meanwhile work runs until it ends or waits for a lock; then the
+// acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock. Only the acknowledgement is held: a
+// later change through the dispatcher, such as the worker's mark of the first Publication, goes straight on.
+func (l *live) againstDispatcherDo(t *testing.T, publicID string, work func(ctx context.Context) error) {
 	t.Helper()
 	ctx := t.Context()
 	locked, proceed := make(chan struct{}), make(chan struct{})
@@ -186,7 +264,7 @@ func (l *live) againstDispatcher(t *testing.T, publicID string) {
 		return l.svc.Enqueue(ctx, tx, r)
 	})
 	var wg sync.WaitGroup
-	var ackErr, roundErr error
+	var ackErr, workErr error
 	wg.Go(func() { _, ackErr = l.groups.Acknowledge(ctx, l.alice, publicID) })
 	select {
 	case <-locked:
@@ -197,18 +275,18 @@ func (l *live) againstDispatcher(t *testing.T, publicID string) {
 	worked := make(chan struct{})
 	wg.Go(func() {
 		defer close(worked)
-		_, roundErr = l.a.Round(ctx)
+		workErr = work(ctx)
 	})
 	blocked := l.blockedOrDone(t, worked, held)
 	close(proceed)
 	wg.Wait()
 	l.groups.SetRerender(l.svc.Enqueue)
-	t.Logf("the worker waited for a lock while the dispatcher held the alert group: %v", blocked)
+	t.Logf("the work waited for a lock while the dispatcher held the alert group: %v", blocked)
 	if ackErr != nil {
 		t.Errorf("the acknowledgement: %v", ackErr)
 	}
-	if roundErr != nil {
-		t.Errorf("the worker's round: %v", roundErr)
+	if workErr != nil {
+		t.Errorf("the work: %v", workErr)
 	}
 	l.noDeadlock(t)
 }

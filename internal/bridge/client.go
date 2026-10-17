@@ -5,8 +5,10 @@
 // Connection's token as a bearer token, through internal/outbound with the Connection's proxy, in the client class of
 // the caller (ADR-0015), with the token registered for redaction; the classification of every answer by the problem's
 // class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
-// check (check.go); and the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
-// envelope.go). The models are generated from api/bridge.yaml into internal/bridge/gen.
+// check (check.go); the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
+// envelope.go); and the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once
+// per id and answered through answerEvent (events.go, poller.go, push.go, presses.go). The models are generated from
+// api/bridge.yaml into internal/bridge/gen.
 package bridge
 
 import (
@@ -128,17 +130,32 @@ type Client struct {
 	via      string
 
 	mu      sync.Mutex
-	clients map[outbound.Class]*outbound.Client
+	clients map[clientKey]*outbound.Client
+}
+
+// clientKey names an outbound client: its class, and whether it makes long polls, which take longer.
+type clientKey struct {
+	class outbound.Class
+	long  bool
+}
+
+// timeout bounds each attempt of the client k: callTimeout, or for long polls PollWait plus PollMargin, so that the
+// client's timeout is never shorter than the deadline the poller gives a call.
+func (k clientKey) timeout() time.Duration {
+	if k.long {
+		return PollWait + PollMargin
+	}
+	return callTimeout
 }
 
 // NewClient builds the client of the Connection s, checking its settings with the interactive class. The token, the
 // push secret and the proxy password are registered for redaction.
 func NewClient(n Network, s Settings) (*Client, error) {
-	c := &Client{network: n, settings: s, via: ViaDirect, clients: map[outbound.Class]*outbound.Client{}}
+	c := &Client{network: n, settings: s, via: ViaDirect, clients: map[clientKey]*outbound.Client{}}
 	if s.Proxy != nil {
 		c.via = ViaProxy
 	}
-	if _, err := c.client(outbound.ClassInteractive); err != nil {
+	if _, err := c.client(clientKey{class: outbound.ClassInteractive}); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -161,23 +178,23 @@ func (s Settings) mask(text string) string {
 	return text
 }
 
-func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
-	if class != outbound.ClassInteractive && class != outbound.ClassDelivery && class != outbound.ClassBackground {
-		return nil, fmt.Errorf("the Bridge client has no %s class", class)
+func (c *Client) client(k clientKey) (*outbound.Client, error) {
+	if k.class != outbound.ClassInteractive && k.class != outbound.ClassDelivery && k.class != outbound.ClassBackground {
+		return nil, fmt.Errorf("the Bridge client has no %s class", k.class)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if oc, ok := c.clients[class]; ok {
+	if oc, ok := c.clients[k]; ok {
 		return oc, nil
 	}
 	s, n := c.settings, c.network
-	oc, err := outbound.New(outbound.Config{Class: class, ConnectTimeout: connectTimeout, Timeout: callTimeout,
+	oc, err := outbound.New(outbound.Config{Class: k.class, ConnectTimeout: connectTimeout, Timeout: k.timeout(),
 		Proxy: s.Proxy, Secrets: s.secrets(), BaseURL: s.BaseURL, Policy: n.Policy, Logger: n.Log,
 		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
 	if err != nil {
 		return nil, err
 	}
-	c.clients[class] = oc
+	c.clients[k] = oc
 	return oc, nil
 }
 
@@ -305,6 +322,66 @@ func (c *Client) ReplyInThread(ctx context.Context, class outbound.Class, messag
 	return out, r
 }
 
+// maxCursor is the longest next_cursor of the protocol, in characters.
+const maxCursor = 1024
+
+// Batch is the answer of pollEvents: the events after the cursor sent, oldest first, each as the bridge sent it, and
+// the cursor of the next call.
+type Batch struct {
+	Events     []json.RawMessage
+	NextCursor string
+}
+
+// PollEvents calls pollEvents (C-22.FR-11): the events after cursor, all the bridge keeps when cursor is nil, which the
+// bridge holds open for wait while there are none. It runs in the background client class through the client that
+// makes long polls, whose timeout is PollWait plus PollMargin, and the caller's context bounds the call with the
+// retries of the class. A successful answer without an array of events and a next_cursor of at most 1024 characters
+// is invalid.
+func (c *Client) PollEvents(ctx context.Context, cursor *string, wait time.Duration) (Batch, Result) {
+	q := url.Values{"wait": {strconv.FormatInt(int64(wait/time.Second), 10)}}
+	if cursor != nil {
+		q.Set("cursor", *cursor)
+	}
+	var out struct {
+		Events     *[]json.RawMessage `json:"events"`
+		NextCursor *string            `json:"next_cursor"`
+	}
+	_, r := c.call(ctx, clientKey{class: outbound.ClassBackground, long: true}, http.MethodGet,
+		"events?"+q.Encode(), nil, nil, &out)
+	if !r.OK() {
+		return Batch{}, r
+	}
+	if out.Events == nil || out.NextCursor == nil || utf8.RuneCountInString(*out.NextCursor) > maxCursor {
+		return Batch{}, notExpected(r.Status, "GET events")
+	}
+	return Batch{Events: *out.Events, NextCursor: *out.NextCursor}, r
+}
+
+// MaxAnswerLength is the longest text of an answer to an event, in characters (C-22.FR-13).
+const MaxAnswerLength = 500
+
+// AnswerEvent calls answerEvent (C-22.FR-13): it shows text, a plain text cut to MaxAnswerLength characters, to the
+// person behind the event eventID, with the Idempotency-Key answer-<event id>, and returns where the bridge showed it.
+// A successful answer without a shown_as of the protocol is invalid.
+func (c *Client) AnswerEvent(ctx context.Context, class outbound.Class, eventID, text string) (gen.AnswerShown,
+	Result) {
+	var out gen.AnswerShown
+	_, r := c.do(ctx, class, http.MethodPost, "answers", idempotency("answer-"+eventID),
+		gen.AnswerInput{EventId: eventID, Text: cutText(text, MaxAnswerLength)}, &out)
+	if r.OK() && !out.ShownAs.Valid() {
+		return gen.AnswerShown{}, notExpected(r.Status, "POST answers")
+	}
+	return out, r
+}
+
+// cutText is s cut to at most n characters.
+func cutText(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
+}
+
 // idempotency is the header that carries key, none for an empty key.
 func idempotency(key string) http.Header {
 	if key == "" {
@@ -331,7 +408,14 @@ func notExpected(status int, call string) Result {
 // on the request's context: a call without an answer whose request was written may have reached the bridge.
 func (c *Client) do(ctx context.Context, class outbound.Class, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
-	oc, err := c.client(class)
+	return c.call(ctx, clientKey{class: class}, method, path, header, body, out)
+}
+
+// call is do through the outbound client k; a query of path is left out of the texts of its failures.
+func (c *Client) call(ctx context.Context, k clientKey, method, path string, header http.Header, body,
+	out any) (outbound.Result, Result) {
+	name, _, _ := strings.Cut(path, "?")
+	oc, err := c.client(k)
 	if err != nil {
 		return outbound.Result{}, Result{Classification: Classification{Class: ClassInvalid},
 			Error: outbound.Untrusted(err.Error())}
@@ -346,7 +430,7 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 	if body != nil {
 		if data, err = json.Marshal(body); err != nil {
 			return outbound.Result{}, Result{Classification: Classification{Class: ClassInvalid},
-				Error: outbound.Untrusted(method + " " + path + ": the request is not valid JSON")}
+				Error: outbound.Untrusted(method + " " + name + ": the request is not valid JSON")}
 		}
 		h.Set("Content-Type", "application/json")
 	}
@@ -364,7 +448,7 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 	}
 	if err := json.Unmarshal(res.Body, out); err != nil {
 		return res, Result{Status: res.Status, Classification: Classification{Class: ClassInvalid},
-			Error: outbound.Untrusted(method + " " + path + ": the answer is not the expected JSON")}
+			Error: outbound.Untrusted(method + " " + name + ": the answer is not the expected JSON")}
 	}
 	return res, r
 }

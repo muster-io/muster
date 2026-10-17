@@ -10,11 +10,16 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -384,5 +389,498 @@ func TestTelegramReplyBinding(t *testing.T) {
 	if _, err := e.svc.TelegramReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgGroup, 812); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// bridgeDest is the Destination of a delivery when it is a Bridge Destination of the Connection conn, not deleted.
+func (f *fakeDB) bridgeDest(id, conn int64) *fakeDest {
+	ds := f.dests[id]
+	if ds == nil || ds.typ != delivery.TypeBridge || ds.deleted || ds.connection == nil || *ds.connection != conn {
+		return nil
+	}
+	return ds
+}
+
+// bridgeRoot is the binding row of the delivery to a Bridge Destination of the Connection conn whose current Root
+// message, or older one when older is set, is messageID, the lowest delivery id first.
+func (f *fakeDB) bridgeRoot(conn int64, messageID string, older bool) (dbgen.GetBridgeRootBindingRow, bool) {
+	for _, d := range slices.SortedFunc(slices.Values(f.deliveries), func(a, b *fakeDelivery) int {
+		return int(a.id - b.id)
+	}) {
+		ds, g := f.bridgeDest(d.dest, conn), f.groups[d.group]
+		if ds == nil || g == nil {
+			continue
+		}
+		if (!older && (d.messageID == nil || *d.messageID != messageID)) ||
+			(older && !slices.Contains(d.superseded, messageID)) {
+			continue
+		}
+		return dbgen.GetBridgeRootBindingRow{GroupPublicID: g.publicID,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, true
+	}
+	return dbgen.GetBridgeRootBindingRow{}, false
+}
+
+func (f *fakeDB) GetBridgeRootBinding(_ context.Context, arg dbgen.GetBridgeRootBindingParams) (
+	dbgen.GetBridgeRootBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeRootBinding"); err != nil {
+		return dbgen.GetBridgeRootBindingRow{}, err
+	}
+	if r, ok := f.bridgeRoot(arg.ConnectionID.Int64, arg.MessageID, false); ok {
+		return r, nil
+	}
+	return dbgen.GetBridgeRootBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetBridgeSupersededBinding(_ context.Context, arg dbgen.GetBridgeSupersededBindingParams) (
+	dbgen.GetBridgeSupersededBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeSupersededBinding"); err != nil {
+		return dbgen.GetBridgeSupersededBindingRow{}, err
+	}
+	if r, ok := f.bridgeRoot(arg.ConnectionID.Int64, arg.MessageID, true); ok {
+		return dbgen.GetBridgeSupersededBindingRow(r), nil
+	}
+	return dbgen.GetBridgeSupersededBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridgeReminderBindingParams) (
+	dbgen.GetBridgeReminderBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeReminderBinding"); err != nil {
+		return dbgen.GetBridgeReminderBindingRow{}, err
+	}
+	for _, r := range f.replies {
+		ds, g := f.bridgeDest(r.dest, arg.ConnectionID.Int64), f.groups[r.group]
+		if ds == nil || g == nil || r.event != "reminder" || r.state != "sent" || r.messageID == nil ||
+			*r.messageID != arg.MessageID {
+			continue
+		}
+		return dbgen.GetBridgeReminderBindingRow{GroupPublicID: g.publicID,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, nil
+	}
+	return dbgen.GetBridgeReminderBindingRow{}, pgx.ErrNoRows
+}
+
+// TestBridgePressBinding is the binding of C-22.FR-12: a press on a message of a Bridge Connection is bound to the
+// delivery of an Alert Group to a Bridge Destination of the Connection whose current Root message it is, or whose older
+// Root message a republication past the edit window replaced, or to a sent Reminder there, with the Alert Group and
+// the Route's Snooze durations; another Connection, another type, a deleted Destination, a Thread reply that is not a
+// sent Reminder, a Storm summary or an unknown message is not bound, and a failed read is an error.
+func TestBridgePressBinding(t *testing.T) {
+	e, _ := bridged(t)
+	e.db.dests[destMM].name = "alerts"
+	r := e.db.routes[routeID]
+	r.snooze = []int64{3600, 14400, 86400}
+	e.db.routes[routeID] = r
+	current, reminder, other, summary := "m3", "r-1", "r-2", "s-1"
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", messageID: &current,
+			superseded: []string{"m1", "m2"}, publishedAt: at(business0)},
+		&fakeDelivery{id: 2, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
+			publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies,
+		&fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM, event: "reminder", state: "sent",
+			messageID: &reminder},
+		&fakeReply{id: 2, delivery: 1, group: groupID, dest: destMM, event: "alerts_added", state: "sent",
+			messageID: &other})
+	for _, tc := range []struct {
+		message string
+		kind    buttons.Subject
+		// reads are the reads of the binding, the current Root message's first.
+		reads []string
+	}{
+		{"m3", buttons.SubjectRoot, []string{"GetBridgeRootBinding"}},
+		{"m1", buttons.SubjectRoot, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+		{"m2", buttons.SubjectRoot, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+		{"r-1", buttons.SubjectReply, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding",
+			"GetBridgeReminderBinding"}},
+	} {
+		calls := maps.Clone(e.db.calls)
+		b, err := e.svc.BridgePressBinding(t.Context(), connID, tc.message)
+		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+			t.Errorf("BridgePressBinding(%s) = %+v, %v", tc.message, b, err)
+		}
+		if got := readsSince(calls, e.db.calls); !slices.Equal(got, tc.reads) {
+			t.Errorf("BridgePressBinding(%s) read %v", tc.message, got)
+		}
+	}
+	for _, c := range []struct {
+		conn    int64
+		message string
+	}{{connID, "r-2"}, {connID, "s-1"}, {connID, "m9"}, {connID, ""}, {connID + 1, "m3"}, {connID + 1, "m1"},
+		{connID + 1, "r-1"}} {
+		if _, err := e.svc.BridgePressBinding(t.Context(), c.conn, c.message); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("BridgePressBinding(%d, %q) = %v, want ErrNotBound", c.conn, c.message, err)
+		}
+	}
+	e.db.replies[0].state = "pending"
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("an unsent Reminder = %v", err)
+	}
+	e.db.replies[0].state = "sent"
+	e.db.dests[destMM].typ = delivery.TypeMattermost
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "m3"); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("a Mattermost Destination = %v", err)
+	}
+	e.db.dests[destMM].typ = delivery.TypeBridge
+	e.db.dests[destMM].deleted = true
+	for _, m := range []string{"m3", "m1", "r-1"} {
+		if _, err := e.svc.BridgePressBinding(t.Context(), connID, m); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("%s of a deleted Destination = %v", m, err)
+		}
+	}
+	e.db.dests[destMM].deleted = false
+	reads := []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding"}
+	for i, q := range reads {
+		e.db.fail[q] = errBoom
+		calls := maps.Clone(e.db.calls)
+		if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, errBoom) {
+			t.Errorf("a failed %s = %v", q, err)
+		}
+		for _, later := range reads[i+1:] {
+			if e.db.calls[later] != calls[later] {
+				t.Errorf("after a failed %s, %s was read", q, later)
+			}
+		}
+		delete(e.db.fail, q)
+	}
+}
+
+// TestBridgePressBindingPrefersTheCurrentRootMessage: should a message id be both the current Root message of one
+// delivery and an older one of another, the current one is bound.
+func TestBridgePressBindingPrefersTheCurrentRootMessage(t *testing.T) {
+	e, _ := bridged(t)
+	m := "m1"
+	e.db.groups[groupID+1] = &fakeGroup{id: groupID + 1, publicID: "AGAAAAAAAAAA22", number: 8, status: "firing",
+		route: routeID, created: business0}
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", superseded: []string{m}},
+		&fakeDelivery{id: 2, dest: destMM, group: groupID + 1, state: "delivered", messageID: &m})
+	b, err := e.svc.BridgePressBinding(t.Context(), connID, m)
+	if err != nil || b.GroupPublicID != "AGAAAAAAAAAA22" || e.db.calls["GetBridgeSupersededBinding"] != 0 {
+		t.Errorf("BridgePressBinding = %+v, %v", b, err)
+	}
+}
+
+// readsSince are the reads of a Bridge binding made since before, in the order the bindings make them.
+func readsSince(before, now map[string]int) []string {
+	var out []string
+	for _, q := range []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding"} {
+		if now[q] != before[q] {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// TestPressOnTheOlderRootMessage is C-22.FR-9 and FR-12 on the delivery side: a press on the older Root message of a
+// delivery republished past its bridge's edit window is bound to the Alert Group, and the re-render of the Command it
+// runs never edits that message — the worker reconciles only the current Root message, within its window or by
+// another republication whose pointer goes under the current one.
+func TestPressOnTheOlderRootMessage(t *testing.T) {
+	e, d, _ := publishedWindowed(t)
+	republished := business0.Add(11 * time.Minute)
+	e.business.Set(republished)
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.acknowledged(t, 2)
+	e.round(t)
+	if *d.messageID != "m2" || !slices.Equal(d.superseded, []string{"m1"}) {
+		t.Fatalf("not republished: %+v", d)
+	}
+	e.rec.Reset()
+	calls := maps.Clone(e.db.calls)
+	b, err := e.svc.BridgePressBinding(t.Context(), connID, "m1")
+	if err != nil || b.Kind != buttons.SubjectRoot || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+		!slices.Equal(readsSince(calls, e.db.calls), []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}) {
+		t.Fatalf("BridgePressBinding(m1) = %+v, %v", b, err)
+	}
+	untouched := func(when string) {
+		t.Helper()
+		for _, c := range e.rec.Calls() {
+			if c.MessageID == "m1" || c.Root.MessageID == "m1" {
+				t.Errorf("%s: a call on the older Root message: %+v", when, c)
+			}
+		}
+	}
+	// The Command the press runs — Unacknowledge — re-renders within the current message's window: an edit of m2.
+	e.business.Set(republished.Add(time.Minute))
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventUnacknowledged, Variant: groups.VariantCommand, Loudness: groups.Quiet})
+	e.round(t)
+	if calls := e.rec.Calls(); len(calls) == 0 || calls[0].Method != deliverytest.MethodUpdate ||
+		calls[0].MessageID != "m2" {
+		t.Errorf("within the window: %s %+v", callMethods(calls), calls)
+	}
+	untouched("within the window")
+	// Past the current message's window as well, the next Command republishes again, pointing from m2, not m1.
+	e.rec.Reset()
+	e.business.Set(republished.Add(11 * time.Minute))
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m3", "t-3"))
+	e.acknowledged(t, 4)
+	e.round(t)
+	sent := e.rec.Calls()
+	if callMethods(sent) != "publish,reply" || sent[1].Root.MessageID != "m2" ||
+		!slices.Equal(d.superseded, []string{"m1", "m2"}) || *d.messageID != "m3" {
+		t.Errorf("past the window: %s %+v, delivery %+v", callMethods(sent), sent, d)
+	}
+	untouched("past the window")
+	for _, m := range []string{"m1", "m2"} {
+		calls := maps.Clone(e.db.calls)
+		if b, err := e.svc.BridgePressBinding(t.Context(), connID, m); err != nil ||
+			b.GroupPublicID != "AGAAAAAAAAAA21" || !slices.Equal(readsSince(calls, e.db.calls),
+			[]string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}) {
+			t.Errorf("BridgePressBinding(%s) after two republications = %+v, %v", m, b, err)
+		}
+	}
+}
+
+func (f *fakeDB) LockBridgeDeletedRoot(_ context.Context, arg dbgen.LockBridgeDeletedRootParams) (
+	dbgen.LockBridgeDeletedRootRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LockBridgeDeletedRoot"); err != nil {
+		return dbgen.LockBridgeDeletedRootRow{}, err
+	}
+	for _, d := range slices.SortedFunc(slices.Values(f.deliveries), func(a, b *fakeDelivery) int {
+		return int(a.id - b.id)
+	}) {
+		if f.bridgeDest(d.dest, arg.ConnectionID.Int64) == nil || d.messageID == nil || *d.messageID != arg.MessageID ||
+			d.desiredRetire || endedRow(d) {
+			continue
+		}
+		r := dbgen.LockBridgeDeletedRootRow{ID: d.id, DestinationID: d.dest, RepublishedAfterDelete: d.republished}
+		if g := f.groups[d.group]; g != nil {
+			r.AlertGroupID = pgtype.Int8{Int64: g.id, Valid: true}
+			r.GroupPublicID, r.Resolved = g.publicID, g.status == string(groups.StatusResolved)
+		}
+		if d.storm != 0 {
+			r.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
+		}
+		return r, nil
+	}
+	return dbgen.LockBridgeDeletedRootRow{}, pgx.ErrNoRows
+}
+
+// TestBridgeThreadBinding is the binding of C-22.FR-14: a Thread message is bound to the delivery of an Alert Group to
+// a Bridge Destination of the Connection whose current Root message, or older Root message a republication past the
+// edit window replaced, is the message whose Thread it is in, with the Alert Group and the Route's Snooze durations;
+// a Reminder, another Thread reply, a Storm summary, another Connection, another type, a deleted Destination or an
+// unknown message is not bound, and a failed read is an error after which nothing more is read.
+func TestBridgeThreadBinding(t *testing.T) {
+	e, _ := bridged(t)
+	r := e.db.routes[routeID]
+	r.snooze = []int64{3600, 14400, 86400}
+	e.db.routes[routeID] = r
+	current, reminder, summary := "m3", "r-1", "s-1"
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", messageID: &current,
+			superseded: []string{"m1"}, publishedAt: at(business0)},
+		&fakeDelivery{id: 2, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
+			publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM,
+		event: "reminder", state: "sent", messageID: &reminder})
+	for _, tc := range []struct {
+		message string
+		reads   []string
+	}{
+		{"m3", []string{"GetBridgeRootBinding"}},
+		{"m1", []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+	} {
+		calls := maps.Clone(e.db.calls)
+		b, err := e.svc.BridgeThreadBinding(t.Context(), connID, tc.message)
+		if err != nil || b.Kind != buttons.SubjectRoot || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) ||
+			!slices.Equal(readsSince(calls, e.db.calls), tc.reads) {
+			t.Errorf("BridgeThreadBinding(%s) = %+v, %v", tc.message, b, err)
+		}
+	}
+	for _, c := range []struct {
+		conn    int64
+		message string
+	}{{connID, "r-1"}, {connID, "s-1"}, {connID, "m9"}, {connID + 1, "m3"}, {connID + 1, "m1"}} {
+		if _, err := e.svc.BridgeThreadBinding(t.Context(), c.conn, c.message); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("BridgeThreadBinding(%d, %q) = %v, want ErrNotBound", c.conn, c.message, err)
+		}
+	}
+	if e.db.calls["GetBridgeReminderBinding"] != 0 {
+		t.Error("a Thread message was looked up among the Reminders")
+	}
+	for _, change := range []func(ds *fakeDest){
+		func(ds *fakeDest) { ds.typ = delivery.TypeMattermost },
+		func(ds *fakeDest) { ds.deleted = true },
+	} {
+		ds := *e.db.dests[destMM]
+		change(e.db.dests[destMM])
+		for _, m := range []string{"m3", "m1"} {
+			if _, err := e.svc.BridgeThreadBinding(t.Context(), connID, m); !errors.Is(err, delivery.ErrNotBound) {
+				t.Errorf("%s of %+v = %v", m, e.db.dests[destMM], err)
+			}
+		}
+		*e.db.dests[destMM] = ds
+	}
+	reads := []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}
+	for i, q := range reads {
+		e.db.fail[q] = errBoom
+		calls := maps.Clone(e.db.calls)
+		if _, err := e.svc.BridgeThreadBinding(t.Context(), connID, "m9"); !errors.Is(err, errBoom) {
+			t.Errorf("a failed %s = %v", q, err)
+		}
+		for _, later := range reads[i+1:] {
+			if e.db.calls[later] != calls[later] {
+				t.Errorf("after a failed %s, %s was read", q, later)
+			}
+		}
+		delete(e.db.fail, q)
+	}
+}
+
+// TestRootDeleted is C-22.FR-10 and AC-17 on the delivery side, with C-11.FR-13: a message_deleted event for the
+// current Root message of an open Alert Group in a Bridge Destination publishes it again at once — the delivery due
+// now, the workers woken — Quietly, with the deletion note and a new Thread; for the republished message it marks the
+// pair deleted in the messenger, drops its pending Thread replies and leaves it alone; once ended, the same message
+// changes nothing.
+func TestRootDeleted(t *testing.T) {
+	e, d, _ := publishedBridge(t, publishedAs("m1", "t-1"))
+	d.threadState, d.anchorID = "attached", at2("t-1")
+	e.db.events = nil
+	deleted := time.Date(2026, 10, 7, 12, 42, 0, 0, time.UTC)
+	e.business.Set(deleted)
+	woken, hints := e.db.notified, len(e.db.hints)
+	if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+		t.Fatalf("RootDeleted(m1) = %v", err)
+	}
+	if d.state != "pending" || !d.republished || d.messageID != nil || d.threadState != "none" || d.anchorID != nil ||
+		!d.next.Equal(deleted) || e.db.notified != woken+1 || len(e.db.hints) != hints+1 {
+		t.Fatalf("not reset for a republication: %+v, %d wakes, %d hints", d, e.db.notified, len(e.db.hints))
+	}
+	if !slices.Equal(e.eventKinds(), []string{"republished"}) || e.db.events[0].Loudness != "quiet" ||
+		!e.db.events[0].OccurredAt.Equal(deleted) {
+		t.Errorf("events %+v", e.db.events)
+	}
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.round(t)
+	pubs := e.publications()
+	if len(pubs) != 1 || pubs[0].Loudness != groups.Quiet || len(pubs[0].Mentions) != 0 ||
+		pubs[0].Message.Notices[len(pubs[0].Message.Notices)-1] != "The previous message was deleted at 12:42." {
+		t.Fatalf("republication %+v", pubs)
+	}
+	if d.state != "delivered" || *d.messageID != "m2" || d.publications != 2 {
+		t.Fatalf("not republished %+v", d)
+	}
+	// The republished Root message is deleted too: the pair is deleted in the messenger, its pending replies dropped.
+	pending := "pending"
+	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: d.id, group: groupID, dest: destMM,
+		event: "alerts_added", state: pending})
+	e.rec.Reset()
+	if err := e.svc.RootDeleted(t.Context(), connID, "m2"); err != nil {
+		t.Fatalf("RootDeleted(m2) = %v", err)
+	}
+	if d.state != "deleted_in_messenger" || e.db.replies[0].state != "dropped" ||
+		e.eventKinds()[len(e.db.events)-1] != "deleted_in_messenger" {
+		t.Errorf("the pair %+v, reply %s, events %v", d, e.db.replies[0].state, e.eventKinds())
+	}
+	events, lockedRows := len(e.db.events), e.db.calls["LockBridgeDeletedRoot"]
+	for _, m := range []string{"m2", "m1"} {
+		if err := e.svc.RootDeleted(t.Context(), connID, m); err != nil || len(e.db.events) != events {
+			t.Errorf("RootDeleted(%s) after the pair = %v, events %v", m, err, e.eventKinds())
+		}
+	}
+	if e.db.calls["LockBridgeDeletedRoot"] != lockedRows+2 {
+		t.Errorf("%d locks after the pair", e.db.calls["LockBridgeDeletedRoot"]-lockedRows)
+	}
+	e.business.Advance(time.Hour)
+	e.round(t)
+	if len(e.rec.Calls()) != 0 || len(e.db.events) != events || d.state != "deleted_in_messenger" {
+		t.Errorf("after the pair: %s, events %v, %+v", callMethods(e.rec.Calls()), e.eventKinds(), d)
+	}
+}
+
+// TestRootDeletedResolved is C-11.FR-13 through a message_deleted event: the Root message of a resolved Alert Group is
+// marked deleted in the messenger at once, never published again.
+func TestRootDeletedResolved(t *testing.T) {
+	e, d, _ := publishedBridge(t, publishedAs("m1", "t-1"))
+	e.db.groups[groupID].status = string(groups.StatusResolved)
+	e.db.events = nil
+	if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+		t.Fatalf("RootDeleted = %v", err)
+	}
+	if d.state != "deleted_in_messenger" || d.republished || !slices.Equal(e.eventKinds(), []string{
+		"deleted_in_messenger"}) {
+		t.Errorf("%+v, events %v", d, e.eventKinds())
+	}
+}
+
+// TestRootDeletedStormSummary: a deleted Storm summary of a Bridge Destination is published again, as after a gone
+// answer to its edit.
+func TestRootDeletedStormSummary(t *testing.T) {
+	e, _ := bridged(t)
+	summary := "s-1"
+	d := &fakeDelivery{id: 1, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
+		publishedAt: at(business0)}
+	e.db.deliveries = append(e.db.deliveries, d)
+	if err := e.svc.RootDeleted(t.Context(), connID, "s-1"); err != nil {
+		t.Fatalf("RootDeleted = %v", err)
+	}
+	if d.state != "pending" || !d.republished || d.messageID != nil || len(e.db.events) != 1 ||
+		e.db.events[0].StormID.Int64 != 9 || e.db.events[0].AlertGroupID.Valid {
+		t.Errorf("%+v, events %+v", d, e.db.events)
+	}
+}
+
+// TestRootDeletedOtherMessages is C-22.FR-10: a message_deleted event for any other message of the bot changes
+// nothing — an older Root message a republication past the edit window replaced, a Thread reply, an unknown message,
+// a Root message of another Connection, of a Mattermost Destination, of a deleted Destination or of a delivery that
+// retires — and a failed lock or flow is an error.
+func TestRootDeletedOtherMessages(t *testing.T) {
+	e, d, _ := publishedBridge(t, publishedAs("m1", "t-1"))
+	d.superseded = []string{"m0"}
+	reply := "r-1"
+	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: d.id, group: groupID, dest: destMM,
+		event: "reminder", state: "sent", messageID: &reply})
+	e.db.events = nil
+	before := *d
+	unchanged := func(what string) {
+		t.Helper()
+		if d.state != before.state || d.republished || d.messageID == nil || *d.messageID != "m1" ||
+			len(e.db.events) != 0 {
+			t.Errorf("%s changed the delivery: %+v, events %v", what, d, e.eventKinds())
+		}
+	}
+	for _, c := range []struct {
+		conn    int64
+		message string
+	}{{connID, "m0"}, {connID, "r-1"}, {connID, "m9"}, {connID, ""}, {connID + 1, "m1"}} {
+		if err := e.svc.RootDeleted(t.Context(), c.conn, c.message); err != nil {
+			t.Errorf("RootDeleted(%d, %q) = %v", c.conn, c.message, err)
+		}
+		unchanged(c.message)
+	}
+	for name, change := range map[string]func(){
+		"a Mattermost Destination": func() { e.db.dests[destMM].typ = delivery.TypeMattermost },
+		"a deleted Destination":    func() { e.db.dests[destMM].deleted = true },
+		"a retiring delivery":      func() { d.desiredRetire = true },
+	} {
+		ds, row := *e.db.dests[destMM], *d
+		change()
+		if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+			t.Errorf("%s: RootDeleted = %v", name, err)
+		}
+		*e.db.dests[destMM], *d = ds, row
+		unchanged(name)
+	}
+	for _, q := range []string{"LockBridgeDeletedRoot", "ResetForRepublish", "InsertDeliveryEvent", "NotifyDelivery"} {
+		e.db.fail[q] = errBoom
+		if err := e.svc.RootDeleted(t.Context(), connID, "m1"); !errors.Is(err, errBoom) {
+			t.Errorf("a failed %s = %v", q, err)
+		}
+		delete(e.db.fail, q)
+		*d = before
+		e.db.events = nil
 	}
 }

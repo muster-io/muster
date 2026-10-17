@@ -57,7 +57,18 @@ export const getTelegramWebhookMockHandler = (overrideResponse?: void | ((info: 
       })
   }, options)
 }
+
+export const getBridgeEventMockHandler = (overrideResponse?: void | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post('*/callbacks/bridge/:connectionId', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
 export const getMessengerCallbacksMock = () => [
   getMattermostActionMockHandler(),
-  getTelegramWebhookMockHandler()
+  getTelegramWebhookMockHandler(),
+  getBridgeEventMockHandler()
 ]
