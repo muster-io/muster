@@ -256,8 +256,8 @@ func (e *Events) slot(ctx context.Context) (func(), error) {
 
 // Handle handles the event ev of the Connection c once a slot is free (C-22.FR-11). An event whose id the Connection
 // handled before is acknowledged without handling it. An error — no slot before ctx ended, or a claim or a handling
-// that failed, logged as bridge_event_failed — records nothing: the poller keeps its cursor and the push callback
-// answers 500, so that the event comes again.
+// that failed, logged as bridge_event_failed unless ctx ended, as when the Leader stops polling — records nothing: the
+// poller keeps its cursor and the push callback answers 500, so that the event comes again.
 func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 	release, err := e.slot(ctx)
 	if err != nil {
@@ -271,8 +271,10 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 	})
 	release()
 	if err != nil {
-		e.Log.Log(ctx, logging.BridgeEventFailed, logging.F("connection", c.PublicID), logging.F("event_id", ev.ID),
-			logging.F("type", ev.Type), logging.F("error", err.Error()))
+		if ctx.Err() == nil {
+			e.Log.Log(ctx, logging.BridgeEventFailed, logging.F("connection", c.PublicID),
+				logging.F("event_id", ev.ID), logging.F("type", ev.Type), logging.F("error", err.Error()))
+		}
 		return fmt.Errorf("handle the %s event %s of the connection %s: %w", ev.Type, ev.ID, c.PublicID, err)
 	}
 	if ran && h.line.Name() != "" {

@@ -325,7 +325,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
-		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation"}
+		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -365,8 +365,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		t.Errorf("alert group retention without a retention")
 	}
 	// Without a re-render or a keyring notification the task does nothing and nothing wakes it.
-	if last := tasks[len(tasks)-1]; last.Every != MaintenanceInterval || last.Wake != nil || last.Run(t.Context()) != nil {
+	if rerender := tasks[16]; rerender.Every != MaintenanceInterval || rerender.Wake != nil ||
+		rerender.Run(t.Context()) != nil {
 		t.Errorf("re-render after a rotation without a re-render")
+	}
+	// Without a poller of Bridge events the task does nothing and nothing wakes it.
+	if last := tasks[len(tasks)-1]; last.Every != BridgePollingInterval || last.Wake != nil || last.Run(t.Context()) != nil {
+		t.Errorf("bridge polling without a poller")
 	}
 }
 
@@ -387,7 +392,7 @@ func TestRerenderAfterRotationTask(t *testing.T) {
 		},
 		KeyringChanged: changed,
 	})()
-	task := tasks[len(tasks)-1]
+	task := tasks[16]
 	if task.Name != "rerender_after_rotation" || task.Every != MaintenanceInterval || task.Wake == nil {
 		t.Fatalf("task %s every %v", task.Name, task.Every)
 	}
@@ -402,7 +407,7 @@ func TestRerenderAfterRotationTask(t *testing.T) {
 	}
 	broken := Tasks(Work{Organizations: func(context.Context) ([]int64, error) { return nil, failed },
 		RerenderAfterRotation: func(context.Context, int64) error { return nil }})()
-	if err := broken[len(broken)-1].Run(t.Context()); !errors.Is(err, failed) {
+	if err := broken[16].Run(t.Context()); !errors.Is(err, failed) {
 		t.Errorf("listing the organizations failed with %v", err)
 	}
 }
@@ -591,6 +596,53 @@ func TestTelegramPollingTask(t *testing.T) {
 		t.Fatalf("organizations = %v", err)
 	}
 	if err := Tasks(Work{})()[13].Run(t.Context()); err != nil {
+		t.Fatalf("unwired = %v", err)
+	}
+}
+
+// TestBridgePollingTask covers C-22.FR-11 and C-02.FR-10 (ADR-0007): the Leader polls the events of the Bridge
+// Connections of every Organization at once until its context ends, with the Organization passed to each, and
+// returns their errors; the task is the last of the list and runs again after BridgePollingInterval.
+func TestBridgePollingTask(t *testing.T) {
+	failed := errors.New("list failed")
+	var mu sync.Mutex
+	var polled []int64
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		BridgePolling: func(ctx context.Context, org int64) error {
+			mu.Lock()
+			polled = append(polled, org)
+			mu.Unlock()
+			if org == 2 {
+				return failed
+			}
+			<-ctx.Done()
+			return nil
+		},
+	}
+	tasks := Tasks(work)()
+	task := tasks[len(tasks)-1]
+	if task.Name != "bridge_polling" || task.Every != BridgePollingInterval || task.Wake != nil {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := task.Run(ctx); !errors.Is(err, failed) {
+		t.Fatalf("run = %v", err)
+	}
+	slices.Sort(polled)
+	if !slices.Equal(polled, []int64{1, 2}) {
+		t.Fatalf("polled %v", polled)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	tasks = Tasks(work)()
+	if err := tasks[len(tasks)-1].Run(t.Context()); !errors.Is(err, orgsErr) ||
+		err.Error() != "list the organizations to poll bridge events for: down" {
+		t.Fatalf("organizations = %v", err)
+	}
+	tasks = Tasks(Work{})()
+	if err := tasks[len(tasks)-1].Run(t.Context()); err != nil {
 		t.Fatalf("unwired = %v", err)
 	}
 }
@@ -973,6 +1025,45 @@ func TestShortLivedPruningOfCopies(t *testing.T) {
 	case <-task.Wake:
 	default:
 		t.Error("the short-lived pruning was not woken")
+	}
+}
+
+// TestShortLivedPruningOfBridgeEvents covers C-22.FR-11 and bridge.event_dedup_window: the ids of Bridge events seen
+// are a short-lived table of internal/connections, pruned and counted under bridge_events_seen after the tables of the
+// other domains, at the business time of the run; running it twice deletes nothing more.
+func TestShortLivedPruningOfBridgeEvents(t *testing.T) {
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	var log bytes.Buffer
+	var calls []pruneCall
+	backlog := map[int64]int64{1: PruneBatch + 2}
+	before := metrics.ShortLivedRowsPruned.With("bridge_events_seen").Get()
+	w := Work{
+		Organizations:     func(context.Context) ([]int64, error) { return []int64{1}, nil },
+		Business:          clock.NewManual(now),
+		Log:               logging.New(&log, logging.LevelInfo),
+		PruneAccountLinks: []PruneTable{fakeTable("account_link_requests", map[int64]int64{}, &calls, 0)},
+		PruneConnections:  []PruneTable{fakeTable("bridge_events_seen", backlog, &calls, 0)},
+	}
+	task := Tasks(w)()[3]
+	for range 2 {
+		if err := task.Run(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []pruneCall{{"account_link_requests", 1, now, PruneBatch}, {"bridge_events_seen", 1, now, PruneBatch},
+		{"bridge_events_seen", 1, now, PruneBatch}, {"account_link_requests", 1, now, PruneBatch},
+		{"bridge_events_seen", 1, now, PruneBatch}}
+	if !slices.Equal(calls, want) || backlog[1] != 0 {
+		t.Fatalf("calls %v, backlog %v", calls, backlog)
+	}
+	if got := metrics.ShortLivedRowsPruned.With("bridge_events_seen").Get() - before; got != PruneBatch+2 {
+		t.Errorf("counted %d", got)
+	}
+	if strings.Count(log.String(), `"event":"short_lived_pruned","table":"bridge_events_seen","rows":1002`) != 1 {
+		t.Errorf("log %s", log.String())
+	}
+	if !slices.Contains(metrics.ShortLivedTables, "bridge_events_seen") {
+		t.Error("bridge_events_seen is not a value of the table label")
 	}
 }
 
