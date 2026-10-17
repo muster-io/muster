@@ -338,3 +338,165 @@ func TestBridgeBodyLimit(t *testing.T) {
 	}
 	t.Logf("40 alerts: the body has %d code points", utf8.RuneCountInString(body))
 }
+
+// windowed creates the Bridge Destination "edits" on the channel alerts-prod and the Route of team to it, without ack
+// timeout and Reminders so that only the test changes its Alert Groups, and makes the fake bridge declare an edit
+// window of 600 s, which the Connection check reads again; it returns the Destination and the Route.
+func (e *brd) windowed(team string) (string, string) {
+	e.t.Helper()
+	dest := e.destination("edits", fakebridge.ChannelAlertsProd)
+	route := e.route(team, team, []string{dest}, func(p map[string]any) {
+		p["ack_timeout"].(map[string]any)["enabled"] = false
+		p["reminders"].(map[string]any)["enabled"] = false
+	})
+	e.configure(`{"limits":{"max_body_length":4000,"edit_max_age_seconds":600}}`)
+	if check := e.api.json(http.MethodPost, "/api/v1/connections/"+e.conn+"/checks", "", http.StatusOK); check["ok"] !=
+		true {
+		e.t.Fatalf("check = %v", check)
+	}
+	return dest, route
+}
+
+// offRoute takes every Destination off the Route.
+func (e *brd) offRoute(route string) {
+	e.t.Helper()
+	a := e.api.do(http.MethodGet, "/api/v1/routes/"+route, "")
+	var rt map[string]any
+	decode(e.t, a, &rt)
+	body, _ := json.Marshal(map[string]any{"name": rt["name"], "matchers": rt["matchers"], "urgent": rt["urgent"],
+		"group_key": rt["group_key"], "destination_ids": []string{}, "policy": rt["policy"]})
+	e.api.json(http.MethodPut, "/api/v1/routes/"+route, string(body), http.StatusOK, "If-Match", a.header.Get("ETag"))
+}
+
+// deliveryID is the id of the delivery of the Alert Group g to the Destination dest.
+func (e *brd) deliveryID(g, dest string) int64 {
+	e.t.Helper()
+	return e.h.count(e.t, fmt.Sprintf(`SELECT d.id FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id
+		JOIN alert_groups ag ON ag.id = d.alert_group_id WHERE ds.public_id = '%s' AND ag.public_id = '%s'`, dest, g))
+}
+
+// keyOf is the Idempotency-Key of a recorded request.
+func keyOf(r fakeserver.Request) string {
+	if k := r.Headers["Idempotency-Key"]; len(k) == 1 {
+		return k[0]
+	}
+	return ""
+}
+
+// TestBridgeFinalEditPastWindow is the final edit of C-22.FR-9 against `muster dev` and the fake bridge: with an edit
+// window of 600 s, once the development clock is 11 minutes past the Publication, the Destination leaving the Route
+// makes no edit of the Root message but replies under it, Quietly, with the final text and the key
+// final-<Destination>-<delivery id>; the delivery is retired, and the Timeline shows the final edit.
+func TestBridgeFinalEditPastWindow(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	e := newBRD(t, h, r)
+	dest, route := e.windowed("final")
+
+	g := e.start("f1", "Final", "final", "final")
+	root := e.waitPosted("Final", 1)[0]
+	e.settled()
+	advance(t, r, 660)
+	e.offRoute(route)
+	eventually(t, "the final edit as a Thread reply", func() bool { return len(e.posted("Final")[0].Replies) == 1 })
+	e.settled()
+
+	got := e.posted("Final")
+	if len(got) != 1 || len(got[0].Edits) != 0 {
+		t.Fatalf("after the Destination left: %+v", got)
+	}
+	if reply := got[0].Replies[0].Input; !strings.Contains(reply.Body, "No longer updated here") || reply.Notify {
+		t.Errorf("the final reply %+v", reply)
+	}
+	if p := e.bridgeCalls(http.MethodPatch, "/v1/messages/"+root.ID); len(p) != 0 {
+		t.Errorf("edits past the window %+v", p)
+	}
+	key := fmt.Sprintf("final-%s-%d", dest, e.deliveryID(g, dest))
+	if replies := e.bridgeCalls(http.MethodPost, "/v1/messages/"+root.ID+"/thread-replies"); len(replies) != 1 ||
+		keyOf(replies[0]) != key {
+		t.Errorf("replies %+v, want one with the key %s", replies, key)
+	}
+	if n := h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'retired'`); n != 1 {
+		t.Errorf("%d retired deliveries", n)
+	}
+	if ev := deliveryEvents(e.timeline(g, "")); countOf(ev, "final_edit") != 1 {
+		t.Errorf("delivery events %v", ev)
+	}
+}
+
+// TestBridgePointerFails is the pointer reply of C-22.FR-9 against `muster dev` and the fake bridge: with an edit
+// window of 600 s, Acknowledge 11 minutes past the Publication posts a new Root message Quietly with the key of the
+// second Publication, and the pointer reply under the old one, refused as invalid, is sent once and never retried:
+// the delivery event republished_past_edit_window carries its error, the old id is kept in superseded_message_ids,
+// and the next Thread reply goes under the new Root message.
+func TestBridgePointerFails(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	e := newBRD(t, h, r)
+	dest, _ := e.windowed("pointer")
+
+	g := e.start("w1", "Pointer", "pointer", "pointer")
+	old := e.waitPosted("Pointer", 1)[0]
+	e.settled()
+	advance(t, r, 660)
+	replies := "/v1/messages/" + old.ID + "/thread-replies"
+	e.bridgeFault(problemFault(replies, http.StatusBadRequest, "invalid", "The reply is not valid."))
+	e.command(g, "acknowledge")
+	got := e.waitPosted("Pointer", 2)
+	e.settled()
+	advance(t, r, 120)
+	e.settled()
+
+	id := e.deliveryID(g, dest)
+	if cur := got[1]; cur.Envelope.Notify || cur.Envelope.Status != "acknowledged" || got[0].Deleted {
+		t.Errorf("the new Root message %+v", cur.Envelope)
+	}
+	if posts := e.bridgeCalls(http.MethodPost, "/v1/messages"); len(posts) != 2 ||
+		keyOf(posts[1]) != fmt.Sprintf("pub-%s-%d-2", dest, id) {
+		t.Errorf("posts %+v", posts)
+	}
+	pointer := e.bridgeCalls(http.MethodPost, replies)
+	if len(pointer) != 1 || pointer[0].Status != http.StatusBadRequest ||
+		keyOf(pointer[0]) != fmt.Sprintf("pointer-%s-%d-1", dest, id) {
+		t.Errorf("pointer replies %+v", pointer)
+	}
+	if n := h.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished_past_edit_window'
+		AND loudness = 'quiet' AND error_class = 'unknown' AND error = 'The reply is not valid.'
+		AND detail->>'pointer' = 'failed' AND detail->>'old_message_id' = '`+old.ID+`'
+		AND detail->>'new_message_id' = '`+got[1].ID+`'`); n != 1 {
+		t.Errorf("%d republished_past_edit_window events with the pointer's error", n)
+	}
+	if n := h.count(t, fmt.Sprintf(`SELECT count(*) FROM deliveries WHERE id = %d AND state = 'delivered'
+		AND NOT past_edit_window AND publications = 2 AND message_id = '%s' AND actual_status = 'acknowledged'
+		AND superseded_message_ids = ARRAY['%s']`, id, got[1].ID, old.ID)); n != 1 {
+		t.Errorf("the delivery after the republication: %s", h.text(t, fmt.Sprintf(`SELECT row_to_json(d)::text
+			FROM deliveries d WHERE id = %d`, id)))
+	}
+	if ev := deliveryEvents(e.timeline(g, "")); countOf(ev, "republished_past_edit_window") != 1 {
+		t.Errorf("delivery events %v", ev)
+	}
+	eventually(t, "the bridge_republished_past_edit_window line", func() bool {
+		for _, rep := range h.Replicas {
+			if line, _, ok := rep.LogLine("bridge_republished_past_edit_window"); ok &&
+				line["old_message_id"] == old.ID && line["new_message_id"] == got[1].ID && line["destination"] == dest &&
+				line["group"] == g {
+				return true
+			}
+		}
+		return false
+	})
+
+	e.alert("w1", "pointer2", `{"team":"pointer","cluster":"pointer","pod":"p2"}`, "")
+	e.notify("w1", "new alerts added")
+	advance(t, r, 61)
+	eventually(t, "the Thread reply under the new Root message", func() bool {
+		return len(e.posted("Pointer")[1].Replies) == 1
+	})
+	e.settled()
+	if now := e.posted("Pointer"); len(now) != 2 || len(now[0].Replies) != 0 {
+		t.Errorf("after the next Thread reply: %+v", now)
+	}
+	if n := len(e.bridgeCalls(http.MethodPost, replies)); n != 1 {
+		t.Errorf("%d requests to the old Thread", n)
+	}
+}

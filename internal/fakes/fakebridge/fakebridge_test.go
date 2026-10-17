@@ -938,6 +938,47 @@ func TestMessageFaults(t *testing.T) {
 	}
 }
 
+// TestEditWindowClosedFault is C-22.AC-9 at the fake: limits.edit_max_age_seconds of /_fake/config is served in info,
+// and the fake never enforces it — Muster's window runs on the development clock — so a harness fault answering gone
+// with the reason edit_window_closed is what refuses an edit earlier than declared, as api/bridge.yaml specifies and
+// Muster's client classifies it; the fault matches the edit's path only, so Thread replies are untouched, and the
+// message is neither edited nor deleted.
+func TestEditWindowClosedFault(t *testing.T) {
+	s := start(t)
+	s.configure(t, `{"limits":{"max_body_length":4000,"edit_max_age_seconds":600}}`)
+	if i := s.getInfo(t, fakebridge.Token).valid(t); i.Limits.EditMaxAgeSeconds.MustGet() != 600 {
+		t.Fatalf("info %s", i.Raw)
+	}
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	if status, body := s.control(t, http.MethodPost, "/_fake/faults", `{"path":"/v1/messages/*","status":404,
+		"content_type":"application/problem+json",
+		"body":"{\"title\":\"Too old to edit\",\"status\":404,\"class\":\"gone\",\"reason\":\"edit_window_closed\"}",
+		"times":2}`); status != http.StatusNoContent {
+		t.Fatalf("POST /_fake/faults = %d %s", status, body)
+	}
+	if r := s.reply(t, fakebridge.Token, "m1", "k2", replyOf(nil)).replied(t); r.ThreadRef != "t-m1" {
+		t.Errorf("a Thread reply under the fault = %+v", r)
+	}
+	if p := s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).refused(t, http.StatusNotFound,
+		gen.ErrorClassGone); p.Reason == nil || *p.Reason != gen.EditWindowClosed {
+		t.Errorf("the refused edit = %+v", p)
+	}
+	_, r := s.client(t, fakebridge.Token).EditMessage(t.Context(), outbound.ClassDelivery, "m1",
+		content(gen.Acknowledged))
+	if r.Classification.Class != bridge.ClassGone || r.Classification.Reason != bridge.ReasonEditWindowClosed ||
+		r.Outcome().Kind != delivery.OutcomeGone {
+		t.Errorf("Muster's edit = %+v", r)
+	}
+	if ms := s.fake.Messages(); len(ms) != 1 || ms[0].Deleted || len(ms[0].Edits) != 0 || len(ms[0].Replies) != 1 {
+		t.Errorf("messages %+v", ms)
+	}
+	var e gen.MessageEdited
+	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).ok(t, http.StatusOK, &e)
+	if ms := s.fake.Messages(); len(ms[0].Edits) != 1 {
+		t.Errorf("an edit once the fault is spent: %+v", ms)
+	}
+}
+
 // TestTruncated is C-22.FR-7 at the fake: a body longer than limits.max_body_length code points is answered truncated
 // by a post, an edit and a reply, and listed so, with the body kept as Muster sent it; a body of exactly the limit is
 // not truncated.

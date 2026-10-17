@@ -19,7 +19,9 @@
   [`0008_bridge_connections`](../../internal/db/migrations/0008_bridge_connections.up.sql)
   (Bridge Connections, S-073) and
   [`0009_bridge_destinations`](../../internal/db/migrations/0009_bridge_destinations.up.sql)
-  (Bridge Destinations, S-080), in `internal/db/migrations/` — golang-migrate
+  (Bridge Destinations, S-080) and
+  [`0010_bridge_edit_windows`](../../internal/db/migrations/0010_bridge_edit_windows.up.sql)
+  (the edit windows of Bridge Root messages, S-081), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -994,6 +996,18 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
     forgotten for a republication; it, not `message_id`, tells a published Root message — an outgoing webhook in
     template mode may publish with no id to extract; migration 0006), `publications`, `possible_duplicate`,
     `republished_after_delete` (a deleted Root message is republished once);
+  - *edit window* (migration 0010, C-22.FR-9): `actual_status` — the status the Root message shows (`firing`,
+    `acknowledged`, `snoozed`, `resolved`, or `storm` for a Storm summary), recorded by each delivered Publication and
+    edit from the Desired state's status, and null when unknown (before migration 0010, or after a replayed answer),
+    which counts as a change of status; `past_edit_window`, set once a Bridge Root message is past its bridge's edit
+    window — read lazily, by the first call due after the window ended, or at once by an edit refused as `gone` with
+    `edit_window_closed` — and cleared with every new Root message: a republication past the window, after a
+    deletion, or after the Destination rejoined the Route;
+    `superseded_message_ids` (`text[]`, default empty), the ids of the older Root messages that republications past
+    the window replaced, which presses and Text commands on them resolve to their delivery through the partial GIN
+    index `deliveries_superseded_idx ... WHERE superseded_message_ids <> '{}'`; a lookup repeats
+    `superseded_message_ids <> '{}'` beside `superseded_message_ids @> ARRAY[...]`, or the planner cannot use the
+    partial index;
   - *Thread*: `thread_state` (`none`, `waiting_for_copy`, `attached`, `unattached`), `thread_anchor_id` (Telegram's
     automatic copy, or a Bridge's last `thread_ref`, from its post or a reply, which the next reply sends) and the
     Telegram `thread_chain_last_id`, and `thread_batch_until`, the open Thread batching window;
@@ -1008,7 +1022,8 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   The claim index `(org_id, urgent DESC, next_attempt_at) WHERE state = 'pending'` takes Urgent first; the per-
   Destination pending index gives queue depth and the oldest waiting delivery for the Broken probe; `message_id` and
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
-  `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page.
+  `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
+  `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
 - **`thread_replies`** — follow-ups under a Root message. A `collecting` row is the open batch of new Alerts (at most
   one per delivery), due at the end of the Thread batching window; other replies (notices, Reminders, Takeovers,
   Reopens, Snooze ended, resolution by the system, the release of a disabled or deleted Owner) are `pending` at once. `event_seqs` lists the lifecycle events a
@@ -1028,9 +1043,13 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   subject to Storms and never dropped while the Destination is Broken, with no age limit.
 - **`delivery_events`** (partitioned by month on `occurred_at`) — what happened while delivering: Publication, possible
   duplicate, Not delivered with its error class and error, delivered late, deleted in the messenger, republished, Thread
-  not attached, rejected markup, Broken and recovered, Storm summary, final edit — with loudness and Mentions as in the
-  Loud/Quiet table of delivery events. Written only by delivery, never into Alert Group tables; merged into the
-  Timeline by `(org_id, alert_group_id, occurred_at, id)`.
+  not attached, rejected markup, Broken and recovered, Storm summary, final edit, republished past the edit window
+  (`republished_past_edit_window`, migration 0010) — with loudness and Mentions as in the Loud/Quiet table of delivery
+  events. Written only by delivery, never into Alert Group tables; merged into the Timeline by
+  `(org_id, alert_group_id, occurred_at, id)`. The `kind` CHECK is widened on the partitioned parent: migration 0010
+  adds `delivery_events_kind_v2_check` `NOT VALID`, which adds it to every partition, validates it in a second
+  transaction, which recurses to every partition on PostgreSQL 14 and 17 alike, and drops the old
+  `delivery_events_kind_check` in a third, each under the migration's `lock_timeout`.
 - **`telegram_post_copies`** — the Telegram Thread mapping buffer: the automatic copy of a channel post in the
   discussion group, keyed by `(connection_id, channel_chat_id, channel_message_id)`, written by whichever replica sees
   the update (the Leader's poller or the webhook) — before or after the send call returns — and learned from the copy or
