@@ -577,3 +577,290 @@ func TestRepublicationAsProbe(t *testing.T) {
 		t.Errorf("events %v", kinds)
 	}
 }
+
+// TestPastWindowRestartsBudget is C-11.FR-8 with C-22.FR-9: a delivery that a Root message past its window delivers
+// without a call, and an edit refused as edit_window_closed, start the Transient budget afresh, so that the failures
+// of an edit that is no longer due never count against a later republication: one that fails once, more than
+// delivery.transient_budget after the edit failed, leaves the Destination healthy.
+func TestPastWindowRestartsBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		answers []deliverytest.Answer
+	}{
+		{"no call", []deliverytest.Answer{deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503")}},
+		{"edit_window_closed", []deliverytest.Answer{deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503"),
+			deliverytest.Failure(delivery.OutcomeEditWindowClosed, "")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, d, _ := publishedWindowed(t)
+			e.business.Set(business0.Add(time.Minute))
+			e.rec.Script(deliverytest.MethodUpdate, tc.answers...)
+			e.retitled(t, groups.StatusFiring, "b", 2)
+			e.round(t)
+			if d.attempts != 1 || d.firstFailed == nil || *d.errorClass != "transient" || d.state != "pending" {
+				t.Fatalf("after the failed edit %+v", d)
+			}
+			e.business.Set(business0.Add(11 * time.Minute))
+			if len(tc.answers) > 1 {
+				e.business.Set(d.next)
+			}
+			for range 2 {
+				e.round(t)
+			}
+			if len(e.rec.Calls()) != len(tc.answers) || d.state != "delivered" || !d.pastEditWindow ||
+				d.attempts != 0 || d.firstFailed != nil || d.errorClass != nil || d.lastError != nil {
+				t.Fatalf("past the window %s, %+v", callMethods(e.rec.Calls()), d)
+			}
+			e.business.Set(business0.Add(time.Hour))
+			e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503"))
+			e.acknowledged(t, 3)
+			e.round(t)
+			if ds := e.db.dests[destMM]; ds.health != "healthy" || d.attempts != 1 ||
+				!d.firstFailed.Equal(e.business.Now()) || d.state != "pending" {
+				t.Errorf("the republication failed once: health %s, %+v", ds.health, d)
+			}
+		})
+	}
+}
+
+// startedRepublication is publishedWindowed whose Alert Group was acknowledged past the window at start, and whose
+// republication was then made with the answers given, the first of them a request without an answer.
+func startedRepublication(t *testing.T, start time.Time, answers ...deliverytest.Answer) (*env, *fakeDelivery,
+	*windowedRecorder) {
+	t.Helper()
+	e, d, w := publishedWindowed(t)
+	e.business.Set(start)
+	e.rec.Script(deliverytest.MethodPublish, append([]deliverytest.Answer{timedOut()}, answers...)...)
+	e.acknowledged(t, 2)
+	e.round(t)
+	if d.restarted == nil || !d.restarted.Equal(start) || d.state != "pending" || *d.messageID != "m1" ||
+		len(e.db.events) != 0 {
+		t.Fatalf("after the lost answer %+v", d)
+	}
+	return e, d, w
+}
+
+// replayedAs answers a republication with the message the bridge posted for its key earlier.
+func replayedAs(id string) deliverytest.Answer {
+	a := publishedAs(id, "t-"+id)
+	a.Outcome.Replayed = true
+	return a
+}
+
+// TestRepublicationAnswerLost is C-22.FR-6 and FR-9 with C-11.FR-14: a republication whose answer was lost keeps its
+// start, so when the status returns meanwhile to the one the old Root message shows, the retry still publishes again
+// with the same key — never abandoning a Root message the bridge may have posted with a stale status and live
+// buttons — and the pointer reply follows; a replayed answer is dated from the start and records no possible
+// duplicate, and the next call edits the new message to the current state.
+func TestRepublicationAnswerLost(t *testing.T) {
+	start := business0.Add(11 * time.Minute)
+	e, d, w := startedRepublication(t, start, replayedAs("m2"))
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventUnacknowledged, Variant: groups.VariantCommand, Loudness: groups.Quiet})
+	e.business.Set(d.next)
+	e.round(t)
+	calls := e.rec.Calls()
+	key := fmt.Sprintf("pub-%s-%d-2", bridgePublicID, d.id)
+	if callMethods(calls) != "publish,publish,reply" || calls[1].Message.Colour != "firing" ||
+		calls[1].Loudness != groups.Quiet || len(calls[1].Mentions) != 0 || calls[2].Root.MessageID != "m1" ||
+		!slices.Equal(w.Keys(), []string{key, key, fmt.Sprintf("pointer-%s-%d-1", bridgePublicID, d.id)}) {
+		t.Fatalf("calls %s %+v, keys %v", callMethods(calls), calls, w.Keys())
+	}
+	if d.state != "pending" || *d.messageID != "m2" || !d.publishedAt.Equal(start) || d.restarted != nil ||
+		d.possibleDuplicate || d.publications != 2 || !slices.Equal(d.superseded, []string{"m1"}) ||
+		d.actualStatus != nil || !slices.Equal(e.eventKinds(), []string{"republished_past_edit_window"}) {
+		t.Fatalf("after the replay %+v, events %v", d, e.eventKinds())
+	}
+	e.round(t)
+	if calls := e.rec.Calls(); callMethods(calls) != "publish,publish,reply,update" || calls[3].MessageID != "m2" ||
+		d.state != "delivered" || *d.actualStatus != "firing" {
+		t.Errorf("after the replay %s, %+v", callMethods(calls), d)
+	}
+
+	// A bridge that does not replay: the retry posts a new message and records a possible duplicate.
+	e, d, _ = startedRepublication(t, start, publishedAs("m2", "t-2"))
+	e.business.Set(d.next)
+	e.round(t)
+	if d.state != "delivered" || *d.messageID != "m2" || !d.possibleDuplicate || !d.publishedAt.Equal(e.business.Now()) ||
+		d.restarted != nil || !slices.Equal(e.eventKinds(), []string{"possible_duplicate", "republished_past_edit_window"}) ||
+		!strings.Contains(e.log.String(), `"event":"delivery_possible_duplicate"`) {
+		t.Errorf("without a replay %+v, events %v", d, e.eventKinds())
+	}
+
+	// A started republication is not edited or skipped when the window cannot be read: it is not read at all.
+	e, d, w = startedRepublication(t, start, replayedAs("m2"))
+	w.set(0, false)
+	e.business.Set(d.next)
+	e.round(t)
+	if callMethods(e.rec.Calls()) != "publish,publish,reply" || w.Reads() != 1 {
+		t.Errorf("without a window %s, %d reads", callMethods(e.rec.Calls()), w.Reads())
+	}
+}
+
+// TestRepublicationAnswerLostFinal is C-22.FR-6, FR-9 and C-11.FR-14: a republication whose answer was lost, whose
+// Destination then left the Route, is posted again once with the same key, Quiet and without buttons, carrying the
+// final edit, and the pointer reply follows. Answered without a replay, that message is the final one: the delivery
+// retires with a possible duplicate. Replayed, the new message is recorded, dated from the start, and edited to the
+// final text before the delivery retires.
+func TestRepublicationAnswerLostFinal(t *testing.T) {
+	start := business0.Add(11 * time.Minute)
+	leave := func(t *testing.T, answer deliverytest.Answer) (*env, *fakeDelivery) {
+		t.Helper()
+		e, d, w := startedRepublication(t, start, answer)
+		e.db.routeDests[routeID] = nil
+		e.changed(t, routeID, nil, []int64{destMM})
+		if d.state != "pending" || !d.desiredRetire || d.restarted == nil {
+			t.Fatalf("left after the lost answer %+v", d)
+		}
+		e.business.Set(d.next)
+		e.round(t)
+		cs := e.rec.Calls()
+		key := fmt.Sprintf("pub-%s-%d-2", bridgePublicID, d.id)
+		if callMethods(cs) != "publish,publish,reply" || cs[1].Loudness != groups.Quiet || len(cs[1].Mentions) != 0 ||
+			len(cs[1].Message.Buttons) != 0 || !slices.Contains(cs[1].Message.Notices, finalText("AGAAAAAAAAAA21")) ||
+			cs[2].Root.MessageID != "m1" || !strings.Contains(textOf(cs[2]), "https://chat.example.org/m/m2") ||
+			!slices.Equal(w.Keys(), []string{key, key, fmt.Sprintf("pointer-%s-%d-1", bridgePublicID, d.id)}) {
+			t.Fatalf("calls %s %+v, keys %v", callMethods(cs), cs, w.Keys())
+		}
+		return e, d
+	}
+
+	e, d := leave(t, publishedAs("m2", "t-2"))
+	if d.state != "retired" || d.desiredRetire || !d.possibleDuplicate || d.restarted != nil || *d.messageID != "m1" ||
+		!slices.Equal(e.eventKinds(), []string{"possible_duplicate", "republished_past_edit_window", "final_edit"}) {
+		t.Errorf("final message without a replay %+v, events %v", d, e.eventKinds())
+	}
+	e.round(t)
+	if len(e.rec.Calls()) != 3 {
+		t.Errorf("called after the final message: %s", callMethods(e.rec.Calls()))
+	}
+
+	e, d = leave(t, replayedAs("m2"))
+	if d.state != "pending" || !d.desiredRetire || *d.messageID != "m2" || !d.publishedAt.Equal(start) ||
+		d.possibleDuplicate || d.restarted != nil {
+		t.Fatalf("after the replay %+v", d)
+	}
+	e.round(t)
+	cs := e.rec.Calls()
+	if callMethods(cs) != "publish,publish,reply,update" || cs[3].MessageID != "m2" ||
+		cs[3].Message.Notices[len(cs[3].Message.Notices)-1] != finalText("AGAAAAAAAAAA21") {
+		t.Fatalf("calls %s %+v", callMethods(cs), cs)
+	}
+	if d.state != "retired" || d.possibleDuplicate ||
+		!slices.Equal(e.eventKinds(), []string{"republished_past_edit_window", "final_edit"}) {
+		t.Errorf("after the final edit %+v, events %v", d, e.eventKinds())
+	}
+}
+
+// TestRepublicationStartCleared is C-22.FR-6 and FR-9: a republication the bridge answered with a failure, or never
+// received, keeps nothing started — a status that returns to the one the old Root message shows then makes no call —
+// while a Fatal error after a lost answer keeps it; Not delivered and a deleted Root message clear it.
+func TestRepublicationStartCleared(t *testing.T) {
+	for _, answer := range []deliverytest.Answer{
+		deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503"),
+		deliverytest.RetryAfter(7*time.Second, delivery.ScopeDestination),
+	} {
+		t.Run(string(answer.Outcome.Kind), func(t *testing.T) {
+			e, d, _ := publishedWindowed(t)
+			e.business.Set(business0.Add(11 * time.Minute))
+			e.rec.Script(deliverytest.MethodPublish, answer)
+			e.acknowledged(t, 2)
+			e.round(t)
+			if d.restarted != nil || d.state != "pending" {
+				t.Fatalf("after the answered failure %+v", d)
+			}
+			e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+				Event: groups.EventUnacknowledged, Variant: groups.VariantCommand, Loudness: groups.Quiet})
+			e.business.Set(d.next.Add(time.Second))
+			e.round(t)
+			if len(e.rec.Calls()) != 1 || d.state != "delivered" || *d.messageID != "m1" || len(d.superseded) != 0 {
+				t.Errorf("after the status returned %s, %+v", callMethods(e.rec.Calls()), d)
+			}
+		})
+	}
+	start := business0.Add(11 * time.Minute)
+	e, d, _ := startedRepublication(t, start, deliverytest.Failure(delivery.OutcomeFatal, "removed"))
+	e.business.Set(d.next)
+	e.round(t)
+	if d.restarted == nil || !d.restarted.Equal(start) || e.db.dests[destMM].health != "broken" {
+		t.Errorf("fatal %+v", d)
+	}
+	e, d, _ = startedRepublication(t, start, deliverytest.Failure(delivery.OutcomeUnknown, "invalid"))
+	e.business.Set(d.next)
+	e.round(t)
+	if d.restarted != nil || d.state != "not_delivered" {
+		t.Errorf("not delivered %+v", d)
+	}
+	// A Thread reply under the old Root message, before the retry, finds it deleted.
+	e, d, _ = startedRepublication(t, start)
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Failure(delivery.OutcomeGone, "no such message"))
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventTakeover, Loudness: groups.Loud})
+	e.round(t)
+	if callMethods(e.rec.Calls()) != "publish,reply" || !d.republished || d.restarted != nil || d.messageID != nil {
+		t.Errorf("gone %s, %+v", callMethods(e.rec.Calls()), d)
+	}
+}
+
+// TestPointerRetryAfter is C-11.FR-8 with C-22.FR-9: a pointer reply answered with RetryAfter is not retried, but holds
+// the limiter it names until the time asked, as any RetryAfter does.
+func TestPointerRetryAfter(t *testing.T) {
+	e, _, _ := publishedWindowed(t)
+	now := business0.Add(11 * time.Minute)
+	e.business.Set(now)
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.rec.Script(deliverytest.MethodReply, deliverytest.RetryAfter(30*time.Second, delivery.ScopeDestination))
+	e.acknowledged(t, 2)
+	e.round(t)
+	if b := e.db.buckets[bucketKey{"destination", destMM}]; b == nil || !b.refilled.Equal(now.Add(30*time.Second)) {
+		t.Errorf("destination bucket %+v", b)
+	}
+	if ev := e.db.events[0]; ev.ErrorClass.String != "retry_after" ||
+		!strings.Contains(string(ev.Detail), `"pointer":"failed"`) {
+		t.Errorf("event %+v %s", ev, ev.Detail)
+	}
+	e, _, _ = publishedWindowed(t)
+	e.business.Set(now)
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.rec.Script(deliverytest.MethodReply, deliverytest.RetryAfter(30*time.Second, delivery.ScopeDestination))
+	e.db.fail["HoldBucket"] = errBoom
+	e.acknowledged(t, 2)
+	e.round(t)
+	if !strings.Contains(e.log.String(), `"error":"hold the destination limiter: boom"`) {
+		t.Errorf("log %s", e.log)
+	}
+}
+
+// TestRepublicationRecordFailures: a failure to record the start of a republication, or a part of its outcome — the
+// hint, the possible duplicate's event, the republication's event — is logged, and the row is attempted again once its
+// lease runs out.
+func TestRepublicationRecordFailures(t *testing.T) {
+	start := business0.Add(11 * time.Minute)
+	for _, tc := range []struct {
+		query, want string
+		started     bool
+	}{
+		{"StartRepublication", "record the start of the republication: boom", false},
+		{"Notify", "boom", false},
+		{"InsertDeliveryEvent", "boom", false},
+		{"InsertDeliveryEvent", "boom", true},
+	} {
+		t.Run(fmt.Sprintf("%s started %v", tc.query, tc.started), func(t *testing.T) {
+			var e *env
+			if tc.started {
+				e, _, _ = startedRepublication(t, start, publishedAs("m2", "t-2"))
+				e.business.Set(e.db.deliveries[0].next)
+			} else {
+				e, _, _ = publishedWindowed(t)
+				e.business.Set(start)
+				e.acknowledged(t, 2)
+			}
+			e.db.fail[tc.query] = errBoom
+			e.round(t)
+			if !strings.Contains(e.log.String(), `"event":"delivery_work_failed"`) ||
+				!strings.Contains(e.log.String(), tc.want) {
+				t.Errorf("log %s", e.log)
+			}
+		})
+	}
+}

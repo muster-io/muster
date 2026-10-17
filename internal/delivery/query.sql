@@ -153,14 +153,16 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 -- webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
 -- and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
 -- Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
--- (C-17.FR-1). A bridge's Root message also brings its Thread anchor, the status it shows and whether it is past its
--- edit window (C-22.FR-9). No row when the lease ran out or went to another replica.
+-- (C-17.FR-1). A bridge's Root message also brings its Thread anchor, the status it shows, whether it is past its
+-- edit window and the start of a republication past it (C-22.FR-9). No row when the lease ran out or went to another
+-- replica.
 -- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, d.thread_anchor_id,
-       d.actual_status, d.past_edit_window, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.actual_status, d.past_edit_window, d.republication_started_at, ds.id AS destination_id,
+       ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -180,10 +182,13 @@ SET lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- MarkDelivered records that the actual message already shows the desired version, or that a bridge's Root message
--- past its edit window takes no edit for it (@past_edit_window, C-22.FR-9): nothing to call.
+-- past its edit window takes no edit for it (@past_edit_window, C-22.FR-9): nothing to call. A delivered row starts
+-- the Transient budget afresh, as a delivered call does: the failures of an edit that is no longer due are not those of
+-- the next call.
 -- name: MarkDelivered :exec
 UPDATE deliveries
 SET state = 'delivered', desired_received_at = NULL, past_edit_window = past_edit_window OR @past_edit_window::boolean,
+    attempts = 0, first_failed_at = NULL, last_error_class = NULL, last_error = NULL,
     lease_owner = NULL, lease_until = NULL, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND desired_version = @version;
 
@@ -212,6 +217,15 @@ SET publication_started_at = CASE
                                  ELSE @now::timestamptz
                              END,
     updated_at             = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
+
+-- StartRepublication records, before the call, that a republication past a bridge's edit window started (C-22.FR-6,
+-- FR-9), as StartPublication does with @keep for a first Publication: the start of an earlier attempt of the same
+-- republication is kept, so that it dates the republication the bridge replays, and a retry that is not replayed
+-- records a possible duplicate.
+-- name: StartRepublication :exec
+UPDATE deliveries
+SET republication_started_at = coalesce(republication_started_at, @now::timestamptz), updated_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
@@ -292,74 +306,85 @@ RETURNING d.state, d.published_at;
 -- RecordRepublished records a Root message published again past its bridge's edit window (C-22.FR-9): the new
 -- message, its url and its `thread_ref`, which later Thread replies go under, replace the old one, whose id joins
 -- superseded_message_ids, so that presses and Text commands on it still reach the delivery; the Publication count grows
--- and the new message's edit window starts now. It is delivered unless the Desired state grew meanwhile, the
--- Destination left (desired_retire) or the answer was @replayed, after which the status it shows is unknown and the
--- next call edits it; a row that ended while the call was in flight stays so. No row when the lease went to another
+-- and the new message's edit window starts now — or, when the bridge @replayed it, at the start of the republication,
+-- when the message was really posted (C-22.FR-6), and the start is cleared. It is delivered unless the Desired state
+-- grew meanwhile, the Destination left (desired_retire) or the answer was @replayed, after which the status it shows
+-- is unknown and the next call edits it; a row that ended while the call was in flight stays so.
+-- @possible_duplicate records a possible duplicate that the outcome decided. No row when the lease went to another
 -- replica.
--- name: RecordRepublished :one
+-- name: RecordRepublished :execrows
 UPDATE deliveries
-SET superseded_message_ids = CASE
-                                 WHEN message_id IS NULL THEN superseded_message_ids
-                                 ELSE array_append(superseded_message_ids, message_id)
-                             END,
-    message_id             = @message_id::text,
-    message_url            = sqlc.narg('message_url')::text,
-    thread_anchor_id       = sqlc.narg('thread_ref')::text,
-    published_at           = @now::timestamptz,
-    publications           = publications + 1,
-    actual_version         = CASE WHEN @replayed::boolean THEN actual_version ELSE @version::bigint END,
-    actual_hash            = CASE WHEN @replayed::boolean THEN NULL ELSE @hash::bytea END,
-    actual_status          = CASE WHEN @replayed::boolean THEN NULL ELSE sqlc.narg('actual_status')::text END,
-    actual_button_key_id   = sqlc.narg('button_key_id')::text,
-    past_edit_window       = false,
-    last_delivered_at      = @now::timestamptz,
-    state                  = CASE
-                                 WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
-                                 WHEN desired_version = @version::bigint AND NOT desired_retire
-                                     AND NOT @replayed::boolean THEN 'delivered'
-                                 ELSE 'pending'
-                             END,
-    desired_received_at    = CASE WHEN @replayed::boolean THEN desired_received_at END,
-    next_attempt_at        = @now::timestamptz,
-    attempts               = 0,
-    first_failed_at        = NULL,
-    last_error_class       = NULL,
-    last_error             = NULL,
-    lease_owner            = NULL,
-    lease_until            = NULL,
-    updated_at             = @now::timestamptz
-WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
-RETURNING state;
+SET superseded_message_ids   = CASE
+                                   WHEN message_id IS NULL THEN superseded_message_ids
+                                   ELSE array_append(superseded_message_ids, message_id)
+                               END,
+    message_id               = @message_id::text,
+    message_url              = sqlc.narg('message_url')::text,
+    thread_anchor_id         = sqlc.narg('thread_ref')::text,
+    published_at             = CASE
+                                   WHEN @replayed::boolean THEN coalesce(republication_started_at, @now::timestamptz)
+                                   ELSE @now::timestamptz
+                               END,
+    republication_started_at = NULL,
+    possible_duplicate       = possible_duplicate OR @possible_duplicate::boolean,
+    publications             = publications + 1,
+    actual_version           = CASE WHEN @replayed::boolean THEN actual_version ELSE @version::bigint END,
+    actual_hash              = CASE WHEN @replayed::boolean THEN NULL ELSE @hash::bytea END,
+    actual_status            = CASE WHEN @replayed::boolean THEN NULL ELSE sqlc.narg('actual_status')::text END,
+    actual_button_key_id     = sqlc.narg('button_key_id')::text,
+    past_edit_window         = false,
+    last_delivered_at        = @now::timestamptz,
+    state                    = CASE
+                                   WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
+                                   WHEN desired_version = @version::bigint AND NOT desired_retire
+                                       AND NOT @replayed::boolean THEN 'delivered'
+                                   ELSE 'pending'
+                               END,
+    desired_received_at      = CASE WHEN @replayed::boolean THEN desired_received_at END,
+    next_attempt_at          = @now::timestamptz,
+    attempts                 = 0,
+    first_failed_at          = NULL,
+    last_error_class         = NULL,
+    last_error               = NULL,
+    lease_owner              = NULL,
+    lease_until              = NULL,
+    updated_at               = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordEditWindowClosed records an edit a bridge refused only because of the Root message's age (C-22.FR-8, FR-9):
 -- the Root message is past its edit window, and the delivery is due at once, so that the rule of a Root message past
--- its window decides its Desired state. No row when the lease went to another replica.
+-- its window decides its Desired state. The refusal is an answer, not a failure: the Transient budget starts afresh for
+-- the call the rule makes. No row when the lease went to another replica.
 -- name: RecordEditWindowClosed :execrows
 UPDATE deliveries
-SET past_edit_window = true, next_attempt_at = @now::timestamptz, lease_owner = NULL, lease_until = NULL,
-    updated_at = @now::timestamptz
+SET past_edit_window = true, next_attempt_at = @now::timestamptz, attempts = 0, first_failed_at = NULL,
+    last_error_class = NULL, last_error = NULL, lease_owner = NULL, lease_until = NULL, updated_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter or a Fatal error, which leave the
 -- budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
 -- did not take a Publication, so its start is cleared, unless @keep_started: for an adapter whose messenger keeps
 -- idempotency keys, a Publication that may have reached it — started before this attempt, or a request without an
--- answer — keeps the start of its first attempt for the retry (C-22.FR-6). No row when the lease went to another
--- replica.
+-- answer — keeps the start of its first attempt for the retry (C-22.FR-6); so does a republication past a bridge's edit
+-- window, whose start no other attempt has (C-22.FR-9). No row when the lease went to another replica.
 -- name: RecordDeliveryRetry :one
 UPDATE deliveries
-SET next_attempt_at        = @at,
-    attempts               = attempts + CASE WHEN @counted::boolean THEN 1 ELSE 0 END,
-    first_failed_at        = CASE WHEN @counted::boolean THEN coalesce(first_failed_at, @now) ELSE first_failed_at END,
-    publication_started_at = CASE
-                                 WHEN published_at IS NULL AND NOT @keep_started::boolean THEN NULL
-                                 ELSE publication_started_at
-                             END,
-    last_error_class       = sqlc.narg('error_class')::text,
-    last_error             = sqlc.narg('error')::text,
-    lease_owner            = NULL,
-    lease_until            = NULL,
-    updated_at             = @now
+SET next_attempt_at          = @at,
+    attempts                 = attempts + CASE WHEN @counted::boolean THEN 1 ELSE 0 END,
+    first_failed_at          = CASE
+                                   WHEN @counted::boolean THEN coalesce(first_failed_at, @now)
+                                   ELSE first_failed_at
+                               END,
+    publication_started_at   = CASE
+                                   WHEN published_at IS NULL AND NOT @keep_started::boolean THEN NULL
+                                   ELSE publication_started_at
+                               END,
+    republication_started_at = CASE WHEN @keep_started::boolean THEN republication_started_at END,
+    last_error_class         = sqlc.narg('error_class')::text,
+    last_error               = sqlc.narg('error')::text,
+    lease_owner              = NULL,
+    lease_until              = NULL,
+    updated_at               = @now
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
 RETURNING attempts, first_failed_at;
 
@@ -368,19 +393,20 @@ RETURNING attempts, first_failed_at;
 -- while the call was in flight stays so. No row when the lease went to another replica.
 -- name: RecordNotDelivered :one
 UPDATE deliveries
-SET state                  = CASE
-                                 WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
-                                 ELSE 'not_delivered'
-                             END,
-    desired_retire         = false,
-    attempts               = 0,
-    first_failed_at        = NULL,
-    publication_started_at = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
-    last_error_class       = @error_class::text,
-    last_error             = @error::text,
-    lease_owner            = NULL,
-    lease_until            = NULL,
-    updated_at             = @now
+SET state                    = CASE
+                                   WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
+                                   ELSE 'not_delivered'
+                               END,
+    desired_retire           = false,
+    attempts                 = 0,
+    first_failed_at          = NULL,
+    publication_started_at   = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
+    republication_started_at = NULL,
+    last_error_class         = @error_class::text,
+    last_error               = @error::text,
+    lease_owner              = NULL,
+    lease_until              = NULL,
+    updated_at               = @now
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
 RETURNING id;
 
@@ -416,6 +442,7 @@ SET message_id               = NULL,
     actual_status            = NULL,
     past_edit_window         = false,
     publication_started_at   = NULL,
+    republication_started_at = NULL,
     thread_state             = 'none',
     thread_anchor_id         = NULL,
     thread_chain_last_id     = NULL,
@@ -1148,6 +1175,7 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     thread_anchor_id         = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_anchor_id END,
     thread_chain_last_id     = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_chain_last_id END,
     publication_started_at   = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE publication_started_at END,
+    republication_started_at = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE republication_started_at END,
     publication_loud         = CASE WHEN state IN ('retired', 'withheld') THEN @loud::boolean ELSE publication_loud END,
     republished_after_delete = CASE WHEN state IN ('retired', 'withheld') THEN false ELSE republished_after_delete END,
     late_note                = false,
@@ -1235,7 +1263,7 @@ WHERE org_id = @org_id AND destination_id = @destination_id AND state IN ('colle
 -- name: RecordRetired :one
 UPDATE deliveries
 SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
-    actual_button_key_id = NULL,
+    actual_button_key_id = NULL, republication_started_at = NULL,
     last_error = NULL, last_delivered_at = @now::timestamptz, lease_owner = NULL, lease_until = NULL,
     updated_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text

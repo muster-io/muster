@@ -81,7 +81,8 @@ issue: 239
   `alert-group-deliveries.test.tsx` gains `past_edit_window: false`, since the type check of `make lint` includes the
   tests; the text of the flag on the page is S-077's.
 - **Schema** (migration `0010_bridge_edit_windows`, expand only, `schema.md`): `deliveries` gains `actual_status`,
-  `past_edit_window` (boolean, default false) and `superseded_message_ids` (`text[]`, default empty), with a partial GIN
+  `past_edit_window` (boolean, default false), `republication_started_at` and `superseded_message_ids` (`text[]`,
+  default empty), with a partial GIN
   index on `superseded_message_ids` where it is not empty, so that S-075 finds the delivery of an older Root message
   without scanning the Connection's deliveries; the `kind` CHECK of `delivery_events` gains
   `republished_past_edit_window`. `delivery_events` is partitioned: the new CHECK is added to the parent `NOT VALID`
@@ -105,17 +106,24 @@ issue: 239
   republication, not a lifecycle event: it has no `thread_replies` row and is not retried, and its failure is recorded
   with the event. A final edit (C-11.FR-14) of a row past its window is sent as a Thread reply with the same text
   (`final-<Destination public_id>-<delivery id>`).
-- **Edit window details** (where the rules above are silent): `actual_status` is the status of the Desired state that
-  a delivered Publication, edit or republication showed (`firing`, `acknowledged`, `snoozed`, `resolved`, `storm`);
-  null — rows from before 0010, or after a replayed answer — counts as a change of status. `past_edit_window` is set
-  lazily, by the first call due past the window, or at once by `edit_window_closed`; the window is read outside any
-  transaction, before tokens are taken, and an `info` that cannot be read gives no window, without a log line, so that
-  the bridge's own refusal decides. A republication counts toward `publications` and dates `published_at` from its
-  outcome, a replayed one too; it records no possible duplicate, and one that fails leaves the flag unset. The pointer
-  key carries the count before the republication; the pointer reply is sent after a replayed republication too and is
-  counted as a `thread_reply` attempt. The republication releases the old buttons' key. A Storm summary past its window
-  is never republished. `edit_window_closed` on a Publication, a republication or a final edit as a Thread reply is
-  Not delivered.
+- **Edit window details** (where the rules above are silent): `actual_status` is the status of the Desired state that a
+  delivered Publication, edit or republication showed (`firing`, `acknowledged`, `snoozed`, `resolved`, `storm`); null —
+  rows from before 0010, or after a replayed answer — counts as a change of status. `past_edit_window` is set lazily, by
+  the first call due past the window, or at once by `edit_window_closed`; the window is read outside any transaction,
+  before tokens are taken, and an `info` that cannot be read gives no window, without a log line, so that the bridge's
+  own refusal decides. A republication counts toward `publications` and dates `published_at` from its outcome; one that
+  fails leaves the flag unset. Its start is kept as a first Publication's is (C-22.FR-6), in `republication_started_at`,
+  as `publication_started_at` stays set once a Root message is published: recorded before the call and kept after an
+  answer that was lost, so that the next call republishes with the same key whatever the status and the window —
+  carrying the final text when the Destination left, which then retires the delivery unless the answer is replayed — and
+  the pointer reply follows; a replayed answer is dated from the start, a retry after a started republication that is
+  not replayed records a possible duplicate, one that never started records none, and Not delivered, a deleted Root
+  message and the final edit clear the start. A delivery marked delivered without a call and an edit refused as
+  `edit_window_closed` start the Transient budget afresh, as a delivered call does. A pointer reply answered with
+  RetryAfter holds the limiter it names, and is not retried. The pointer key carries the count before the republication;
+  the pointer reply is sent after a replayed republication too and is counted as a `thread_reply` attempt. The
+  republication releases the old buttons' key. A Storm summary past its window is never republished.
+  `edit_window_closed` on a Publication, a republication or a final edit as a Thread reply is Not delivered.
 - **Loud/Quiet table** (`reference.md`, `enqueue.go`): the republication is the row `republication_past_edit_window`,
   Quiet, without Mentions; the row of the final edit gains S-074's Bridge exception, a Publication whose answer was
   lost before the Destination left, posted again with its key and the final text (C-22.FR-6).
@@ -208,7 +216,9 @@ None.
 - Changes to this file in the pull request: `files_touched` gains the migration tests of `internal/db`, `enqueue.go`
   (the Loud/Quiet row), the membership and live tests that count those rows, and `reference.md`, and loses
   `internal/fakes/fakebridge/messages.go`, which needed no change; the Verification reads a reply's body at
-  `.input.body`, as `/_fake/messages` lists it; the Contracts record the details above where the rules were silent.
+  `.input.body`, as `/_fake/messages` lists it; the Contracts record the details above where the rules were silent;
+  after review, the schema gains `republication_started_at`, and the details record the start of a republication, the
+  fresh Transient budget of a delivery marked delivered without a call, and the pointer reply's RetryAfter.
 
 ## Coverage
 

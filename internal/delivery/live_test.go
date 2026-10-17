@@ -960,6 +960,8 @@ func TestLive(t *testing.T) {
 			// S-068.
 			{"reminder_press_binding", l.reminderPressBinding},
 			{"ack_timeout_notice_fallback", l.ackTimeoutNoticeFallback},
+			// S-081.
+			{"edit_window_starts", l.editWindowStarts},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -3776,4 +3778,76 @@ func (l *live) ackTimeoutNoticeFallback(t *testing.T) {
 	}
 	l.exec(t, `UPDATE routes SET template_ack_timeout_notice = NULL, template_error = NULL,
 		template_error_template = NULL, template_error_since = NULL WHERE id = $1`, l.routeID)
+}
+
+// editWindowStarts is C-11.FR-8, C-22.FR-6 and FR-9 on PostgreSQL: a Root message past its window that takes no call
+// starts the Transient budget of an earlier failed edit afresh; a republication whose answer was lost keeps its start
+// in republication_started_at; its retry, replayed, is dated from that start, and, not replayed, records a possible
+// duplicate; either clears the start and keeps the old message's id.
+func (l *live) editWindowStarts(t *testing.T) {
+	adapter := l.a.Adapters[delivery.TypeMattermost]
+	l.a.Adapters[delivery.TypeMattermost] = windowed(l.rec)
+	defer func() { l.a.Adapters[delivery.TypeMattermost] = adapter }()
+	var lines []string
+	for _, replayed := range []bool{true, false} {
+		l.fresh(t, 1000, 1)
+		name := map[bool]string{true: "Replayed", false: "Posted"}[replayed]
+		l.rec.Script(deliverytest.MethodPublish, publishedAs("w1", "t-w1"))
+		l.fire(t, "ew"+name, name+"/a")
+		gid := l.group(t, name)
+		l.round(t, l.a)
+		published := l.business.Now()
+
+		l.business.Advance(time.Minute)
+		l.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeTransient, "503"))
+		l.fire(t, "ew"+name, name+"/a", name+"/b")
+		l.round(t, l.a)
+		if l.count(t, `SELECT count(*) FROM deliveries WHERE attempts = 1 AND first_failed_at IS NOT NULL
+			AND state = 'pending'`) != 1 {
+			t.Fatalf("the edit did not fail: %s", methods(l.rec.Calls()))
+		}
+		l.business.Set(published.Add(11 * time.Minute))
+		l.round(t, l.a)
+		if l.count(t, `SELECT count(*) FROM deliveries WHERE state = 'delivered' AND past_edit_window
+			AND attempts = 0 AND first_failed_at IS NULL AND last_error_class IS NULL AND last_error IS NULL`) != 1 {
+			t.Fatalf("past the window, the budget was kept: %s", methods(l.rec.Calls()))
+		}
+
+		l.rec.Script(deliverytest.MethodPublish, timedOut())
+		l.ack(t, gid)
+		l.round(t, l.a)
+		start := l.business.Now()
+		if l.count(t, `SELECT count(*) FROM deliveries WHERE republication_started_at = $1 AND message_id = 'w1'`,
+			start) != 1 {
+			t.Fatalf("the start of the republication was not kept: %s", methods(l.rec.Calls()))
+		}
+		answer := publishedAs("w2", "t-w2")
+		answer.Outcome.Replayed = replayed
+		l.rec.Script(deliverytest.MethodPublish, answer)
+		l.toNextAttempt(t)
+		l.round(t, l.a)
+		var at time.Time
+		var started, duplicate bool
+		var superseded []string
+		var publications int64
+		if err := l.d.Pool.QueryRow(t.Context(), `SELECT published_at, republication_started_at IS NOT NULL,
+			possible_duplicate, superseded_message_ids, publications FROM deliveries WHERE message_id = 'w2'`).Scan(&at,
+			&started, &duplicate, &superseded, &publications); err != nil {
+			t.Fatalf("the republication was not recorded: %v, %s", err, methods(l.rec.Calls()))
+		}
+		dated := start
+		if !replayed {
+			dated = l.business.Now()
+		}
+		if !at.Equal(dated) || started || duplicate == replayed || !slices.Equal(superseded, []string{"w1"}) ||
+			publications != 2 || l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'possible_duplicate'`) !=
+			map[bool]int64{true: 0, false: 1}[replayed] {
+			t.Errorf("replayed %v: published_at %v (want %v), started %v, possible_duplicate %v, superseded %v, "+
+				"publications %d", replayed, at, dated, started, duplicate, superseded, publications)
+		}
+		lines = append(lines, fmt.Sprintf("replayed %v: published_at %s after the start, possible_duplicate %v",
+			replayed, at.Sub(start), duplicate))
+	}
+	t.Logf("past the window: no call, budget reset; lost republication answer kept its start; %s",
+		strings.Join(lines, "; "))
 }

@@ -1,7 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 -- Adds the edit windows of Bridge Root messages (C-22.FR-9): the status a delivery's Root message shows
--- (actual_status), whether it is past its bridge's edit window (past_edit_window) and the ids of the older Root
+-- (actual_status), whether it is past its bridge's edit window (past_edit_window), the start of a republication past
+-- the window that may have reached the bridge (republication_started_at, C-22.FR-6) and the ids of the older Root
 -- messages a republication past the window replaced (superseded_message_ids), with a partial GIN index that finds the
 -- delivery of an older Root message; and the delivery event republished_past_edit_window. Expand only: the new columns
 -- are nullable or have defaults, which an earlier binary never writes, and it never writes the new kind. The CHECK of
@@ -17,6 +18,7 @@ SET LOCAL statement_timeout = '5min';
 ALTER TABLE deliveries
     ADD COLUMN actual_status text,
     ADD COLUMN past_edit_window boolean NOT NULL DEFAULT false,
+    ADD COLUMN republication_started_at timestamptz,
     ADD COLUMN superseded_message_ids text[] NOT NULL DEFAULT '{}',
     ADD CONSTRAINT deliveries_actual_status_check
         CHECK (actual_status IN ('firing', 'acknowledged', 'snoozed', 'resolved', 'storm')) NOT VALID;

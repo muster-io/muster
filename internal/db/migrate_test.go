@@ -219,7 +219,8 @@ func TestIntegrationDeliveryEventsKindCheck(t *testing.T) {
 			if n := count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished_past_edit_window'`); n != 0 ||
 				count(t, `SELECT count(*) FROM delivery_events`) != 1 || count(t, `SELECT count(*)
 				FROM information_schema.columns WHERE table_name = 'deliveries'
-				AND column_name IN ('actual_status', 'past_edit_window', 'superseded_message_ids')`) != 0 {
+				AND column_name IN ('actual_status', 'past_edit_window', 'republication_started_at',
+				'superseded_message_ids')`) != 0 {
 				t.Errorf("after down: %d events of the new kind, or the new columns are left", n)
 			}
 		}

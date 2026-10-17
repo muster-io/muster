@@ -1002,7 +1002,12 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
     which counts as a change of status; `past_edit_window`, set once a Bridge Root message is past its bridge's edit
     window — read lazily, by the first call due after the window ended, or at once by an edit refused as `gone` with
     `edit_window_closed` — and cleared with every new Root message: a republication past the window, after a
-    deletion, or after the Destination rejoined the Route;
+    deletion, or after the Destination rejoined the Route; `republication_started_at`, the start of a republication
+    past the window, recorded before its call and kept, as `publication_started_at` is for a first Publication, while
+    its answer was lost, so that the next call posts again with the same key whatever the status and dates a replayed
+    answer from it; `publication_started_at` cannot carry it, as it stays set once a Root message is published
+    (Telegram's copy wait reads it); cleared by the republication's record, by Not delivered, by a deleted Root
+    message and by the final edit;
     `superseded_message_ids` (`text[]`, default empty), the ids of the older Root messages that republications past
     the window replaced, which presses and Text commands on them resolve to their delivery through the partial GIN
     index `deliveries_superseded_idx ... WHERE superseded_message_ids <> '{}'`; a lookup repeats

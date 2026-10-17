@@ -86,7 +86,7 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 			d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
 			d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, false
 			d.loud, d.heldBy = pgtype.Bool{Bool: arg.Loud, Valid: true}, arg.HeldByStormID.Int64
-			d.actualStatus, d.pastEditWindow = nil, false
+			d.actualStatus, d.pastEditWindow, d.restarted = nil, false, nil
 		}
 		d.lateNote, d.desiredRetire, d.state, d.next, d.updated = false, false, "pending", arg.Now, arg.Now
 		return 1, nil
@@ -210,6 +210,7 @@ func (f *fakeDB) RecordRetired(_ context.Context, arg dbgen.RecordRetiredParams)
 	}
 	d.desiredRetire, d.attempts, d.firstFailed, d.errorClass, d.lastError = false, 0, nil, nil, nil
 	d.lastDelivered, d.owner, d.until, d.updated, d.actualKey = at(arg.Now), "", time.Time{}, arg.Now, nil
+	d.restarted = nil
 	return d.id, nil
 }
 

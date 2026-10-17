@@ -48,7 +48,8 @@ const (
 // first Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it.
 // A Publication a bridge replayed is no exception: its outcome and the edit that follows lock the delivery row only, as
 // every outcome and every edit does, never its Alert Group before it; nor is a republication past a bridge's edit
-// window (editwindow.go), whose preparation updates the delivery row once and whose outcome locks it only.
+// window (editwindow.go), whose preparation updates the delivery row only — its lease and its start, as a Publication's
+// does — and whose outcome locks it only.
 // The preparation of a Telegram reply that waits for its copy is the one exception: it holds the reply, then takes the
 // post's copy lock and the delivery, the order of the learning of a copy and of the record of a Publication
 // (copies.go). The re-render after a key rotation (rerender.go) takes the dispatcher's order — the Alert Group, SKIP
@@ -264,10 +265,11 @@ func (w *Worker) next(ctx context.Context, org int64, limit time.Duration) (time
 }
 
 // attempt is a delivery that has its tokens and is about to be called; late says that its Publication carries the
-// late note. idempotent says that its adapter is Idempotent, and started that its Publication had started before this
-// attempt. For a Root message past its bridge's edit window (C-22.FR-9), republish is a new Root message for a new
-// status, with pointer the outcome of the reply under the old one once it was sent, and finalReply a final edit sent
-// as a Thread reply; needsWindow is a delivery whose rule needs the window read first, outside any transaction.
+// late note. idempotent says that its adapter is Idempotent, and started that its Publication — or its republication —
+// had started before this attempt. For a Root message past its bridge's edit window (C-22.FR-9), republish is a new
+// Root message for a new status, with pointer the outcome of the reply under the old one once it was sent, and
+// finalReply a final edit sent as a Thread reply; needsWindow is a delivery whose rule needs the window read first,
+// outside any transaction.
 type attempt struct {
 	row         dbgen.GetLeasedDeliveryRow
 	destination Destination
@@ -290,17 +292,18 @@ type attempt struct {
 func (a attempt) replayed(out Outcome) bool { return (a.publication || a.republish) && out.Replayed }
 
 // duplicate reports whether the ok outcome out of the attempt records a possible duplicate (C-22.FR-6): a retry of a
-// started Publication to an Idempotent adapter that was not replayed, so the messenger did not know its key.
+// started Publication or republication to an Idempotent adapter that was not replayed, so the messenger did not know
+// its key.
 func (a attempt) duplicate(out Outcome) bool {
-	return a.idempotent && a.publication && a.started && !out.Replayed
+	return a.idempotent && (a.publication || a.republish) && a.started && !out.Replayed
 }
 
-// keepStarted reports whether the outcome out keeps the start of the attempt's Publication for its retry (C-22.FR-6):
-// for an Idempotent adapter, a Publication that may have reached the messenger — started before this attempt, or a
-// request without an answer — so that the retry is replayed, or records a possible duplicate when it is not. A failure
-// the messenger answered stored nothing, and a refused connection sent nothing.
+// keepStarted reports whether the outcome out keeps the start of the attempt's Publication or republication for its
+// retry (C-22.FR-6): for an Idempotent adapter, one that may have reached the messenger — started before this attempt,
+// or a request without an answer — so that the retry is replayed, or records a possible duplicate when it is not. A
+// failure the messenger answered stored nothing, and a refused connection sent nothing.
 func (a attempt) keepStarted(out Outcome) bool {
-	return a.idempotent && a.publication && (a.started || out.Unanswered)
+	return a.idempotent && (a.publication || a.republish) && (a.started || out.Unanswered)
 }
 
 // idempotent is the adapter of the Destination type typ when it keeps idempotency keys (C-22.FR-6).
@@ -366,8 +369,10 @@ func (w *Worker) deliver(ctx context.Context, org, id int64) {
 // with its key, Quiet and without notes, carrying the final edit, so that a replay names the Root message the final
 // edit is then made to. A published Root message of an EditWindowed adapter follows the rules of its edit window
 // (editwindow.go), which win, read outside any transaction, says, before any token is taken: without win, and unless
-// the row is flagged past its window already, nothing is written and the attempt needsWindow. ok says whether to call;
-// logs are the lines to log now that it committed.
+// the row is flagged past its window already or its republication started, nothing is written and the attempt
+// needsWindow. A started republication is made again even when the actual message shows the Desired state, as the
+// bridge may have posted a new Root message; its start is recorded before the call, as a Publication's is. ok says
+// whether to call; logs are the lines to log now that it committed.
 func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (attempt, bool, after, error) {
 	var a attempt
 	var logs after
@@ -397,7 +402,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 			}
 			return wipeSecrets(ctx, q, org, row.DestinationID, realNow)
 		}
-		if !row.DesiredRetire && bytes.Equal(row.ActualHash, row.DesiredHash) {
+		if !row.DesiredRetire && !republishing(row) && bytes.Equal(row.ActualHash, row.DesiredHash) {
 			if err := q.MarkDelivered(ctx, dbgen.MarkDeliveredParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Version: row.DesiredVersion, Now: now}); err != nil {
 				return fmt.Errorf("mark the delivery delivered: %w", err)
@@ -422,7 +427,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 		}
 		rule := ruleEdit
 		if _, windowed := w.editWindowed(row.DestinationType); windowed && !unpublished(row) {
-			if win == nil && !row.PastEditWindow {
+			if win == nil && !row.PastEditWindow && !republishing(row) {
 				a = attempt{row: row, destination: d, needsWindow: true}
 				return nil
 			}
@@ -455,9 +460,18 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 		a = attempt{row: row, destination: d, publication: unpublished(row), message: msg, at: now,
 			idempotent: idempotent, started: row.PublicationStartedAt.Valid, republish: rule == ruleRepublish,
 			finalReply: rule == ruleFinalReply}
+		if a.republish {
+			a.started = row.RepublicationStartedAt.Valid
+		}
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			LeaseUntil: realNow.Add(w.Lease.Duration)}); err != nil {
 			return fmt.Errorf("renew the lease of the delivery: %w", err)
+		}
+		if a.republish && a.idempotent {
+			if err := q.StartRepublication(ctx, dbgen.StartRepublicationParams{OrgID: org, ID: id,
+				Owner: w.Lease.Owner, Now: now}); err != nil {
+				return fmt.Errorf("record the start of the republication: %w", err)
+			}
 		}
 		if a.publication {
 			if a.started && !a.idempotent {
