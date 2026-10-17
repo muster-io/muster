@@ -8,9 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -1672,4 +1674,244 @@ func TestCloseStopsThePusher(t *testing.T) {
 		t.Fatal(err)
 	}
 	within(t, "end of the push in flight after the server closed", ended2)
+}
+
+// people is the findUsers answer of a person found, decoded.
+func (a answer) people(t *testing.T) []gen.Person {
+	t.Helper()
+	var out gen.PersonList
+	a.ok(t, http.StatusOK, &out)
+	if out.Items == nil {
+		t.Fatalf("items is not a list: %s", a.body)
+	}
+	return out.Items
+}
+
+// find sends findUsers with the handle, checked as getInfo is; broken marks a handle that breaks the protocol.
+func (s *spec) find(t *testing.T, token, handle string, broken bool) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodGet, path: "/v1/users?" + url.Values{"handle": {handle}}.Encode(),
+		token: token, broken: broken})
+}
+
+// TestFindUsers is findUsers of the fake (C-22.FR-15): it finds a person by the handle of the kind user_lookup sets —
+// a login by default, an email address in any case, a username or a user id — and answers them with that handle, or
+// nobody; with user_lookup none, and for a handle that breaks the protocol, it is invalid; Muster's client reads it.
+func TestFindUsers(t *testing.T) {
+	s := start(t)
+	handleOf := func(ps []gen.Person) string {
+		if len(ps) != 1 {
+			return fmt.Sprint(len(ps), " people")
+		}
+		return ps[0].ExternalId + " " + ps[0].DisplayName + " " + ps[0].Handle.MustGet()
+	}
+	if got := handleOf(s.find(t, fakebridge.Token, "alice", false).people(t)); got != "u-alice Alice Smith alice" {
+		t.Errorf("by login: %s", got)
+	}
+	if got := s.find(t, fakebridge.Token, "Alice", false).people(t); len(got) != 0 {
+		t.Errorf("a login in another case: %+v", got)
+	}
+	for _, tc := range []struct {
+		kind, handle, want string
+	}{
+		{"email", "BOB@example.org", "u-bob Bob Brown bob@example.org"},
+		{"email", "alice@example.org", "u-alice Alice Smith alice@example.org"},
+		{"email", "nobody@example.org", "0 people"},
+		{"username", "vera", "u-vera Vera Viewer vera"},
+		{"user_id", "u-alice", "u-alice Alice Smith u-alice"},
+		{"user_id", "alice", "0 people"},
+	} {
+		s.configure(t, `{"user_lookup":"`+tc.kind+`"}`)
+		if got := handleOf(s.find(t, fakebridge.SecondToken, tc.handle, false).people(t)); got != tc.want {
+			t.Errorf("%s %s = %s, want %s", tc.kind, tc.handle, got, tc.want)
+		}
+	}
+	s.configure(t, `{"user_lookup":"email"}`)
+	s.find(t, fakebridge.Token, "", true).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	s.find(t, fakebridge.Token, strings.Repeat("a", fakebridge.MaxHandle+1), true).refused(t, http.StatusBadRequest,
+		gen.ErrorClassInvalid)
+	p, found, r := s.client(t, fakebridge.Token).FindUsers(t.Context(), outbound.ClassInteractive, "bob@example.org")
+	if !r.OK() || !found || p.ExternalId != fakebridge.BobID || p.Handle.MustGet() != fakebridge.Email(fakebridge.BobID) {
+		t.Errorf("Muster's FindUsers = %+v, %v, %+v", p, found, r)
+	}
+	if _, found, r := s.client(t, fakebridge.Token).FindUsers(t.Context(), outbound.ClassInteractive,
+		"x@example.org"); !r.OK() || found {
+		t.Errorf("Muster's FindUsers of nobody = %v, %+v", found, r)
+	}
+	s.configure(t, `{"user_lookup":"none"}`)
+	s.find(t, fakebridge.Token, "alice", false).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+}
+
+// dm sends sendDirectMessage with the token and the key, checked as getInfo is.
+func (s *spec) dm(t *testing.T, token, key string, in any, broken bool) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodPost, path: "/v1/direct-messages", token: token, key: key, body: in,
+		broken: broken})
+}
+
+func (a answer) dmSent(t *testing.T) gen.DirectMessageSent {
+	t.Helper()
+	var out gen.DirectMessageSent
+	a.ok(t, http.StatusCreated, &out)
+	return out
+}
+
+// TestDirectMessages is sendDirectMessage of the fake (C-22.FR-15): a message to a person is kept and listed with its
+// bot, person, body and key; a repeated Idempotency-Key answers its first result, replayed, and keeps nothing; a person
+// in dm_blocked is forbidden, a refusal that stores nothing; an unknown person, a bot without direct_messages and a
+// request that breaks the protocol are invalid; Muster's client sends through it and reads the refusal.
+func TestDirectMessages(t *testing.T) {
+	s := start(t)
+	body := "You requested a link to Muster. Do not share this code.\n\nABCD2345"
+	in := gen.DirectMessageInput{UserExternalId: fakebridge.BobID, Body: body}
+	if got := s.dm(t, fakebridge.Token, "dm-AR1", in, false).dmSent(t); got.MessageId != "dm1" || got.Replayed {
+		t.Errorf("the first message = %+v", got)
+	}
+	if got := s.dm(t, fakebridge.Token, "dm-AR1", gen.DirectMessageInput{UserExternalId: fakebridge.AliceID,
+		Body: "other"}, false).dmSent(t); got.MessageId != "dm1" || !got.Replayed {
+		t.Errorf("a repeated key = %+v", got)
+	}
+	s.configure(t, `{"dm_blocked":["u-bob"]}`)
+	if p := s.dm(t, fakebridge.SecondToken, "dm-AR2", in, false).refused(t, http.StatusForbidden,
+		gen.ErrorClassForbidden); p.Detail == nil || *p.Detail != fakebridge.DirectMessageRefused {
+		t.Errorf("a blocked person = %+v", p)
+	}
+	c := s.client(t, fakebridge.SecondToken)
+	if _, r := c.SendDirectMessage(t.Context(), outbound.ClassInteractive, "dm-AR2", fakebridge.BobID,
+		body); r.Classification.Class != bridge.ClassForbidden || r.Status != http.StatusForbidden {
+		t.Errorf("Muster's message to a blocked person = %+v", r)
+	}
+	s.configure(t, `{"dm_blocked":[]}`)
+	if out, r := c.SendDirectMessage(t.Context(), outbound.ClassInteractive, "dm-AR2", fakebridge.BobID,
+		body); !r.OK() || out.MessageId != "dm2" || out.Replayed {
+		t.Errorf("Muster's message once unblocked = %+v, %+v", out, r)
+	}
+	s.dm(t, fakebridge.Token, "dm-x", gen.DirectMessageInput{UserExternalId: "u-nobody", Body: "x"}, false).refused(t,
+		http.StatusBadRequest, gen.ErrorClassInvalid)
+	for _, bad := range []any{gen.DirectMessageInput{UserExternalId: fakebridge.BobID},
+		gen.DirectMessageInput{UserExternalId: fakebridge.BobID, Body: strings.Repeat("я",
+			fakebridge.MaxDirectMessage+1)},
+		gen.DirectMessageInput{Body: "x"}, map[string]any{"body": "x"}} {
+		s.dm(t, fakebridge.Token, "dm-bad", bad, true).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	}
+	s.exchange(t, request{method: http.MethodPost, path: "/v1/direct-messages", token: fakebridge.Token, body: in,
+		broken: true}).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	s.configure(t, `{"capabilities":{"thread_messages":"all"}}`)
+	s.dm(t, fakebridge.Token, "dm-AR3", in, false).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+
+	status, out := s.control(t, http.MethodGet, "/_fake/direct-messages", "")
+	var listed []fakebridge.DirectMessage
+	if err := json.Unmarshal([]byte(out), &listed); err != nil || status != http.StatusOK {
+		t.Fatalf("GET /_fake/direct-messages = %d %s", status, out)
+	}
+	want := []fakebridge.DirectMessage{
+		{Bot: 1, ID: "dm1", UserExternalID: fakebridge.BobID, Body: body, Key: "dm-AR1"},
+		{Bot: 2, ID: "dm2", UserExternalID: fakebridge.BobID, Body: body, Key: "dm-AR2"},
+	}
+	if !slices.Equal(listed, want) || !slices.Equal(s.fake.DirectMessages(), want) {
+		t.Errorf("direct messages %+v", listed)
+	}
+	if fakebridge.Email(fakebridge.VeraID) != "vera@example.org" || fakebridge.Email("u-nobody") != "" {
+		t.Error("the email addresses")
+	}
+}
+
+// link sends POST /_fake/link with body and returns the event it queued.
+func (s *spec) link(t *testing.T, body string) fakebridge.Event {
+	t.Helper()
+	status, out := s.control(t, http.MethodPost, "/_fake/link", body)
+	var ev fakebridge.Event
+	if err := json.Unmarshal([]byte(out), &ev); err != nil || status != http.StatusOK {
+		t.Fatalf("POST /_fake/link %s = %d %s", body, status, out)
+	}
+	return ev
+}
+
+// TestLink is POST /_fake/link (C-22.FR-15): a person sending a token to a bot — 1 by default, or 2 — queues an
+// account_link event of that bot, with the person and the handle of the configured kind, null for none, which Muster
+// decodes and polls and which is pushed like any other; its answer is shown in the direct chat and listed; an unknown
+// person, no token and a bot other than 1 and 2 are refused.
+func TestLink(t *testing.T) {
+	s := start(t)
+	token := strings.Repeat("A", 42) + "b"
+	ev := s.link(t, `{"user_id":"u-alice","token":"`+token+`"}`)
+	got := decoded(t, ev)
+	if ev.Bot != 1 || got.Type != bridge.TypeAccountLink || got.Token != token || got.User.ExternalId != "u-alice" ||
+		got.User.DisplayName != "Alice Smith" || got.User.Handle.MustGet() != "alice" {
+		t.Errorf("a link to bot 1 = %+v", got)
+	}
+	s.configure(t, `{"user_lookup":"email"}`)
+	at := "2026-10-17T12:00:00Z"
+	if got := decoded(t, s.link(t, `{"user_id":"u-bob","token":"`+token+`","bot":2,"occurred_at":"`+at+`"}`)); got.User.Handle.MustGet() != "bob@example.org" ||
+		got.OccurredAt.Format(time.RFC3339) != at {
+		t.Errorf("a link by email = %+v", got)
+	}
+	s.configure(t, `{"user_lookup":"none"}`)
+	if got := decoded(t, s.link(t, `{"user_id":"u-vera","token":"`+token+`","bot":2}`)); !got.User.Handle.IsNull() {
+		t.Errorf("a link without a lookup = %+v", got)
+	}
+	evs, _ := s.poll(t, fakebridge.SecondToken, "wait=0").batch(t)
+	if !slices.Equal(ids(evs), []string{"e2", "e3"}) || evs[0].Type != bridge.TypeAccountLink {
+		t.Errorf("bot 2 polls %v", ids(evs))
+	}
+	for _, bad := range []string{`{"user_id":"u-nobody","token":"t"}`, `{"user_id":"u-alice"}`,
+		`{"user_id":"u-alice","token":"t","bot":3}`, `{"user_id":"u-alice","token":"t","bot":-1}`, `{`} {
+		if status, out := s.control(t, http.MethodPost, "/_fake/link", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/link %s = %d %s", bad, status, out)
+		}
+	}
+	if a := s.answerOf(t, fakebridge.SecondToken, "answer-e2", gen.AnswerInput{EventId: "e2",
+		Text: "Linked to Muster user Bob Brown (bob)"}, false).shown(t); a.ShownAs != gen.AnswerShownShownAsDirect {
+		t.Errorf("the answer to an account_link = %+v", a)
+	}
+	s.answerOf(t, fakebridge.Token, "answer-e2", gen.AnswerInput{EventId: "e2", Text: "x"}, false).refused(t,
+		http.StatusNotFound, gen.ErrorClassGone)
+	if got := s.fake.Answers(); !slices.Equal(got, []fakebridge.Answer{{Bot: 2, EventID: "e2",
+		EventType: fakebridge.TypeAccountLink, UserID: fakebridge.BobID, Text: "Linked to Muster user Bob Brown (bob)",
+		ShownAs: "direct"}}) {
+		t.Errorf("answers %+v", got)
+	}
+
+	rc, target := newReceiver(t, http.StatusNoContent)
+	s.configure(t, `{"push":{"url":"`+target+`","secret":"`+pushSecret+`"}}`)
+	pushed := s.link(t, `{"user_id":"u-alice","token":"`+token+`"}`)
+	if got := rc.wait(t, 1); len(got) != 1 || got[0].Body != string(pushed.Event) {
+		t.Errorf("the pushed account_link %+v", got)
+	}
+}
+
+// TestLinkConfig: /_fake/config sets the link_url_template that getInfo answers, as configured — also one that breaks
+// the protocol, which Muster refuses — and null removes it; it sets the people the bots cannot write to; both round
+// trip through GET /_fake/config.
+func TestLinkConfig(t *testing.T) {
+	s := start(t)
+	const link = "https://chat.example.org/bot?start={token}"
+	s.configure(t, `{"link_url_template":"`+link+`","dm_blocked":["u-bob","u-vera"]}`)
+	if i := s.getInfo(t, fakebridge.Token).valid(t); i.LinkUrlTemplate.GetOrEmpty() != link {
+		t.Errorf("info with a link: %s", i.Raw)
+	}
+	if c := s.fake.Config(); c.LinkURLTemplate == nil || *c.LinkURLTemplate != link ||
+		!slices.Equal(c.DMBlocked, []string{"u-bob", "u-vera"}) {
+		t.Errorf("Config() = %+v", c)
+	}
+	s.configure(t, `{"link_url_template":"ftp://chat.example.org/{token}"}`)
+	a := s.getInfo(t, fakebridge.Token)
+	if a.invalid == nil || !strings.Contains(string(a.body), `"link_url_template":"ftp://chat.example.org/{token}"`) {
+		t.Errorf("a link that breaks the protocol: %v %s", a.invalid, a.body)
+	}
+	if _, err := bridge.ParseInfo(a.body); err == nil {
+		t.Error("Muster accepts a link that is not http or https")
+	}
+	s.configure(t, `{"link_url_template":null,"dm_blocked":[]}`)
+	status, body := s.control(t, http.MethodGet, "/_fake/config", "")
+	if status != http.StatusOK || !strings.Contains(body, `"link_url_template":null`) ||
+		!strings.Contains(body, `"dm_blocked":[]`) || strings.Contains(string(s.getInfo(t, fakebridge.Token).body),
+		"link_url_template") {
+		t.Errorf("GET /_fake/config = %d %s", status, body)
+	}
+	c := fakebridge.DefaultConfig()
+	c.DMBlocked = nil
+	if err := s.fake.SetConfig(c); err != nil || s.fake.Config().DMBlocked == nil {
+		t.Errorf("SetConfig without dm_blocked: %v", err)
+	}
 }

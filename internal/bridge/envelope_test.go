@@ -145,25 +145,30 @@ func bridgeSchema(t *testing.T, name string) *openapi3.Schema {
 	return ref.Value
 }
 
-// TestEnvelopeMatchesTheProtocol covers C-22.FR-4: the envelopes of a Root message, a Storm summary, a test message,
-// an edit and Thread replies with and without a thread_ref pass the schemas of api/bridge.yaml.
+// TestEnvelopeMatchesTheProtocol covers C-22.FR-4 and FR-16: the envelopes of a Root message with Mentions, a Storm
+// summary, a test message, an edit and Thread replies with and without a thread_ref pass the schemas of
+// api/bridge.yaml.
 func TestEnvelopeMatchesTheProtocol(t *testing.T) {
 	i := infoOf(t)
-	firing := content(rootMessage(t, messages.ColourFiring), i, []string{"Alice Smith"})
+	head, list := mentionsOf(delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{
+		linked("Alice Smith", "u-alice", "Alice Smith"), linked("Bob Brown", "", "")}})
+	firing := content(rootMessage(t, messages.ColourFiring), i, head)
+	root := postInput(gen.Root, "ch-alerts", firing, true)
+	root.Mentions = list
 	reminder := replyMessage("Still unacknowledged")
 	reminder.Buttons = signedButtons(t, messages.ColourAcknowledged, "en", nil)
 	for _, tc := range []struct {
 		name, schema string
 		v            any
 	}{
-		{"root", "MessageInput", postInput(gen.Root, "ch-alerts", firing, true)},
+		{"root", "MessageInput", root},
 		{"storm summary", "MessageInput", postInput(gen.StormSummary, "ch-alerts", content(stormMessage(), i, nil),
 			false)},
 		{"test", "MessageInput", postInput(gen.Test, "ch-alerts", content(rootMessage(t, messages.ColourResolved),
 			infoOf(t, bare), []string{"🧪 Test message"}), false)},
 		{"edit", "MessageContent", content(rootMessage(t, messages.ColourAcknowledged), i, nil)},
-		{"first reply", "ThreadReplyInput", replyInput("", replyMessage("New Alert: pod i3"), i, nil, false)},
-		{"reply", "ThreadReplyInput", replyInput("t-m1", reminder, i, []string{"Alice Smith"}, true)},
+		{"first reply", "ThreadReplyInput", replyInput("", replyMessage("New Alert: pod i3"), i, nil, nil, false)},
+		{"reply", "ThreadReplyInput", replyInput("t-m1", reminder, i, head, list, true)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, err := json.Marshal(tc.v)
@@ -175,9 +180,12 @@ func TestEnvelopeMatchesTheProtocol(t *testing.T) {
 			}
 		})
 	}
-	if b, _ := json.Marshal(replyInput("", replyMessage("x"), i, nil, false)); !strings.Contains(string(b),
-		`"thread_ref":null`) {
+	if b, _ := json.Marshal(replyInput("", replyMessage("x"), i, nil, nil, false)); !strings.Contains(string(b),
+		`"thread_ref":null`) || !strings.Contains(string(b), `"mentions":[]`) {
 		t.Fatalf("a first reply = %s", b)
+	}
+	if !strings.HasPrefix(firing.Body, "[@Alice Smith](muster-mention:m1) Bob Brown\n\n") {
+		t.Fatalf("the body of a Root message with Mentions = %q", firing.Body)
 	}
 }
 
@@ -311,11 +319,12 @@ func TestButtonsAndCommandsLine(t *testing.T) {
 	}
 	reminder := replyMessage("Still unacknowledged")
 	reminder.Buttons = signedButtons(t, messages.ColourAcknowledged, "en", nil)
-	if in := replyInput("t-1", reminder, infoOf(t, threadOnly("all")), nil, false); len(in.Buttons) != 0 ||
+	if in := replyInput("t-1", reminder, infoOf(t, threadOnly("all")), nil, nil, false); len(in.Buttons) != 0 ||
 		strings.Contains(in.Body, line) {
 		t.Fatalf("a reply %+v", in)
 	}
-	if in := replyInput("t-1", reminder, infoOf(t), nil, false); len(in.Buttons) != 2 || in.Buttons[0].Label != "Unack" {
+	if in := replyInput("t-1", reminder, infoOf(t), nil, nil, false); len(in.Buttons) != 2 ||
+		in.Buttons[0].Label != "Unack" {
 		t.Fatalf("a Reminder's buttons %+v", in.Buttons)
 	}
 }
@@ -427,23 +436,68 @@ func TestBodyShortening(t *testing.T) {
 	}
 }
 
-// TestMentionLine: a Loud call names the Users it targets by display name, escaped, once each, and nobody else until
-// S-076; a Quiet call names nobody.
-func TestMentionLine(t *testing.T) {
-	user := func(name string) mentions.Target {
-		return mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{Name: name}}
+// linked is a User target named name in Muster, with an Account link for the Connection when external is not empty,
+// whose display name is display.
+func linked(name, external, display string) mentions.Target {
+	return mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{Name: name, ExternalID: external,
+		DisplayName: display}}
+}
+
+// TestMentions covers C-22.FR-16 and AC-20: a Loud call names a User linked through the Connection by a Mention marker
+// with the link's display name, escaped, and an entry of mentions — ref m1, m2…, external id and display name — and
+// a User without a link by their display name as text, escaped, which mentions nobody; each once, in the order of the
+// targets, on one line. A link without a display name takes the Muster name, a long one is cut to 200 characters, and
+// a Quiet call names nobody.
+func TestMentions(t *testing.T) {
+	long := strings.Repeat("ж", 250)
+	c := delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{
+		linked("Alice Smith", "u-alice", "Alice Smith"), linked("@bob *b*", "", ""),
+		linked("Alice S.", "u-alice", "Alice"), linked("Carol", "u-carol", "Carol ]evil[ (x)\n@all"),
+		{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel}, {Kind: mentions.TargetGroup, Group: "db"},
+		{Kind: mentions.TargetUser}, linked("", "", ""), linked("@bob *b*", "", ""),
+		linked("Dave Doe", "u-dave", "  "), linked("Erin", "u-erin", long),
+		linked("Frank", strings.Repeat("f", 513), "Frank F."), linked("", "u-nobody", "")}}
+	head, list := mentionsOf(c)
+	want := "[@Alice Smith](muster-mention:m1) @\u200bbob \\*b\\* " +
+		"[@Carol \\]evil\\[ (x) @\u200ball](muster-mention:m2) [@Dave Doe](muster-mention:m3) " +
+		"[@" + strings.Repeat("ж", 199) + "…](muster-mention:m4) Frank"
+	if len(head) != 1 || head[0] != want {
+		t.Fatalf("line\n%q\nwant\n%q", head, want)
 	}
-	c := delivery.Call{Loudness: groups.Loud, Targets: []mentions.Target{user("Alice Smith"), user("@bob *b*"),
-		user("Alice Smith"), {Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel},
-		{Kind: mentions.TargetGroup, Group: "db"}, {Kind: mentions.TargetUser}, user("")}}
-	if got := mentionLine(c); len(got) != 1 || got[0] != "Alice Smith @\u200bbob \\*b\\*" {
-		t.Fatalf("loud = %q", got)
+	got, _ := json.Marshal(list)
+	wantList := `[{"display_name":"Alice Smith","external_id":"u-alice","ref":"m1"},` +
+		`{"display_name":"Carol ]evil[ (x) @all","external_id":"u-carol","ref":"m2"},` +
+		`{"display_name":"Dave Doe","external_id":"u-dave","ref":"m3"},` +
+		`{"display_name":"` + strings.Repeat("ж", 199) + `…","external_id":"u-erin","ref":"m4"}]`
+	if string(got) != wantList {
+		t.Fatalf("mentions\n%s\nwant\n%s", got, wantList)
+	}
+	for _, m := range list {
+		if b, _ := json.Marshal(m); visit(t, bridgeSchema(t, "Mention"), b) != nil {
+			t.Errorf("%s does not match Mention", b)
+		}
 	}
 	c.Loudness = groups.Quiet
-	if got := mentionLine(c); got != nil {
-		t.Fatalf("quiet = %q", got)
+	if head, list := mentionsOf(c); head != nil || list == nil || len(list) != 0 {
+		t.Fatalf("quiet = %q %v", head, list)
 	}
-	if got := mentionLine(delivery.Call{Loudness: groups.Loud}); got != nil {
-		t.Fatalf("nobody = %q", got)
+	if head, list := mentionsOf(delivery.Call{Loudness: groups.Loud}); head != nil || list == nil || len(list) != 0 {
+		t.Fatalf("nobody = %q %v", head, list)
+	}
+}
+
+// TestFooterOfTheConnection covers C-22.FR-16 and C-12.FR-12: the body's footer names the user as the identity space
+// of the Destination's Connection does — by the display name of their Bridge link there — and by the Muster display
+// name without a link there.
+func TestFooterOfTheConnection(t *testing.T) {
+	m := rootMessage(t, messages.ColourAcknowledged)
+	m.Footers["bridge:7"] = "Acknowledged by Bob B."
+	if body := content(withFooterIn(m, 7), infoOf(t), nil).Body; !strings.HasSuffix(body,
+		"\n\nAcknowledged by Bob B.") {
+		t.Fatalf("linked through the connection: %q", body)
+	}
+	if body := content(withFooterIn(m, 8), infoOf(t), nil).Body; !strings.HasSuffix(body,
+		"\n\nAcknowledged by Bob Smith") {
+		t.Fatalf("not linked through the connection: %q", body)
 	}
 }

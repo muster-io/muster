@@ -232,7 +232,7 @@ curl -s -X PUT $FAM/groups/m1/alerts/x1 -d '{"labels":{"team":"br","pod":"x1"}}'
 NOTIFY m1 '{"reason":"first notification"}'; sleep 1; GM=$(AG 'pod%3D%22x1%22')
 curl -s $FB/messages | jq -c '[.[] | select(.envelope.title | endswith("Mention"))][0].envelope |
   {m: .mentions, first: (.body | split("\n")[0])}'
-# {"m":[{"ref":"m1","external_id":"u-alice","display_name":"Alice Smith"}],"first":"[@Alice Smith](muster-mention:m1)"}
+# {"m":[{"display_name":"Alice Smith","external_id":"u-alice","ref":"m1"}],"first":"[@Alice Smith](muster-mention:m1)"}
 curl -s "${HA[@]}" -X POST $API/alert-groups/$GM/acknowledge > /dev/null; sleep 1
 curl -s $FB/messages | jq -r '[.[] | select(.envelope.title | endswith("Mention"))][0].edits[-1].body' | grep -c 'Alice Smith'   # 1
 ```

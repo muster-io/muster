@@ -23,9 +23,11 @@ type user struct {
 	id                    int64
 	publicID, name, login string
 	deleted               bool
-	// links are the usernames by identity space, and externals the messenger's user ids.
+	// links are the usernames by identity space, externals the messenger's user ids and displays the display names
+	// of the links.
 	links     map[string]string
 	externals map[string]string
+	displays  map[string]string
 }
 
 // fakeQueries is the database of the package in memory.
@@ -76,7 +78,8 @@ func (f *fakeQueries) ListMentionUsers(_ context.Context, arg dbgen.ListMentionU
 			continue
 		}
 		out = append(out, dbgen.ListMentionUsersRow{ID: u.id, PublicID: u.publicID, Name: u.name, Login: u.login,
-			Username: u.links[arg.IdentitySpace], ExternalID: u.externals[arg.IdentitySpace]})
+			Username: u.links[arg.IdentitySpace], ExternalID: u.externals[arg.IdentitySpace],
+			DisplayName: u.displays[arg.IdentitySpace]})
 	}
 	return out, nil
 }
@@ -370,7 +373,7 @@ func TestNames(t *testing.T) {
 	conn := int64(3)
 	if IdentitySpace(TypeTelegram, &conn) != "telegram" || IdentitySpace(TypeMattermost, &conn) != "mattermost:3" ||
 		IdentitySpace(TypeMattermost, nil) != "" || IdentitySpace(TypeWebhook, nil) != "" ||
-		IdentitySpace(TypeBridge, &conn) != "" {
+		IdentitySpace(TypeBridge, &conn) != "bridge:3" || IdentitySpace(TypeBridge, nil) != "" {
 		t.Error("identity spaces")
 	}
 	f := newFake()
@@ -378,10 +381,11 @@ func TestNames(t *testing.T) {
 	if got, err := s.FooterNames(t.Context(), nil, 5); err != nil || got != nil {
 		t.Errorf("no links: %v %v", got, err)
 	}
-	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "mattermost:3", Username: "alice.mm"},
-		{IdentitySpace: "telegram", Username: "alice_tg"}}
+	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "bridge:4", Username: "Alice Smith"},
+		{IdentitySpace: "mattermost:3", Username: "alice.mm"}, {IdentitySpace: "telegram", Username: "alice_tg"}}
 	got, err := s.FooterNames(t.Context(), nil, 5)
-	if err != nil || got["telegram"] != "alice_tg" || got["mattermost:3"] != "alice.mm" {
+	if err != nil || got["telegram"] != "alice_tg" || got["mattermost:3"] != "alice.mm" ||
+		got["bridge:4"] != "Alice Smith" {
 		t.Errorf("footer names %v %v", got, err)
 	}
 	f.fail["ListFooterUsernames"] = errors.New("boom")
@@ -402,5 +406,35 @@ func TestResolveExternalID(t *testing.T) {
 		AlertGroupID: 5, Mentions: []string{KindNewAlerts}})
 	if err != nil || len(got) != 2 || got[0].User.ExternalID != "4242" || got[1].User.ExternalID != "" {
 		t.Fatalf("targets = %+v, %v", got, err)
+	}
+}
+
+// TestResolveBridge covers C-22.FR-16: a Mention through a Bridge Destination names a User with an Account link for its
+// Connection by the link's messenger user id and display name, a User linked through another Connection only — or not
+// at all — by the Muster display name, without a user id.
+func TestResolveBridge(t *testing.T) {
+	f := newFake()
+	f.users[0].links["bridge:5"] = "alice@example.org"
+	f.users[0].externals["bridge:5"] = "u-alice"
+	f.users[0].displays = map[string]string{"bridge:5": "Alice S."}
+	f.users[1].links = map[string]string{"bridge:6": "bob"}
+	f.users[1].externals = map[string]string{"bridge:6": "u-bob"}
+	f.users[1].displays = map[string]string{"bridge:6": "Bob J."}
+	s := newService(f)
+	set := nobody()
+	set[KindNewAlertGroup] = Setting{Everyone: EveryoneNone, UserIDs: []string{alice, bob}}
+	f.settings[50] = settingsJSON(t, set)
+	conn := int64(5)
+	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 50, DestinationType: TypeBridge,
+		ConnectionID: &conn, AlertGroupID: 5, Mentions: []string{KindNewAlertGroup}})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("targets = %+v, %v", got, err)
+	}
+	if a := got[0].User; a.ExternalID != "u-alice" || a.DisplayName != "Alice S." || a.Name != "Alice Smith" ||
+		a.Username != "alice@example.org" {
+		t.Errorf("a linked user %+v", a)
+	}
+	if b := got[1].User; b.ExternalID != "" || b.DisplayName != "" || b.Username != "" || b.Name != "Bob Jones" {
+		t.Errorf("a user linked through another connection %+v", b)
 	}
 }

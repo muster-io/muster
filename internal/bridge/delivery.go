@@ -91,9 +91,10 @@ func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duratio
 	return time.Duration(n) * time.Second, true
 }
 
-// Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call before its body. Its
-// outcome names the message, its link when the bridge sent a safe one, the Thread the answer named and whether the
-// answer was replayed; a truncated body is delivered.
+// Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call — their line before its body
+// and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space. Its outcome names
+// the message, its link when the bridge sent a safe one, the Thread the answer named and whether the answer was
+// replayed; a truncated body is delivered.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
@@ -103,7 +104,9 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	if m.Kind == messages.KindStorm {
 		kind = gen.StormSummary
 	}
-	in := postInput(kind, t.ChannelID, content(m, i, mentionLine(c)), c.Loudness == groups.Loud)
+	head, list := mentionsOf(c)
+	in := postInput(kind, t.ChannelID, content(withFooterIn(m, t.Conn.ID), i, head), c.Loudness == groups.Loud)
+	in.Mentions = list
 	out, r := t.Conn.Client.PostMessage(ctx, c.Class, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {
@@ -113,15 +116,15 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	return o
 }
 
-// Update replaces the message messageID with the whole envelope of m, Quiet and without Mentions. An edit refused as
-// gone only because of the message's age, with the reason edit_window_closed, is OutcomeEditWindowClosed, not a
-// deleted Root message (C-22.FR-8).
+// Update replaces the message messageID with the whole envelope of m, Quiet and without Mentions, its footer in the
+// Connection's identity space. An edit refused as gone only because of the message's age, with the reason
+// edit_window_closed, is OutcomeEditWindowClosed, not a deleted Root message (C-22.FR-8).
 func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
 		return *fail
 	}
-	_, r := t.Conn.Client.EditMessage(ctx, c.Class, messageID, content(m, i, nil))
+	_, r := t.Conn.Client.EditMessage(ctx, c.Class, messageID, content(withFooterIn(m, t.Conn.ID), i, nil))
 	o := r.Outcome()
 	switch {
 	case r.OK():
@@ -133,14 +136,15 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 }
 
 // Reply posts m into the Thread of root under its last thread_ref, null without one, with the Mentions of a Loud call
-// before its body; its outcome names the reply, the thread_ref the answer returned and whether it was replayed. A
+// as Publish sends them; its outcome names the reply, the thread_ref the answer returned and whether it was replayed. A
 // Reminder carries its buttons when the bridge has them.
 func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
 		return *fail
 	}
-	in := replyInput(root.ThreadAnchorID, m, i, mentionLine(c), c.Loudness == groups.Loud)
+	head, list := mentionsOf(c)
+	in := replyInput(root.ThreadAnchorID, withFooterIn(m, t.Conn.ID), i, head, list, c.Loudness == groups.Loud)
 	out, r := t.Conn.Client.ReplyInThread(ctx, c.Class, root.MessageID, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {

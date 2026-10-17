@@ -7,8 +7,8 @@
 // messenger "Fake chat", every feature on and both event delivery modes by default — checkChannel answers the
 // configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
 // their edits and Thread replies (messages.go), pollEvents and answerEvent serve the events of each bot (events.go),
-// and every request with any other token, none or a revoked one gets 401. Operations that no story has added yet
-// answer 501.
+// findUsers and sendDirectMessage serve Account links by code (people.go), and every request with any other token,
+// none or a revoked one gets 401. Operations that no story has added yet answer 501.
 //
 // Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
 // its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
@@ -20,20 +20,24 @@
 // message under the id e<N>: POST /_fake/press {message_id, user_id, button[, data][, occurred_at][, bot]} presses the
 // button of that label in the message's latest content, or a Thread reply's, with its data unchanged, or sends the data
 // given; POST /_fake/thread-message {message_id, user_id, text[, occurred_at]} writes in the Thread of a message; and
-// DELETE /_fake/messages/{id} deletes a message, which queues message_deleted when capabilities.deletion_events is on.
-// The people are alice (u-alice, "Alice Smith"), bob (u-bob, "Bob Brown") and vera (u-vera, "Vera Viewer").
+// DELETE /_fake/messages/{id} deletes a message, which queues message_deleted when capabilities.deletion_events is on;
+// and POST /_fake/link {user_id, token[, bot][, occurred_at]} sends an Account link token to the bot bot, 1 by default,
+// which queues account_link. The people are alice (u-alice, "Alice Smith", alice@example.org), bob (u-bob, "Bob Brown",
+// bob@example.org) and vera (u-vera, "Vera Viewer", vera@example.org).
 // pollEvents answers the events of the token's bot after the cursor, the index of the next event, and waits up to
-// wait seconds for one when there are none; answerEvent records each answer and where it was shown. With push set in
+// wait seconds for one when there are none; answerEvent records each answer and where it was shown — the answer to an
+// account_link event in the direct chat with the bot. With push set in
 // /_fake/config to {url, secret}, every later event of either bot is also posted to that one url, in order and signed
 // as Standard Webhooks does with the secret, retried with a back-off until it is answered 204, and dropped on 400;
 // push null stops pushing and drops what waits. Close stops the pusher.
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests, faults) and add GET and PUT
-// /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the event delivery modes, the
-// revoked tokens, a padding that makes info larger, the channels, which both bots share, replays and the push target;
-// GET /_fake/messages, the messages of both bots with their edits and replies, and DELETE /_fake/messages/{id}, which
-// deletes a message as a person would; the event endpoints above; GET /_fake/events, the events of both bots with their
-// bot; and GET /_fake/answers, the answers Muster made. The fake answers what it is configured to, also when that breaks
+// /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the link_url_template, the event
+// delivery modes, the revoked tokens, a padding that makes info larger, the channels, which both bots share, replays,
+// the push target and the people the bot cannot write to; GET /_fake/messages, the messages of both bots with their
+// edits and replies, and DELETE /_fake/messages/{id}, which deletes a message as a person would; the event endpoints
+// above; GET /_fake/events, the events of both bots with their bot; GET /_fake/answers, the answers Muster made; and
+// GET /_fake/direct-messages, the direct messages the bots sent. The fake answers what it is configured to, also when that breaks
 // the protocol, so that the checks of Muster can be tried against a broken bridge.
 package fakebridge
 
@@ -87,53 +91,63 @@ const defaultConfig = `{
   },
   "limits": {"max_body_length": 4000, "edit_max_age_seconds": null},
   "user_lookup": "login",
+  "link_url_template": null,
   "event_delivery": ["poll", "push"],
   "revoked": [],
   "info_padding_bytes": 0,
   "channels": {"ch-alerts": "alerts", "ch-alerts-prod": "alerts-prod", "ch-nobot": null},
   "replays": true,
-  "push": null
+  "push": null,
+  "dm_blocked": []
 }`
 
 // Config is the configuration of the fake, as GET and PUT /_fake/config show it. ProtocolVersion, Capabilities,
-// Limits, UserLookup and EventDelivery are served in info as they are; Revoked tokens get 401; InfoPaddingBytes adds a
+// Limits, UserLookup, LinkURLTemplate — left out while nil — and EventDelivery are served in info as they are, also when
+// they break the protocol; UserLookup is also the kind of handle findUsers searches by and the events carry; Revoked
+// tokens get 401; InfoPaddingBytes adds a
 // member "padding" of that many bytes to info, which the protocol allows and Muster ignores, to make it larger.
 // Channels are the channels checkChannel knows, by id: the name of one the bot can use, or null for one it cannot;
 // any other id is one it cannot use either; postMessage posts only to a channel the bot can use. With Replays, a
 // repeated Idempotency-Key answers the first result; without, every request posts again. Push is where the events of
-// both bots are pushed to, nil for nowhere.
+// both bots are pushed to, nil for nowhere. DMBlocked are the people, by external id, to whom the bots cannot send a
+// direct message.
 type Config struct {
 	ProtocolVersion  string                  `json:"protocol_version"`
 	Capabilities     gen.Capabilities        `json:"capabilities"`
 	Limits           gen.Limits              `json:"limits"`
 	UserLookup       gen.InfoUserLookup      `json:"user_lookup"`
+	LinkURLTemplate  *string                 `json:"link_url_template"`
 	EventDelivery    []gen.InfoEventDelivery `json:"event_delivery"`
 	Revoked          []string                `json:"revoked"`
 	InfoPaddingBytes int                     `json:"info_padding_bytes"`
 	Channels         map[string]*string      `json:"channels"`
 	Replays          bool                    `json:"replays"`
 	Push             *PushTarget             `json:"push"`
+	DMBlocked        []string                `json:"dm_blocked"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
 // channels, whose entries are added or replaced one by one: a name adds or renames a channel, null forbids it; push
-// null stops pushing.
+// null stops pushing, and link_url_template null removes the link.
 type configPatch struct {
 	ProtocolVersion  *string                       `json:"protocol_version"`
 	Capabilities     *gen.Capabilities             `json:"capabilities"`
 	Limits           *gen.Limits                   `json:"limits"`
 	UserLookup       *gen.InfoUserLookup           `json:"user_lookup"`
+	LinkURLTemplate  nullable.Nullable[string]     `json:"link_url_template"`
 	EventDelivery    *[]gen.InfoEventDelivery      `json:"event_delivery"`
 	Revoked          *[]string                     `json:"revoked"`
 	InfoPaddingBytes *int                          `json:"info_padding_bytes"`
 	Channels         map[string]*string            `json:"channels"`
 	Replays          *bool                         `json:"replays"`
 	Push             nullable.Nullable[PushTarget] `json:"push"`
+	DMBlocked        *[]string                     `json:"dm_blocked"`
 }
 
 // DefaultConfig is the configuration of a new fake: protocol version 1, every feature on, a body of up to 4000 code
-// points, edits that never expire, user lookup by login, both event delivery modes, the channels ChannelAlerts and
-// ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot, replays on and no push target.
+// points, edits that never expire, user lookup by login, no link_url_template, both event delivery modes, the channels
+// ChannelAlerts and ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot, replays on, no push target
+// and nobody the bot cannot write to.
 func DefaultConfig() Config {
 	var c Config
 	if err := json.Unmarshal([]byte(defaultConfig), &c); err != nil {
@@ -169,11 +183,12 @@ type Fake struct {
 	posted   int
 	replies  int
 	// events are the events of both bots in the order they happened, sent the events by id and eventIDs counts the
-	// ids given; answers are the answers Muster made.
-	events   []Event
-	sent     map[string]sent
-	eventIDs int
-	answers  []Answer
+	// ids given; answers are the answers Muster made; directMessages the direct messages the bots sent.
+	events         []Event
+	sent           map[string]sent
+	eventIDs       int
+	answers        []Answer
+	directMessages []DirectMessage
 	// toPush are the events waiting to be pushed; a pusher runs while pushing, in pushCtx, which pushStop ends and
 	// pushers waits for; pushWake makes it retry at once after the target changed; pushStopped once the fake closed.
 	toPush      []pending
@@ -201,6 +216,8 @@ func New() *Fake {
 	f.api.HandleFunc("POST /v1/messages/{message_id}/thread-replies", f.replyInThread)
 	f.api.HandleFunc("GET /v1/events", f.pollEvents)
 	f.api.HandleFunc("POST /v1/answers", f.answerEvent)
+	f.api.HandleFunc("GET /v1/users", f.findUsers)
+	f.api.HandleFunc("POST /v1/direct-messages", f.sendDirectMessage)
 	f.api.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
 			r.Method+" "+r.URL.Path+" is not implemented by the fake bridge")
@@ -221,6 +238,10 @@ func New() *Fake {
 	})
 	f.HandleControl("GET /_fake/answers", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Answers())
+	})
+	f.HandleControl("POST /_fake/link", f.postLink)
+	f.HandleControl("GET /_fake/direct-messages", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.DirectMessages())
 	})
 	return f
 }
@@ -275,10 +296,13 @@ func checkPadding(n int) error {
 }
 
 // normalize returns c with the nullable members it leaves out set to null, as the protocol requires them, where JSON
-// would show them as 0, and with no channels rather than none at all.
+// would show them as 0, and with no channels and nobody blocked rather than none at all.
 func normalize(c Config) Config {
 	if c.Channels == nil {
 		c.Channels = map[string]*string{}
+	}
+	if c.DMBlocked == nil {
+		c.DMBlocked = []string{}
 	}
 	if !c.Limits.EditMaxAgeSeconds.IsSpecified() {
 		c.Limits.EditMaxAgeSeconds = nullable.NewNullNullable[int]()
@@ -337,6 +361,15 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.UserLookup != nil {
 		c.UserLookup = *p.UserLookup
+	}
+	if p.LinkURLTemplate.IsSpecified() {
+		c.LinkURLTemplate = nil
+		if v, err := p.LinkURLTemplate.Get(); err == nil {
+			c.LinkURLTemplate = &v
+		}
+	}
+	if p.DMBlocked != nil {
+		c.DMBlocked = *p.DMBlocked
 	}
 	if p.EventDelivery != nil {
 		c.EventDelivery = *p.EventDelivery
@@ -410,6 +443,9 @@ func (f *Fake) getInfo(w http.ResponseWriter, _ *http.Request) {
 		Limits: c.Limits, UserLookup: c.UserLookup, EventDelivery: c.EventDelivery},
 		Padding: strings.Repeat("x", c.InfoPaddingBytes)}
 	i.Bridge.Name, i.Bridge.Version, i.Messenger.Name = BridgeName, BridgeVersion, MessengerName
+	if c.LinkURLTemplate != nil {
+		i.LinkUrlTemplate = nullable.NewNullableWithValue(*c.LinkURLTemplate)
+	}
 	fakeserver.WriteJSON(w, http.StatusOK, i)
 }
 

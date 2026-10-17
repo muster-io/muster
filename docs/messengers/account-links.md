@@ -1,13 +1,15 @@
 # Link your messenger accounts
 
-An **Account link** ties your Telegram account, or your account on a Mattermost server, to your Muster User. With it,
-a button you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger
-you pressed in — and Mentions and footers in the messenger name you.
+An **Account link** ties your Telegram account, your account on a Mattermost server, or your account on a messenger
+that Muster reaches through a [Bridge](bridge.md), to your Muster User. With it, a button you press under an Alert
+Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed in — and Mentions and
+footers in the messenger name you.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
-Mattermost Connection, since each Connection is its own server. You have at most one Telegram account and one account
-per Mattermost Connection; linking another one replaces the earlier link, and linking the same account again keeps
-its link and updates its username.
+Mattermost Connection, since each Connection is its own server, and so does an account reached through a Bridge, per
+Bridge Connection. You have at most one Telegram account and one account per Mattermost or Bridge Connection; linking
+another one replaces the earlier link, and linking the same account again keeps its link and updates its username and
+name.
 
 ## Why links start in your profile
 
@@ -47,6 +49,51 @@ know, a bot account and a deactivated account cannot be linked. An account that 
 
 The bot must be allowed to open direct messages with you; see [Direct messages](mattermost.md#direct-messages).
 
+## Link through a Bridge
+
+A Bridge Connection reaches a messenger through a bridge, which tells Muster in its info what it can do for Account
+links. Every bridge takes a **token** that you send to its bot. A bridge that can look people up and start a direct
+chat with them also offers a **code** that its bot sends you, as Mattermost does. Your profile offers what the
+Connection's bridge declares.
+
+Once linked, a Mention of you in a message of that Connection names you by the name the bridge reported for your
+account, which a bridge with native mentions turns into its messenger's mention, and the footer of a message you
+acknowledged, snoozed or resolved names you by that name. Without a link, a Mention is your Muster name as plain text,
+which notifies nobody.
+
+### By a token sent to the bot
+
+1. In your profile, open **Messenger accounts**, choose the Bridge Connection and select **Link**.
+2. Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
+   as well. Within 10 minutes, send the token to the bot of that Connection in a direct message, or open the link,
+   which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.
+3. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
+   and the handle the bridge reported for your account.
+
+If the bot answers "This link is invalid or expired. Start again from your Muster profile.", the token was used
+already, expired, was started for another Connection — another bridge, or another bot of the same bridge — or was
+never issued: start again from your profile. If it answers "This account is linked to another user. Its owner or an
+admin can unlink it.", that account is linked to someone else; nothing changed.
+
+### By a code by direct message
+
+The code is offered only when the bridge declares how it finds people — its **lookup kind**, one of email address,
+login, username or user id — and that its bot can start a direct chat. Your profile names the field after that kind:
+**Email**, **Login**, **Username** or **User id**.
+
+1. In your profile, choose the Bridge Connection, enter your email address, login, username or user id in the
+   messenger, as the field asks, and select **Send code**.
+2. The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
+   code. If you did not ask for it, ignore it.
+3. Type the code into your profile within 10 minutes; capital and small letters are the same. The link is made at
+   once, and the bot sends no confirmation.
+
+If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
+the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
+The limits are those of Mattermost: 5 attempts per code, a new request replaces your earlier one, 5 code requests an
+hour for you and at most 3 codes an hour for one account, whoever asks. An account that is linked to another User is
+refused.
+
 ## Several Connections of one messenger
 
 An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
@@ -55,6 +102,9 @@ Telegram bot. What a link covers differs by messenger:
 - **Mattermost links are per Connection.** Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   **Link Mattermost** with each Connection. Your profile lists one row per Connection.
+- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections
+  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
+  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
 - **A Telegram link is valid for all Telegram bots.** Telegram has one Identity space, so the link you make through any
   Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
   "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.
@@ -78,7 +128,7 @@ from the web session only, as above. They cannot create a link for someone else.
 
 | Who pressed | What happens | The private answer |
 |---|---|---|
-| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost; the link goes to your profile and carries no secret |
+| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret |
 | A linked Viewer | Nothing changes | "You are not permitted to do this" |
 | A linked User who is disabled | Nothing changes | "Your Muster account is disabled" |
 | A linked Responder or Admin | The Command runs as that User | "Done: {command}", or why it was refused |

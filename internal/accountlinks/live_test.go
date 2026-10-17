@@ -28,7 +28,9 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 func TestMain(m *testing.M) {
@@ -821,6 +823,42 @@ func TestLiveBridgeLinks(t *testing.T) {
 		mine, err := svc.List(ctx, users["bob"])
 		if err != nil || len(mine) != 1 || *mine[0].DisplayName != "Bob Brown" {
 			t.Errorf("List = %+v, %v", mine, err)
+		}
+		// The footer of an Alert Group bob acknowledged names him in the identity space of the Connection by the display
+		// name of his link, also without a username, and by its username without a display name (C-22.FR-16).
+		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+		var group int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+			group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+			integration_ids, status, severity_level, urgent, owner_user_id, acknowledged_at, created_at,
+			last_changed_at)
+			SELECT $1, 'AGAAAAAAAAAAF1', 1, r.id, '{alertname}', '{}', sha256('footer'::bytea), 'Latency', '{}', '{}',
+				'{}', 'acknowledged', 'critical', false, $2, $3, $3, $3
+			FROM routes r WHERE r.org_id = $1 AND r.is_default RETURNING id`, org.ID, users["bob"], t0).Scan(
+			&group); err != nil {
+			t.Fatal(err)
+		}
+		space := accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"])
+		for _, step := range []struct {
+			set, want string
+		}{
+			{"", "Bob Brown"},
+			{"username = NULL", "Bob Brown"},
+			{"display_name = NULL, username = 'bob@example.org'", "bob@example.org"},
+			{"display_name = 'Bob Brown'", "Bob Brown"},
+		} {
+			if step.set != "" {
+				if _, err := d.Pool.Exec(ctx, `UPDATE account_links SET `+step.set+` WHERE org_id = $1 AND
+					user_id = $2 AND messenger = 'bridge'`, org.ID, users["bob"]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			names, err := mentions.New(org.ID, d.Pool).FooterNames(ctx, nil, group)
+			if err != nil || len(names) != 1 || names[space] != step.want {
+				t.Errorf("footer names with %q = %v, %v", step.set, names, err)
+			}
 		}
 		if u, err := svc.Lookup(ctx, accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"]), "u-bob"); err != nil ||
 			u.ID != users["bob"] {

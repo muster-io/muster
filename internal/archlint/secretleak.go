@@ -30,6 +30,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/accountlinks"
 	alinkdb "github.com/muster-io/muster/internal/accountlinks/dbgen"
@@ -39,6 +40,7 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/bridge"
+	bgen "github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/cli"
 	"github.com/muster-io/muster/internal/clock"
@@ -115,6 +117,7 @@ var registry = []Probe{
 	{Name: "bridge_events", Run: probeBridgeEvents},
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
+	{Name: "bridge_links", Run: probeBridgeLinks},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
 }
@@ -2831,11 +2834,13 @@ func (p *probeMMConn) Connection(context.Context, string) (mattermost.Connection
 	return p.conn, nil
 }
 
-// probeLinkStore is the Account links of probeAccountLinks in memory: the User 1, the Telegram Connection 1 without a
-// stored bot username and the Mattermost Connection 2, the link requests and the links.
+// probeLinkStore is the Account links of probeAccountLinks and probeBridgeLinks in memory: the User 1, the Telegram
+// Connection 1 without a stored bot username and the Mattermost Connection 2, or the Bridge Connection bridge, the
+// link requests and the links.
 type probeLinkStore struct {
 	accountlinks.Queries
-	reqs []probeLinkRequest
+	reqs   []probeLinkRequest
+	bridge *alinkdb.GetLinkConnectionRow
 }
 
 type probeLinkRequest struct {
@@ -2843,7 +2848,10 @@ type probeLinkRequest struct {
 	publicID  string
 	messenger string
 	conn      int64
+	method    pgtype.Text
 	target    pgtype.Text
+	username  pgtype.Text
+	display   pgtype.Text
 	created   time.Time
 }
 
@@ -2857,6 +2865,12 @@ func (s *probeLinkStore) Savepoint(_ context.Context, f func(accountlinks.Querie
 
 func (s *probeLinkStore) GetLinkConnection(_ context.Context, a alinkdb.GetLinkConnectionParams) (
 	alinkdb.GetLinkConnectionRow, error) {
+	if s.bridge != nil {
+		if a.PublicID == s.bridge.PublicID {
+			return *s.bridge, nil
+		}
+		return alinkdb.GetLinkConnectionRow{}, pgx.ErrNoRows
+	}
 	switch a.PublicID {
 	case "CNAAAAAAAAAAA1":
 		return alinkdb.GetLinkConnectionRow{ID: 1, PublicID: a.PublicID, Type: "telegram", Name: "tg"}, nil
@@ -2874,7 +2888,8 @@ func (s *probeLinkStore) InsertLinkRequest(_ context.Context, a alinkdb.InsertLi
 	id := int64(len(s.reqs) + 1)
 	s.reqs = append(s.reqs, probeLinkRequest{row: alinkdb.LockLinkRequestRow{ID: id, SecretHash: a.SecretHash,
 		ExpiresAt: a.ExpiresAt}, publicID: a.PublicID, messenger: a.Messenger, conn: a.ConnectionID,
-		target: a.TargetExternalID, created: a.CreatedAt})
+		method: a.Method, target: a.TargetExternalID, username: a.TargetUsername, display: a.TargetDisplayName,
+		created: a.CreatedAt})
 	return id, nil
 }
 
@@ -2895,12 +2910,48 @@ func (s *probeLinkStore) GetTelegramRequestByHash(_ context.Context, a alinkdb.G
 func (s *probeLinkStore) GetLinkRequest(_ context.Context, a alinkdb.GetLinkRequestParams) (alinkdb.GetLinkRequestRow,
 	error) {
 	for _, r := range s.reqs {
-		if r.publicID == a.PublicID {
-			return alinkdb.GetLinkRequestRow{ID: r.row.ID, UserID: 1, Messenger: r.messenger, ConnectionID: r.conn,
-				TargetExternalID: r.target, ConnectionPublicID: "CNAAAAAAAAAAA2", ConnectionName: "mm"}, nil
+		if r.publicID != a.PublicID {
+			continue
 		}
+		out := alinkdb.GetLinkRequestRow{ID: r.row.ID, UserID: 1, Messenger: r.messenger, ConnectionID: r.conn,
+			Method: r.method, TargetExternalID: r.target, TargetUsername: r.username, TargetDisplayName: r.display,
+			ConnectionPublicID: "CNAAAAAAAAAAA2", ConnectionName: "mm"}
+		if s.bridge != nil {
+			out.ConnectionPublicID, out.ConnectionName = s.bridge.PublicID, s.bridge.Name
+		}
+		return out, nil
 	}
 	return alinkdb.GetLinkRequestRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) GetBridgeTokenRequestByHash(_ context.Context, a alinkdb.GetBridgeTokenRequestByHashParams) (
+	alinkdb.GetBridgeTokenRequestByHashRow, error) {
+	for _, r := range s.reqs {
+		if r.messenger == "bridge" && r.method.String == accountlinks.MethodToken &&
+			bytes.Equal(r.row.SecretHash, a.SecretHash) {
+			return alinkdb.GetBridgeTokenRequestByHashRow{ID: r.row.ID, UserID: 1, ConnectionID: r.conn,
+				ExpiresAt: r.row.ExpiresAt, ConsumedAt: r.row.ConsumedAt, VoidedAt: r.row.VoidedAt,
+				UserPublicID: "SRAAAAAAAAAAA1", ConnectionPublicID: s.bridge.PublicID}, nil
+		}
+	}
+	return alinkdb.GetBridgeTokenRequestByHashRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) CountUserBridgeCodeRequests(context.Context, alinkdb.CountUserBridgeCodeRequestsParams) (
+	alinkdb.CountUserBridgeCodeRequestsRow, error) {
+	return alinkdb.CountUserBridgeCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) CountTargetBridgeCodeRequests(context.Context, alinkdb.CountTargetBridgeCodeRequestsParams) (
+	alinkdb.CountTargetBridgeCodeRequestsRow, error) {
+	return alinkdb.CountTargetBridgeCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) VoidPendingBridgeCodeRequests(_ context.Context,
+	a alinkdb.VoidPendingBridgeCodeRequestsParams) (int64, error) {
+	return s.void(func(r probeLinkRequest) bool {
+		return r.messenger == "bridge" && r.method.String == accountlinks.MethodCode
+	}, a.Now), nil
 }
 
 func (s *probeLinkStore) LockLinkRequest(_ context.Context, a alinkdb.LockLinkRequestParams) (
@@ -2980,6 +3031,245 @@ func (s *probeLinkStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryP
 }
 
 func (s *probeLinkStore) Notify(context.Context, db.Hint) error { return nil }
+
+// probeBridgeLinks pushes the secrets through Account links of a Bridge Connection (C-22.FR-15): the first as the
+// Connection's bot token and the random bytes of the first link token, which the token carries in base64url; the second
+// as the random bytes of a token no one started; the third as the code that confirms a link through the API, wrong
+// until its request is void. Through the API two tokens are started and code requests made, then confirmed; through
+// account_link events the first token links, is sent again, the second expires, and the unknown token is refused. The
+// stand-in bridge refuses its first findUsers with the query and the Authorization header in its problem, its first
+// two direct messages with their bodies, which hold the codes, and every answer to an event with the request, the
+// Authorization header and the token of the event it answers, as a bridge may repeat what it was sent. Neither the log, the errors nor the API's answers, apart
+// from those that start a token, may carry them; the tokens and codes that come from crypto/rand are not planted
+// secrets, so the probe looks for them itself and reports a leak as the first secret.
+func probeBridgeLinks(ctx context.Context, secrets []string, log io.Writer) error {
+	var seen bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &seen), logging.LevelInfo)
+	now := time.Now().UTC()
+	business := clock.NewManual(now)
+	clocks := clock.Clocks{Business: business, Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	bot := &probeBridgeBot{}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: bot}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
+		Network:     mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	c, err := svc.Create(ctx, connections.Requester{Actor: audit.System, Transport: audit.TransportUI},
+		connections.Input{Type: connections.TypeBridge, Name: "probe", BridgeBaseURL: "http://" + ln.Addr().String(),
+			EventDelivery: connections.EventDeliveryPoll, BotToken: keyring.Replace(logging.Secret(secrets[0])),
+			Limiter: connections.Limiter{Limit: 10, PerSeconds: 1}, Proxy: proxyconf.Input{Enabled: false}})
+	if err != nil {
+		return err
+	}
+	conn, err := svc.BridgeConn(ctx, c.PublicID)
+	if err != nil {
+		return err
+	}
+	path := deliverytest.Unlimited(1, clocks)
+	random := append([]byte(secrets[0]), make([]byte, 32)...)[:32]
+	links := accountlinks.New(accountlinks.Config{OrgID: 1, Store: &probeLinkStore{bridge: &alinkdb.GetLinkConnectionRow{
+		ID: conn.ID, PublicID: conn.PublicID, Type: "bridge", Name: "probe",
+		LinkUrlTemplate: "http://127.0.0.1/bot?start={token}"}}, Audit: audit.NewWriter(logger, business),
+		Business: business, Log: logger, Bridge: bridge.LinkBots{Conns: svc, Path: path},
+		Random: io.MultiReader(bytes.NewReader(random), rand.Reader)})
+	sess := auth.Session{ID: 1, PublicID: "SNAAAAAAAAAAA1", State: auth.StateActive,
+		User: auth.Principal{ID: 1, PublicID: "SRAAAAAAAAAAA1", Name: "Bob", Role: auth.RoleResponder}}
+	h, err := api.New(api.Config{Sessions: probeSessions{sess: sess}, AccountLinks: links, Log: logger,
+		Real: clock.Real{}})
+	if err != nil {
+		return err
+	}
+	send := func(path, body string) string {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+		if err != nil {
+			return err.Error()
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cookie", auth.CookieName+"=probe")
+		r.Header.Set(auth.CSRFHeader, "probe")
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		return rec.body.String()
+	}
+	const start = "/api/v1/me/account-links/bridge"
+	connBody := `{"connection_id":"` + conn.PublicID + `"}`
+	// A started token goes to the person, so its answer is left out of what must not carry a secret.
+	var started []string
+	for range 2 {
+		var st struct {
+			Token string `json:"token"`
+		}
+		_ = json.Unmarshal([]byte(send(start, connBody)), &st)
+		started = append(started, st.Token)
+	}
+	unknown := base64.RawURLEncoding.EncodeToString(append([]byte(secrets[1]), make([]byte, 32)...)[:32])
+	events := &bridge.Events{Store: svc, Bindings: probeBridgeBindings{}, Links: links, Linker: links,
+		Commands: probeCommands{}, Keys: k, Path: path, Budget: 5 * time.Second, PublicURL: "http://localhost:8080",
+		Clocks: clocks, Log: logger}
+	var errs []error
+	for i, token := range []string{started[0], started[0], unknown, "", started[1]} {
+		if token == "" {
+			business.Advance(accountlinks.BridgeTokenTTL)
+			continue
+		}
+		bot.carries(token)
+		errs = append(errs, events.Handle(ctx, conn, bridge.Event{ID: "ev-" + strconv.Itoa(i),
+			Type: bridge.TypeAccountLink, OccurredAt: time.Now().UTC(), Token: token,
+			User: bgen.Person{ExternalId: "u-bob", DisplayName: "Bob Brown",
+				Handle: nullable.NewNullableWithValue("bob@example.org")}}))
+	}
+	codes, confirm := start+"/codes", start+"/confirmation"
+	handle := `{"connection_id":"` + conn.PublicID + `","handle":"bob@example.org"}`
+	var answers []string
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	for range 3 {
+		answers = append(answers, send(codes, handle))
+	}
+	for range 2 {
+		a := send(codes, handle)
+		answers = append(answers, a)
+		_ = json.Unmarshal([]byte(a), &req)
+		for _, code := range []string{secrets[2], secrets[2], secrets[2], secrets[2], secrets[2], bot.code()} {
+			answers = append(answers, send(confirm, `{"request_id":"`+req.RequestID+`","code":"`+code+`"}`))
+		}
+	}
+	a := send(codes, handle)
+	_ = json.Unmarshal([]byte(a), &req)
+	linked := send(confirm, `{"request_id":"`+req.RequestID+`","code":"`+bot.code()+`"}`)
+	answers = append(answers, a, linked)
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	refused, sent, answered, searched := bot.counts()
+	if refused < 2 || sent < 3 || answered < 4 || searched < 2 || !strings.Contains(linked, `"messenger":"bridge"`) {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d refused and %d sent direct messages, %d answers, %d "+
+			"lookups, the last confirmation linked: %v", refused, sent, answered, searched,
+			strings.Contains(linked, `"messenger":"bridge"`))})
+	}
+	text := seen.String() + strings.Join(answers, "") + errors.Join(errs...).Error()
+	for _, s := range append(bot.allCodes(), started...) {
+		if s != "" && strings.Contains(text, s) {
+			errs = append(errs, errors.New("a link token or code leaked: "+secrets[0]))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// probeBridgeBot is the stand-in bridge of probeBridgeLinks: its info offers a code by email through direct messages
+// the bot starts and a link_url_template; it refuses the first findUsers with the query and the Authorization header
+// in its problem and then finds bob; it refuses the first direct message as forbidden and the second as transient,
+// with the request in its problem, and keeps the codes of the others; and it refuses every answer to an event as
+// forbidden with the request, the Authorization header and the token of the event in its problem.
+type probeBridgeBot struct {
+	mu       sync.Mutex
+	token    string
+	searched int
+	refused  []string
+	sent     []string
+	answered int
+}
+
+// carries records the token of the event to be answered next, which the stand-in repeats in its refusals.
+func (p *probeBridgeBot) carries(token string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.token = token
+}
+
+// code is the code of the last direct message sent.
+func (p *probeBridgeBot) code() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.sent) == 0 {
+		return ""
+	}
+	return p.sent[len(p.sent)-1]
+}
+
+// allCodes are the codes of every direct message, refused or sent.
+func (p *probeBridgeBot) allCodes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append(slices.Clone(p.refused), p.sent...)
+}
+
+func (p *probeBridgeBot) counts() (refused, sent, answered, searched int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.refused), len(p.sent), p.answered, p.searched
+}
+
+func (p *probeBridgeBot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	problem := func(status int, class string) {
+		echo := "refused " + r.URL.RawQuery + " " + string(body) + " " + r.Header.Get("Authorization") + " " +
+			p.token
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "title": echo, "detail": echo, "class": class})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	switch r.URL.Path {
+	case "/v1/info":
+		_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+			`"messenger":{"name":"probe"},"capabilities":{"direct_messages":{"bot_can_start":true}},`+
+			`"limits":{"max_body_length":4000,"edit_max_age_seconds":null},"user_lookup":"email",`+
+			`"event_delivery":["poll"],"link_url_template":"http://127.0.0.1/bot?start={token}"}`)
+	case "/v1/users":
+		if p.searched++; p.searched == 1 {
+			problem(http.StatusInternalServerError, "transient")
+			return
+		}
+		_, _ = io.WriteString(w, `{"items":[{"external_id":"u-bob","display_name":"Bob Brown",`+
+			`"handle":"bob@example.org"}]}`)
+	case "/v1/direct-messages":
+		code := probeCodeRe.FindString(string(body))
+		switch len(p.refused) {
+		case 0:
+			p.refused = append(p.refused, code)
+			problem(http.StatusForbidden, "forbidden")
+		case 1:
+			p.refused = append(p.refused, code)
+			problem(http.StatusInternalServerError, "transient")
+		default:
+			p.sent = append(p.sent, code)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"message_id":"dm","replayed":false}`)
+		}
+	case "/v1/answers":
+		p.answered++
+		problem(http.StatusForbidden, "forbidden")
+	default:
+		problem(http.StatusNotFound, "gone")
+	}
+}
 
 // probeOutgoingHeartbeat pushes the secrets through the outgoing heartbeat (C-19.FR-7): the first in the path and the
 // second in the query of its URL, set through the organization resource, whose Audit log diff is returned; the third

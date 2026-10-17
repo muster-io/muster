@@ -12,19 +12,19 @@ the event.
 
 INFO · fields: `messenger`, `connection`, `user`, `error` · C-18
 
-A messenger account was linked to a User, through /start with a deep-link token in Telegram or a code from the bot's direct message in Mattermost, and the account-links hint went to the User: messenger is telegram or mattermost, connection the public_id of the Connection, user the public_id of the User. error, when present, says why the bot's confirmation was not sent; the link stays. Never carries the token or the code.
+A messenger account was linked to a User, through /start with a deep-link token in Telegram, a code from the bot's direct message in Mattermost, or through a Bridge an account_link event with a token sent to the bot or a code from the bot's direct message, and the account-links hint went to the User: messenger is telegram, mattermost or bridge, connection the public_id of the Connection, user the public_id of the User. error, when present, says why the bot's confirmation or the answer to the account_link event was not sent; the link stays. Never carries the token or the code.
 
 ### `account_link_rejected`
 
 INFO · fields: `messenger`, `connection`, `reason`, `error` · C-18
 
-A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram or mattermost, connection the public_id of the Connection, reason token_unknown, token_used, token_expired or wrong_connection for a /start, wrong_code, token_used or token_expired for a Mattermost code, or conflict for an account linked to another User. error, when present, says why the bot's answer was not sent. Never carries the token or the code.
+A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram, mattermost or bridge, connection the public_id of the Connection, reason token_unknown, token_used, token_expired or wrong_connection for a /start or a Bridge account_link event, wrong_code, token_used or token_expired for a Mattermost or Bridge code, or conflict for an account linked to another User. error, when present, says why the bot's answer was not sent. Never carries the token or the code.
 
 ### `account_link_unlinked`
 
 INFO · fields: `messenger`, `connection`, `user`, `reason` · C-18
 
-An Account link was removed and recorded as account_link.unlink: messenger is telegram or mattermost, connection the public_id of the Connection it was made through, user the public_id of its User, reason removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity space took its place, or user_deleted when its User was deleted.
+An Account link was removed and recorded as account_link.unlink: messenger is telegram, mattermost or bridge, connection the public_id of the Connection it was made through, user the public_id of its User, reason removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity space took its place, or user_deleted when its User was deleted.
 
 ### `active_key_not_held`
 

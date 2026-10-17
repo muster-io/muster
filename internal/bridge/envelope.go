@@ -4,9 +4,11 @@
 package bridge
 
 import (
+	"cmp"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/oapi-codegen/nullable"
@@ -26,7 +28,9 @@ import (
 // and the body, the rest of the message in CommonMark within `limits.max_body_length` of the Connection's info. The
 // body is shortened as C-12.FR-11 says, keeping its line of links, its notices and its footer; without `buttons`, a
 // bridge that forwards Thread messages gets the commands line at the end of a Root message (messages.CommandsLine).
-// Template output keeps its trusted Mention tokens as text that notifies nobody, until the Mention markers of S-076.
+// The Mentions of a Loud message are its first line, with a Mention marker for each User linked through the
+// Connection, listed in `mentions` (C-22.FR-16); its footer names the user as the Connection's identity space does.
+// Template output keeps its trusted Mention tokens as text that notifies nobody.
 
 // MinBodyLength is the protocol's floor of limits.max_body_length, in code points: the body limit when info has none.
 const MinBodyLength = 500
@@ -46,6 +50,9 @@ const ellipsis = "…"
 
 // zeroWidthSpace follows the `@` of a Mention token written as text, so that no messenger reads a Mention in it.
 const zeroWidthSpace = "\u200b"
+
+// markerScheme is the link scheme of a Mention marker, `[@Display Name](muster-mention:<ref>)`.
+const markerScheme = "muster-mention:"
 
 // content is the envelope of m for a bridge whose info is i, with head — the mention line of a Loud call, the mark of a
 // test message — before its body.
@@ -69,43 +76,75 @@ func content(m messages.Message, i Info, head []string) gen.MessageContent {
 	return c
 }
 
-// postInput is the envelope c posted with postMessage as a message of kind to channel; notify is a Loud message. Its
-// Mentions stay empty until S-076.
+// postInput is the envelope c posted with postMessage as a message of kind to channel, without Mentions; notify is a
+// Loud message.
 func postInput(kind gen.MessageKind, channel string, c gen.MessageContent, notify bool) gen.MessageInput {
 	return gen.MessageInput{Kind: kind, ChannelId: channel, Status: c.Status, Color: c.Color, Emoji: c.Emoji,
 		Title: c.Title, Link: c.Link, Body: c.Body, Buttons: c.Buttons, Mentions: []gen.Mention{}, Notify: notify}
 }
 
 // replyInput is the Thread reply m for a bridge whose info is i, under the Thread threadRef, null when it is empty,
-// with head before its body; notify is a Loud reply.
-func replyInput(threadRef string, m messages.Message, i Info, head []string, notify bool) gen.ThreadReplyInput {
+// with head — its Mention line — before its body and the Mentions its markers name; notify is a Loud reply.
+func replyInput(threadRef string, m messages.Message, i Info, head []string, list []gen.Mention,
+	notify bool) gen.ThreadReplyInput {
 	ref := nullable.NewNullNullable[string]()
 	if threadRef != "" {
 		ref = nullable.NewNullableWithValue(threadRef)
 	}
+	if list == nil {
+		list = []gen.Mention{}
+	}
 	return gen.ThreadReplyInput{ThreadRef: ref, Body: bodyOf(m, i, head), Buttons: buttonsOf(m, i),
-		Mentions: []gen.Mention{}, Notify: notify}
+		Mentions: list, Notify: notify}
 }
 
-// mentionLine is the Mentions of a Loud call as a line: the display names of the Users it targets, escaped and
-// separated by spaces, which notify nobody until the Mention markers of S-076; a Quiet call has none.
-func mentionLine(c delivery.Call) []string {
+// mentionsOf are the Mentions of a Loud call (C-22.FR-16) as the line that starts the body and the envelope's
+// `mentions`: a User with an Account link for the Destination's Connection is a marker `[@name](muster-mention:mN)`,
+// whose entry carries the link's external id and display name — the Muster display name when the link has none — and
+// any other User is their display name as text, which mentions nobody; in the order of the targets, each once. A Quiet
+// call has neither, and the list is never nil.
+func mentionsOf(c delivery.Call) ([]string, []gen.Mention) {
+	list := []gen.Mention{}
 	if c.Loudness != groups.Loud {
-		return nil
+		return nil, list
 	}
 	var names []string
 	for _, t := range c.Targets {
 		if t.Kind != mentions.TargetUser || t.User == nil {
 			continue
 		}
-		if n := messages.EscapeCommonMark(messages.Value(t.User.Name)); n != "" && !slices.Contains(names, n) {
-			names = append(names, n)
+		u := t.User
+		name := cutEnd(cmp.Or(oneLine(u.DisplayName), oneLine(u.Name)), maxDisplayName)
+		if u.ExternalID == "" || utf8.RuneCountInString(u.ExternalID) > maxID || name == "" {
+			if n := messages.EscapeCommonMark(messages.Value(oneLine(u.Name))); n != "" && !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+			continue
 		}
+		if slices.ContainsFunc(list, func(m gen.Mention) bool { return m.ExternalId == u.ExternalID }) {
+			continue
+		}
+		ref := "m" + strconv.Itoa(len(list)+1)
+		list = append(list, gen.Mention{Ref: ref, ExternalId: u.ExternalID, DisplayName: name})
+		names = append(names, "[@"+messages.EscapeCommonMark(messages.Value(name))+"]("+markerScheme+ref+")")
 	}
 	if len(names) == 0 {
-		return nil
+		return nil, list
 	}
-	return []string{strings.Join(names, " ")}
+	return []string{strings.Join(names, " ")}, list
+}
+
+// oneLine is s on one line: every run of white space and control characters a single space, trimmed.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }),
+		" ")
+}
+
+// withFooterIn is m with the footer of the identity space of the Bridge Connection conn, which names the user by the
+// display name of their Account link there (C-22.FR-16), otherwise by the Muster display name.
+func withFooterIn(m messages.Message, conn int64) messages.Message {
+	m.Footer = m.FooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn))
+	return m
 }
 
 // bodyLimit is limits.max_body_length of i, MinBodyLength without one.
@@ -136,9 +175,9 @@ func bodyOf(m messages.Message, i Info, head []string) string {
 	return cutEnd(strings.Join(parts, blockBreak), limit)
 }
 
-// laidOut is m as the body lays it out: without buttons, with its footer in no identity space until the Account links
-// of S-076, and the trusted Mention tokens of its template output as text that notifies nobody. Its heading stays, so
-// that shortening links the full list of Alerts to the Alert Group page.
+// laidOut is m as the body lays it out: without buttons, with the footer withFooterIn chose, and the trusted Mention
+// tokens of its template output as text that notifies nobody. Its heading stays, so that shortening links the full
+// list of Alerts to the Alert Group page.
 func laidOut(m messages.Message) messages.Message {
 	cp := m
 	cp.Buttons, cp.Footers = nil, nil
