@@ -72,20 +72,32 @@ issue: 236
   | `thread_ref` | a second reply with the first one's `thread_ref` | `201` | never |
   | `forbidden_channel` | `checkChannel` of `--forbidden-channel` | `forbidden` | no `--forbidden-channel` |
   | `user_lookup` | `findUsers` with `--handle` | one person | `user_lookup` `none`, or no `--handle` |
-  | `direct_message` | `sendDirectMessage` to that person | `201` | no `direct_messages`, `bot_can_start` false, or no person found |
+  | `direct_message` | `sendDirectMessage` to that person | `201` | no `direct_messages`; `bot_can_start` false; `user_lookup` `none`; no `--handle`; no person found |
   | `delete` | `deleteMessage` of the `post` message | `204` | no `delete` |
   | `poll` | `pollEvents` with `wait` 0, then again with its `next_cursor` | both answers match the protocol | no `poll` |
   | `press` | waits for a press of the `buttons` message, by polling when offered, else at the push listener | a `press` event with its data unchanged | no `buttons`; `--no-interactive` |
-  | `push` | checks what the push listener received during `press` | a signed event — the press, under the id `press` saw — with a valid signature within `bridge.push_tolerance` | no `push`; `--no-interactive` |
+  | `push` | checks what the push listener received during `press` | a signed event — the press, under the id `press` saw — with a valid signature within `bridge.push_tolerance` | no `push`; no `buttons`; `--no-interactive` |
   | `answer` | `answerEvent` for the event of `press` or `push`, else for an unknown event id | `200` for an event, `gone` for the unknown id | never |
 
-  In an interactive run against a bridge that offers `push`, the check opens its push listener after `poll` and prints
-  one line `PUSH <url> <secret>` with a secret it generates, or `PUSH <url>` when `--push-secret-file` gives the secret,
-  so that the bridge can be pointed at it before anything is pressed. Before each wait for a person, which lasts up to
-  five minutes, it prints one line `WAIT <step>: <what to do>` that names the message by its `message_id`, so that a
-  script can act as the person. The check reuses the client of S-073 through the outbound package, with a policy that
-  allows loopback and private addresses, because the person running it chose the target; it needs no database, master
-  key or configuration file, and nothing in it writes to the file system, so it runs from the image as
+  A step that needs what an earlier step failed to produce is not tried and prints `FAIL <step>: the <earlier> step
+  failed`, as `edit` does after a failed `post`. Otherwise a step is skipped only for a feature the bridge does not
+  offer, a flag not given or `--no-interactive`, and `direct_message` also when `user_lookup` found no person, whose own
+  line says why; the first reason of its row that applies is printed.
+
+  Only in an interactive run against a bridge that offers `push`, and once the `buttons` step posted its message, the
+  check opens its push listener after `poll` and prints one line `PUSH <url> <secret>` with a secret it generates, or
+  `PUSH <url>` when `--push-secret-file` gives the secret, so that the bridge can be pointed at it before anything is
+  pressed. Before each wait for a person, which lasts up to five minutes, it prints one line that names the message by
+  its `message_id`, so that a script can act as the person:
+  `WAIT press: press a button of the message "muster bridge check: buttons" within 5m0s, message_id <id>`, where the id
+  is everything after `, message_id `. A bridge that only pushes is pressed at the push listener; once the listener has
+  refused a push, the wait ends 30 seconds later unless a valid press came, and `press` fails with
+  `no valid press of message <id> within 30s of the first refused push`, followed by how many pushes the listener
+  refused and why it refused the last.
+
+  The check reuses the client of S-073 through the outbound package, with a policy that allows loopback and private
+  addresses, because the person running it chose the target; it needs no database, master key or configuration file,
+  and nothing in it writes to the file system, so it runs from the image as
   `docker run --network host -v <token file>:/token:ro ghcr.io/muster-io/muster:edge bridge check …`, which the
   libraries' CI does. It never changes the bridge's configuration.
 - **The CLI exception** (ADR-0017, ADR-0016): the conformance check posts, edits and replies through the protocol

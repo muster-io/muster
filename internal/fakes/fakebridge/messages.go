@@ -24,8 +24,8 @@ const MessageGone = "The message no longer exists."
 
 // Message is a message a bot posted, as GET /_fake/messages lists it: its id, the bot that posted it — 1 for Token, 2
 // for SecondToken, never the token — its channel, the envelope as Muster sent it, each edit as the whole envelope
-// Muster sent, its Thread replies, the link the fake answered, whether a person deleted it, and whether its body was
-// longer than limits.max_body_length, which the fake answers as truncated.
+// Muster sent, its Thread replies, the link the fake answered, whether it was deleted, by a person or by its bot, and
+// whether its body was longer than limits.max_body_length, which the fake answers as truncated.
 type Message struct {
 	ID        string               `json:"id"`
 	Bot       int                  `json:"bot"`
@@ -184,6 +184,20 @@ func (f *Fake) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		m.Deleted = true
 		f.deleted(r.Context(), m)
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteBotMessage answers deleteMessage: a message of the token's bot is marked deleted without a message_deleted
+// event, since the bot deleted it itself; a message already deleted, one of the other bot and an unknown id are answered
+// 204 too and change nothing, because api/bridge.yaml makes a message that no longer exists a success. It does not look
+// at capabilities.delete.
+func (f *Fake) deleteBotMessage(w http.ResponseWriter, r *http.Request) {
+	id, b := r.PathValue("message_id"), botFrom(r)
+	f.mu.Lock()
+	if i := slices.IndexFunc(f.messages, func(m *Message) bool { return m.ID == id && m.Bot == b.n }); i >= 0 {
+		f.messages[i].Deleted = true
+	}
+	f.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

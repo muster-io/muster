@@ -28,6 +28,8 @@ Commands:
             input, admin reset-totp removes a lost second factor
   ingest    ingest replay --since <duration> [--integration <name>] --actor <name> reprocesses Stored Snapshots
   secrets   secrets rotate-key --activate <id> --actor <name> activates a master key that every live replica holds
+  bridge    bridge check <url> --token-file <file> --channel <id> runs the Bridge protocol against a bridge, without a
+            database; muster bridge help lists its flags
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
@@ -67,6 +69,8 @@ func run(args []string, stdout, stderr io.Writer, development bool) int {
 		return runIngest(args[1:], stdout, stderr, development)
 	case "secrets":
 		return runSecrets(args[1:], stdout, stderr, development)
+	case "bridge":
+		return runBridge(args[1:], stdout, stderr)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)
