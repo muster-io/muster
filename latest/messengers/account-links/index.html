@@ -604,6 +604,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#link-through-a-bridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link through a Bridge
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Link through a Bridge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#by-a-token-sent-to-the-bot" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        By a token sent to the bot
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#by-a-code-by-direct-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        By a code by direct message
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#several-connections-of-one-messenger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1736,6 +1775,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#link-through-a-bridge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link through a Bridge
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Link through a Bridge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#by-a-token-sent-to-the-bot" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        By a token sent to the bot
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#by-a-code-by-direct-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        By a code by direct message
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#several-connections-of-one-messenger" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1800,13 +1878,15 @@
 
 
 <h1 id="link-your-messenger-accounts">Link your messenger accounts<a class="headerlink" href="#link-your-messenger-accounts" title="Permanent link">&para;</a></h1>
-<p>An <strong>Account link</strong> ties your Telegram account, or your account on a Mattermost server, to your Muster User. With it,
-a button you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger
-you pressed in — and Mentions and footers in the messenger name you.</p>
+<p>An <strong>Account link</strong> ties your Telegram account, your account on a Mattermost server, or your account on a messenger
+that Muster reaches through a <a href="../bridge/">Bridge</a>, to your Muster User. With it, a button you press under an Alert
+Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed in — and Mentions and
+footers in the messenger name you.</p>
 <p>A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
-Mattermost Connection, since each Connection is its own server. You have at most one Telegram account and one account
-per Mattermost Connection; linking another one replaces the earlier link, and linking the same account again keeps
-its link and updates its username.</p>
+Mattermost Connection, since each Connection is its own server, and so does an account reached through a Bridge, per
+Bridge Connection. You have at most one Telegram account and one account per Mattermost or Bridge Connection; linking
+another one replaces the earlier link, and linking the same account again keeps its link and updates its username and
+name.</p>
 <h2 id="why-links-start-in-your-profile">Why links start in your profile<a class="headerlink" href="#why-links-start-in-your-profile" title="Permanent link">&para;</a></h2>
 <p>Every link starts in your signed-in Muster session, and the secret travels from there to your messenger account —
 never the other way. Nobody can link your account by typing your name into a chat, and nobody can link their account
@@ -1840,6 +1920,45 @@ A new request replaces your earlier one. You can request 5 codes an hour, and on
 codes an hour, whoever asks; beyond that, wait until the oldest request is an hour old. A username the server does not
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.</p>
 <p>The bot must be allowed to open direct messages with you; see <a href="../mattermost/#direct-messages">Direct messages</a>.</p>
+<h2 id="link-through-a-bridge">Link through a Bridge<a class="headerlink" href="#link-through-a-bridge" title="Permanent link">&para;</a></h2>
+<p>A Bridge Connection reaches a messenger through a bridge, which tells Muster in its info what it can do for Account
+links. Every bridge takes a <strong>token</strong> that you send to its bot. A bridge that can look people up and start a direct
+chat with them also offers a <strong>code</strong> that its bot sends you, as Mattermost does. Your profile offers what the
+Connection's bridge declares.</p>
+<p>Once linked, a Mention of you in a message of that Connection names you by the name the bridge reported for your
+account, which a bridge with native mentions turns into its messenger's mention, and the footer of a message you
+acknowledged, snoozed or resolved names you by that name. Without a link, a Mention is your Muster name as plain text,
+which notifies nobody.</p>
+<h3 id="by-a-token-sent-to-the-bot">By a token sent to the bot<a class="headerlink" href="#by-a-token-sent-to-the-bot" title="Permanent link">&para;</a></h3>
+<ol>
+<li>In your profile, open <strong>Messenger accounts</strong>, choose the Bridge Connection and select <strong>Link</strong>.</li>
+<li>Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
+   as well. Within 10 minutes, send the token to the bot of that Connection in a direct message, or open the link,
+   which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.</li>
+<li>The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
+   and the handle the bridge reported for your account.</li>
+</ol>
+<p>If the bot answers "This link is invalid or expired. Start again from your Muster profile.", the token was used
+already, expired, was started for another Connection — another bridge, or another bot of the same bridge — or was
+never issued: start again from your profile. If it answers "This account is linked to another user. Its owner or an
+admin can unlink it.", that account is linked to someone else; nothing changed.</p>
+<h3 id="by-a-code-by-direct-message">By a code by direct message<a class="headerlink" href="#by-a-code-by-direct-message" title="Permanent link">&para;</a></h3>
+<p>The code is offered only when the bridge declares how it finds people — its <strong>lookup kind</strong>, one of email address,
+login, username or user id — and that its bot can start a direct chat. Your profile names the field after that kind:
+<strong>Email</strong>, <strong>Login</strong>, <strong>Username</strong> or <strong>User id</strong>.</p>
+<ol>
+<li>In your profile, choose the Bridge Connection, enter your email address, login, username or user id in the
+   messenger, as the field asks, and select <strong>Send code</strong>.</li>
+<li>The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
+   code. If you did not ask for it, ignore it.</li>
+<li>Type the code into your profile within 10 minutes; capital and small letters are the same. The link is made at
+   once, and the bot sends no confirmation.</li>
+</ol>
+<p>If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
+the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
+The limits are those of Mattermost: 5 attempts per code, a new request replaces your earlier one, 5 code requests an
+hour for you and at most 3 codes an hour for one account, whoever asks. An account that is linked to another User is
+refused.</p>
 <h2 id="several-connections-of-one-messenger">Several Connections of one messenger<a class="headerlink" href="#several-connections-of-one-messenger" title="Permanent link">&para;</a></h2>
 <p>An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
 Telegram bot. What a link covers differs by messenger:</p>
@@ -1847,6 +1966,9 @@ Telegram bot. What a link covers differs by messenger:</p>
 <li><strong>Mattermost links are per Connection.</strong> Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   <strong>Link Mattermost</strong> with each Connection. Your profile lists one row per Connection.</li>
+<li><strong>Bridge links are per Connection.</strong> Each Bridge Connection is its own Identity space, also when two Connections
+  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
+  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.</li>
 <li><strong>A Telegram link is valid for all Telegram bots.</strong> Telegram has one Identity space, so the link you make through any
   Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
   "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.</li>
@@ -1874,7 +1996,7 @@ from the web session only, as above. They cannot create a link for someone else.
 <tr>
 <td>An account without a link</td>
 <td>Nothing changes</td>
-<td>"Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost; the link goes to your profile and carries no secret</td>
+<td>"Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret</td>
 </tr>
 <tr>
 <td>A linked Viewer</td>
