@@ -371,7 +371,8 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 		}
 		now := w.Lease.Clocks.Business.Now().UTC()
 		_, idempotent := w.idempotent(row.DestinationType)
-		if row.DesiredRetire && unpublished(row) && !(idempotent && row.PublicationStartedAt.Valid) {
+		mayExist := idempotent && row.PublicationStartedAt.Valid
+		if row.DesiredRetire && unpublished(row) && !mayExist {
 			// Its Destination left before its Root message was ever published there.
 			if err := q.WithholdLeased(ctx, dbgen.WithholdLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Now: now}); err != nil {
