@@ -17,7 +17,6 @@ files_touched:
   - web/src/components/destination-form.tsx
   - web/src/components/destination-form.test.tsx
   - web/src/components/destination-check.tsx
-  - web/src/components/destination-health.tsx
   - web/src/components/destination-label.ts
   - web/src/components/destination-label.test.ts
   - web/src/components/destination-preview-panel.tsx
@@ -46,6 +45,9 @@ files_touched:
   - web/e2e/bridge-connection.spec.ts
   - web/e2e/bridge-destination.spec.ts
   - web/e2e/account-links.spec.ts
+  - internal/destinations/test.go
+  - internal/destinations/write_test.go
+  - internal/api/destinations.go
 acceptance:
   - "[C-22.FR-1, C-22.FR-2, C-22.AC-21] Connections → New → Bridge saves a Connection with a name, the base URL, the token, the event delivery mode, the proxy and the limiter; the push secret field and the callback address with its hint appear only in push mode; \"Check\" shows the steps with latency and path and, on success, the bridge's name and version, the messenger, the protocol version and what it offers (`bridge-connection.spec.ts`)."
   - "[C-22.FR-2] A failing step shows the translated text of its code with the bridge's English message as the detail where it says more: `token_invalid`, `protocol_version_unknown` with \"The bridge speaks protocol version 2; this Muster speaks 1.\", `protocol_mismatch`, and `event_delivery_not_offered` with the missing mode (`bridge-connection-fields.test.tsx`); the steps read \"Bridge info\" and \"Event delivery\"."
@@ -119,9 +121,9 @@ issue: 235
   direct message. Send it the token instead.") and `code_not_offered` shown at the handle field, `link_code_invalid` at
   the code, and `link_code_requests_exceeded` with the wait from `retry_after_seconds`; the list refreshes on the live
   hint of S-052 when the token is used.
-- **Labels** (`destination-label.ts`, `destination-health.tsx`): the messenger's name from the Connection's `info`,
-  and the type's name "Bridge" («Мост») of S-073 and S-080 while none was read; `chatKey` gains the Bridge case, the
-  Connection's normalized base URL and the channel id, so the duplicate-chat warning of S-070 covers Bridges.
+- **Labels** (`destination-label.ts`): the messenger's name from the Connection's `info`, and the type's name "Bridge"
+  («Мост») of S-073 and S-080 while none was read; `chatKey` gains the Bridge case, the Connection's normalized base URL
+  and the channel id, so the duplicate-chat warning of S-070 covers Bridges.
 - **Delivery state** (`alert-group-deliveries.tsx`): the flag `past_edit_window` of S-081, shown with its text beside
   the delivery's state.
 - **Timeline and Audit log** (`timeline.tsx`, `admin.audit-log.tsx`): the Transport `bridge` with an explicit case in
@@ -145,22 +147,26 @@ issue: 235
 
 ## Verification
 
-Playwright against `muster dev` with the fake bridge (`127.0.0.1:18094`), in `web/e2e`:
+Playwright against `muster dev` with the fake bridge (`127.0.0.1:18094`), in `web/e2e`. Each spec creates its own
+Bridge Connection "br" on the fake's second bot (`muster-dev-bridge-token-b`, polling) and deletes it, with its
+Destinations and Routes, at the end, and puts the fake's configuration back:
 
-1. `bridge-connection.spec.ts`: as the Admin, Connections → New → Bridge, "Base URL" `http://127.0.0.1:18094`,
-   "Token" `muster-dev-bridge-token-b`, "Polling", Save, Check → visible "Fake chat", "Protocol version 1", "Buttons",
-   "Thread messages"; switch to "Push" → visible "Push secret" and "The bridge posts events to http://localhost:8081/
-   api/v1/callbacks/bridge/CN…"; with the fake's `protocol_version` set to `2`, Check → visible "The bridge speaks
-   protocol version 2; this Muster speaks 1."; at 360 px no horizontal scroll; in Russian the type reads «Мост».
+1. `bridge-connection.spec.ts`: as the Admin, Connections → New → Bridge, "Name" `br`, "Base URL"
+   `http://127.0.0.1:18094`, "Token" `muster-dev-bridge-token-b`, "Polling", Save, Check → visible "Fake chat",
+   "Protocol version 1", "Buttons", "Thread messages"; switch to "Push" → visible "Push secret" and "The bridge posts
+   events to http://localhost:8081/api/v1/callbacks/bridge/CN…"; with the fake's `protocol_version` set to `2`, Check →
+   visible "The bridge speaks protocol version 2; this Muster speaks 1."; at 360 px no horizontal scroll; in Russian the
+   type reads «Мост».
 2. `bridge-destination.spec.ts`: Destinations → New → Bridge through "br", channel `ch-nobot`, Save → visible "The bot
    is not a member of this channel." at the channel field; channel `ch-alerts`, Save → the page shows "alerts"; the
-   Mention settings offer no "Everyone in the chat"; the Route editor's picker reads "alerts · Fake chat · via br ·
-   alerts".
-3. `account-links.spec.ts`: as bob, Profile → "Link through br" → the token and "Send this token to the bot in a direct
-   message"; the test posts it to `/_fake/link` as `u-bob` → the row "Fake chat · Bob Brown · via br" appears without
-   a reload; with the fake's `user_lookup` `email` and a check of the demo Connection "Dev Bridge", the fake's other
-   bot, so that Muster has read its `info`, the "Email" field and a code from `/_fake/direct-messages` link the account
-   through "Dev Bridge"; the Timeline of an Alert Group bob acknowledged through the fake shows "Bridge".
+   Mention settings offer only "Nobody", without a chat-wide mention or groups; the Route editor's picker reads "alerts
+   · Fake chat · via br · alerts".
+3. `account-links.spec.ts`: as link-bob (the profile spec owns "bob"), Profile → "Link through br" → the token and
+   "Send this token to the bot in a direct message"; the test posts it to `/_fake/link` as `u-bob` with `"bot": 2`, the
+   bot of "br" → the row "Fake chat · Bob Brown · via br" appears without a reload; with the fake's `user_lookup`
+   `email` and a check of the demo Connection "Dev Bridge", the fake's other bot, so that Muster has read its `info`,
+   the "Email" field and a code from `/_fake/direct-messages` link the account through "Dev Bridge"; the Timeline of an
+   Alert Group link-bob acknowledged through the fake shows "Bridge".
 
 ## Open questions
 

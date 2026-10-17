@@ -12,6 +12,46 @@
       "empty": "No messenger accounts linked.",
       "title": "Account links"
     },
+    "bridge": {
+      "attemptsLeft_one": "{{count}} attempt left",
+      "attemptsLeft_other": "{{count}} attempts left",
+      "code": "Enter the code the bot sent you",
+      "confirm": "Link",
+      "errors": {
+        "codeInvalid": "The code is wrong or no longer valid. Request a new code.",
+        "codeNotOffered": "This bridge sends no codes: send the token to the bot instead.",
+        "directMessageRefused": "The bot cannot send you a direct message. Send it the token instead.",
+        "handleNotFound": {
+          "email": "No account with this email was found.",
+          "login": "No account with this login was found.",
+          "userId": "No account with this user id was found.",
+          "username": "No account with this username was found."
+        },
+        "linkedElsewhere": "This account is linked to another user. Its owner or an admin can unlink it.",
+        "tooManyCodes_one": "Too many codes were requested. Try again in {{count}} minute.",
+        "tooManyCodes_other": "Too many codes were requested. Try again in {{count}} minutes."
+      },
+      "expired": "This token has expired.",
+      "expires": "This token works once and expires at {{time}}.",
+      "handleHint": "The bot sends a code to this account in a direct message.",
+      "handleKinds": {
+        "email": "Email",
+        "login": "Login",
+        "userId": "User id",
+        "username": "Username"
+      },
+      "newCode": "Request a new code",
+      "newToken": "Get a new token",
+      "open": "Open the chat with the bot",
+      "send": "Send code",
+      "sendToken": "Send this token to the bot in a direct message.",
+      "start": "Link through {{connection}}",
+      "tabs": {
+        "code": "Code",
+        "label": "How to link",
+        "token": "Token"
+      }
+    },
     "connection": "Connection",
     "empty": "No messenger accounts linked yet.",
     "errors": {
@@ -24,7 +64,8 @@
       "lastUsedAgo": "{{duration}} ago",
       "linked": "Linked {{date}}",
       "linkedVia": "linked via {{connection}}",
-      "never": "Never"
+      "never": "Never",
+      "via": "via {{connection}}"
     },
     "mattermost": {
       "attemptsLeft_one": "{{count}} attempt left",
@@ -392,6 +433,7 @@
     "to": "changed to",
     "transport": {
       "api": "API",
+      "bridge": "Bridge",
       "cli": "CLI",
       "system": "Muster",
       "ui": "Web UI"
@@ -529,6 +571,67 @@
     "saved": "Saved."
   },
   "connections": {
+    "bridge": {
+      "baseUrl": "Base URL",
+      "baseUrlFormat": "Enter an absolute http or https URL without user information, query or fragment, such as https://bridge.example.org. A path prefix is allowed.",
+      "baseUrlHint": "The bridge's address. Muster calls <base URL>/v1/… with the token, and sends the token nowhere else.",
+      "callbackAfterSave": "The callback address appears once the Connection is saved.",
+      "callbackHint": "The bridge posts events to {{address}}, signed with the push secret. Configure the same address and secret in the bridge.",
+      "eventDelivery": "Event delivery",
+      "features": {
+        "buttons": "Buttons",
+        "delete": "Deleting its messages",
+        "deletionEvents": "Reports of deleted messages",
+        "directMessages": "Direct messages",
+        "nativeMentions": "Mentions that notify",
+        "privateAnswers": "Answers only one person sees",
+        "quietMessages": "Messages that notify no one",
+        "statusColor": "Status colours",
+        "threadMessages": "Thread messages",
+        "threadMessagesMentions": "Thread messages that mention the bot"
+      },
+      "info": {
+        "bridge": "Bridge: {{name}} {{version}}",
+        "eventDelivery": "Event delivery: {{modes}}",
+        "features": "Features",
+        "lookup": {
+          "email": "Finds people by email",
+          "login": "Finds people by login",
+          "none": "Finds nobody: accounts link by token only",
+          "userId": "Finds people by user id",
+          "username": "Finds people by username"
+        },
+        "messenger": "Messenger: {{name}}",
+        "noFeatures": "Only posting and editing",
+        "none": "Nothing read yet: run the Connection check.",
+        "protocolVersion": "Protocol version {{version}}",
+        "readAt": "Read {{time}}",
+        "title": "What the bridge offers"
+      },
+      "limiterHint": "At most this many requests go to the bridge through this Connection. When the bridge asks Muster to wait, Muster waits as long as it asks.",
+      "limiterProposal": "The bridge declares a rate of {{rate}} a second; Muster proposes half: {{limit}} per {{seconds}} s.",
+      "limits": {
+        "editForever": "Edits without a time limit",
+        "editWindow": "Edits for {{duration}} after posting",
+        "maxBody_one": "Longest message text: {{count}} character",
+        "maxBody_other": "Longest message text: {{count}} characters",
+        "sendPerSecond": "Sends per second: {{rate}}",
+        "sendPerSecondPerChannel": "Sends per second per channel: {{rate}}"
+      },
+      "modes": {
+        "poll": "Polling",
+        "push": "Push"
+      },
+      "pollDropsPushSecret": "Saving in polling mode removes the stored push secret.",
+      "pollHint": "Muster polls the bridge; the bridge needs no address of Muster",
+      "pushHint": "The bridge pushes events to Muster's ingest address",
+      "pushSecret": "Push secret",
+      "pushSecretFormat": "Enter the push secret as whsec_ followed by base64.",
+      "pushSecretHint": "The bridge signs every event with this secret, in the Standard Webhooks form: whsec_ followed by base64.",
+      "token": "Token",
+      "tokenForNewBaseUrl": "Enter the token again: the stored token is sent only to the bridge it was entered for.",
+      "useProposal": "Use the proposal"
+    },
     "callback": {
       "hint": "Mattermost calls {{address}} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it.",
       "label": "Callback address",
@@ -536,6 +639,7 @@
     },
     "check": {
       "bot": "Bot: {{bot}}",
+      "bridgeHint": "Reads the bridge's info with the saved token, then checks that the bridge offers this Connection's event delivery mode.",
       "busy": "The messenger is busy; try again in {{seconds}} s.",
       "connectedAs": "Connected as {{bot}}",
       "direct": "direct",
@@ -554,8 +658,10 @@
       "start": "Check connection",
       "steps": {
         "dryProbe": "Dry probe without the token",
+        "eventDelivery": "Event delivery",
         "getMe": "getMe",
         "getWebhookInfo": "getWebhookInfo",
+        "info": "Bridge info",
         "token": "Token"
       },
       "stepsLabel": "Steps of the check",
@@ -637,6 +743,7 @@
   "deliveries": {
     "newTab": "(opens in a new tab)",
     "none": "No deliveries.",
+    "pastEditWindow": "Past the edit window: updated on the next change of status",
     "possibleDuplicate": "Possible duplicate",
     "state": {
       "deletedInMessenger": "Deleted in the messenger",
@@ -653,6 +760,7 @@
   },
   "destinationPreview": {
     "empty": "Nothing to preview.",
+    "envelope": "The envelope Muster would post to the bridge, as JSON; the bridge renders it in its messenger's markup.",
     "expandable": "Expandable quote",
     "failed": "The template of this request failed:",
     "frameTitle": "Root message in {{destination}}",
@@ -663,6 +771,15 @@
     "refresh": "Render again"
   },
   "destinations": {
+    "bridge": {
+      "channel": "Channel id",
+      "channelFound": "Channel:",
+      "channelHint": "As the messenger names it.",
+      "chooseConnection": "Choose a Connection",
+      "connection": "Connection",
+      "limiterHint": "At most this many sends and edits go to the channel. A new Destination proposes half of what the bridge declares per channel, or 30 a minute.",
+      "noConnections": "There is no Bridge Connection yet: create one under Connections first."
+    },
     "check": {
       "failed": "Check failed",
       "hint": "Checks with the saved settings that Muster can still reach the channel and post there, without sending a message. A passing check ends the Broken state.",
@@ -671,6 +788,7 @@
         "botInChannel": "Bot in the channel",
         "botRightsChannel": "Bot rights in the channel",
         "botRightsGroup": "Bot rights in the discussion group",
+        "channel": "Channel",
         "channelExists": "Channel exists",
         "discussionGroup": "Discussion group",
         "token": "Token"
@@ -894,6 +1012,7 @@
     "extractedValue": "Value",
     "failed": "Test failed",
     "hints": {
+      "bridge": "Sends one test message, marked 🧪, through the bridge with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers that it is a test message.",
       "broken": "A test that succeeds in every step ends the Broken state.",
       "mattermost": "Sends one test message, marked 🧪, with the saved settings, then presses its first button through the bot to check that button presses reach Muster. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
       "telegram": "Sends one test message, marked 🧪, with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
@@ -1286,6 +1405,7 @@
       "unsupported": "This messenger does not support this mention."
     },
     "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
+    "everyoneHintBridge": "A Bridge has no mention of the whole chat and no groups: only the chosen users are mentioned, through their accounts linked to this Connection.",
     "everyoneHintTelegram": "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
     "everyoneHintWebhook": "Muster sends mentions as data the receiver formats: everyone, groups by name and users with their login. Chosen users and groups are mentioned as well.",
     "groupPlaceholder": "Mattermost group",
@@ -2153,6 +2273,7 @@
       "possibleDuplicate": "Possible duplicate in {{destination}}",
       "publication": "Published in {{destination}}",
       "republished": "Published again in {{destination}}",
+      "republishedPastEditWindow": "Published again in {{destination}}: past the edit window",
       "stormSummary": "Storm summary in {{destination}}",
       "threadNotAttached": "Thread not attached to the Root message in {{destination}}"
     },
@@ -2237,6 +2358,7 @@
     "title": "Timeline",
     "transport": {
       "api": "the API",
+      "bridge": "Bridge",
       "cli": "the CLI",
       "mattermost": "Mattermost",
       "system": "Muster",

@@ -1390,9 +1390,10 @@ func TestCheckBridgeDestination(t *testing.T) {
 	}
 }
 
-// TestBridgeHasNoTester: a test or a preview of a Bridge Destination is ErrNoTester until this build has its Tester,
-// which the API answers with 501; nothing is recorded. A Tester without samples is a failure of Muster.
-func TestBridgeHasNoTester(t *testing.T) {
+// TestTypeWithoutTesterIsErrNoTester: the test env registers no Tester for the Bridge type, so a Bridge Destination
+// stands for any type without a Tester; its test or preview is ErrNoTester, which the API answers with 501, and nothing
+// is recorded. A Tester without samples is a failure of Muster.
+func TestTypeWithoutTesterIsErrNoTester(t *testing.T) {
 	e := newTestEnv(t)
 	withBridge(e.store, e.w)
 	if _, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA4", Source{Kind: SourceExample}); !errors.Is(err,

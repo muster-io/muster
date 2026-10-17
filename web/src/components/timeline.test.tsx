@@ -266,6 +266,9 @@ describe("entryText", () => {
     expect(text(delivery("publication"))).toBe("Published in ops");
     expect(text(delivery("not_delivered"))).toBe("Not delivered to ops");
     expect(text(delivery("final_edit"))).toBe("No longer updated in ops");
+    expect(text(delivery("republished_past_edit_window"))).toBe(
+      "Published again in ops: past the edit window",
+    );
   });
 
   test("names the actor with the Transport, and Muster for the system", () => {
@@ -273,6 +276,15 @@ describe("entryText", () => {
     expect(actorText(i18n.t, ALICE)).toBe("Alice Smith via Mattermost");
     expect(actorText(i18n.t, { ...ALICE, transport: "api", token_name: "ci" })).toBe(
       "Alice Smith via the API, token ci",
+    );
+  });
+
+  test("names the Transport bridge Bridge, and Мост in Russian", async () => {
+    expect(actorText(i18n.t, { ...ALICE, transport: "bridge" })).toBe("Alice Smith via Bridge");
+    await i18n.changeLanguage("ru");
+    expect(actorText(i18n.t, { ...ALICE, transport: "bridge" })).toBe("Alice Smith через Мост");
+    expect(text(delivery("republished_past_edit_window"))).toBe(
+      "Опубликована заново в ops: окно правки истекло",
     );
   });
 

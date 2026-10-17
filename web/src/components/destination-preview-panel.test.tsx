@@ -5,7 +5,9 @@
 // built from text — Telegram HTML keeps only the tags of its subset and no attribute, Mattermost Markdown and its
 // attachment become elements — with links shown by their address and never as anchors, and the buttons drawn; an
 // outgoing webhook shows each request with its method, URL, headers and body, and the error of a failing template.
-// Nothing of the output runs: no script, event handler, image or link reaches the frame. Both in English and Russian.
+// Nothing of the output runs: no script, event handler, image or link reaches the frame. A Bridge shows the envelope it
+// would post, the item "message" in the format json, as formatted JSON, with the characters that Go escapes (<, > and
+// &) as they are, instead of "Preview failed". Both in English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -15,6 +17,7 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type {
+  BridgeDestination,
   DestinationPreview,
   DestinationPreviewItem,
   Permission,
@@ -311,7 +314,125 @@ function WithPicker() {
   );
 }
 
+const BRIDGE_DESTINATION: BridgeDestination = {
+  id: ID,
+  type: "bridge",
+  name: "alerts",
+  connection_id: "CN0000000000BR",
+  channel_id: "ch-alerts",
+  channel_name: "alerts",
+  mentions: defaultMentions(),
+  limiter: { limit: 30, per_seconds: 60 },
+  health: { state: "healthy" },
+  routes: [],
+  created_at: "2026-10-17T09:30:00Z",
+  etag: '"1"',
+};
+
+/** The envelope as the server sends it: indented JSON, with Secrets masked. */
+const ENVELOPE = JSON.stringify(
+  {
+    kind: "test",
+    status: "firing",
+    color: "#d32f2f",
+    emoji: "🔴",
+    title: "#0 🧪 Test message",
+    link: "http://localhost:8080/alert-groups/AG0",
+    body: "<script>alert(1)</script> **Severity:** critical",
+    buttons: [{ label: "Ack", style: "primary", data: "[masked]" }],
+    notify: true,
+  },
+  null,
+  2,
+);
+
 describe("DestinationPreviewPanel", () => {
+  test("shows a Bridge envelope as formatted JSON", async () => {
+    const bodies = fakeApi({ items: [{ name: "message", format: "json", text: ENVELOPE }] });
+    await render(
+      providers(
+        <DestinationPreviewPanel
+          destination={BRIDGE_DESTINATION}
+          source={EXAMPLE}
+          onSourceGone={() => undefined}
+        />,
+      ),
+    );
+    await expect.element(page.getByRole("heading", { name: "Root message" })).toBeVisible();
+    const envelope = page.getByTestId("preview-envelope");
+    await expect.element(envelope).toBeVisible();
+    expect(envelope.element().textContent).toBe(ENVELOPE);
+    expect(envelope.element().textContent).toContain('"kind": "test"');
+    // Text only: the body's markup is never parsed.
+    expect(envelope.element().querySelector("script")).toBeNull();
+    await expect
+      .element(
+        page.getByText(
+          "The envelope Muster would post to the bridge, as JSON; the bridge renders it in its messenger's markup.",
+        ),
+      )
+      .toBeVisible();
+    expect(document.querySelector('[data-testid="preview-item-error"]')).toBeNull();
+    expect(document.querySelector('[data-testid="preview-frame"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("The template of this request failed:");
+    expect(JSON.parse(bodies[0] ?? "")).toEqual({ source: { kind: "example" } });
+  });
+
+  test("shows the characters Go's indented JSON escapes in a Bridge envelope as they are", async () => {
+    // json.MarshalIndent writes <, > and & as <, > and &.
+    const escaped = [
+      "{",
+      '  "kind": "test",',
+      '  "title": "#0 cpu \\u003e 90% \\u0026 rising",',
+      '  "body": "\\u003cb\\u003eload\\u003c/b\\u003e"',
+      "}",
+    ].join("\n");
+    fakeApi({ items: [{ name: "message", format: "json", text: escaped }] });
+    await render(
+      providers(
+        <DestinationPreviewPanel
+          destination={BRIDGE_DESTINATION}
+          source={EXAMPLE}
+          onSourceGone={() => undefined}
+        />,
+      ),
+    );
+    const envelope = page.getByTestId("preview-envelope");
+    await expect.element(envelope).toBeVisible();
+    expect(envelope.element().textContent).toBe(
+      '{\n  "kind": "test",\n  "title": "#0 cpu > 90% & rising",\n  "body": "<b>load</b>"\n}',
+    );
+    expect(envelope.element().querySelector("b")).toBeNull();
+  });
+
+  test("shows a compact Bridge envelope indented, and its hint in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    fakeApi({
+      items: [{ name: "message", format: "json", text: '{"kind":"test","title":"#0 x"}' }],
+    });
+    await render(
+      providers(
+        <DestinationPreviewPanel
+          destination={BRIDGE_DESTINATION}
+          source={EXAMPLE}
+          onSourceGone={() => undefined}
+        />,
+      ),
+    );
+    await expect.element(page.getByRole("heading", { name: "Корневое сообщение" })).toBeVisible();
+    await expect.element(page.getByTestId("preview-envelope")).toBeVisible();
+    expect(page.getByTestId("preview-envelope").element().textContent).toBe(
+      '{\n  "kind": "test",\n  "title": "#0 x"\n}',
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Конверт, который Muster отправил бы мосту, в формате JSON; мост сам переводит его в разметку своего мессенджера.",
+        ),
+      )
+      .toBeVisible();
+  });
+
   test('renders the Root message in a frame with sandbox="" without sending anything', async () => {
     const bodies = fakeApi({ items: [TELEGRAM_ITEM] });
     await render(

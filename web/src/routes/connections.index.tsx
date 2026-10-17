@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Connections (C-13.FR-1, C-14.FR-1, C-22.FR-1): the Connections with their type, name — with the host of a Mattermost
-// server or the @username of a Telegram bot once a Connection check found it (D309); a Bridge by its name only — and
-// the number of Destinations that use them, page by page, and "Create connection" with connections:write.
+// Connections (C-13.FR-1, C-14.FR-1, C-22.FR-1): the Connections with their type — a Bridge by the messenger its bridge
+// names once a check read it — name, with the host of a Mattermost server or a bridge's base URL or the @username of a
+// Telegram bot once a Connection check found it (D309), and the number of Destinations that use them, page by page,
+// and "Create connection" with connections:write.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
-import type { TFunction } from "i18next";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,42 +17,13 @@ import {
 import type { Connection } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
-import { unreachable } from "../components/destination-test-panel";
+import { connectionAccount, connectionMessengerName } from "../components/destination-label";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/connections/")({
   staticData: { shell: true },
   component: ConnectionsPage,
 });
-
-/** The name of a messenger, which is not translated, or "Bridge" in the reader's language. */
-function connectionTypeName(t: TFunction, type: Connection["type"]): string {
-  switch (type) {
-    case "mattermost":
-      return "Mattermost";
-    case "telegram":
-      return "Telegram";
-    case "bridge":
-      return t("connections.types.bridge");
-    default:
-      return unreachable(type);
-  }
-}
-
-/** The host of a Mattermost Connection's server URL, or the @username of a Telegram bot a check found. */
-function connectionAccount(row: Connection): string | undefined {
-  if (row.type === "bridge") {
-    return undefined;
-  }
-  if (row.type === "telegram") {
-    return row.bot_username ? `@${row.bot_username}` : undefined;
-  }
-  try {
-    return new URL(row.server_url).host || undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function NameCell({ row }: { row: Connection }) {
   const account = connectionAccount(row);
@@ -92,7 +63,7 @@ function ConnectionsTable() {
       {
         id: "type",
         header: t("connections.fields.type"),
-        text: (row) => connectionTypeName(t, row.type),
+        text: (row) => connectionMessengerName(t, row),
       },
       { id: "name", header: t("connections.fields.name"), className: "min-w-40", Cell: NameCell },
       { id: "destinations", header: t("connections.fields.destinations"), Cell: DestinationsCell },

@@ -7,7 +7,9 @@
 // the Bot API's subset of tags, both built element by element from text, so that no markup of the output is ever
 // parsed into the page; links are shown with their address and are never followed. The buttons are drawn as they
 // would appear. An outgoing webhook shows each request — the event, or "Create", "Update", "Open thread" and "Reply in
-// thread" — with its method, URL, headers and body; a request whose template fails shows its error.
+// thread" — with its method, URL, headers and body; a request whose template fails shows its error. A Bridge shows the
+// envelope Muster would post to the bridge, the item "message" in the format json, as formatted JSON text
+// (C-22.FR-17): the bridge renders it in its messenger's markup, so the page draws no message of its own.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -251,6 +253,18 @@ function arrayOf(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/**
+ * A Bridge's envelope, indented by two spaces. The server writes it with Go's escapes of <, > and &, which reading and
+ * writing it again turns back into the characters; text that does not parse is shown as it is.
+ */
+function envelopeText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
 /** The body of a request as JSON, or nothing when it is not an object. */
 function jsonBody(body: string | null | undefined): Record<string, unknown> {
   try {
@@ -447,6 +461,19 @@ function PreviewItem({
             </div>
           </details>
         )}
+      </>
+    );
+  } else if (
+    item.format === "json" &&
+    item.text !== null &&
+    item.text !== undefined &&
+    item.request === undefined
+  ) {
+    // A Bridge's envelope: the bridge renders it, so the page shows it as text.
+    body = (
+      <>
+        <p className="text-sm text-muted-foreground">{t("destinationPreview.envelope")}</p>
+        <CodeText text={envelopeText(item.text)} testId="preview-envelope" />
       </>
     );
   } else if (item.request !== undefined) {

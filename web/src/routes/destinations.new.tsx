@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1): the choice of the type — Mattermost, Telegram or outgoing
-// webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing webhook first shows
-// its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the query cache, and the
-// page of the Destination opens when the dialog closes.
+// "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1, C-22.FR-3): the choice of the type — Mattermost, Telegram,
+// Bridge or outgoing webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing
+// webhook first shows its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the
+// query cache, and the page of the Destination opens when the dialog closes.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -21,6 +21,7 @@ import {
 import { getListRouteSuggestionsQueryKey } from "../api/gen/endpoints/routes/routes";
 import type { Destination, DestinationInput, DestinationType } from "../api/gen/model";
 import { RequirePermission } from "../components/app-shell";
+import { BRIDGE_KIND } from "../components/bridge-destination-fields";
 import { DestinationForm } from "../components/destination-form";
 import { destinationTypeName } from "../components/destination-health";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/destinations/new")({
   component: NewDestinationPage,
 });
 
-const TYPES: readonly DestinationType[] = ["mattermost", "telegram", "webhook"];
+const TYPES: readonly DestinationType[] = ["mattermost", "telegram", "bridge", "webhook"];
 
 function NewDestination() {
   const { t } = useTranslation();
@@ -106,6 +107,14 @@ function NewDestination() {
       {type === "telegram" && (
         <DestinationForm
           kind={TELEGRAM_KIND}
+          submitLabel={t("common.save")}
+          save={save}
+          onCancel={cancel}
+        />
+      )}
+      {type === "bridge" && (
+        <DestinationForm
+          kind={BRIDGE_KIND}
           submitLabel={t("common.save")}
           save={save}
           onCancel={cancel}

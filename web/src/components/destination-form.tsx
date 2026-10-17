@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The form of a Destination (C-13.FR-9, FR-2; C-12.FR-8), shared by every type: the name, the type's fields in a slot
-// (Mattermost, Telegram or the outgoing webhook), the Mention section and the limiter. Saving a Mattermost or Telegram
-// Destination runs its Destination check, and a failing check is refused with destination_check_failed at the field it
-// concerns, with the check's code, which the form shows there translated, and its English message as the detail; a template of an outgoing webhook that fails is
-// refused at its field with its line and column. Without destinations:write the form only shows the Destination.
+// The form of a Destination (C-13.FR-9, FR-2; C-12.FR-8; C-22.FR-3), shared by every type: the name, the type's fields
+// in a slot (Mattermost, Telegram, Bridge or the outgoing webhook), the Mention section and the limiter. Saving a
+// Mattermost, Telegram or Bridge Destination runs its Destination check, and a failing check is refused with
+// destination_check_failed at the field it concerns, with the check's code, which the form shows there translated, and
+// its English message as the detail; a template of an outgoing webhook that fails is refused at its field with its line
+// and column. Without destinations:write the form only shows the Destination.
 
 import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";

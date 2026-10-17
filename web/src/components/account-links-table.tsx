@@ -4,16 +4,22 @@
 // The list of a User's Account links (C-18.FR-10), shared by the profile and the Admin's user page: each link with its
 // messenger, Connection, username (or the external id without one), last use and the date it was linked. A Mattermost
 // link belongs to its Connection; a Telegram link is valid for every Telegram bot (D305), so its row reads "Telegram ·
-// @<username> · for all Telegram bots" with "linked via <Connection>" and the last use on its secondary line. With
-// remove, each row has a button ("Unlink" on the profile, "Remove" on the user page) that asks first.
+// @<username> · for all Telegram bots" with "linked via <Connection>" and the last use on its secondary line. A Bridge
+// link belongs to its Connection too and reads "<messenger> · <display name> · via <Connection>" with the last use on
+// its secondary line (C-22.FR-15): the messenger is the one the Connection's bridge names in its info, read with
+// connections:read, and "Bridge" without it. With remove, each row has a button ("Unlink" on the profile, "Remove" on
+// the user page) that asks first.
 
 import { useMutation } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AccountLink, Messenger } from "../api/gen/model";
+import type { AccountLink, Connection } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { dayIn, useTimeFormat } from "../lib/time";
+import { bridgeMessengerName, useConnectionsById } from "./destination-label";
+import { unreachable } from "./destination-test-panel";
 import { elapsedSeconds, formatElapsed, useNow } from "./relative-time";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -27,13 +33,38 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 
-/** The name of a messenger, the same in every language. */
-export function messengerName(messenger: Messenger): string {
-  return messenger === "telegram" ? "Telegram" : "Mattermost";
+/**
+ * The messenger of a link: Telegram and Mattermost by name, the same in every language; a Bridge link the messenger its
+ * Connection's bridge names, and "Bridge" while that Connection is unknown or its info unread.
+ */
+export function linkMessenger(
+  t: TFunction,
+  link: AccountLink,
+  connections: ReadonlyMap<string, Connection>,
+): string {
+  switch (link.messenger) {
+    case "telegram":
+      return "Telegram";
+    case "mattermost":
+      return "Mattermost";
+    case "bridge":
+      return bridgeMessengerName(
+        t,
+        link.connection === undefined ? undefined : connections.get(link.connection.id),
+      );
+    default:
+      return unreachable(link.messenger);
+  }
 }
 
-/** The account of a link as people know it: "@username", or the external id when the messenger gave no username. */
+/**
+ * The account of a link as people know it: "@username", or the external id when the messenger gave no username; a
+ * Bridge account by its display name, else its handle or external id as the bridge reported them.
+ */
 export function accountName(link: AccountLink): string {
+  if (link.messenger === "bridge") {
+    return link.display_name || link.username || link.external_id;
+  }
   return link.username ? `@${link.username}` : link.external_id;
 }
 
@@ -46,7 +77,13 @@ export interface RemoveLink {
   onDone: () => void;
 }
 
-function LinkRow({ link }: { link: AccountLink }) {
+function LinkRow({
+  link,
+  connections,
+}: {
+  link: AccountLink;
+  connections: ReadonlyMap<string, Connection>;
+}) {
   const { t } = useTranslation();
   const { dateTime, date, timeZone } = useTimeFormat();
   const now = useNow();
@@ -57,10 +94,20 @@ function LinkRow({ link }: { link: AccountLink }) {
     : t("accountLinks.list.never");
   const lastUseTitle = link.last_used_at ? dateTime(link.last_used_at) : undefined;
   const telegram = link.messenger === "telegram";
+  const bridge = link.messenger === "bridge";
+  const messenger = linkMessenger(t, link, connections);
   const summary = (
     telegram
-      ? [messengerName(link.messenger), accountName(link), t("accountLinks.list.allTelegramBots")]
-      : [messengerName(link.messenger), link.connection?.name, accountName(link), lastUse]
+      ? [messenger, accountName(link), t("accountLinks.list.allTelegramBots")]
+      : bridge
+        ? [
+            messenger,
+            accountName(link),
+            link.connection === undefined
+              ? undefined
+              : t("accountLinks.list.via", { connection: link.connection.name }),
+          ]
+        : [messenger, link.connection?.name, accountName(link), lastUse]
   ).filter((part): part is string => part !== undefined && part !== "");
   const via = (
     telegram
@@ -70,14 +117,17 @@ function LinkRow({ link }: { link: AccountLink }) {
             : t("accountLinks.list.linkedVia", { connection: link.connection.name }),
           lastUse,
         ]
-      : []
+      : bridge
+        ? [lastUse]
+        : []
   ).filter((part): part is string => part !== undefined);
+  const lastUseOnSecondLine = telegram || bridge;
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       <span
         className="font-medium break-words"
         data-testid="account-link-summary"
-        title={telegram ? undefined : lastUseTitle}
+        title={lastUseOnSecondLine ? undefined : lastUseTitle}
       >
         {summary.join(" · ")}
       </span>
@@ -166,6 +216,7 @@ export function AccountLinksTable({
   remove?: RemoveLink;
 }) {
   const { t } = useTranslation();
+  const connections = useConnectionsById();
   const [asking, setAsking] = useState<AccountLink | null>(null);
   const run = useMutation({
     mutationFn: (link: AccountLink) => (remove ? remove.run(link) : Promise.resolve()),
@@ -190,7 +241,7 @@ export function AccountLinksTable({
             className="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-start"
             data-testid="account-link-row"
           >
-            <LinkRow link={link} />
+            <LinkRow link={link} connections={connections} />
             {remove !== undefined && (
               <Button
                 variant="outline"

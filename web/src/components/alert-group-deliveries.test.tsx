@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Delivery section of the Alert Group page in a real browser: the text of every delivery state and mark, a
-// message link that opens only http and https addresses in a new tab without the opener, the error of the messenger as
-// text, a section that follows the alert-group hint instead of polling, and a Destination's name whose tooltip and
-// accessible description are its full label with destinations:read (a deleted Destination keeps its name alone).
+// The Delivery section of the Alert Group page in a real browser: the text of every delivery state and mark (a Bridge
+// message past its bridge's edit window among them), a message link that opens only http and https addresses in a new
+// tab without the opener, the error of the messenger as text, a section that follows the alert-group hint instead of
+// polling, and a Destination's name whose tooltip and accessible description are its full label with destinations:read
+// (a deleted Destination keeps its name alone).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -201,6 +202,43 @@ describe("the Delivery section", () => {
     await expect.element(page.getByTestId("destination-health").nth(1)).toHaveTextContent("Broken");
   });
 
+  test("marks a delivery past the bridge's edit window beside its state, and nothing when it is not", async () => {
+    const bridge = {
+      id: "DS0000000000BR",
+      name: "alerts-br",
+      type: "bridge",
+      health: { state: "healthy" },
+    } as const;
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            delivery({ destination: bridge, past_edit_window: true }),
+            delivery({
+              destination: { ...bridge, id: "DS0000000000B2", name: "alerts-br-2" },
+              past_edit_window: false,
+            }),
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />));
+    const first = page.getByTestId("delivery-row").nth(0);
+    await expect.element(first.getByTestId("delivery-state")).toHaveTextContent("Delivered");
+    await expect
+      .element(first.getByTestId("delivery-past-edit-window"))
+      .toHaveTextContent("Past the edit window: updated on the next change of status");
+    // Beside the state: in the same line of the row, right after it.
+    expect(
+      first.getByTestId("delivery-state").element().nextElementSibling?.getAttribute("data-testid"),
+    ).toBe("delivery-past-edit-window");
+    await expect
+      .element(page.getByTestId("delivery-row").nth(1).getByTestId("delivery-state"))
+      .toHaveTextContent("Delivered");
+    expect(page.getByTestId("delivery-past-edit-window").elements()).toHaveLength(1);
+  });
+
   test("does not poll a pending delivery and reads it again on the alert-group hint", async () => {
     const answers = [
       [delivery({ state: "pending" })],
@@ -239,6 +277,16 @@ describe("the Delivery section", () => {
     expect(deliveryStateText(i18n.t, delivery({ state: "retired" }))).toBe(
       "Здесь больше не обновляется",
     );
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [delivery({ past_edit_window: true })] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />));
+    await expect
+      .element(page.getByTestId("delivery-past-edit-window"))
+      .toHaveTextContent("Окно правки истекло: обновится при следующей смене статуса");
   });
   test("gives the name its full label as tooltip and description, a deleted Destination none", async () => {
     await renderLabelled(

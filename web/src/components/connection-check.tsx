@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11): each step with "ok" or what failed, translated by
-// its code with the server's English message below as its detail, its latency and the path it took, directly or through
-// the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the check, each with its hint.
-// Telegram works in steps — the dry probe without the token, getMe with the bot, getWebhookInfo with the pending updates
-// — and a set webhook in the long-polling mode gets its warning. While the form holds an unsaved base URL, the check
-// sends it as base_url: the server makes only the dry probe against it, never with the token, and the other steps read
-// "Skipped: save the address first". The check runs on the interactive path, so a busy messenger answers 503 with
-// Retry-After: "The messenger is busy; try again in N s."
+// "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11; C-22.FR-2): each step with "ok" or what failed,
+// translated by its code with the server's English message below as its detail, its latency and the path it took,
+// directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the
+// check, each with its hint. Telegram works in steps — the dry probe without the token, getMe with the bot,
+// getWebhookInfo with the pending updates — and a set webhook in the long-polling mode gets its warning. While the form
+// holds an unsaved base URL, the check sends it as base_url: the server makes only the dry probe against it, never with
+// the token, and the other steps read "Skipped: save the address first". A Bridge has two steps, "Bridge info" and
+// "Event delivery"; the info it reads is stored on the Connection, whose page shows it. The check runs on the
+// interactive path, so a busy messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -45,8 +46,27 @@ function stepName(t: TFunction, name: ConnectionCheckStepName): string {
       return t("connections.check.steps.dryProbe");
     case "get_me":
       return t("connections.check.steps.getMe");
-    default:
+    case "get_webhook_info":
       return t("connections.check.steps.getWebhookInfo");
+    case "info":
+      return t("connections.check.steps.info");
+    case "event_delivery":
+      return t("connections.check.steps.eventDelivery");
+    default:
+      return unreachable(name);
+  }
+}
+
+function checkHint(t: TFunction, type: Connection["type"]): string {
+  switch (type) {
+    case "mattermost":
+      return t("connections.check.hint");
+    case "telegram":
+      return t("connections.check.telegramHint");
+    case "bridge":
+      return t("connections.check.bridgeHint");
+    default:
+      return unreachable(type);
   }
 }
 
@@ -390,7 +410,7 @@ export function ConnectionCheck({
   // An unsaved address the server would refuse is named before anything is sent.
   const [badAddress, setBadAddress] = useState(false);
   const queryClient = useQueryClient();
-  // A successful check records the bot's name on the Connection, which the page shows.
+  // A successful check records the bot's name, or the info of a bridge, on the Connection, which the page shows.
   const check = useCheckConnection({
     mutation: {
       onSuccess: () =>
@@ -403,9 +423,7 @@ export function ConnectionCheck({
         <CardTitle>
           <h2>{t("connections.check.title")}</h2>
         </CardTitle>
-        <CardDescription>
-          {type === "telegram" ? t("connections.check.telegramHint") : t("connections.check.hint")}
-        </CardDescription>
+        <CardDescription>{checkHint(t, type)}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">

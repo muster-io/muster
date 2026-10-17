@@ -20,8 +20,7 @@ import (
 // The Audit log action of a Destination test (C-16.FR-5).
 const ActionTested = "destination.tested"
 
-// ErrNoTester is a test or a preview of a Destination whose type has no Tester in this build, such as a Bridge
-// Destination until its delivery exists: the API answers 501.
+// ErrNoTester is a test or a preview of a Destination whose type has no Tester in this build: the API answers 501.
 var ErrNoTester = errors.New("this build has no test of destinations of this type")
 
 // The kinds of the source of a test or a preview (TestSource).

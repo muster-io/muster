@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create connection" (C-13.FR-1, C-14.FR-1): the choice of the messenger, then its form; the new Connection's page
-// opens after it is created, with "Check connection" and, for Mattermost, its callback address.
+// "Create connection" (C-13.FR-1, C-14.FR-1, C-22.FR-1): the choice of the messenger — Mattermost, Telegram or a
+// Bridge — then its form; the new Connection's page opens after it is created, with "Check connection" and, for
+// Mattermost and a Bridge in push mode, its callback address.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -24,13 +25,14 @@ export const Route = createFileRoute("/connections/new")({
   component: NewConnectionPage,
 });
 
-const KINDS: readonly { kind: ConnectionType; name: string }[] = [
-  { kind: "mattermost", name: "Mattermost" },
-  { kind: "telegram", name: "Telegram" },
-];
-
 function NewConnection() {
   const { t } = useTranslation();
+  // The messengers' names are not translated; a Bridge goes by the type's name.
+  const kinds: readonly { kind: ConnectionType; name: string }[] = [
+    { kind: "mattermost", name: "Mattermost" },
+    { kind: "telegram", name: "Telegram" },
+    { kind: "bridge", name: t("connections.types.bridge") },
+  ];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [kind, setKind] = useState<ConnectionType>();
@@ -49,7 +51,7 @@ function NewConnection() {
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-sm font-medium">{t("connections.create.type")}</legend>
         <div className="flex flex-wrap gap-3">
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <label
               key={k.kind}
               className="flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium has-checked:border-primary has-checked:bg-accent has-focus-visible:ring-2 has-focus-visible:ring-ring"

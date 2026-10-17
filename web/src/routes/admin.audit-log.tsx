@@ -19,6 +19,7 @@ import type { AuditActor, AuditEntry, ListAuditLogParams, Transport } from "../a
 import { RequirePermission, useCan } from "../components/app-shell";
 import { AuditDiff } from "../components/audit-diff";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { unreachable } from "../components/destination-test-panel";
 import { OrganizationLayout } from "../components/organization-nav";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -88,6 +89,10 @@ const KNOWN_ACTIONS = [
 
 const KNOWN_RESOURCES = ["user", "service_account", "api_token", "oidc_settings", "organization"];
 
+/**
+ * The label of a Transport. The switch has no default: what follows it takes only `never`, so the type check proves
+ * that every Transport has its label.
+ */
 function transportLabel(t: TFunction, transport: Transport): string {
   switch (transport) {
     case "ui":
@@ -98,11 +103,14 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return "Mattermost";
     case "telegram":
       return "Telegram";
+    case "bridge":
+      return t("audit.transport.bridge");
     case "cli":
       return t("audit.transport.cli");
-    default:
+    case "system":
       return t("audit.transport.system");
   }
+  return unreachable(transport);
 }
 
 function actorText(t: TFunction, actor: AuditActor): string {

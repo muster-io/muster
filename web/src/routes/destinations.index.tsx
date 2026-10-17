@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Destinations (C-13.FR-9, C-11.FR-9): every Destination of every type with its type, name, "Connection · channel"
-// (an outgoing webhook: the host of its URL; D309), health and Routes, page by page, and the Broken banner of each
-// Broken Destination above them; "Create destination" with destinations:write. The destination hint reads the list
-// again as health changes.
+// Destinations (C-13.FR-9, C-11.FR-9, C-22.FR-1): every Destination of every type with its type — a Bridge by the
+// messenger its Connection's bridge names — name, "Connection · channel" (an outgoing webhook: the host of its URL;
+// D309), health and Routes, page by page, and the Broken banner of each Broken Destination above them; "Create
+// destination" with destinations:write. The destination hint reads the list again as health changes.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { createContext, useContext, useMemo } from "react";
@@ -17,8 +17,12 @@ import {
 import type { Connection, Destination } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
-import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
-import { connectionPlace, useConnectionsById } from "../components/destination-label";
+import { BrokenBanner, HealthBadge } from "../components/destination-health";
+import {
+  connectionPlace,
+  destinationMessengerName,
+  useConnectionsById,
+} from "../components/destination-label";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/destinations/")({
@@ -95,7 +99,12 @@ function DestinationsTable() {
       {
         id: "type",
         header: t("destinations.fields.type"),
-        text: (row) => destinationTypeName(t, row.type),
+        text: (row) =>
+          destinationMessengerName(
+            t,
+            row.type,
+            row.type === "webhook" ? undefined : connections.get(row.connection_id),
+          ),
       },
       { id: "name", header: t("destinations.fields.name"), className: "min-w-32", Cell: NameCell },
       {
@@ -112,7 +121,7 @@ function DestinationsTable() {
         Cell: RoutesCell,
       },
     ],
-    [t],
+    [t, connections],
   );
   const broken = list.items.filter((d) => d.health.state === "broken");
   return (

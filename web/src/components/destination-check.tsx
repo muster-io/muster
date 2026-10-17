@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Check" of a Destination (C-13.FR-10, C-13.AC-8; C-14.FR-14): the Destination check through the interactive path,
-// each check with "ok" or what failed, translated by its code with the server's English message below as its detail —
-// for Telegram "Channel exists", "Discussion group", "Bot rights in the channel"
-// and "Bot rights in the discussion group" — and "Check passed" or "Check failed". A passing check ends the Broken
+// "Check" of a Destination (C-13.FR-10, C-13.AC-8; C-14.FR-14; C-22.FR-3): the Destination check through the
+// interactive path, each check with "ok" or what failed, translated by its code with the server's English message below
+// as its detail — for Telegram "Channel exists", "Discussion group", "Bot rights in the channel" and "Bot rights in the
+// discussion group", for a Bridge "Channel" — and "Check passed" or "Check failed". A passing check ends the Broken
 // state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
 // answers 503 with Retry-After: "The messenger is busy; try again in N s."
 
@@ -25,6 +25,7 @@ import type {
   DestinationCheckResult,
 } from "../api/gen/model";
 import { CheckDetail, checkCodeText, checkErrorText } from "./connection-check";
+import { unreachable } from "./destination-test-panel";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -41,8 +42,12 @@ export function checkItemName(t: TFunction, name: DestinationCheckItemName): str
       return t("destinations.check.items.discussionGroup");
     case "bot_rights_channel":
       return t("destinations.check.items.botRightsChannel");
-    default:
+    case "bot_rights_group":
       return t("destinations.check.items.botRightsGroup");
+    case "channel":
+      return t("destinations.check.items.channel");
+    default:
+      return unreachable(name);
   }
 }
 

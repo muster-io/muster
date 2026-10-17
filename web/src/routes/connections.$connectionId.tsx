@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1): its form, read-only without connections:write;
-// for Mattermost the callback address with its hint; "Check connection" and "Delete" with connections:write. A Bridge
-// Connection shows its name and "Delete" only: it has no form yet, so the Mattermost form never saves it. A Telegram
-// Connection's check takes the base URL in the form: an unsaved one gets only the dry probe, without the token. The
-// form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an untouched
-// form takes the new version and says so, and a form with changes keeps them, and its save is refused (412) with the
-// offer to reload.
+// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1, FR-2, FR-18): its form, read-only without
+// connections:write; for Mattermost the callback address with its hint, for a Bridge in push mode the same in its form;
+// "Check connection" and "Delete" with connections:write. A Telegram Connection's check takes the base URL in the form:
+// an unsaved one gets only the dry probe, without the token. A Bridge Connection shows what its bridge offers, from the
+// info the last check read, which a check refreshes, and its form proposes half of the bridge's rate as the limiter.
+// The form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an
+// untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
+// with the offer to reload.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -24,6 +25,7 @@ import {
 } from "../api/gen/endpoints/connections/connections";
 import type { Connection } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { BridgeInfoPanel } from "../components/bridge-connection-fields";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
 import { ConnectionDeleteDialog, ConnectionForm } from "../components/connection-form";
@@ -98,6 +100,7 @@ function EditForm({ current }: { current: Connection }) {
         saved={saved}
         onDirtyChange={setDirty}
         onBaseUrlChange={setBaseUrl}
+        info={current.type === "bridge" ? current.info : undefined}
         save={async (input) => {
           setSaving(true);
           setSaved(false);
@@ -151,6 +154,10 @@ function EditForm({ current }: { current: Connection }) {
           updateMode={base.type === "telegram" ? base.update_mode : undefined}
         />
       )}
+      {/* The stored info, which a check refreshes without a new version of the Connection. */}
+      {current.type === "bridge" && (
+        <BridgeInfoPanel info={current.info} readAt={current.info_read_at} />
+      )}
     </>
   );
 }
@@ -197,7 +204,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
           {query.isError ? problemText(t, query.error) : t("common.loading")}
         </p>
       ) : (
-        connection.type !== "bridge" && <EditForm current={connection} />
+        <EditForm current={connection} />
       )}
     </div>
   );

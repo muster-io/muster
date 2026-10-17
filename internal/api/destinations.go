@@ -48,7 +48,7 @@ type Webhooks interface {
 	RetirePreviousSigningSecret(ctx context.Context, r webhooks.Requester, publicID string) error
 }
 
-// errNoTester is the 501 of a test or a preview of a Destination whose type this build cannot test yet.
+// errNoTester is the 501 of a test or a preview of a Destination whose type has no Tester in this build.
 var errNoTester = problem(http.StatusNotImplemented, typeNotImplemented, "",
 	"This build cannot test or preview Destinations of this type yet.")
 
@@ -233,7 +233,7 @@ func sourceOf(src gen.TestSource) destinations.Source {
 
 // TestDestination is testDestination (C-16.FR-1 to FR-3, FR-5, FR-7) on the interactive path: each step with its
 // masked request and response, and the health after the test. A step without a limiter token in time is limited and
-// the operation still answers 200. A type without a test in this build, a Bridge Destination, answers 501.
+// the operation still answers 200. A type without a Tester in this build answers 501.
 func (s *Server) TestDestination(ctx context.Context, req gen.TestDestinationRequestObject) (
 	gen.TestDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -302,8 +302,7 @@ func renderedRequestOf(r *delivery.TestRequest) *gen.RenderedRequest {
 }
 
 // PreviewDestination is previewDestination (C-16.FR-4): what the Destination would receive for the source, rendered
-// without sending anything, with every Secret masked. A type without a preview in this build, a Bridge Destination,
-// answers 501.
+// without sending anything, with every Secret masked. A type without a Tester in this build answers 501.
 func (s *Server) PreviewDestination(ctx context.Context, req gen.PreviewDestinationRequestObject) (
 	gen.PreviewDestinationResponseObject, error) {
 	if req.Body == nil {
