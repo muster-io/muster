@@ -141,7 +141,11 @@ issue: 232
   from that first `publication_started_at`, so the edit window of S-081 counts from when the message was really
   posted, and passes the same time to `markPublished`, so the Alert Group's first Publication (C-17.FR-1), from which
   its ack timeout counts, is the real post too; it leaves `actual_hash` unset, so the delivery stays pending and the
-  worker's next call is an edit to the latest Desired state. The Mattermost and Telegram paths do not change.
+  worker's next call is an edit to the latest Desired state. A Publication to an `Idempotent` adapter whose start is
+  kept when its Destination leaves the Route is not withheld, since its Root message may exist: it is posted again
+  with the same key, Quiet, carrying the final edit (C-11.FR-14). A `Replayed` answer is then edited to the final
+  text; any other answer is itself the final message, and records a possible duplicate. The Mattermost and Telegram
+  paths do not change.
 - **Lock order** (D307; `lockorder_integration_test.go`): a `Replayed` outcome and the edit that follows it lock the
   delivery row only, as every outcome does, never its Alert Group before it; the test gains a replayed Publication
   against an acknowledgement that holds the Alert Group and then waits for the delivery in `Enqueue`.
