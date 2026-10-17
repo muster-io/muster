@@ -19,6 +19,7 @@ import (
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // TestIntegrationStatusSupersededButtons covers C-20.FR-6 with C-22.FR-9 on PostgreSQL: a Bridge Root message signed
@@ -35,6 +36,9 @@ func TestIntegrationStatusSupersededButtons(t *testing.T) {
 		}
 		d, org := migratedForRotation(t, s, keys)
 		a, b := keyring.KeyID(material('a')), keyring.KeyID(material('b'))
+		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org, t0); err != nil {
+			t.Fatal(err)
+		}
 		token, tokenKey, err := keys.Encrypt("connections.bot_token", []byte("bridge token"))
 		if err != nil || tokenKey != a {
 			t.Fatal(err)
