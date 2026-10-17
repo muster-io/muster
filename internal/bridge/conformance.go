@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -42,7 +43,8 @@ const ConformanceWait = 5 * time.Minute
 const DefaultPushListen = "127.0.0.1:0"
 
 const (
-	// pushGrace is how long the push step waits, after a press that came by polling, for its push.
+	// pushGrace is how long the push step waits, after a press that came by polling, for its push, and how long the
+	// press step waits at the push listener after it saw the first push the listener refused.
 	pushGrace = 30 * time.Second
 	// checkTitle starts the title of every test message, followed by its step.
 	checkTitle = "muster bridge check: "
@@ -101,6 +103,7 @@ type conformance struct {
 	run       string
 	generated bool
 	failed    bool
+	forms     []string
 
 	info       Info
 	postIn     gen.MessageInput
@@ -130,6 +133,7 @@ func RunConformance(ctx context.Context, cfg ConformanceConfig) (failed bool, er
 	if cn.cfg.PushSecret == "" {
 		cn.cfg.PushSecret, cn.generated = webhooks.NewSigningSecret(), true
 	}
+	cn.forms = secretForms(cn.cfg.Token, cn.cfg.PushSecret)
 	policy, err := outbound.ParsePolicy(string(outbound.ModeStandard), []string{"127.0.0.0/8", "::1/128"}, nil)
 	if err != nil {
 		return false, err
@@ -196,8 +200,33 @@ func randomText(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// text is a text of the bridge, or one given on the command line, as a line shows it: masked and on one line.
-func (cn *conformance) text(s string) string { return oneLine(cn.c.settings.mask(s)) }
+// secretForms are the secrets as a text may carry them, verbatim and in the escaped forms a URL gives them, as outbound
+// redacts them: the longer first, so that a secret contained in another is not replaced inside it first.
+func secretForms(secrets ...logging.Secret) []string {
+	var forms []string
+	for _, s := range secrets {
+		if s == "" {
+			continue
+		}
+		raw := string(s)
+		for _, f := range []string{raw, url.PathEscape(raw), url.QueryEscape(raw), (&url.URL{Path: raw}).EscapedPath()} {
+			if !slices.Contains(forms, f) {
+				forms = append(forms, f)
+			}
+		}
+	}
+	slices.SortFunc(forms, func(a, b string) int { return len(b) - len(a) })
+	return forms
+}
+
+// text is a text of the bridge, or one given on the command line, as a line shows it: with the token and the push
+// secret masked in every form and on one line.
+func (cn *conformance) text(s string) string {
+	for _, f := range cn.forms {
+		s = strings.ReplaceAll(s, f, "[redacted]")
+	}
+	return oneLine(s)
+}
 
 func (cn *conformance) pass(step string) { _, _ = fmt.Fprintf(cn.cfg.Out, "PASS %s\n", step) }
 
@@ -422,7 +451,14 @@ func (cn *conformance) directMessage(ctx context.Context) {
 	case !dm.BotCanStart:
 		cn.skip(step, "the bot cannot start a direct chat (bot_can_start is false)")
 		return
+	case cn.info.UserLookup == gen.None:
+		cn.skip(step, "the bridge looks up nobody")
+		return
+	case cn.cfg.Handle == "":
+		cn.skip(step, "no --handle")
+		return
 	case cn.person == nil:
+		// user_lookup ran and its own line says why it found nobody.
 		cn.skip(step, "no person found")
 		return
 	}
@@ -584,14 +620,22 @@ func (cn *conformance) pressByPolling(ctx context.Context) (*Event, string) {
 	return nil, "interrupted"
 }
 
-// pressByPush waits at the push listener until a press of the buttons message comes, or Wait passed.
+// pressByPush waits at the push listener until a press of the buttons message comes, Wait passed, or pushGrace passed
+// since the wait saw the first push the listener refused, so that a bridge whose pushes are all refused does not hold
+// the run for the whole of Wait: the press, or nil and why.
 func (cn *conformance) pressByPush(ctx context.Context) (*Event, string) {
 	timeout, stop := cn.cfg.timer(cn.cfg.Wait)
 	defer stop()
+	var grace <-chan time.Time
+	stopGrace := func() {}
+	defer func() { stopGrace() }()
 	for {
 		changed := cn.listener.changes()
 		if ev := cn.listener.press(cn.buttonsID); ev != nil {
 			return ev, ""
+		}
+		if grace == nil && cn.listener.refusedAny() {
+			grace, stopGrace = cn.cfg.timer(pushGrace)
 		}
 		select {
 		case <-changed:
@@ -599,6 +643,9 @@ func (cn *conformance) pressByPush(ctx context.Context) (*Event, string) {
 			return nil, "interrupted"
 		case <-timeout:
 			return nil, cn.noPress() + cn.listener.refusals()
+		case <-grace:
+			return nil, fmt.Sprintf("no valid press of message %s within %s of the first refused push",
+				cn.buttonsID, pushGrace) + cn.listener.refusals()
 		}
 	}
 }
@@ -811,6 +858,13 @@ func (l *pushListener) attempt(id string) (pushAttempt, bool) {
 		return l.attempts[refused], true
 	}
 	return pushAttempt{}, false
+}
+
+// refusedAny reports whether the listener refused a push.
+func (l *pushListener) refusedAny() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.refused > 0
 }
 
 // refusals tells how many pushes the listener refused and why it refused the last, nothing when it refused none.

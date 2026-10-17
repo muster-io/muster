@@ -3278,10 +3278,10 @@ func (p *probeBridgeBot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // base64, as the push secret, both read from files, against a stand-in bridge whose problems echo them with the
 // request's Authorization and body and whose message ids carry them: once with an info that fails; once interactively
 // against a bridge that only pushes, whose push listener receives a push signed with the third secret, a stale one, one
-// whose body carries the secrets and the press, sent through an outbound client; once with replays that answer a second
-// message id that carries the push secret; and once with a push secret file that holds no push secret. Neither the
-// lines the command prints, which the probe copies to its log, its log lines, the listener's answers nor the errors may
-// carry them.
+// whose body carries the secrets and the press, sent through an outbound client; once with replays that answer a
+// message id that carries the token URL-escaped and a second one that carries the push secret; and once with a push
+// secret file that holds no push secret. Neither the lines the command prints, which the probe copies to its log, its
+// log lines, the listener's answers nor the errors may carry them.
 func probeBridgeCheck(ctx context.Context, secrets []string, log io.Writer) error {
 	const (
 		modeInfoFails = iota
@@ -3365,7 +3365,7 @@ func probeBridgeCheck(ctx context.Context, secrets []string, log io.Writer) erro
 			case r.URL.Path == "/v1/messages" && mode.Load() == modeReplays:
 				mu.Lock()
 				posts++
-				id := "p-" + secrets[0]
+				id := "p-" + url.QueryEscape(secrets[0])
 				if posts%2 == 0 {
 					id = "p-" + pushSecret
 				}

@@ -12,10 +12,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,7 +162,8 @@ func TestConformanceEveryFeature(t *testing.T) {
 }
 
 // TestConformanceReducedFeatures: the steps of a feature the bridge does not offer, or of a flag not given, are
-// skipped with the reason, and the run passes; a person the bridge does not find fails user_lookup.
+// skipped with the first reason that applies, and the run passes; a person the bridge does not find fails user_lookup
+// and skips direct_message.
 func TestConformanceReducedFeatures(t *testing.T) {
 	f := startFake(t)
 	configure(t, f, `{"capabilities":{"thread_messages":"all"},"user_lookup":"none","event_delivery":["poll"]}`)
@@ -193,7 +196,14 @@ func TestConformanceReducedFeatures(t *testing.T) {
 		t.Errorf("lines %q", lines)
 	}
 	cfg.Handle = ""
-	if lines, _ = run(t, cfg); !slices.Contains(lines, "SKIP user_lookup: no --handle") {
+	if lines, _ = run(t, cfg); !slices.Contains(lines, "SKIP user_lookup: no --handle") ||
+		!slices.Contains(lines, "SKIP direct_message: no --handle") {
+		t.Errorf("lines %q", lines)
+	}
+
+	configure(t, f, `{"user_lookup":"none"}`)
+	if lines, _ = run(t, conf(f, nil)); !slices.Contains(lines, "SKIP user_lookup: the bridge looks up nobody") ||
+		!slices.Contains(lines, "SKIP direct_message: the bridge looks up nobody") {
 		t.Errorf("lines %q", lines)
 	}
 }
@@ -413,13 +423,48 @@ func TestConformancePushOnlyFailures(t *testing.T) {
 		t.Fatalf("lines %q", lines)
 	}
 
-	// The summary of the pushes the listener refused.
+	// The summary of the pushes the listener refused, when Wait ends first and when pushGrace after the first refused
+	// push does.
 	l := newPushListener(webhooks.NewSigningSecret(), clock.Real{})
 	l.record(pushAttempt{id: "e1", problem: "has a signature that does not match the push secret"})
-	cn := &conformance{cfg: ConformanceConfig{Wait: time.Minute, timer: firesAtOnce}, listener: l, buttonsID: "m2"}
-	if ev, why := cn.pressByPush(t.Context()); ev != nil || why != "no press of message m2 within 1m0s; the push "+
-		"listener refused 1 push, which has a signature that does not match the push secret" {
+	refused := "; the push listener refused 1 push, which has a signature that does not match the push secret"
+	var asked []time.Duration
+	cn := &conformance{cfg: ConformanceConfig{Wait: time.Minute, timer: firesFor(time.Minute, &asked)}, listener: l,
+		buttonsID: "m2"}
+	if ev, why := cn.pressByPush(t.Context()); ev != nil || why != "no press of message m2 within 1m0s"+refused {
 		t.Errorf("press %+v, %q", ev, why)
+	}
+	cn.cfg.timer = firesFor(pushGrace, &asked)
+	if ev, why := cn.pressByPush(t.Context()); ev != nil ||
+		why != "no valid press of message m2 within 30s of the first refused push"+refused {
+		t.Errorf("press %+v, %q", ev, why)
+	}
+	if !slices.Equal(asked, []time.Duration{time.Minute, pushGrace, time.Minute, pushGrace}) {
+		t.Errorf("waits %v", asked)
+	}
+}
+
+// TestConformancePushOnlyRefused: at the push listener of a bridge that only pushes, and pushes with another secret,
+// the press step stops waiting pushGrace after the first refused push instead of at the end of Wait, and fails naming
+// the refused pushes; push fails as it saw no press.
+func TestConformancePushOnlyRefused(t *testing.T) {
+	f := startFake(t)
+	configure(t, f, `{"event_delivery":["push"]}`)
+	_, cfg := interactive(t, f, string(webhooks.NewSigningSecret()), nil)
+	var asked []time.Duration
+	cfg.timer = firesFor(pushGrace, &asked)
+	lines, failed := run(t, cfg)
+	refused := `; the push listener refused (1 push, which|\d+ pushes, the last of which) has a signature that does not ` +
+		`match the push secret$`
+	press := regexp.MustCompile(`^FAIL press: no valid press of message m\d+ within 30s of the first refused push` +
+		refused)
+	push := regexp.MustCompile(`^FAIL push: the press step saw no press` + refused)
+	if !failed || !slices.ContainsFunc(lines, press.MatchString) || !slices.ContainsFunc(lines, push.MatchString) ||
+		lines[len(lines)-1] != "PASS answer" {
+		t.Fatalf("failed %v, lines %q", failed, lines)
+	}
+	if !slices.Equal(asked, []time.Duration{ConformanceWait, pushGrace}) {
+		t.Errorf("waits %v", asked)
 	}
 }
 
@@ -430,8 +475,19 @@ func firesAtOnce(time.Duration) (<-chan time.Time, func()) {
 	return ch, func() {}
 }
 
-// TestConformancePressTimeout: without a press within Wait, polled on the real clock, press fails and answer checks
-// an unknown event id.
+// firesFor is a timer that fires at once for a wait of d and never for another, and adds every wait to asked.
+func firesFor(d time.Duration, asked *[]time.Duration) func(time.Duration) (<-chan time.Time, func()) {
+	return func(wait time.Duration) (<-chan time.Time, func()) {
+		*asked = append(*asked, wait)
+		if wait == d {
+			return firesAtOnce(wait)
+		}
+		return make(chan time.Time), func() {}
+	}
+}
+
+// TestConformancePressTimeout: without a press within Wait, polled on a manual clock in the role of the real clock,
+// press fails and answer checks an unknown event id.
 func TestConformancePressTimeout(t *testing.T) {
 	f := startFake(t)
 	configure(t, f, `{"event_delivery":["poll"]}`)
@@ -514,6 +570,45 @@ func TestConformanceKeepsSecrets(t *testing.T) {
 	if !slices.Contains(lines, "FAIL answer: expected gone for an unknown event id; answered 403 forbidden: token "+
 		"[redacted] push [redacted] Bearer [redacted]") {
 		t.Errorf("lines %q", lines)
+	}
+}
+
+// TestConformanceMasksEscapedSecrets: a token and a push secret that URL escaping changes are masked in their escaped
+// forms too, in the message ids and the problems a bridge returns.
+func TestConformanceMasksEscapedSecrets(t *testing.T) {
+	const token = logging.Secret("brg/s3cr3t+token=77")
+	forms := []string{string(token), url.PathEscape(string(token)), url.QueryEscape(string(token)), testPushSecret,
+		url.QueryEscape(testPushSecret)}
+	var posts atomic.Int32
+	b := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/info":
+			answerJSON(http.StatusOK, "application/json", string(validInfo(t, nil)))(w, r)
+		case "/v1/messages":
+			id := "m-" + url.QueryEscape(string(token))
+			if posts.Add(1) == 2 {
+				id = "m-" + url.QueryEscape(testPushSecret)
+			}
+			answerJSON(http.StatusCreated, "application/json", `{"message_id":"`+id+`","truncated":false,`+
+				`"replayed":false}`)(w, r)
+		default:
+			p, _ := json.Marshal(map[string]any{"class": "forbidden", "detail": strings.Join(forms[1:], " ")})
+			answerJSON(http.StatusForbidden, "application/problem+json", string(p))(w, r)
+		}
+	})
+	lines, failed := run(t, ConformanceConfig{BaseURL: b.srv.URL, Token: token, PushSecret: testPushSecret,
+		Channel: "c"})
+	all := strings.Join(lines, "\n")
+	if !failed || !slices.Contains(lines, "FAIL replayed_key: the second request with the same Idempotency-Key "+
+		"created message m-[redacted] instead of returning m-[redacted]") ||
+		!slices.Contains(lines, "FAIL channel_check: answered 403 forbidden: [redacted] [redacted] [redacted] "+
+			"[redacted]") {
+		t.Errorf("lines %q", lines)
+	}
+	for _, f := range forms {
+		if strings.Contains(all, f) {
+			t.Errorf("%q in %q", f, lines)
+		}
 	}
 }
 
