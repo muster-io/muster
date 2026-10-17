@@ -251,7 +251,9 @@ MSG '[.[] | select(.envelope.title | endswith(" CpuHigh"))][0].edits | length'  
 # C-22.AC-7: rate_limited for the whole bot, then forbidden
 FAULT '/v1/messages/*' 429 '{"class":"rate_limited","scope":"bot"}' 7
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/resolve > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null
-sleep 9; curl -s $FB/requests | jq -c '[.[] | select(.method == "PATCH")] | .[-2:] | (.[1].at_ms - .[0].at_ms) / 1000 | . >= 7 and . < 8'   # true
+# both edits wait for the bot's hold and go out together, each 7 to 8 seconds after the 429
+sleep 9; curl -s $FB/requests | jq -c '[.[] | select(.method == "PATCH")] | (map(.status) | rindex(429)) as $i | .[$i].at_ms as $t |
+  [.[$i + 1:][] | (.at_ms - $t) / 1000] | length > 0 and all(. >= 7 and . < 8)'   # true
 FAULT '/v1/messages/*' 403 '{"class":"forbidden","detail":"The bot was removed from this channel."}'
 curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null; sleep 1
 curl -s -b jar $API/destinations/$D | jq -c '.health | {state, reason}'   # {"state":"broken","reason":"The bot was removed from this channel."}
@@ -261,10 +263,14 @@ ADV 300; sleep 2; curl -s -b jar $API/destinations/$D | jq -r .health.state     
 curl -s -X PUT $FB/config -d '{"limits":{"max_body_length":1000,"edit_max_age_seconds":null}}' > /dev/null
 curl -s "${H[@]}" -X POST $API/connections/$C/checks > /dev/null                   # reads info again
 curl -s -X PUT $FAM/groups/b5 -d '{"receiver":"lab","route":"{}","labels":{"alertname":"Many"}}' > /dev/null
-for i in $(seq 1 40); do curl -s -X PUT $FAM/groups/b5/alerts/m$i -d "{\"labels\":{\"team\":\"br\",\"pod\":\"m$i\"}}" > /dev/null; done
+# past 10 Alerts the list is one line of distinct values per differing label, so four long ones make about 1,450
+# code points, which the limit shortens
+for i in $(seq 1 40); do curl -s -X PUT $FAM/groups/b5/alerts/m$i -d "{\"labels\":{\"team\":\"br\",\"pod\":\"m$i\",
+  \"instance\":\"node-$i.region-a.example.org:9100\",\"host\":\"host-$i.rack-b.datacenter-c.example.org\",
+  \"disk\":\"/dev/disk/by-id/nvme-sample-serial-0000$i\"}}" > /dev/null; done
 NOTIFY b5 '{"reason":"first notification"}'; sleep 1
-MSG '[.[] | select(.envelope.title | endswith(" Many"))][0].envelope | {n: (.body | length <= 1000), o: (.body | contains("Open in Muster")), l: .link.label, b: (.buttons | length > 0)}'
-# {"n":true,"o":true,"l":"Open in Muster","b":true}
+MSG '[.[] | select(.envelope.title | endswith(" Many"))][0].envelope | {n: (.body | length <= 1000), s: (.body | contains("+30 more") | not), o: (.body | contains("Open in Muster")), l: .link.label, b: (.buttons | length > 0)}'
+# {"n":true,"s":true,"o":true,"l":"Open in Muster","b":true}
 curl -s -X PUT $FB/config -d '{"limits":{"max_body_length":4000,"edit_max_age_seconds":null}}' > /dev/null
 
 # C-22.AC-11: no buttons, Thread messages only
