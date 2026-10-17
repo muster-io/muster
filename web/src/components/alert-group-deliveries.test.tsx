@@ -37,6 +37,7 @@ function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
     state: "delivered",
     thread_not_attached: false,
     possible_duplicate: false,
+    past_edit_window: false,
     ...extra,
   };
 }

@@ -122,6 +122,11 @@ type (
 		threadOpened   bool
 		// actualKey is actual_button_key_id: the key that signed the buttons of the message sent, empty for none.
 		actualKey *string
+		// actualStatus is the status the Root message shows, nil when unknown; pastEditWindow says that it is past its
+		// bridge's edit window, and superseded are the ids of the older Root messages a republication replaced.
+		actualStatus   *string
+		pastEditWindow bool
+		superseded     []string
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -592,7 +597,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
 		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
-		ActualButtonKeyID: txt(d.actualKey)}
+		ActualButtonKeyID: txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
+		PastEditWindow: d.pastEditWindow}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
 		return out, nil
@@ -636,6 +642,7 @@ func (f *fakeDB) MarkDelivered(_ context.Context, arg dbgen.MarkDeliveredParams)
 	}
 	if d := f.delivery(arg.ID); d.owner == arg.Owner && d.version == arg.Version {
 		d.state, d.receivedAt, d.owner, d.until = "delivered", nil, "", time.Time{}
+		d.pastEditWindow = d.pastEditWindow || arg.PastEditWindow
 	}
 	return nil
 }
@@ -699,11 +706,12 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	if err != nil {
 		return dbgen.RecordDeliveredRow{}, err
 	}
-	// A replayed Publication keeps the actual version, leaves actual_hash NULL and keeps the receipt time.
+	// A replayed Publication keeps the actual version, leaves actual_hash and actual_status NULL and keeps the
+	// receipt time.
 	if arg.Replayed {
-		d.actualHash = nil
+		d.actualHash, d.actualStatus = nil, nil
 	} else {
-		d.actualVersion, d.actualHash, d.receivedAt = arg.Version, arg.Hash, nil
+		d.actualVersion, d.actualHash, d.receivedAt, d.actualStatus = arg.Version, arg.Hash, nil, strOf(arg.ActualStatus)
 	}
 	d.actualKey = strOf(arg.ButtonKeyID)
 	if arg.MessageID.Valid {
@@ -745,6 +753,54 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	d.next, d.attempts, d.errorClass, d.lastError, d.owner, d.until = arg.Now, 0, nil, nil, "", time.Time{}
 	d.firstFailed = nil
 	return dbgen.RecordDeliveredRow{State: d.state, PublishedAt: tz(d.publishedAt)}, nil
+}
+
+func (f *fakeDB) RecordRepublished(_ context.Context, arg dbgen.RecordRepublishedParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordRepublished"); err != nil {
+		return "", err
+	}
+	d := f.delivery(arg.ID)
+	if arg.OrgID != orgID || d.owner != arg.Owner {
+		return "", pgx.ErrNoRows
+	}
+	if d.messageID != nil {
+		d.superseded = append(d.superseded, *d.messageID)
+	}
+	d.messageID, d.messageURL, d.anchorID = &arg.MessageID, strOf(arg.MessageUrl), strOf(arg.ThreadRef)
+	d.publishedAt, d.lastDelivered = at(arg.Now), at(arg.Now)
+	d.publications++
+	if arg.Replayed {
+		d.actualHash, d.actualStatus = nil, nil
+	} else {
+		d.actualVersion, d.actualHash, d.receivedAt, d.actualStatus = arg.Version, arg.Hash, nil, strOf(arg.ActualStatus)
+	}
+	d.actualKey, d.pastEditWindow = strOf(arg.ButtonKeyID), false
+	switch {
+	case endedRow(d):
+	case d.version == arg.Version && !d.desiredRetire && !arg.Replayed:
+		d.state = "delivered"
+	default:
+		d.state = "pending"
+	}
+	d.next, d.attempts, d.firstFailed, d.errorClass, d.lastError = arg.Now, 0, nil, nil, nil
+	d.owner, d.until, d.updated = "", time.Time{}, arg.Now
+	return d.state, nil
+}
+
+func (f *fakeDB) RecordEditWindowClosed(_ context.Context, arg dbgen.RecordEditWindowClosedParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordEditWindowClosed"); err != nil {
+		return 0, err
+	}
+	d := f.delivery(arg.ID)
+	if arg.OrgID != orgID || d.owner != arg.Owner {
+		return 0, nil
+	}
+	d.pastEditWindow, d.next, d.owner, d.until, d.updated = true, arg.Now, "", time.Time{}, arg.Now
+	return 1, nil
 }
 
 func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDeliveryRetryParams) (
@@ -1140,7 +1196,8 @@ func (f *fakeDB) ListGroupDeliveries(_ context.Context, arg dbgen.ListGroupDeliv
 		}
 		ds := f.dests[d.dest]
 		out = append(out, dbgen.ListGroupDeliveriesRow{State: d.state, ThreadState: d.threadState,
-			PossibleDuplicate: d.possibleDuplicate, MessageUrl: txt(d.messageURL), LastError: txt(d.lastError),
+			PossibleDuplicate: d.possibleDuplicate, PastEditWindow: d.pastEditWindow, MessageUrl: txt(d.messageURL),
+			LastError: txt(d.lastError),
 			UpdatedAt: d.updated, DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 			Health: ds.health, BrokenSince: tz(ds.brokenSince), BrokenReason: txt(ds.brokenReason)})
 	}
@@ -1285,6 +1342,7 @@ func (f *fakeDB) ResetForRepublish(_ context.Context, arg dbgen.ResetForRepublis
 	}
 	d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
 	d.publishedAt, d.responseValues, d.threadOpened, d.actualKey = nil, nil, false, nil
+	d.actualStatus, d.pastEditWindow = nil, false
 	d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, true
 	d.loud, d.lateNote, d.state, d.attempts, d.firstFailed = pgtype.Bool{Bool: false, Valid: true}, false, "pending",
 		0, nil

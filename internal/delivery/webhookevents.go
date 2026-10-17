@@ -401,7 +401,8 @@ func (w *Worker) recordEventOutcome(ctx context.Context, q queries, org int64, a
 		}
 		return true, breakDestination(ctx, q, w.raiser(org), org, d, causeFatal, failure(out, "fatal error"), now,
 			logs)
-	case OutcomeUnknown, OutcomeTemplateError, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost:
+	case OutcomeUnknown, OutcomeTemplateError, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost,
+		OutcomeEditWindowClosed:
 		// The answers a messenger gives and an outgoing webhook does not are unknown too.
 	}
 	class := string(OutcomeUnknown)

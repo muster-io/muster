@@ -101,7 +101,7 @@ func ErrorClass(k OutcomeKind) string {
 		return ClassNone
 	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeTemplateError:
 		return string(k)
-	case OutcomeUnknown, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost:
+	case OutcomeUnknown, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost, OutcomeEditWindowClosed:
 	}
 	return string(OutcomeUnknown)
 }

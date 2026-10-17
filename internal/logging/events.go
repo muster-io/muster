@@ -651,6 +651,16 @@ var BridgeInfoRead = newEvent("bridge_info_read", LevelInfo, "C-22",
 		"speaks, features the names of the optional features it declares.",
 	"connection", "protocol_version", "features")
 
+// BridgeRepublishedPastEditWindow is logged when a Bridge Root message past its edit window was published again
+// (C-22.FR-9, FR-24).
+var BridgeRepublishedPastEditWindow = newEvent("bridge_republished_past_edit_window", LevelInfo, "C-22",
+	"The status of an Alert Group changed while its Bridge Root message was past the bridge's edit window, so Muster "+
+		"posted a new Root message Quietly and replied under the old one with a link to it: destination is the "+
+		"public_id of the Destination, group the public_id of the Alert Group, old_message_id and new_message_id the "+
+		"bridge's ids of the old and the new Root message. Later Thread replies go under the new one; the old one keeps "+
+		"working. Logged once the republication was recorded.",
+	"destination", "group", "old_message_id", "new_message_id")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

@@ -1093,7 +1093,8 @@ const getLeasedDelivery = `-- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, d.thread_anchor_id,
+       d.actual_status, d.past_edit_window, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -1135,6 +1136,9 @@ type GetLeasedDeliveryRow struct {
 	ResponseValues           []byte
 	ThreadOpened             bool
 	ActualButtonKeyID        pgtype.Text
+	ThreadAnchorID           pgtype.Text
+	ActualStatus             pgtype.Text
+	PastEditWindow           bool
 	DestinationID            int64
 	DestinationPublicID      string
 	DestinationName          string
@@ -1156,7 +1160,8 @@ type GetLeasedDeliveryRow struct {
 // webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
 // and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
 // Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
-// (C-17.FR-1). No row when the lease ran out or went to another replica.
+// (C-17.FR-1). A bridge's Root message also brings its Thread anchor, the status it shows and whether it is past its
+// edit window (C-22.FR-9). No row when the lease ran out or went to another replica.
 func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryParams) (GetLeasedDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedDelivery,
 		arg.OrgID,
@@ -1187,6 +1192,9 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.ResponseValues,
 		&i.ThreadOpened,
 		&i.ActualButtonKeyID,
+		&i.ThreadAnchorID,
+		&i.ActualStatus,
+		&i.PastEditWindow,
 		&i.DestinationID,
 		&i.DestinationPublicID,
 		&i.DestinationName,
@@ -2180,7 +2188,7 @@ func (q *Queries) ListDestinationHealth(ctx context.Context, orgID int64) ([]Lis
 }
 
 const listGroupDeliveries = `-- name: ListGroupDeliveries :many
-SELECT d.state, d.thread_state, d.possible_duplicate, d.message_url, d.last_error, d.updated_at,
+SELECT d.state, d.thread_state, d.possible_duplicate, d.past_edit_window, d.message_url, d.last_error, d.updated_at,
        ds.public_id AS destination_public_id, ds.name AS destination_name, ds.type AS destination_type, ds.health,
        ds.broken_since, ds.broken_reason
 FROM deliveries d
@@ -2198,6 +2206,7 @@ type ListGroupDeliveriesRow struct {
 	State               string
 	ThreadState         string
 	PossibleDuplicate   bool
+	PastEditWindow      bool
 	MessageUrl          pgtype.Text
 	LastError           pgtype.Text
 	UpdatedAt           time.Time
@@ -2223,6 +2232,7 @@ func (q *Queries) ListGroupDeliveries(ctx context.Context, arg ListGroupDeliveri
 			&i.State,
 			&i.ThreadState,
 			&i.PossibleDuplicate,
+			&i.PastEditWindow,
 			&i.MessageUrl,
 			&i.LastError,
 			&i.UpdatedAt,
@@ -2841,21 +2851,25 @@ func (q *Queries) MarkDeletedInMessenger(ctx context.Context, arg MarkDeletedInM
 
 const markDelivered = `-- name: MarkDelivered :exec
 UPDATE deliveries
-SET state = 'delivered', desired_received_at = NULL, lease_owner = NULL, lease_until = NULL, updated_at = $1
-WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text AND desired_version = $5
+SET state = 'delivered', desired_received_at = NULL, past_edit_window = past_edit_window OR $1::boolean,
+    lease_owner = NULL, lease_until = NULL, updated_at = $2
+WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text AND desired_version = $6
 `
 
 type MarkDeliveredParams struct {
-	Now     time.Time
-	OrgID   int64
-	ID      int64
-	Owner   string
-	Version int64
+	PastEditWindow bool
+	Now            time.Time
+	OrgID          int64
+	ID             int64
+	Owner          string
+	Version        int64
 }
 
-// MarkDelivered records that the actual message already shows the desired version: nothing to call.
+// MarkDelivered records that the actual message already shows the desired version, or that a bridge's Root message
+// past its edit window takes no edit for it (@past_edit_window, C-22.FR-9): nothing to call.
 func (q *Queries) MarkDelivered(ctx context.Context, arg MarkDeliveredParams) error {
 	_, err := q.db.Exec(ctx, markDelivered,
+		arg.PastEditWindow,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
@@ -3095,23 +3109,24 @@ const recordDelivered = `-- name: RecordDelivered :one
 UPDATE deliveries d
 SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::bigint END,
     actual_hash         = CASE WHEN $1::boolean THEN NULL ELSE $3::bytea END,
-    actual_button_key_id = $4::text,
-    message_id          = coalesce($5::text, d.message_id),
-    message_url         = coalesce($6::text, d.message_url),
-    thread_anchor_id    = coalesce($7::text, d.thread_anchor_id),
+    actual_status       = CASE WHEN $1::boolean THEN NULL ELSE $4::text END,
+    actual_button_key_id = $5::text,
+    message_id          = coalesce($6::text, d.message_id),
+    message_url         = coalesce($7::text, d.message_url),
+    thread_anchor_id    = coalesce($8::text, d.thread_anchor_id),
     published_at        = CASE
-                              WHEN $8::boolean THEN coalesce(d.published_at,
-                                  CASE WHEN $1::boolean THEN d.publication_started_at END, $9::timestamptz)
+                              WHEN $9::boolean THEN coalesce(d.published_at,
+                                  CASE WHEN $1::boolean THEN d.publication_started_at END, $10::timestamptz)
                               ELSE d.published_at
                           END,
-    possible_duplicate  = d.possible_duplicate OR $10::boolean,
-    publications        = d.publications + CASE WHEN $8::boolean THEN 1 ELSE 0 END,
+    possible_duplicate  = d.possible_duplicate OR $11::boolean,
+    publications        = d.publications + CASE WHEN $9::boolean THEN 1 ELSE 0 END,
     response_values     = CASE
-                              WHEN $8::boolean THEN coalesce($11::jsonb, '{}'::jsonb)
+                              WHEN $9::boolean THEN coalesce($12::jsonb, '{}'::jsonb)
                               ELSE d.response_values
                           END,
-    thread_opened       = d.thread_opened AND NOT $8::boolean,
-    last_delivered_at   = $9::timestamptz,
+    thread_opened       = d.thread_opened AND NOT $9::boolean,
+    last_delivered_at   = $10::timestamptz,
     state               = CASE
                               WHEN f.ended AND NOT f.raced THEN d.state
                               WHEN f.raced AND d.storm_id IS NOT NULL THEN 'retired'
@@ -3122,18 +3137,18 @@ SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::b
                           END,
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = CASE WHEN $1::boolean THEN d.desired_received_at END,
-    next_attempt_at     = $9::timestamptz,
+    next_attempt_at     = $10::timestamptz,
     attempts            = 0,
     first_failed_at     = NULL,
     last_error_class    = NULL,
     last_error          = NULL,
     lease_owner         = NULL,
     lease_until         = NULL,
-    updated_at          = $9::timestamptz
+    updated_at          = $10::timestamptz
 FROM (SELECT x.id,
              x.state IN ('withheld', 'retired', 'deleted_in_messenger') AS ended,
              (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.published_at IS NULL
-              AND $8::boolean) AS raced,
+              AND $9::boolean) AS raced,
              (EXISTS (SELECT 1
                       FROM destinations ds
                       WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
@@ -3143,8 +3158,8 @@ FROM (SELECT x.id,
                              WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
                                AND rd.destination_id = x.destination_id)) AS left_destination
       FROM deliveries x
-      WHERE x.org_id = $12 AND x.id = $14) AS f
-WHERE d.org_id = $12 AND d.id = f.id AND d.lease_owner = $13::text
+      WHERE x.org_id = $13 AND x.id = $15) AS f
+WHERE d.org_id = $13 AND d.id = f.id AND d.lease_owner = $14::text
 RETURNING d.state, d.published_at
 `
 
@@ -3152,6 +3167,7 @@ type RecordDeliveredParams struct {
 	Replayed          bool
 	Version           int64
 	Hash              []byte
+	ActualStatus      pgtype.Text
 	ButtonKeyID       pgtype.Text
 	MessageID         pgtype.Text
 	MessageUrl        pgtype.Text
@@ -3187,11 +3203,13 @@ type RecordDeliveredRow struct {
 // the start of its first attempt, when the message was really posted, and stays pending without an actual version,
 // its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
 // to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
+// The status the message shows (@actual_status) is unknown after a replay.
 func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (RecordDeliveredRow, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
 		arg.Replayed,
 		arg.Version,
 		arg.Hash,
+		arg.ActualStatus,
 		arg.ButtonKeyID,
 		arg.MessageID,
 		arg.MessageUrl,
@@ -3265,6 +3283,36 @@ func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRet
 	var i RecordDeliveryRetryRow
 	err := row.Scan(&i.Attempts, &i.FirstFailedAt)
 	return i, err
+}
+
+const recordEditWindowClosed = `-- name: RecordEditWindowClosed :execrows
+UPDATE deliveries
+SET past_edit_window = true, next_attempt_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
+    updated_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type RecordEditWindowClosedParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// RecordEditWindowClosed records an edit a bridge refused only because of the Root message's age (C-22.FR-8, FR-9):
+// the Root message is past its edit window, and the delivery is due at once, so that the rule of a Root message past
+// its window decides its Desired state. No row when the lease went to another replica.
+func (q *Queries) RecordEditWindowClosed(ctx context.Context, arg RecordEditWindowClosedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordEditWindowClosed,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordNotDelivered = `-- name: RecordNotDelivered :one
@@ -3419,6 +3467,84 @@ func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams
 		arg.Owner,
 	)
 	return err
+}
+
+const recordRepublished = `-- name: RecordRepublished :one
+UPDATE deliveries
+SET superseded_message_ids = CASE
+                                 WHEN message_id IS NULL THEN superseded_message_ids
+                                 ELSE array_append(superseded_message_ids, message_id)
+                             END,
+    message_id             = $1::text,
+    message_url            = $2::text,
+    thread_anchor_id       = $3::text,
+    published_at           = $4::timestamptz,
+    publications           = publications + 1,
+    actual_version         = CASE WHEN $5::boolean THEN actual_version ELSE $6::bigint END,
+    actual_hash            = CASE WHEN $5::boolean THEN NULL ELSE $7::bytea END,
+    actual_status          = CASE WHEN $5::boolean THEN NULL ELSE $8::text END,
+    actual_button_key_id   = $9::text,
+    past_edit_window       = false,
+    last_delivered_at      = $4::timestamptz,
+    state                  = CASE
+                                 WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
+                                 WHEN desired_version = $6::bigint AND NOT desired_retire
+                                     AND NOT $5::boolean THEN 'delivered'
+                                 ELSE 'pending'
+                             END,
+    desired_received_at    = CASE WHEN $5::boolean THEN desired_received_at END,
+    next_attempt_at        = $4::timestamptz,
+    attempts               = 0,
+    first_failed_at        = NULL,
+    last_error_class       = NULL,
+    last_error             = NULL,
+    lease_owner            = NULL,
+    lease_until            = NULL,
+    updated_at             = $4::timestamptz
+WHERE org_id = $10 AND id = $11 AND lease_owner = $12::text
+RETURNING state
+`
+
+type RecordRepublishedParams struct {
+	MessageID    string
+	MessageUrl   pgtype.Text
+	ThreadRef    pgtype.Text
+	Now          time.Time
+	Replayed     bool
+	Version      int64
+	Hash         []byte
+	ActualStatus pgtype.Text
+	ButtonKeyID  pgtype.Text
+	OrgID        int64
+	ID           int64
+	Owner        string
+}
+
+// RecordRepublished records a Root message published again past its bridge's edit window (C-22.FR-9): the new
+// message, its url and its `thread_ref`, which later Thread replies go under, replace the old one, whose id joins
+// superseded_message_ids, so that presses and Text commands on it still reach the delivery; the Publication count grows
+// and the new message's edit window starts now. It is delivered unless the Desired state grew meanwhile, the
+// Destination left (desired_retire) or the answer was @replayed, after which the status it shows is unknown and the
+// next call edits it; a row that ended while the call was in flight stays so. No row when the lease went to another
+// replica.
+func (q *Queries) RecordRepublished(ctx context.Context, arg RecordRepublishedParams) (string, error) {
+	row := q.db.QueryRow(ctx, recordRepublished,
+		arg.MessageID,
+		arg.MessageUrl,
+		arg.ThreadRef,
+		arg.Now,
+		arg.Replayed,
+		arg.Version,
+		arg.Hash,
+		arg.ActualStatus,
+		arg.ButtonKeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var state string
+	err := row.Scan(&state)
+	return state, err
 }
 
 const recordRetired = `-- name: RecordRetired :one
@@ -3668,6 +3794,8 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     thread_opened            = thread_opened AND state NOT IN ('retired', 'withheld'),
     actual_version           = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_version END,
     actual_hash              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_hash END,
+    actual_status            = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_status END,
+    past_edit_window         = past_edit_window AND state NOT IN ('retired', 'withheld'),
     thread_state             = CASE WHEN state IN ('retired', 'withheld') THEN 'none' ELSE thread_state END,
     thread_anchor_id         = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_anchor_id END,
     thread_chain_last_id     = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_chain_last_id END,
@@ -3996,6 +4124,8 @@ SET message_id               = NULL,
     thread_opened            = false,
     actual_version           = NULL,
     actual_hash              = NULL,
+    actual_status            = NULL,
+    past_edit_window         = false,
     publication_started_at   = NULL,
     thread_state             = 'none',
     thread_anchor_id         = NULL,
@@ -4024,7 +4154,8 @@ type ResetForRepublishParams struct {
 
 // ResetForRepublish makes a delivery whose Root message was deleted in the messenger publish again, Quietly and once
 // (C-11.FR-13): the actual message and its Thread are forgotten, and its pending Thread replies wait for the new Root
-// message. A delivery republished once already, or ended, is left alone.
+// message. A delivery republished once already, or ended, is left alone. The new Root message has an edit window of
+// its own; the older ones a republication past a window replaced stay known (superseded_message_ids).
 func (q *Queries) ResetForRepublish(ctx context.Context, arg ResetForRepublishParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resetForRepublish, arg.Now, arg.OrgID, arg.ID)
 	if err != nil {

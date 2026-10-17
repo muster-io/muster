@@ -2110,7 +2110,7 @@ func (l *live) movedToDefaultRoute(t *testing.T) {
 // produces the new message, the edit or nothing it names, with its loudness and Mentions; the Publication after a
 // recovery is Loud only for an Alert Group firing at that moment.
 func (l *live) deliveryEventRows(t *testing.T) {
-	if len(delivery.DeliveryEvents) != 11 {
+	if len(delivery.DeliveryEvents) != 12 {
 		t.Fatalf("%d rows", len(delivery.DeliveryEvents))
 	}
 	n := 0
@@ -2239,6 +2239,22 @@ func (l *live) deliveryEventRows(t *testing.T) {
 			l.routeEdit(t, route)
 			l.round(t, l.a)
 			return l.rec.Calls()
+		}}},
+		// A change of status past a bridge's edit window: the new Root message, apart from the pointer reply under
+		// the old one.
+		delivery.DeliveryPastEditWindow: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, true)
+			adapter := l.a.Adapters[delivery.TypeMattermost]
+			l.a.Adapters[delivery.TypeMattermost] = windowed(l.rec)
+			defer func() { l.a.Adapters[delivery.TypeMattermost] = adapter }()
+			l.business.Advance(11 * time.Minute)
+			l.ack(t, gid)
+			l.round(t, l.a)
+			if l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished_past_edit_window'`) != 1 ||
+				len(only(l.rec.Calls(), deliverytest.MethodReply)) != 1 {
+				t.Errorf("no republication past the edit window: %s", methods(l.rec.Calls()))
+			}
+			return only(l.rec.Calls(), deliverytest.MethodPublish, deliverytest.MethodUpdate)
 		}}},
 	}
 	var lines []string

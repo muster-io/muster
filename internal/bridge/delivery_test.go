@@ -322,8 +322,10 @@ func TestReplyThreadRef(t *testing.T) {
 	}
 }
 
-// TestKeys covers C-22.FR-6: a Publication's key is pub-<Destination public_id>-<delivery id>-<publication>, a Thread
-// reply's reply-<Destination public_id>-<thread reply id>, both within the protocol's pattern.
+// TestKeys covers C-22.FR-6 and FR-9: a Publication's key is pub-<Destination public_id>-<delivery id>-<publication>,
+// a Thread reply's reply-<Destination public_id>-<thread reply id>, the pointer reply's
+// pointer-<Destination public_id>-<delivery id>-<publication> and that of a final edit sent as a Thread reply
+// final-<Destination public_id>-<delivery id>, all within the protocol's pattern.
 func TestKeys(t *testing.T) {
 	a := &Adapter{}
 	d := delivery.Destination{ID: 4, PublicID: destPublicID}
@@ -332,6 +334,11 @@ func TestKeys(t *testing.T) {
 	if pub != "pub-DS0123456789AB-17-3" || reply != "reply-DS0123456789AB-99" || !pattern.MatchString(pub) ||
 		!pattern.MatchString(reply) || a.PublicationKey(d, 17, 3) != pub {
 		t.Fatalf("keys %q %q", pub, reply)
+	}
+	pointer, final := a.PointerKey(d, 17, 3), a.FinalKey(d, 17)
+	if pointer != "pointer-DS0123456789AB-17-3" || final != "final-DS0123456789AB-17" ||
+		!pattern.MatchString(pointer) || !pattern.MatchString(final) {
+		t.Fatalf("keys %q %q", pointer, final)
 	}
 	if a.LengthLimit() != MinBodyLength {
 		t.Fatalf("length limit %d", a.LengthLimit())
@@ -388,7 +395,8 @@ func (f *fired) fire() { f.once.Do(func() { close(f.done) }) }
 
 // TestErrorMapping covers C-22.FR-8 and AC-7 on each call: transient is Transient; rate_limited waits exactly its
 // Retry-After for the Destination, or with the scope bot for the Connection, and is Transient without one or with one
-// longer than bridge.retry_after_max; gone is Gone on an edit and on a reply; forbidden is Fatal with the bridge's
+// longer than bridge.retry_after_max; gone is Gone on an edit and on a reply, and on an edit with the reason
+// edit_window_closed OutcomeEditWindowClosed (C-22.AC-9); forbidden is Fatal with the bridge's
 // detail, masked; invalid, an answer that is not the protocol's and a redirect are unknown; a call without an answer is
 // Transient, Unanswered when its request was written and may have reached the bridge — never when it was refused or
 // timed out while connecting, in a TLS handshake or a proxy's CONNECT — and an address the policy refuses is Fatal.
@@ -418,8 +426,10 @@ func TestErrorMapping(t *testing.T) {
 		{"gone on an edit", "edit", problem(404, `{"class":"gone","detail":"The message no longer exists."}`),
 			delivery.OutcomeGone, 0, "", "The message no longer exists."},
 		{"gone with edit_window_closed", "edit", problem(404, `{"class":"gone","reason":"edit_window_closed"}`),
-			delivery.OutcomeGone, 0, "", ""},
+			delivery.OutcomeEditWindowClosed, 0, "", ""},
 		{"gone on a reply", "reply", problem(404, `{"class":"gone"}`), delivery.OutcomeGone, 0, "", ""},
+		{"gone with edit_window_closed on a reply", "reply",
+			problem(404, `{"class":"gone","reason":"edit_window_closed"}`), delivery.OutcomeGone, 0, "", ""},
 		{"forbidden", "post", problem(403, `{"class":"forbidden","detail":"The bot was removed from this channel."}`),
 			delivery.OutcomeFatal, 0, "", "The bot was removed from this channel."},
 		{"forbidden echoing the token", "edit", problem(403, `{"class":"forbidden","detail":"bad token `+testToken+`"}`),
@@ -758,6 +768,32 @@ func TestInfoReadFailure(t *testing.T) {
 	e.bridge.answer("info", answerJSON(500, problemJSON, `{"class":"transient"}`))
 	if o := callOp(t, e.adapter, "edit", t.Context()); o.Kind != delivery.OutcomeOK || len(e.bridge.requests("edit")) != 1 {
 		t.Fatalf("with a stale copy = %+v", o)
+	}
+}
+
+// TestEditWindow covers C-22.FR-9: the edit window is limits.edit_max_age_seconds of the Connection's info, read
+// through the InfoCache; none when the info declares null, when it cannot be read, or without a Target.
+func TestEditWindow(t *testing.T) {
+	e := newAdapterEnv(t, set("limits", "edit_max_age_seconds", 600))
+	if d, ok := e.adapter.EditWindow(t.Context(), call(groups.Quiet, "")); !ok || d != 600*time.Second {
+		t.Errorf("600 = %v, %v", d, ok)
+	}
+	if n := len(e.bridge.requests("info")); n != 1 || len(e.bridge.seen()) != 1 {
+		t.Errorf("%d info reads, %d requests", n, len(e.bridge.seen()))
+	}
+	e = newAdapterEnv(t, set("limits", "edit_max_age_seconds", nil))
+	if d, ok := e.adapter.EditWindow(t.Context(), call(groups.Quiet, "")); ok || d != 0 {
+		t.Errorf("null = %v, %v", d, ok)
+	}
+	e = newAdapterEnv(t)
+	e.bridge.answer("info", answerJSON(500, problemJSON, `{"class":"transient","detail":"down"}`))
+	if d, ok := e.adapter.EditWindow(t.Context(), call(groups.Quiet, "")); ok || d != 0 {
+		t.Errorf("unreadable info = %v, %v", d, ok)
+	}
+	other := call(groups.Quiet, "")
+	other.Destination.ID = 9
+	if d, ok := e.adapter.EditWindow(t.Context(), other); ok || d != 0 {
+		t.Errorf("without a target = %v, %v", d, ok)
 	}
 }
 

@@ -153,12 +153,14 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 -- webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
 -- and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
 -- Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
--- (C-17.FR-1). No row when the lease ran out or went to another replica.
+-- (C-17.FR-1). A bridge's Root message also brings its Thread anchor, the status it shows and whether it is past its
+-- edit window (C-22.FR-9). No row when the lease ran out or went to another replica.
 -- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, d.thread_anchor_id,
+       d.actual_status, d.past_edit_window, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -177,10 +179,12 @@ UPDATE deliveries
 SET lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
--- MarkDelivered records that the actual message already shows the desired version: nothing to call.
+-- MarkDelivered records that the actual message already shows the desired version, or that a bridge's Root message
+-- past its edit window takes no edit for it (@past_edit_window, C-22.FR-9): nothing to call.
 -- name: MarkDelivered :exec
 UPDATE deliveries
-SET state = 'delivered', desired_received_at = NULL, lease_owner = NULL, lease_until = NULL, updated_at = @now
+SET state = 'delivered', desired_received_at = NULL, past_edit_window = past_edit_window OR @past_edit_window::boolean,
+    lease_owner = NULL, lease_until = NULL, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND desired_version = @version;
 
 -- RescheduleDelivery releases a delivery that waits for its limiter tokens until @at, without failing it.
@@ -227,10 +231,12 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- the start of its first attempt, when the message was really posted, and stays pending without an actual version,
 -- its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
 -- to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
+-- The status the message shows (@actual_status) is unknown after a replay.
 -- name: RecordDelivered :one
 UPDATE deliveries d
 SET actual_version      = CASE WHEN @replayed::boolean THEN d.actual_version ELSE @version::bigint END,
     actual_hash         = CASE WHEN @replayed::boolean THEN NULL ELSE @hash::bytea END,
+    actual_status       = CASE WHEN @replayed::boolean THEN NULL ELSE sqlc.narg('actual_status')::text END,
     actual_button_key_id = sqlc.narg('button_key_id')::text,
     message_id          = coalesce(sqlc.narg('message_id')::text, d.message_id),
     message_url         = coalesce(sqlc.narg('message_url')::text, d.message_url),
@@ -282,6 +288,57 @@ FROM (SELECT x.id,
       WHERE x.org_id = @org_id AND x.id = @id) AS f
 WHERE d.org_id = @org_id AND d.id = f.id AND d.lease_owner = @owner::text
 RETURNING d.state, d.published_at;
+
+-- RecordRepublished records a Root message published again past its bridge's edit window (C-22.FR-9): the new
+-- message, its url and its `thread_ref`, which later Thread replies go under, replace the old one, whose id joins
+-- superseded_message_ids, so that presses and Text commands on it still reach the delivery; the Publication count grows
+-- and the new message's edit window starts now. It is delivered unless the Desired state grew meanwhile, the
+-- Destination left (desired_retire) or the answer was @replayed, after which the status it shows is unknown and the
+-- next call edits it; a row that ended while the call was in flight stays so. No row when the lease went to another
+-- replica.
+-- name: RecordRepublished :one
+UPDATE deliveries
+SET superseded_message_ids = CASE
+                                 WHEN message_id IS NULL THEN superseded_message_ids
+                                 ELSE array_append(superseded_message_ids, message_id)
+                             END,
+    message_id             = @message_id::text,
+    message_url            = sqlc.narg('message_url')::text,
+    thread_anchor_id       = sqlc.narg('thread_ref')::text,
+    published_at           = @now::timestamptz,
+    publications           = publications + 1,
+    actual_version         = CASE WHEN @replayed::boolean THEN actual_version ELSE @version::bigint END,
+    actual_hash            = CASE WHEN @replayed::boolean THEN NULL ELSE @hash::bytea END,
+    actual_status          = CASE WHEN @replayed::boolean THEN NULL ELSE sqlc.narg('actual_status')::text END,
+    actual_button_key_id   = sqlc.narg('button_key_id')::text,
+    past_edit_window       = false,
+    last_delivered_at      = @now::timestamptz,
+    state                  = CASE
+                                 WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
+                                 WHEN desired_version = @version::bigint AND NOT desired_retire
+                                     AND NOT @replayed::boolean THEN 'delivered'
+                                 ELSE 'pending'
+                             END,
+    desired_received_at    = CASE WHEN @replayed::boolean THEN desired_received_at END,
+    next_attempt_at        = @now::timestamptz,
+    attempts               = 0,
+    first_failed_at        = NULL,
+    last_error_class       = NULL,
+    last_error             = NULL,
+    lease_owner            = NULL,
+    lease_until            = NULL,
+    updated_at             = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
+RETURNING state;
+
+-- RecordEditWindowClosed records an edit a bridge refused only because of the Root message's age (C-22.FR-8, FR-9):
+-- the Root message is past its edit window, and the delivery is due at once, so that the rule of a Root message past
+-- its window decides its Desired state. No row when the lease went to another replica.
+-- name: RecordEditWindowClosed :execrows
+UPDATE deliveries
+SET past_edit_window = true, next_attempt_at = @now::timestamptz, lease_owner = NULL, lease_until = NULL,
+    updated_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter or a Fatal error, which leave the
 -- budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
@@ -344,7 +401,8 @@ WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destinat
 
 -- ResetForRepublish makes a delivery whose Root message was deleted in the messenger publish again, Quietly and once
 -- (C-11.FR-13): the actual message and its Thread are forgotten, and its pending Thread replies wait for the new Root
--- message. A delivery republished once already, or ended, is left alone.
+-- message. A delivery republished once already, or ended, is left alone. The new Root message has an edit window of
+-- its own; the older ones a republication past a window replaced stay known (superseded_message_ids).
 -- name: ResetForRepublish :execrows
 UPDATE deliveries
 SET message_id               = NULL,
@@ -355,6 +413,8 @@ SET message_id               = NULL,
     thread_opened            = false,
     actual_version           = NULL,
     actual_hash              = NULL,
+    actual_status            = NULL,
+    past_edit_window         = false,
     publication_started_at   = NULL,
     thread_state             = 'none',
     thread_anchor_id         = NULL,
@@ -677,7 +737,7 @@ WHERE org_id = @org_id AND public_id = @public_id;
 
 -- ListGroupDeliveries reads the delivery state of an Alert Group per Destination, by Destination name.
 -- name: ListGroupDeliveries :many
-SELECT d.state, d.thread_state, d.possible_duplicate, d.message_url, d.last_error, d.updated_at,
+SELECT d.state, d.thread_state, d.possible_duplicate, d.past_edit_window, d.message_url, d.last_error, d.updated_at,
        ds.public_id AS destination_public_id, ds.name AS destination_name, ds.type AS destination_type, ds.health,
        ds.broken_since, ds.broken_reason
 FROM deliveries d
@@ -1082,6 +1142,8 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     thread_opened            = thread_opened AND state NOT IN ('retired', 'withheld'),
     actual_version           = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_version END,
     actual_hash              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_hash END,
+    actual_status            = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_status END,
+    past_edit_window         = past_edit_window AND state NOT IN ('retired', 'withheld'),
     thread_state             = CASE WHEN state IN ('retired', 'withheld') THEN 'none' ELSE thread_state END,
     thread_anchor_id         = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_anchor_id END,
     thread_chain_last_id     = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_chain_last_id END,

@@ -118,6 +118,7 @@ const (
 	DeliveryResolvedBroken     = "resolved_while_broken"
 	DeliveryRepublication      = "republication_after_deletion"
 	DeliveryFinalEdit          = "final_edit"
+	DeliveryPastEditWindow     = "republication_past_edit_window"
 )
 
 // DeliveryEvents is the closed Loud/Quiet table of delivery events (C-11.FR-20, reference.md): every message delivery
@@ -134,6 +135,7 @@ var DeliveryEvents = []EventRow{
 	{DeliveryResolvedBroken, FormNothing, groups.Quiet, nil, false},
 	{DeliveryRepublication, FormPublication, groups.Quiet, nil, false},
 	{DeliveryFinalEdit, FormUpdate, groups.Quiet, nil, false},
+	{DeliveryPastEditWindow, FormPublication, groups.Quiet, nil, false},
 }
 
 // deliveryEvent is the row name of DeliveryEvents; a name outside the table is a programming error.

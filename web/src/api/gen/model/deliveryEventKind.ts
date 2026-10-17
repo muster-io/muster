@@ -37,4 +37,5 @@ export const DeliveryEventKind = {
   destination_recovered: 'destination_recovered',
   storm_summary: 'storm_summary',
   final_edit: 'final_edit',
+  republished_past_edit_window: 'republished_past_edit_window',
 } as const;

@@ -86,6 +86,7 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 			d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
 			d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, false
 			d.loud, d.heldBy = pgtype.Bool{Bool: arg.Loud, Valid: true}, arg.HeldByStormID.Int64
+			d.actualStatus, d.pastEditWindow = nil, false
 		}
 		d.lateNote, d.desiredRetire, d.state, d.next, d.updated = false, false, "pending", arg.Now, arg.Now
 		return 1, nil
@@ -780,7 +781,7 @@ func stormStarted(t *testing.T) *env {
 // produces through the recording adapter the new message, the edit or nothing it names, Loud or Quiet and with its
 // Mentions; the Publication after a recovery is Loud only for an Alert Group firing at that moment.
 func TestDeliveryEventRows(t *testing.T) {
-	if len(delivery.DeliveryEvents) != 11 {
+	if len(delivery.DeliveryEvents) != 12 {
 		t.Fatalf("%d rows", len(delivery.DeliveryEvents))
 	}
 	type scenario struct {
@@ -899,6 +900,16 @@ func TestDeliveryEventRows(t *testing.T) {
 			e.changed(t, routeID, nil, []int64{destMM})
 			e.round(t)
 			return e.rec.Calls()
+		}}},
+		// A change of status past a bridge's edit window: the new Root message, apart from the pointer reply under
+		// the old one.
+		delivery.DeliveryPastEditWindow: {{true, func(t *testing.T) []deliverytest.Call {
+			e, _, _ := publishedWindowed(t)
+			e.business.Set(business0.Add(11 * time.Minute))
+			e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+			e.acknowledged(t, 2)
+			e.round(t)
+			return without(e.rec.Calls(), deliverytest.MethodReply)
 		}}},
 	}
 	for _, row := range delivery.DeliveryEvents {

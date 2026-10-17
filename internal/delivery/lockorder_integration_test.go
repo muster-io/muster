@@ -119,6 +119,48 @@ func TestReplayedPublicationAgainstDispatcherLockOrder(t *testing.T) {
 	})
 }
 
+// TestRepublicationAgainstDispatcherLockOrder (D307, C-22.FR-9): the worker publishes again a Root message past its
+// bridge's edit window whose status changed — the new Root message, the pointer reply under the old one, the outcome
+// that replaces the message and keeps the old id — while an acknowledgement holds the Alert Group and then waits for
+// the delivery row in Enqueue. The republication locks the delivery row only, as a Publication does, never its Alert
+// Group before it: nothing ends in a deadlock, and the acknowledgement's Desired state then edits the new Root message,
+// within its own window.
+func TestRepublicationAgainstDispatcherLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		l.fire(t, "lockrepublish", "LockRepublish/a")
+		gid := l.group(t, "LockRepublish")
+		l.round(t, l.a)
+		w := windowed(l.rec)
+		l.a.Adapters[delivery.TypeMattermost] = w
+		l.rec.Reset()
+		// Published an hour ago, showing another status: past its window, with a change of status due.
+		l.exec(t, `UPDATE deliveries SET published_at = published_at - interval '1 hour', actual_status = 'acknowledged',
+			actual_hash = NULL, state = 'pending'`)
+		l.againstDispatcher(t, gid)
+		l.round(t, l.a)
+		l.noDeadlock(t)
+		calls := l.rec.Calls()
+		if callMethods(calls) != "publish,reply,update" || calls[1].Root.MessageID == calls[0].Answered.MessageID ||
+			calls[2].MessageID != calls[0].Answered.MessageID || calls[2].Message.Colour != "acknowledged" {
+			t.Errorf("calls %s %+v", callMethods(calls), calls)
+		}
+		if keys := w.Keys(); len(keys) != 3 || !strings.HasPrefix(keys[0], "pub-DSAAAAAAAAAAA1-") ||
+			!strings.HasSuffix(keys[0], "-2") || !strings.HasPrefix(keys[1], "pointer-DSAAAAAAAAAAA1-") ||
+			!strings.HasSuffix(keys[1], "-1") || keys[2] != "" {
+			t.Errorf("keys %v", keys)
+		}
+		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND g.status = 'acknowledged' AND d.state = 'delivered' AND d.publications = 2
+			AND cardinality(d.superseded_message_ids) = 1 AND d.actual_status = 'acknowledged'
+			AND NOT d.past_edit_window AND d.actual_hash = d.desired_hash`, gid) != 1 ||
+			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished_past_edit_window'`) != 1 {
+			t.Errorf("the republication or the edit after it is missing\n%s", l.log)
+		}
+	})
+}
+
 // againstDispatcher acknowledges the Alert Group publicID through the dispatcher and holds that transaction after it
 // locked the Alert Group, before Enqueue; meanwhile a round of the worker runs until it ends or waits for a lock; then
 // the acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock. Only the acknowledgement is
