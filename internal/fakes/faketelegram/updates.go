@@ -161,6 +161,14 @@ func (f *Fake) Conflict(token string) bool {
 	return false
 }
 
+// Polling reports whether a long poll of the bot of token is held.
+func (f *Fake) Polling(token string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.bots[token]
+	return ok && b.poll != nil
+}
+
 // Pending is how many updates of the bot of token are not confirmed or posted yet.
 func (f *Fake) Pending(token string) int {
 	f.mu.Lock()

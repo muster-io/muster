@@ -147,13 +147,13 @@ func TestGetUpdatesWithOffsetAndAllowedUpdates(t *testing.T) {
 }
 
 func TestLongPollWaitsForAnUpdate(t *testing.T) {
-	_, base := start(t)
+	f, base := start(t)
 	done := make(chan answer, 1)
 	go func() {
 		_, _, a := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"timeout":5}`)
 		done <- a
 	}()
-	waitPolling(t, base)
+	waitPolling(t, f)
 	call(t, http.MethodPost, base+"/_fake/updates", `{"token":"`+token+`","update":{"message":{"text":"hi"}}}`)
 	select {
 	case a := <-done:
@@ -165,35 +165,27 @@ func TestLongPollWaitsForAnUpdate(t *testing.T) {
 	}
 }
 
-// waitPolling waits until a getUpdates is recorded and has not been answered yet.
-func waitPolling(t *testing.T, base string) {
+// waitPolling waits until the fake holds a long poll of token. A getUpdates recorded and not answered yet is not
+// enough: the fake records a request before it takes it as the bot's poll.
+func waitPolling(t *testing.T, f *faketelegram.Fake) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		_, body, _ := call(t, http.MethodGet, base+"/_fake/requests", "")
-		var reqs []struct {
-			Path   string `json:"path"`
-			Status int    `json:"status"`
+	for !f.Polling(token) {
+		if time.Now().After(deadline) {
+			t.Fatal("no long poll is running")
 		}
-		_ = json.Unmarshal([]byte(body), &reqs)
-		for _, r := range reqs {
-			if strings.HasSuffix(r.Path, "/getUpdates") && r.Status == 0 {
-				return
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("no long poll is running")
 }
 
 func TestSecondPollerEndsTheFirstWith409(t *testing.T) {
-	_, base := start(t)
+	f, base := start(t)
 	first := make(chan answer, 1)
 	go func() {
 		_, _, a := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"timeout":10}`)
 		first <- a
 	}()
-	waitPolling(t, base)
+	waitPolling(t, f)
 	second := make(chan answer, 1)
 	go func() {
 		_, _, a := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"timeout":1}`)
@@ -210,7 +202,7 @@ func TestSecondPollerEndsTheFirstWith409(t *testing.T) {
 }
 
 func TestConflictEndpoint(t *testing.T) {
-	_, base := start(t)
+	f, base := start(t)
 	// Without a running poll, the next getUpdates gets the 409.
 	_, body, _ := call(t, http.MethodPost, base+"/_fake/conflict", `{"token":"`+token+`"}`)
 	if !strings.Contains(body, `"ended_running_poll":false`) {
@@ -225,7 +217,7 @@ func TestConflictEndpoint(t *testing.T) {
 		s, _, _ := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"timeout":10}`)
 		running <- s
 	}()
-	waitPolling(t, base)
+	waitPolling(t, f)
 	_, body, _ = call(t, http.MethodPost, base+"/_fake/conflict", `{"token":"`+token+`"}`)
 	if s := <-running; s != http.StatusConflict || !strings.Contains(body, `"ended_running_poll":true`) {
 		t.Fatalf("running poll = %d, %s", s, body)
@@ -258,7 +250,7 @@ func TestWebhookDelivery(t *testing.T) {
 		_, _, a := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"timeout":10}`)
 		running <- a
 	}()
-	waitPolling(t, base)
+	waitPolling(t, f)
 	if s, b, _ := call(t, http.MethodPost, base+"/bot"+token+"/setWebhook", `{"url":"`+hook.URL+
 		`/hook","secret_token":"s3cr3t_-x","allowed_updates":["message"],"max_connections":1}`); s != 200 {
 		t.Fatalf("setWebhook = %d %s", s, b)
