@@ -252,6 +252,45 @@ func TestRepublishPastWindow(t *testing.T) {
 	}
 }
 
+// TestRepublicationKeepsOldKeyInUse is C-20.FR-6 with C-22.FR-9: after a rotation, a republication past the edit
+// window publishes the new Root message with buttons the active key signs, while the older Root message keeps the
+// buttons the old key signed, which still work: the old key joins the delivery's superseded keys and stays in use, so
+// the outcome sends no organization hint that would show it removable.
+func TestRepublicationKeepsOldKeyInUse(t *testing.T) {
+	e, _ := windowedBridge(t)
+	key := "k-old"
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: e.w.Log,
+		Renderer: keyRenderer{key: &key}})
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m1", "t-1"))
+	e.round(t)
+	d := e.only(t)
+	if d.state != "delivered" || d.actualKey == nil || *d.actualKey != "k-old" {
+		t.Fatalf("not published with k-old %+v", d)
+	}
+	e.rec.Reset()
+	e.db.hints = nil
+	lookups := e.db.calls["ButtonKeyInUse"]
+
+	key = "k-new"
+	e.business.Set(business0.Add(11 * time.Minute))
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.acknowledged(t, 2)
+	e.round(t)
+	calls := e.rec.Calls()
+	if callMethods(calls) != "publish,reply" || calls[0].Message.Buttons[0].KeyID != "k-new" {
+		t.Fatalf("calls %s %+v", callMethods(calls), calls)
+	}
+	if d.state != "delivered" || *d.messageID != "m2" || d.actualKey == nil || *d.actualKey != "k-new" ||
+		!slices.Equal(d.superseded, []string{"m1"}) || !slices.Equal(d.supersededKeys, []string{"k-old"}) {
+		t.Errorf("delivery %+v", d)
+	}
+	if e.db.calls["ButtonKeyInUse"] != lookups+1 || e.organizationHints() != 0 {
+		t.Errorf("key lookups %d, organization hints %d", e.db.calls["ButtonKeyInUse"]-lookups,
+			e.organizationHints())
+	}
+}
+
 // TestPointerFailsNotRetried is C-22.FR-9: a pointer reply that fails is recorded with the delivery event — its error
 // class and its error — and never retried, and the republication stands; a url the bridge answered that is not a safe
 // link points to the Alert Group page instead.

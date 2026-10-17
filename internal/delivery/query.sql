@@ -1830,11 +1830,16 @@ FOR NO KEY UPDATE OF d;
 SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(@key_id::text));
 
 -- ButtonKeyInUse reports whether a delivery of an open Alert Group that is not deleted in the messenger, retired or
--- withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed.
+-- withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed: on its Root
+-- message, or on an older one a republication past a bridge's edit window replaced, whose buttons still work
+-- (C-22.FR-9). The second lookup repeats superseded_button_key_ids <> '{}' so that it uses the partial GIN index.
 -- name: ButtonKeyInUse :one
 SELECT EXISTS (SELECT 1
                FROM deliveries d
                JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
-               WHERE d.org_id = @org_id AND d.actual_button_key_id = @key_id::text
+               WHERE d.org_id = @org_id
+                 AND (d.actual_button_key_id = @key_id::text
+                      OR (d.superseded_button_key_ids <> '{}'
+                          AND d.superseded_button_key_ids @> ARRAY[@key_id::text]))
                  AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld')
                  AND g.status <> 'resolved')::boolean AS in_use;

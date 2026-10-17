@@ -51,16 +51,18 @@ WHERE org_id = @org_id
 GROUP BY key_id
 ORDER BY key_id;
 
--- CountOpenButtonKeys counts, by key id, the deliveries of the Organization's open Alert Groups whose Root message
--- carries buttons that key signed (C-20.FR-6). A delivery deleted in the messenger, retired or withheld depends on
--- nothing: the re-render after a rotation never re-signs it.
+-- CountOpenButtonKeys counts, by key id, the Root messages of the Organization's open Alert Groups whose buttons that
+-- key signed (C-20.FR-6): the current one of each delivery, and every older one a republication past a bridge's edit
+-- window replaced, whose buttons still work (C-22.FR-9). A delivery deleted in the messenger, retired or withheld
+-- depends on nothing: the re-render after a rotation never re-signs it.
 -- name: CountOpenButtonKeys :many
-SELECT d.actual_button_key_id::text AS key_id, count(*) AS messages
+SELECT k.key_id::text AS key_id, count(*) AS messages
 FROM deliveries d
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
-WHERE d.org_id = @org_id AND d.actual_button_key_id IS NOT NULL
+CROSS JOIN LATERAL unnest(d.superseded_button_key_ids || d.actual_button_key_id) AS k (key_id)
+WHERE d.org_id = @org_id AND k.key_id IS NOT NULL
   AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld') AND g.status <> 'resolved'
-GROUP BY d.actual_button_key_id
+GROUP BY k.key_id
 ORDER BY 1;
 
 -- ListActivatedKeys reads the before and after values of /active_key_id in the Organization's keyring.key_activated

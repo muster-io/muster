@@ -119,10 +119,11 @@ func pointerMessage(m Message, link string) Message {
 
 // republished records a republication past the edit window that the messenger accepted: the new Root message
 // replaces the old one, whose id is kept; the possible duplicate of a retry after a started republication that was not
-// replayed; the republication itself (republication); the release of the old buttons' key; the mark of the Alert
-// Group's first Publication when it is still unmarked; and the end of a Broken state that a probe reached. A
-// republication that carried the final edit and was not replayed posted the final message itself: the delivery is
-// retired as a final edit is. The outcome locks the delivery row only, as every outcome does.
+// replayed; the republication itself (republication); the release of the old buttons' key, which the old message,
+// whose buttons still work, keeps in use while its Alert Group is open; the mark of the Alert Group's first
+// Publication when it is still unmarked; and the end of a Broken state that a probe reached. A republication that
+// carried the final edit and was not replayed posted the final message itself: the delivery is retired as a final
+// edit is. The outcome locks the delivery row only, as every outcome does.
 func (w *Worker) republished(ctx context.Context, q queries, org int64, a attempt, out Outcome, now time.Time,
 	logs *after) (bool, error) {
 	duplicate := a.duplicate(out)

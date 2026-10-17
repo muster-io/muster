@@ -1054,10 +1054,12 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
   `superseded_button_key_ids` (`text[]`, default empty; migration 0011) records, for each older Root message that a
   republication past the edit window replaced and that carried buttons, the key that signed those buttons, appended by
-  the republication's record, one element per such message. The Keyring does not count these keys yet: that follows
-  in a later change, which looks them up through the partial GIN index `deliveries_superseded_keys_idx ...
-  WHERE superseded_button_key_ids <> '{}'`; such a lookup repeats `superseded_button_key_ids <> '{}'` beside `@>`, as
-  for `superseded_message_ids`.
+  the republication's record, one element per such message. Those buttons still work (C-22.FR-9), so the Keyring
+  counts these keys beside `actual_button_key_id`: an open Alert Group's older Root message keeps its key needed until
+  the Alert Group resolves (C-20.FR-6). The Keyring page counts them by unnesting the array; the check whether a key
+  is still in use, after an outcome replaced it, looks them up through the partial GIN index
+  `deliveries_superseded_keys_idx ... WHERE superseded_button_key_ids <> '{}'` and so repeats
+  `superseded_button_key_ids <> '{}'` beside `@>`, as for `superseded_message_ids`.
 - **`thread_replies`** — follow-ups under a Root message. A `collecting` row is the open batch of new Alerts (at most
   one per delivery), due at the end of the Thread batching window; other replies (notices, Reminders, Takeovers,
   Reopens, Snooze ended, resolution by the system, the release of a disabled or deleted Owner) are `pending` at once. `event_seqs` lists the lifecycle events a
@@ -1145,7 +1147,7 @@ A `UNION ALL` of every encrypted field — `field`, `org_id`, `row_key`, `key_id
 `oidc_auth_requests`, `users`, `user_totp`, `connections`, `destinations` and `destination_secrets`.
 `muster secrets rotate-key` re-encrypts what it lists (the key canary separately, in the same transaction); the Keyring
 page and `muster doctor` group it by `key_id` to say whether an older key is still needed (together with
-`deliveries.actual_button_key_id` of open Alert Groups). A test asserts that every `*_ciphertext` column of the schema
+`deliveries.actual_button_key_id` and `deliveries.superseded_button_key_ids` of open Alert Groups). A test asserts that every `*_ciphertext` column of the schema
 appears in the view, so a new secret field cannot be forgotten by rotation.
 
 ## 5. Queues and claims

@@ -52,7 +52,7 @@ func (b *syncBuffer) count(event string) int {
 }
 
 // migratedForRotation is a migrated database with the Organization, the partitions of the Audit log and the key canary of k.
-func migratedForRotation(t *testing.T, s dbtest.Server, k *keyring.Keyring) (*db.DB, int64, string) {
+func migratedForRotation(t *testing.T, s dbtest.Server, k *keyring.Keyring) (*db.DB, int64) {
 	t.Helper()
 	ctx := t.Context()
 	u := s.NewDatabase(t)
@@ -81,7 +81,7 @@ func migratedForRotation(t *testing.T, s dbtest.Server, k *keyring.Keyring) (*db
 	if err := d.Pool.QueryRow(ctx, `SELECT id FROM organizations`).Scan(&org); err != nil {
 		t.Fatal(err)
 	}
-	return d, org, u
+	return d, org
 }
 
 // secretFixtures write one value of every field of encrypted_values, encrypted by k with the field bound, last
@@ -214,7 +214,7 @@ func TestIntegrationRotation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d, org, _ := migratedForRotation(t, s, cli)
+		d, org := migratedForRotation(t, s, cli)
 		a, b := keyring.KeyID(material('a')), keyring.KeyID(material('b'))
 		plain := secretFixtures(t, d, org, cli)
 

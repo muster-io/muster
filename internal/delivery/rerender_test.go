@@ -100,7 +100,8 @@ func (f *fakeDB) ButtonKeyInUse(_ context.Context, arg dbgen.ButtonKeyInUseParam
 	}
 	for _, d := range f.deliveries {
 		g := f.groups[d.group]
-		if d.actualKey != nil && *d.actualKey == arg.KeyID && g != nil && g.status != "resolved" &&
+		signed := (d.actualKey != nil && *d.actualKey == arg.KeyID) || slices.Contains(d.supersededKeys, arg.KeyID)
+		if signed && g != nil && g.status != "resolved" &&
 			!slices.Contains([]string{"deleted_in_messenger", "retired", "withheld"}, d.state) {
 			return true, nil
 		}
