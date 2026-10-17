@@ -241,13 +241,17 @@ SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND user_id = @user_id AND consumed_at IS NULL AND voided_at IS NULL;
 
 -- PruneLinkRequests deletes up to batch_size link requests that expired before @before, consumed and voided ones
--- included. A request being used is skipped and taken at the next run.
+-- included, whatever their messenger. A request being used is skipped and taken at the next run. The batch is chosen
+-- once, in a materialized CTE: a subquery that a plan scans again for each deleted row skips the rows the statement
+-- already deleted, as locked by itself, and takes more than the batch.
 -- name: PruneLinkRequests :execrows
-DELETE FROM account_link_requests r
-WHERE r.org_id = @org_id AND r.id IN (
+WITH doomed AS MATERIALIZED (
     SELECT o.id FROM account_link_requests o
     WHERE o.org_id = @org_id AND o.expires_at < @before::timestamptz
     ORDER BY o.id
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED
-);
+)
+DELETE FROM account_link_requests r
+USING doomed d
+WHERE r.org_id = @org_id AND r.id = d.id;

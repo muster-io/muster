@@ -547,9 +547,10 @@ func TestIntegrationBridgeLinkRequests(t *testing.T) {
 			FROM organizations`)
 		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
 			telegram_bot_api_base_url, telegram_update_mode, bridge_base_url, bridge_event_delivery,
-			bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
-			SELECT id, c.public_id, c.type, c.name, c.server, c.bot_api, c.mode, c.base, c.delivery, '2026-10-05', 1, 1,
-			'2026-10-05', '2026-10-05'
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, c.public_id, c.type, c.name, c.server, c.bot_api, c.mode, c.base, c.delivery, '\x00', 'k1',
+			'2026-10-05', 1, 1, '2026-10-05', '2026-10-05'
 			FROM organizations, (VALUES ('CN0000000000M1', 'mattermost', 'mm', 'http://mm', NULL, NULL, NULL, NULL),
 				('CN0000000000T1', 'telegram', 'tg', NULL, 'http://tg', 'long_polling', NULL, NULL),
 				('CN0000000000B1', 'bridge', 'br', NULL, NULL, NULL, 'http://br', 'poll'))

@@ -878,14 +878,16 @@ func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkPa
 }
 
 const pruneLinkRequests = `-- name: PruneLinkRequests :execrows
-DELETE FROM account_link_requests r
-WHERE r.org_id = $1 AND r.id IN (
+WITH doomed AS MATERIALIZED (
     SELECT o.id FROM account_link_requests o
     WHERE o.org_id = $1 AND o.expires_at < $2::timestamptz
     ORDER BY o.id
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
+DELETE FROM account_link_requests r
+USING doomed d
+WHERE r.org_id = $1 AND r.id = d.id
 `
 
 type PruneLinkRequestsParams struct {
@@ -895,7 +897,9 @@ type PruneLinkRequestsParams struct {
 }
 
 // PruneLinkRequests deletes up to batch_size link requests that expired before @before, consumed and voided ones
-// included. A request being used is skipped and taken at the next run.
+// included, whatever their messenger. A request being used is skipped and taken at the next run. The batch is chosen
+// once, in a materialized CTE: a subquery that a plan scans again for each deleted row skips the rows the statement
+// already deleted, as locked by itself, and takes more than the batch.
 func (q *Queries) PruneLinkRequests(ctx context.Context, arg PruneLinkRequestsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneLinkRequests, arg.OrgID, arg.Before, arg.BatchSize)
 	if err != nil {
