@@ -615,19 +615,21 @@
         "editWindow": "Edits for {{duration}} after posting",
         "maxBody_one": "Longest message text: {{count}} character",
         "maxBody_other": "Longest message text: {{count}} characters",
-        "sendPerSecond": "Sends a second: {{rate}}",
-        "sendPerSecondPerChannel": "Sends a second per channel: {{rate}}"
+        "sendPerSecond": "Sends per second: {{rate}}",
+        "sendPerSecondPerChannel": "Sends per second per channel: {{rate}}"
       },
       "modes": {
         "poll": "Polling",
         "push": "Push"
       },
+      "pollDropsPushSecret": "Saving in polling mode removes the stored push secret.",
       "pollHint": "Muster polls the bridge; the bridge needs no address of Muster",
       "pushHint": "The bridge pushes events to Muster's ingest address",
       "pushSecret": "Push secret",
       "pushSecretFormat": "Enter the push secret as whsec_ followed by base64.",
       "pushSecretHint": "The bridge signs every event with this secret, in the Standard Webhooks form: whsec_ followed by base64.",
       "token": "Token",
+      "tokenForNewBaseUrl": "Enter the token again: the stored token is sent only to the bridge it was entered for.",
       "useProposal": "Use the proposal"
     },
     "callback": {

@@ -348,12 +348,20 @@ export function serverDetails(err: unknown): Record<string, string> {
   return details;
 }
 
-export function connectionErrorText(t: TFunction, code: string, detail?: string): string {
+/** The text of an error code; kind names the token a new address needs again: a bot's, or a bridge's. */
+export function connectionErrorText(
+  t: TFunction,
+  code: string,
+  detail?: string,
+  kind?: ConnectionType,
+): string {
   switch (code) {
     case "name_taken":
       return t("connections.errors.nameTaken");
     case TOKEN_FOR_NEW_SERVER:
-      return t("connections.errors.tokenForNewServer");
+      return kind === "bridge"
+        ? t("connections.bridge.tokenForNewBaseUrl")
+        : t("connections.errors.tokenForNewServer");
     case BASE_URL_FORMAT:
       return t("connections.errors.baseUrlFormat");
     case BRIDGE_BASE_URL_FORMAT:
@@ -526,7 +534,7 @@ export function ConnectionForm({
   const err = (pointer: string) =>
     errors[pointer] === undefined
       ? undefined
-      : connectionErrorText(t, errors[pointer], details[pointer]);
+      : connectionErrorText(t, errors[pointer], details[pointer], kind);
   const proxyFieldErrors: Partial<Record<ProxyField, string>> = {};
   for (const field of ["type", "address", "username", "password"] as const) {
     const text = err(`/proxy/${field}`);
@@ -795,7 +803,7 @@ export function ConnectionForm({
                   {unshown.map(([pointer, code]) => (
                     <li key={pointer}>
                       <span className="font-mono">{pointer}</span>:{" "}
-                      {connectionErrorText(t, code, details[pointer])}
+                      {connectionErrorText(t, code, details[pointer], kind)}
                     </li>
                   ))}
                 </ul>

@@ -17,12 +17,12 @@ import {
 import type { Connection, Destination } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { BrokenBanner, HealthBadge } from "../components/destination-health";
 import {
-  BrokenBanner,
-  HealthBadge,
+  connectionPlace,
   destinationMessengerName,
-} from "../components/destination-health";
-import { connectionPlace, useConnectionsById } from "../components/destination-label";
+  useConnectionsById,
+} from "../components/destination-label";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/destinations/")({

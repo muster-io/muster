@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The fields of a Bridge Connection in the type slot of the Connection form (C-22.FR-1, FR-2, FR-18): the base URL,
-// the event delivery mode as two radio buttons with what each needs, and in push mode the write-only push secret and
-// the callback address with its hint, which a new Connection gets once it is saved. The limiter proposal offers half of
-// the rate the bridge declares, never by itself; the panel of what the bridge offers shows the info the last check read.
-// The token, the proxy and the limiter are the form's own. What the bridge sends is untrusted text, shown as text only.
+// The fields of a Bridge Connection in the type slot of the Connection form (C-22.FR-1, FR-2, FR-18): the base URL, the
+// event delivery mode as two radio buttons with what each needs, and in push mode the write-only push secret and the
+// callback address with its hint, which a new Connection gets once it is saved; polling with a stored push secret says
+// that saving removes it, as the server does. The limiter proposal offers half of the rate the bridge declares, never
+// by itself; the panel of what the bridge offers shows the info the last check read. The token, the proxy and the
+// limiter are the form's own. What the bridge sends is untrusted text, shown as text only.
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -41,7 +42,7 @@ const LIMITER_MAX = 999_999_999;
 
 const PUSH_SECRET_PREFIX = "whsec_";
 
-/** A push secret in the Standard Webhooks form, as the server checks it: whsec_ followed by base64 of 1 byte or more. */
+/** A push secret in the Standard Webhooks form, as the server checks it: whsec_ and base64 of 1 byte or more. */
 export function isPushSecret(text: string): boolean {
   if (!text.startsWith(PUSH_SECRET_PREFIX)) {
     return false;
@@ -198,6 +199,14 @@ export function BridgeConnectionFields({
         {errors.eventDelivery !== undefined && (
           <p id={`${modeId}-error`} className="text-sm wrap-anywhere text-destructive">
             {errors.eventDelivery}
+          </p>
+        )}
+        {eventDelivery === "poll" && pushSecretStatus?.set === true && (
+          <p
+            className="text-sm wrap-anywhere text-muted-foreground"
+            data-testid="bridge-push-secret-dropped"
+          >
+            {t("connections.bridge.pollDropsPushSecret")}
           </p>
         )}
       </fieldset>

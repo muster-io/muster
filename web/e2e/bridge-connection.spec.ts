@@ -6,8 +6,9 @@
 // "Bridge info" and "Event delivery", and the page shows what the bridge offers. "Push" shows the push secret and the
 // callback address with its hint, without saving. With the fake speaking protocol version 2, the check fails with the
 // translated text and the bridge's message as its detail. The Connections list names the messenger and the host. An
-// Admin reading Russian sees «Мост» and the steps at phone width. No page scrolls sideways at 360 px; no Content
-// Security Policy violation. The spec creates and deletes its own "br" and puts the fake's configuration back.
+// Admin reading Russian sees «Мост» and the steps at phone width. No page scrolls sideways at 360 px, a new or saved
+// Connection, in polling and in push mode with the push secret and the callback address, in English and Russian; no
+// Content Security Policy violation. The spec creates and deletes its own "br" and puts the fake's configuration back.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -27,8 +28,11 @@ import {
 
 test.describe.configure({ mode: "serial" });
 
+const CALLBACK_URL = /^http:\/\/localhost:8081\/api\/v1\/callbacks\/bridge\/CN[0-9A-Z]+$/;
 const CALLBACK_HINT =
   /^The bridge posts events to http:\/\/localhost:8081\/api\/v1\/callbacks\/bridge\/CN[0-9A-Z]+, signed with the push secret\. Configure the same address and secret in the bridge\.$/;
+const CALLBACK_HINT_RU =
+  /^Мост отправляет события на http:\/\/localhost:8081\/api\/v1\/callbacks\/bridge\/CN[0-9A-Z]+, подписывая их секретом push-отправки\. Укажите в мосте тот же адрес и секрет\.$/;
 const VERSION_UNKNOWN = "The bridge speaks a protocol version this Muster does not.";
 const VERSION_MESSAGE = "The bridge speaks protocol version 2; this Muster speaks 1.";
 
@@ -115,9 +119,7 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   // 3. "Push" → the push secret and the callback address with its hint; back to polling without saving.
   await fields.getByRole("radio", { name: "Push" }).check();
   await expect(fields.getByText("Push secret", { exact: true })).toBeVisible();
-  await expect(fields.getByTestId("bridge-callback-url")).toHaveText(
-    /^http:\/\/localhost:8081\/api\/v1\/callbacks\/bridge\/CN[0-9A-Z]+$/,
-  );
+  await expect(fields.getByTestId("bridge-callback-url")).toHaveText(CALLBACK_URL);
   await expect(fields.getByTestId("bridge-callback-hint")).toHaveText(CALLBACK_HINT);
   await shot(page, "bridge-connection-push");
   await fields.getByRole("radio", { name: "Polling" }).check();
@@ -142,12 +144,22 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText("The check passed.");
 
-  // At phone width the page scrolls vertically only.
+  // At phone width the page scrolls vertically only, in polling and in push mode with its callback address, the
+  // longest text of the page; back to polling without saving.
   await page.setViewportSize({ width: 360, height: 740 });
   await page.reload();
   await expect(page.getByTestId("bridge-info-protocol")).toHaveText("Protocol version 1");
   await expectNoHorizontalScroll(page);
   await shot(page, "bridge-connection-360");
+  await fields.getByRole("radio", { name: "Push" }).check();
+  await expect(fields.getByText("Push secret", { exact: true })).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-url")).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-url")).toHaveText(CALLBACK_URL);
+  await expect(fields.getByTestId("bridge-callback-hint")).toHaveText(CALLBACK_HINT);
+  await expectNoHorizontalScroll(page);
+  await shot(page, "bridge-connection-push-360");
+  await fields.getByRole("radio", { name: "Polling" }).check();
+  await expect(fields.getByText("Push secret", { exact: true })).toHaveCount(0);
 
   // 5. The Connections list names the bridge's messenger and the host of its base URL.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -161,6 +173,20 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   await page.setViewportSize({ width: 360, height: 740 });
   await expect(row).toContainText("Fake chat");
   await expectNoHorizontalScroll(page);
+
+  // A new Bridge Connection at phone width, in push mode too: the callback address comes once it is saved.
+  await page.getByRole("link", { name: "Create connection" }).click();
+  await page.getByRole("radio", { name: "Bridge", exact: true }).check();
+  await expect(fields.getByRole("radio", { name: "Polling" })).toBeChecked();
+  await expectNoHorizontalScroll(page);
+  await fields.getByRole("radio", { name: "Push" }).check();
+  await expect(fields.getByText("Push secret", { exact: true })).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-after-save")).toHaveText(
+    "The callback address appears once the Connection is saved.",
+  );
+  await expectNoHorizontalScroll(page);
+  await shot(page, "bridge-connection-new-push-360");
+  await fields.getByRole("radio", { name: "Polling" }).check();
   expect(csp).toEqual([]);
 });
 
@@ -195,12 +221,21 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByLabel("Language").selectOption("ru");
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
 
+  const fields = page.getByTestId("bridge-connection-fields");
   await page.goto("/connections/new");
   await expect(page.getByRole("radio", { name: "Мост", exact: true })).toBeVisible();
   await page.getByRole("radio", { name: "Мост", exact: true }).check();
   await expect(page.getByRole("heading", { name: "Мост", exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Опрос" })).toBeChecked();
   await expectNoHorizontalScroll(page);
+  await fields.getByRole("radio", { name: "Push-отправка" }).check();
+  await expect(fields.getByText("Секрет push-отправки", { exact: true })).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-after-save")).toHaveText(
+    "Адрес обратного вызова появится после сохранения подключения.",
+  );
+  await expectNoHorizontalScroll(page);
+  await shot(page, "bridge-connection-ru-new-push-360");
+  await fields.getByRole("radio", { name: "Опрос" }).check();
 
   await page.goto(`/connections/${connectionId}`);
   await expect(page.getByRole("heading", { name: "Мост", exact: true, level: 2 })).toBeVisible();
@@ -215,6 +250,16 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByTestId("bridge-info-messenger")).toHaveText("Мессенджер: Fake chat");
   await expectNoHorizontalScroll(page);
   await shot(page, "bridge-connection-ru-360");
+  // Push mode with the callback address, without saving.
+  await fields.getByRole("radio", { name: "Push-отправка" }).check();
+  await expect(fields.getByText("Секрет push-отправки", { exact: true })).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-url")).toBeVisible();
+  await expect(fields.getByTestId("bridge-callback-url")).toHaveText(CALLBACK_URL);
+  await expect(fields.getByTestId("bridge-callback-hint")).toHaveText(CALLBACK_HINT_RU);
+  await expectNoHorizontalScroll(page);
+  await shot(page, "bridge-connection-ru-push-360");
+  await fields.getByRole("radio", { name: "Опрос" }).check();
+  await expect(fields.getByText("Секрет push-отправки", { exact: true })).toHaveCount(0);
 
   await page.goto("/connections");
   const row = page

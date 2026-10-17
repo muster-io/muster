@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-1, FR-3, FR-17): its
-// messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its Routes, and its form —
-// Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge, which shows the channel's
-// name it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
+// messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its Routes, and its form
+// — Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge, which shows the
+// channel's name it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
 // destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
 // destinations:write.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
@@ -45,12 +45,8 @@ import {
   versionAction,
 } from "../components/destination-form";
 import { DestinationSecrets, refreshWebhook } from "../components/destination-secrets";
-import {
-  BrokenBanner,
-  HealthBadge,
-  destinationMessengerName,
-} from "../components/destination-health";
-import { useConnectionsById } from "../components/destination-label";
+import { BrokenBanner, HealthBadge } from "../components/destination-health";
+import { destinationMessengerName, useConnectionsById } from "../components/destination-label";
 import { DestinationPreviewPanel } from "../components/destination-preview-panel";
 import { DestinationTestPanel } from "../components/destination-test-panel";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";

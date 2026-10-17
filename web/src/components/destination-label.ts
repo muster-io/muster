@@ -16,9 +16,14 @@ import { useTranslation } from "react-i18next";
 
 import { useListConnections } from "../api/gen/endpoints/connections/connections";
 import { useListDestinations } from "../api/gen/endpoints/destinations/destinations";
-import type { Connection, Destination, WebhookDestination } from "../api/gen/model";
+import type {
+  Connection,
+  Destination,
+  DestinationType,
+  WebhookDestination,
+} from "../api/gen/model";
 import { useCan } from "./app-shell";
-import { destinationMessengerName } from "./destination-health";
+import { destinationTypeName } from "./destination-health";
 import { unreachable } from "./destination-test-panel";
 
 /**
@@ -126,8 +131,8 @@ export function normalizedServer(serverUrl: string): string {
 
 /**
  * The chat a Destination posts in: Telegram its numeric chat id once a check found it, else the channel as entered,
- * lower-cased; Mattermost its Connection's server and the channel id; a Bridge its Connection's base URL and the channel
- * id, which is opaque and keeps its case. An outgoing webhook has none.
+ * lower-cased; Mattermost its Connection's server and the channel id; a Bridge its Connection's base URL and the
+ * channel id, which is opaque and keeps its case. An outgoing webhook has none.
  */
 export function chatKey(
   d: Destination,
@@ -160,19 +165,35 @@ export function chatKey(
 }
 
 /**
- * The messenger of a Connection in the Connections list: Mattermost, Telegram, or the messenger a Bridge's bridge
- * names in the info a check read — untrusted text, shown as text only — and "Bridge" until then.
+ * The messenger of a Bridge Connection: the name its bridge gave in the info a check read, untrusted text shown as text
+ * only; "Bridge" until a check read one, and without the Connection.
  */
+export function bridgeMessengerName(t: TFunction, connection: Connection | undefined): string {
+  const name = connection?.type === "bridge" ? connection.info?.messenger.name : undefined;
+  return name || t("connections.types.bridge");
+}
+
+/** The messenger of a Destination: the type's name, or for a Bridge the messenger of its Connection. */
+export function destinationMessengerName(
+  t: TFunction,
+  type: DestinationType,
+  connection?: Connection,
+): string {
+  return type === "bridge" ? bridgeMessengerName(t, connection) : destinationTypeName(t, type);
+}
+
+/** The messenger of a Connection in the Connections list: Mattermost, Telegram, or a Bridge's messenger. */
 export function connectionMessengerName(t: TFunction, c: Connection): string {
-  switch (c.type) {
+  const { type } = c;
+  switch (type) {
     case "mattermost":
       return "Mattermost";
     case "telegram":
       return "Telegram";
     case "bridge":
-      return c.info?.messenger.name || t("connections.types.bridge");
+      return bridgeMessengerName(t, c);
     default:
-      return unreachable(c);
+      return unreachable(type);
   }
 }
 
@@ -198,7 +219,8 @@ export function connectionAccount(c: Connection): string | undefined {
     case "bridge":
       return hostOf(c.base_url);
     default:
-      return unreachable(c);
+      // A type this SPA does not know calls nothing it could name.
+      return undefined;
   }
 }
 

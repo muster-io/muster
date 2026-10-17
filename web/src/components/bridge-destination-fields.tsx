@@ -2,10 +2,10 @@
 // Copyright The Muster Authors
 
 // The fields of a Bridge Destination (C-22.FR-3, FR-18): a Bridge Connection and the channel id, as the messenger names
-// it. Saving runs the Destination check, checkChannel, which refuses a channel the bridge forbids with the bridge's text
-// next to the channel, and the saved Destination shows the channel's name the check found, read-only and as text only.
-// Choosing a Connection proposes half of the rate per channel its bridge declares as the limiter, or the default, while
-// the user has not changed the limiter. A Bridge has no chat-wide mention and no groups.
+// it. Saving runs the Destination check, checkChannel, which refuses a channel the bridge forbids with the bridge's
+// text next to the channel, and the saved Destination shows the channel's name the check found, read-only and as text
+// only. Choosing a Connection proposes half of the rate per channel its bridge declares as the limiter, or the default,
+// while the user has not changed the limiter. A Bridge has no chat-wide mention and no groups.
 
 import { useTranslation } from "react-i18next";
 

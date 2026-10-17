@@ -3,13 +3,13 @@
 
 // "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11; C-22.FR-2): each step with "ok" or what failed,
 // translated by its code with the server's English message below as its detail, its latency and the path it took,
-// directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the check,
-// each with its hint. Telegram works in steps — the dry probe without the token, getMe with the bot, getWebhookInfo with
-// the pending updates — and a set webhook in the long-polling mode gets its warning. While the form holds an unsaved
-// base URL, the check sends it as base_url: the server makes only the dry probe against it, never with the token, and
-// the other steps read "Skipped: save the address first". A Bridge has two steps, "Bridge info" and "Event delivery";
-// the info it reads is stored on the Connection, whose page shows it. The check runs on the interactive path, so a busy
-// messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
+// directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the
+// check, each with its hint. Telegram works in steps — the dry probe without the token, getMe with the bot,
+// getWebhookInfo with the pending updates — and a set webhook in the long-polling mode gets its warning. While the form
+// holds an unsaved base URL, the check sends it as base_url: the server makes only the dry probe against it, never with
+// the token, and the other steps read "Skipped: save the address first". A Bridge has two steps, "Bridge info" and
+// "Event delivery"; the info it reads is stored on the Connection, whose page shows it. The check runs on the
+// interactive path, so a busy messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";

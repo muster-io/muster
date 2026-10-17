@@ -6,8 +6,8 @@
 // attachment become elements — with links shown by their address and never as anchors, and the buttons drawn; an
 // outgoing webhook shows each request with its method, URL, headers and body, and the error of a failing template.
 // Nothing of the output runs: no script, event handler, image or link reaches the frame. A Bridge shows the envelope it
-// would post, the item "message" in the format json, as formatted JSON instead of "Preview failed". Both in English and
-// Russian.
+// would post, the item "message" in the format json, as formatted JSON, with the characters that Go escapes (<, > and
+// &) as they are, instead of "Preview failed". Both in English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -376,6 +376,33 @@ describe("DestinationPreviewPanel", () => {
     expect(document.querySelector('[data-testid="preview-frame"]')).toBeNull();
     expect(document.body.textContent).not.toContain("The template of this request failed:");
     expect(JSON.parse(bodies[0] ?? "")).toEqual({ source: { kind: "example" } });
+  });
+
+  test("shows the characters Go's indented JSON escapes in a Bridge envelope as they are", async () => {
+    // json.MarshalIndent writes <, > and & as <, > and &.
+    const escaped = [
+      "{",
+      '  "kind": "test",',
+      '  "title": "#0 cpu \\u003e 90% \\u0026 rising",',
+      '  "body": "\\u003cb\\u003eload\\u003c/b\\u003e"',
+      "}",
+    ].join("\n");
+    fakeApi({ items: [{ name: "message", format: "json", text: escaped }] });
+    await render(
+      providers(
+        <DestinationPreviewPanel
+          destination={BRIDGE_DESTINATION}
+          source={EXAMPLE}
+          onSourceGone={() => undefined}
+        />,
+      ),
+    );
+    const envelope = page.getByTestId("preview-envelope");
+    await expect.element(envelope).toBeVisible();
+    expect(envelope.element().textContent).toBe(
+      '{\n  "kind": "test",\n  "title": "#0 cpu > 90% & rising",\n  "body": "<b>load</b>"\n}',
+    );
+    expect(envelope.element().querySelector("b")).toBeNull();
   });
 
   test("shows a compact Bridge envelope indented, and its hint in Russian", async () => {

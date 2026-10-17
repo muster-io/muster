@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import type { AccountLink, Connection } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { dayIn, useTimeFormat } from "../lib/time";
-import { connectionMessengerName, useConnectionsById } from "./destination-label";
+import { bridgeMessengerName, useConnectionsById } from "./destination-label";
 import { unreachable } from "./destination-test-panel";
 import { elapsedSeconds, formatElapsed, useNow } from "./relative-time";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -47,13 +47,11 @@ export function linkMessenger(
       return "Telegram";
     case "mattermost":
       return "Mattermost";
-    case "bridge": {
-      const connection =
-        link.connection === undefined ? undefined : connections.get(link.connection.id);
-      return connection === undefined
-        ? t("connections.types.bridge")
-        : connectionMessengerName(t, connection);
-    }
+    case "bridge":
+      return bridgeMessengerName(
+        t,
+        link.connection === undefined ? undefined : connections.get(link.connection.id),
+      );
     default:
       return unreachable(link.messenger);
   }

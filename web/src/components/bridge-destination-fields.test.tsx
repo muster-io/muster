@@ -123,7 +123,12 @@ function mockReads() {
       return Promise.resolve(json(200, { items: [MM, BR, PLAIN, UNREAD], next_cursor: null }));
     }
     if (url.startsWith("/api/v1/user-directory")) {
-      return Promise.resolve(json(200, { items: [], next_cursor: null }));
+      return Promise.resolve(
+        json(200, {
+          items: [{ id: "US0000000000AA", name: "Alice", login: "alice", deactivated: false }],
+          next_cursor: null,
+        }),
+      );
     }
     return Promise.resolve(json(404, { title: "not mocked" }));
   });
@@ -315,6 +320,14 @@ describe("DestinationForm with the Bridge fields", () => {
       );
     await expect.element(page.getByRole("button", { name: "Add group" })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("@channel");
+    // The chosen users stay: a picker for each kind, which mentions the user it adds.
+    const users = page.getByLabelText("Add a user to mention for New Alert Group", { exact: true });
+    await expect.element(users).toBeEnabled();
+    expect(document.querySelectorAll('select[id$="-users"]').length).toBe(6);
+    await userEvent.selectOptions(users, "US0000000000AA");
+    await expect
+      .element(page.getByRole("button", { name: "Remove Alice (alice)", exact: true }))
+      .toBeVisible();
   });
 
   test("shows the forbidden channel at the channel field with the bridge's text", async () => {

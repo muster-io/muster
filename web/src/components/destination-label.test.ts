@@ -25,6 +25,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import {
+  bridgeMessengerName,
   chatKey,
   connectionAccount,
   connectionMessengerName,
@@ -350,8 +351,16 @@ describe("the Connections list", () => {
     expect(
       connectionAccount({ ...tgConnection("CN000000000TGC", "tg"), bot_username: "muster_bot" }),
     ).toBe("@muster_bot");
+    // A type this SPA does not know, from a newer server: its type as the messenger, and no account.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a Connection type the API may add later
+    const unknown = { ...byId("CN000000000MMA"), type: "matrix" } as unknown as Connection;
+    expect(connectionMessengerName(i18n.t, unknown)).toBe("matrix");
+    expect(connectionAccount(unknown)).toBeUndefined();
+    expect(bridgeMessengerName(i18n.t, undefined)).toBe("Bridge");
+    expect(bridgeMessengerName(i18n.t, byId("CN000000000MMA"))).toBe("Bridge");
     await i18n.changeLanguage("ru");
     expect(connectionMessengerName(i18n.t, byId("CN000000000BRU"))).toBe("Мост");
+    expect(bridgeMessengerName(i18n.t, undefined)).toBe("Мост");
   });
 });
 

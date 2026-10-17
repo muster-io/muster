@@ -10,8 +10,9 @@
 // the second bot, by sending the token to it, and through the demo Connection "Dev Bridge", the first bot, with the
 // code it sent to his email once the bridge finds people by email and a check read that; the Admin's user page lists
 // both links by the bridge's messenger; and an Alert Group of a Route to a Bridge Destination of "br" that Bob
-// acknowledges through the fake shows "Bob via Bridge" in its Timeline. The fake's configuration is put back and
-// "Dev Bridge" checked again at the end.
+// acknowledges through the fake shows "Bob via Bridge" in its Timeline. The token, the handle and the code entry fit
+// 360 pixels, in English and in Russian. The fake's configuration is put back and "Dev Bridge" checked again at the
+// end, before the rest of the cleaning, each step of which runs whatever the others do.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -238,20 +239,39 @@ test.beforeAll(async () => {
   }
 });
 
+/** Runs one cleaning step, so that one that fails never skips the others; the first failure is rethrown at the end. */
+async function cleaning(failures: unknown[], step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch (err) {
+    failures.push(err);
+  }
+}
+
 test.afterAll(async () => {
+  const failures: unknown[] = [];
+  // First the fake's configuration, and "Dev Bridge" reads it again, so that its stored info finds people by login once
+  // more: the specs after this one see the state they expect whatever else fails here.
+  await cleaning(failures, resetFakeBridge);
   const admin = await adminApi();
   try {
-    await deleteMm(admin);
-    if (bridgeGroupId !== "") {
-      await admin.call("POST", `/api/v1/alert-groups/${bridgeGroupId}/resolve`, {});
+    if (devBridgeId !== "") {
+      await cleaning(failures, () => checkConnection(admin, devBridgeId));
     }
-    await deleteBridgeRoute(admin);
-    await removeBridgeConnection(admin);
-    // "Dev Bridge" reads the fake's configuration again, so that its stored info finds people by login once more.
-    await resetFakeBridge();
-    await checkConnection(admin, devBridgeId);
+    await cleaning(failures, () => deleteMm(admin));
+    if (bridgeGroupId !== "") {
+      await cleaning(failures, () =>
+        admin.call("POST", `/api/v1/alert-groups/${bridgeGroupId}/resolve`, {}),
+      );
+    }
+    await cleaning(failures, () => deleteBridgeRoute(admin));
+    await cleaning(failures, () => removeBridgeConnection(admin));
   } finally {
     await admin.dispose();
+  }
+  const [first] = failures;
+  if (first !== undefined) {
+    throw first instanceof Error ? first : new Error(JSON.stringify(first));
   }
 });
 
@@ -393,7 +413,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   const { page: bob, csp } = await profileOf(browser, "link-bob");
 
   // 1. "Link through br" → the token with "Copy", the instruction to send it to the bot and when it expires; "br" has
-  // no link template, so no link. The dialog fits 360 pixels.
+  // no link template, so no link. Bob uses a phone up to the code entry of step 3: every step fits 360 pixels.
   await bob.setViewportSize({ width: 360, height: 740 });
   await bob.getByRole("button", { name: "Link through br", exact: true }).click();
   const tokenDialog = bob.getByRole("dialog");
@@ -413,7 +433,6 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await expect(tokenDialog.getByTestId("link-bridge-open")).toHaveCount(0);
   await expectNoHorizontalScroll(bob);
   await shot(bob, "account-links-bridge-token-360");
-  await bob.setViewportSize({ width: 1280, height: 800 });
 
   // 2. Bob sends the token to the bot of "br": the dialog closes and the row appears without a reload.
   const token = (await tokenBlock.textContent()) ?? "";
@@ -425,7 +444,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   ).toHaveText("Fake chat · Bob Brown · via br");
 
   // 3. The bridge finds people by email; once a check of "Dev Bridge" read that, Bob links through it with the code
-  // the bot sent him, after a wrong one.
+  // the bot sent him, after a wrong one: the handle step and the code entry with its attempts fit 360 pixels.
   await fbr("PUT", "/config", { user_lookup: "email" });
   const admin = await adminApi();
   try {
@@ -437,25 +456,37 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await bob.getByRole("button", { name: "Link through Dev Bridge", exact: true }).click();
   const codeDialog = bob.getByRole("dialog");
   await codeDialog.getByRole("tab", { name: "Code" }).click();
+  await expect(codeDialog.getByLabel("Email", { exact: true })).toBeVisible();
+  await expect(
+    codeDialog.getByText("The bot sends a code to this account in a direct message."),
+  ).toBeVisible();
+  await expectNoHorizontalScroll(bob);
+  await shot(bob, "account-links-bridge-handle-360");
   const before = (await bridgeDms("u-bob")).length;
   await codeDialog.getByLabel("Email", { exact: true }).fill("bob@example.org");
   await codeDialog.getByRole("button", { name: "Send code" }).click();
   await expect(codeDialog.getByTestId("link-bridge-attempts")).toHaveText("5 attempts left");
   const codeInput = codeDialog.getByLabel("Enter the code the bot sent you");
+  await expect(codeInput).toBeVisible();
+  await expect(codeDialog.getByRole("button", { name: "Request a new code" })).toBeVisible();
+  await expectNoHorizontalScroll(bob);
   await codeInput.fill("22222222");
   await codeDialog.getByRole("button", { name: "Link", exact: true }).click();
   await expect(codeDialog.getByTestId("link-bridge-code-error")).toHaveText(
     "The code is wrong or no longer valid. Request a new code.",
   );
   await expect(codeDialog.getByTestId("link-bridge-attempts")).toHaveText("4 attempts left");
-  await shot(bob, "account-links-bridge-code");
+  await expectNoHorizontalScroll(bob);
+  await shot(bob, "account-links-bridge-code-360");
   await codeInput.fill(await newBridgeCode("u-bob", before));
   await codeDialog.getByRole("button", { name: "Link", exact: true }).click();
   await expect(codeDialog).toBeHidden();
   await expect(rows(bob).filter({ hasText: "Fake chat · Bob Brown · via Dev Bridge" })).toHaveCount(
     1,
   );
-  await shot(bob, "account-links-bridge-list");
+  await expectNoHorizontalScroll(bob);
+  await shot(bob, "account-links-bridge-list-360");
+  await bob.setViewportSize({ width: 1280, height: 800 });
 
   // The Admin's user page lists both Bridge links by the bridge's messenger.
   const adminCsp = watchCsp(page);
@@ -552,7 +583,56 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   ).toBeVisible();
   await shot(bob, "account-links-bridge-timeline");
 
+  // 5. Bob reads Russian on his phone: the token of "br" and the code entry of "Dev Bridge" in Russian, each step at
+  // 360 pixels without scrolling sideways; then English again.
+  await bob.setViewportSize({ width: 360, height: 740 });
+  await bob.goto("/profile");
+  await bob.getByLabel("Language").selectOption("ru");
+  await expect(bob.getByRole("heading", { name: "Аккаунты в мессенджерах" })).toBeVisible();
+  await russianBridgeDialogs(bob);
+  await bob.getByLabel("Язык").selectOption("en");
+  await expect(bob.getByRole("heading", { name: "Messenger accounts" })).toBeVisible();
+
   expect(csp).toEqual([]);
   expect(adminCsp).toEqual([]);
   await bob.context().close();
 });
+
+/** "Привязать через br" by token and "Привязать через Dev Bridge" up to the code entry, in Russian at 360 pixels. */
+async function russianBridgeDialogs(bob: Page): Promise<void> {
+  await bob.getByRole("button", { name: "Привязать через br", exact: true }).click();
+  const token = bob.getByRole("dialog");
+  await expect(token.getByRole("heading", { name: "Привязать через br" })).toBeVisible();
+  await expect(token.getByTestId("link-bridge-token")).toHaveText(/^[A-Za-z0-9_-]{43}$/);
+  await expect(token.getByRole("button", { name: "Копировать" })).toBeVisible();
+  await expect(token.getByTestId("link-bridge-instruction")).toHaveText(
+    "Отправьте этот токен боту в личном сообщении.",
+  );
+  await expect(token.getByTestId("link-bridge-expires")).toHaveText(
+    /^Токен работает один раз и действует до \d\d:\d\d\.$/,
+  );
+  await expectNoHorizontalScroll(bob);
+  await shot(bob, "account-links-bridge-ru-token-360");
+  await bob.keyboard.press("Escape");
+  await expect(token).toBeHidden();
+
+  await bob.getByRole("button", { name: "Привязать через Dev Bridge", exact: true }).click();
+  const code = bob.getByRole("dialog");
+  await expect(code.getByRole("tab", { name: "Токен" })).toHaveAttribute("aria-selected", "true");
+  await expect(code.getByTestId("link-bridge-token")).toHaveText(/^[A-Za-z0-9_-]{43}$/);
+  await expectNoHorizontalScroll(bob);
+  await code.getByRole("tab", { name: "Код" }).click();
+  await expect(code.getByLabel("Почта", { exact: true })).toBeVisible();
+  await expect(code.getByText("Бот пришлёт код этому аккаунту в личном сообщении.")).toBeVisible();
+  await expectNoHorizontalScroll(bob);
+  await code.getByLabel("Почта", { exact: true }).fill("bob@example.org");
+  await code.getByRole("button", { name: "Отправить код" }).click();
+  await expect(code.getByTestId("link-bridge-attempts")).toHaveText("Осталось 5 попыток");
+  await expect(code.getByLabel("Введите код, который прислал бот")).toBeVisible();
+  await expect(code.getByRole("button", { name: "Запросить новый код" })).toBeVisible();
+  await expect(code.getByRole("button", { name: "Привязать", exact: true })).toBeVisible();
+  await expectNoHorizontalScroll(bob);
+  await shot(bob, "account-links-bridge-ru-code-360");
+  await bob.keyboard.press("Escape");
+  await expect(code).toBeHidden();
+}

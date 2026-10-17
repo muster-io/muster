@@ -50,7 +50,7 @@ import { Label } from "./ui/label";
 /** The kind of handle a bridge finds people by, when it offers a code. */
 export type HandleKind = NonNullable<LinkHandleKind>;
 
-/** The longest handle, in characters, as the API checks it. */
+/** The longest handle, in code points, as the API checks it. */
 const HANDLE_MAX = 320;
 
 const TABS = ["token", "code"] as const;
@@ -293,7 +293,8 @@ export function LinkBridgeDialog({ connection }: { connection: LinkableConnectio
 
   const requestCode = () => {
     const trimmed = handle.trim();
-    const check = trimmed === "" ? "required" : trimmed.length > HANDLE_MAX ? "too_long" : null;
+    const check =
+      trimmed === "" ? "required" : Array.from(trimmed).length > HANDLE_MAX ? "too_long" : null;
     setHandleCheck(check);
     if (check !== null) {
       return;

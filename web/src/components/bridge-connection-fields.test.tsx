@@ -3,11 +3,11 @@
 
 // The Bridge Connection in a real browser: the request a save sends — the base URL, the token, the event delivery mode,
 // the proxy and the limiter — with the push secret only in push mode; the push secret and the callback address with its
-// hint only in push mode, and the note that a new Connection gets its address once saved; the checks a save repeats,
-// the push secret's form and a new base URL that needs the token again included; the limiter proposal, half of the
-// bridge's send_per_second; the steps "Bridge info" and "Event delivery" of the check, each failing one with the text
-// of its code and the bridge's English message as the detail; and the panel of what the bridge offers. English and
-// Russian.
+// hint only in push mode, the note that a new Connection gets its address once saved and the note that polling removes
+// a stored push secret; the checks a save repeats, the push secret's form and a new base URL that needs the token again
+// included; the limiter proposal, half of the bridge's send_per_second; the steps "Bridge info" and "Event delivery" of
+// the check, each failing one with the text of its code and the bridge's English message as the detail; and the panel
+// of what the bridge offers. English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -99,7 +99,7 @@ function providers(children: ReactNode) {
   const read: SessionRead = {
     session: {
       state: "active",
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the form reads only the Permissions and the time zone
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the form reads Permissions and time zone
       user: { id: "SR0000000000AA", name: "Admin", time_zone: "UTC" } as Session["user"],
       csrf_token: "csrf",
       expires_at: "2026-10-17T09:00:00Z",
@@ -333,6 +333,43 @@ describe("ConnectionForm of a Bridge Connection", () => {
     });
   });
 
+  test("says under the modes that saving in polling removes a stored push secret", async () => {
+    const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
+    const pushed: BridgeConnection = {
+      ...BRIDGE,
+      event_delivery: "push",
+      push_secret_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
+    };
+    const screen = await render(
+      providers(<ConnectionForm connection={pushed} submitLabel="Save" save={save} />),
+    );
+    const dropped = page.getByTestId("bridge-push-secret-dropped");
+    await expect.element(page.getByRole("radio", { name: "Push" })).toBeChecked();
+    await expect.element(dropped).not.toBeInTheDocument();
+    await page.getByRole("radio", { name: "Polling" }).click();
+    await expect
+      .element(dropped)
+      .toHaveTextContent("Saving in polling mode removes the stored push secret.");
+    await page.getByRole("radio", { name: "Push" }).click();
+    await expect.element(dropped).not.toBeInTheDocument();
+    await screen.unmount();
+
+    // Without a stored push secret there is nothing to remove.
+    const screen2 = await render(
+      providers(<ConnectionForm connection={BRIDGE} submitLabel="Save" save={save} />),
+    );
+    await expect.element(page.getByRole("radio", { name: "Polling" })).toBeChecked();
+    await expect.element(dropped).not.toBeInTheDocument();
+    await screen2.unmount();
+
+    await i18n.changeLanguage("ru");
+    await render(providers(<ConnectionForm connection={pushed} submitLabel="Save" save={save} />));
+    await page.getByRole("radio", { name: "Опрос" }).click();
+    await expect
+      .element(dropped)
+      .toHaveTextContent("Сохранение в режиме опроса удалит сохранённый секрет push-отправки.");
+  });
+
   test("asks for the token again for a new base URL", async () => {
     const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
     const screen = await render(
@@ -344,7 +381,7 @@ describe("ConnectionForm of a Bridge Connection", () => {
     await expect
       .element(
         page.getByText(
-          "Enter the bot token again: the stored token is sent only to the server it was entered for.",
+          "Enter the token again: the stored token is sent only to the bridge it was entered for.",
         ),
       )
       .toBeVisible();
@@ -686,8 +723,8 @@ describe("BridgeInfoPanel", () => {
         "Protocol version 1",
         "Longest message text: 501 characters",
         "Edits for 48 h after posting",
-        "Sends a second: 30",
-        "Sends a second per channel: 0.5",
+        "Sends per second: 30",
+        "Sends per second per channel: 0.5",
         "Finds nobody: accounts link by token only",
         "Event delivery: Push",
       ]);

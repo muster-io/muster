@@ -410,6 +410,22 @@ describe("LinkBridgeDialog", () => {
     expect(posts(CODES)).toHaveLength(0);
   });
 
+  test("counts the handle in code points, as the API does", async () => {
+    await openDialog(DEVB);
+    await dialog().getByRole("tab", { name: "Code" }).click();
+    await handleField().fill("a".repeat(321));
+    await dialog().getByRole("button", { name: "Send code" }).click();
+    await expect
+      .element(page.getByTestId("link-bridge-handle-error"))
+      .toHaveTextContent(i18n.t("fieldErrors.tooLong"));
+    expect(posts(CODES)).toHaveLength(0);
+    // 320 emoji are 640 UTF-16 units but 320 code points: within the limit.
+    await handleField().fill("😀".repeat(320));
+    await dialog().getByRole("button", { name: "Send code" }).click();
+    await expect.poll(() => posts(CODES).length).toBe(1);
+    expect(page.getByTestId("link-bridge-handle-error").query()).toBeNull();
+  });
+
   test("names the kind and the refusals in Russian, with the plural forms", async () => {
     await i18n.changeLanguage("ru");
     const t = i18n.t;

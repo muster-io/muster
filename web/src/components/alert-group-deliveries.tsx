@@ -3,14 +3,14 @@
 
 // The Delivery section of the Alert Group page (C-11.FR-16, FR-10; C-09.FR-14; reference.md, banners): one row per
 // Destination with its name, health and delivery state — "Delivered" with a link to the message where the messenger
-// gives one, "Pending", "Not delivered: {error}", "Waiting: {Destination} is Broken", "Deleted in the messenger",
-// "Not posted: …" or "No longer updated here" — and the marks "Thread not attached to the Root message", "Possible
+// gives one, "Pending", "Not delivered: {error}", "Waiting: {Destination} is Broken", "Deleted in the messenger", "Not
+// posted: …" or "No longer updated here" — and the marks "Thread not attached to the Root message", "Possible
 // duplicate" and, for a Bridge message past its bridge's edit window, "Past the edit window: updated on the next change
-// of status" (C-22.FR-9). The error comes from the messenger and is text only; a link opens in a new tab, and only an http or https
-// one. The alert-group hint reads the section again: the dispatcher sends it with every change of the Alert Group, and
-// the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so nothing polls. A
-// Destination shows its name; its full label (D309) is the name's tooltip and accessible description, and a Destination
-// the Destinations list does not show keeps its name alone.
+// of status" (C-22.FR-9). The error comes from the messenger and is text only; a link opens in a new tab, and only an
+// http or https one. The alert-group hint reads the section again: the dispatcher sends it with every change of the
+// Alert Group, and the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so
+// nothing polls. A Destination shows its name; its full label (D309) is the name's tooltip and accessible description,
+// and a Destination the Destinations list does not show keeps its name alone.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";

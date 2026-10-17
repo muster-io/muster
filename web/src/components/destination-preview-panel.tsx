@@ -23,7 +23,7 @@ import type {
   DestinationPreviewItemName,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
-import { CodeText, RenderedRequest, readableBody } from "./rendered-request";
+import { CodeText, RenderedRequest } from "./rendered-request";
 import { isSourceGone, unreachable } from "./destination-test-panel";
 import { ExternalLink, inlineMarkdown } from "./template-preview";
 import { type PickedSource, TEST_SOURCE_QUERY, testSource } from "./test-source-picker";
@@ -253,6 +253,18 @@ function arrayOf(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/**
+ * A Bridge's envelope, indented by two spaces. The server writes it with Go's escapes of <, > and &, which reading and
+ * writing it again turns back into the characters; text that does not parse is shown as it is.
+ */
+function envelopeText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
 /** The body of a request as JSON, or nothing when it is not an object. */
 function jsonBody(body: string | null | undefined): Record<string, unknown> {
   try {
@@ -461,7 +473,7 @@ function PreviewItem({
     body = (
       <>
         <p className="text-sm text-muted-foreground">{t("destinationPreview.envelope")}</p>
-        <CodeText text={readableBody(item.text)} testId="preview-envelope" />
+        <CodeText text={envelopeText(item.text)} testId="preview-envelope" />
       </>
     );
   } else if (item.request !== undefined) {

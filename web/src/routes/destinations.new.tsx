@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1, C-22.FR-3): the choice of the type — Mattermost, Telegram,
-// Bridge or outgoing webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing webhook first shows
-// its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the query cache, and the
-// page of the Destination opens when the dialog closes.
+// Bridge or outgoing webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing
+// webhook first shows its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the
+// query cache, and the page of the Destination opens when the dialog closes.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";

@@ -2,10 +2,10 @@
 // Copyright The Muster Authors
 
 // The Delivery section of the Alert Group page in a real browser: the text of every delivery state and mark (a Bridge
-// message past its bridge's edit window among them), a
-// message link that opens only http and https addresses in a new tab without the opener, the error of the messenger as
-// text, a section that follows the alert-group hint instead of polling, and a Destination's name whose tooltip and
-// accessible description are its full label with destinations:read (a deleted Destination keeps its name alone).
+// message past its bridge's edit window among them), a message link that opens only http and https addresses in a new
+// tab without the opener, the error of the messenger as text, a section that follows the alert-group hint instead of
+// polling, and a Destination's name whose tooltip and accessible description are its full label with destinations:read
+// (a deleted Destination keeps its name alone).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
