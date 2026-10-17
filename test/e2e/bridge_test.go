@@ -50,6 +50,9 @@ func newBRD(t *testing.T, h *Harness, r *Replica) *brd {
 		restore(t, http.MethodPut, e.fb+"/config", `{"replays":true,"push":null,"capabilities":`+string(capabilities)+
 			`,"limits":{"max_body_length":4000,"edit_max_age_seconds":null}}`)
 		restore(t, http.MethodDelete, e.fb+"/faults", "")
+		// The second request may find the first's connection still busy and dial another, which then stays unused;
+		// the fake's server would wait 5 s for such a connection when muster dev stops.
+		client.CloseIdleConnections()
 	})
 	return e
 }
