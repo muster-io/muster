@@ -69,6 +69,8 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return t("timeline.transport.mattermost");
     case "telegram":
       return t("timeline.transport.telegram");
+    case "bridge":
+      return t("timeline.transport.bridge");
     case "cli":
       return t("timeline.transport.cli");
     default:
@@ -262,6 +264,8 @@ export function entryText(
           return t("timeline.delivery.stormSummary", { destination });
         case "final_edit":
           return t("timeline.delivery.finalEdit", { destination });
+        case "republished_past_edit_window":
+          return t("timeline.delivery.republishedPastEditWindow", { destination });
         default:
           return t("timeline.delivery.other", { destination });
       }

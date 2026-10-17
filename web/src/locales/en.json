@@ -12,6 +12,46 @@
       "empty": "No messenger accounts linked.",
       "title": "Account links"
     },
+    "bridge": {
+      "attemptsLeft_one": "{{count}} attempt left",
+      "attemptsLeft_other": "{{count}} attempts left",
+      "code": "Enter the code the bot sent you",
+      "confirm": "Link",
+      "errors": {
+        "codeInvalid": "The code is wrong or no longer valid. Request a new code.",
+        "codeNotOffered": "This bridge sends no codes: send the token to the bot instead.",
+        "directMessageRefused": "The bot cannot send you a direct message. Send it the token instead.",
+        "handleNotFound": {
+          "email": "No account with this email was found.",
+          "login": "No account with this login was found.",
+          "userId": "No account with this user id was found.",
+          "username": "No account with this username was found."
+        },
+        "linkedElsewhere": "This account is linked to another user. Its owner or an admin can unlink it.",
+        "tooManyCodes_one": "Too many codes were requested. Try again in {{count}} minute.",
+        "tooManyCodes_other": "Too many codes were requested. Try again in {{count}} minutes."
+      },
+      "expired": "This token has expired.",
+      "expires": "This token works once and expires at {{time}}.",
+      "handleHint": "The bot sends a code to this account in a direct message.",
+      "handleKinds": {
+        "email": "Email",
+        "login": "Login",
+        "userId": "User id",
+        "username": "Username"
+      },
+      "newCode": "Request a new code",
+      "newToken": "Get a new token",
+      "open": "Open the chat with the bot",
+      "send": "Send code",
+      "sendToken": "Send this token to the bot in a direct message.",
+      "start": "Link through {{connection}}",
+      "tabs": {
+        "code": "Code",
+        "label": "How to link",
+        "token": "Token"
+      }
+    },
     "connection": "Connection",
     "empty": "No messenger accounts linked yet.",
     "errors": {
@@ -24,7 +64,8 @@
       "lastUsedAgo": "{{duration}} ago",
       "linked": "Linked {{date}}",
       "linkedVia": "linked via {{connection}}",
-      "never": "Never"
+      "never": "Never",
+      "via": "via {{connection}}"
     },
     "mattermost": {
       "attemptsLeft_one": "{{count}} attempt left",
@@ -392,6 +433,7 @@
     "to": "changed to",
     "transport": {
       "api": "API",
+      "bridge": "Bridge",
       "cli": "CLI",
       "system": "Muster",
       "ui": "Web UI"
@@ -699,6 +741,7 @@
   "deliveries": {
     "newTab": "(opens in a new tab)",
     "none": "No deliveries.",
+    "pastEditWindow": "Past the edit window: updated on the next change of status",
     "possibleDuplicate": "Possible duplicate",
     "state": {
       "deletedInMessenger": "Deleted in the messenger",
@@ -2228,6 +2271,7 @@
       "possibleDuplicate": "Possible duplicate in {{destination}}",
       "publication": "Published in {{destination}}",
       "republished": "Published again in {{destination}}",
+      "republishedPastEditWindow": "Published again in {{destination}}: past the edit window",
       "stormSummary": "Storm summary in {{destination}}",
       "threadNotAttached": "Thread not attached to the Root message in {{destination}}"
     },
@@ -2312,6 +2356,7 @@
     "title": "Timeline",
     "transport": {
       "api": "the API",
+      "bridge": "Bridge",
       "cli": "the CLI",
       "mattermost": "Mattermost",
       "system": "Muster",
