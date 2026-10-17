@@ -223,9 +223,15 @@ func TestHTTPProxy(t *testing.T) {
 	} {
 		c = dial(t, s)
 		_, _ = io.WriteString(c, req)
-		if status := readResponse(t, bufio.NewReader(c)); status != http.StatusBadGateway &&
-			status != http.StatusProxyAuthRequired {
-			t.Fatalf("%q: %d", req, status)
+		// The proxy closes the connection after a refusal, so the answer says so: a client must not send its next
+		// request on it.
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusProxyAuthRequired || !resp.Close {
+			t.Fatalf("%q: %d, close %v", req, resp.StatusCode, resp.Close)
 		}
 	}
 	if s.Refused() != 1 {

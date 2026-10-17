@@ -128,10 +128,13 @@ func TestIntegrationWorkers(t *testing.T) {
 		for _, w := range workers {
 			w.Wake()
 		}
+		// A Snapshot is logged once its commit has returned, which can be after the commit shows in the database: the
+		// workers stop after the last line, as a stop between the two would cancel the commit's answer and its line.
+		processed := func() int { return strings.Count(e.processLog.String(), `"event":"snapshot_processed"`) }
 		deadline := time.Now().Add(30 * time.Second)
-		for e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state = 'pending'`) > 0 {
+		for e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state = 'pending'`) > 0 || processed() < 40 {
 			if time.Now().After(deadline) {
-				t.Fatal("the workers did not finish")
+				t.Fatalf("the workers did not finish: %d snapshot_processed lines", processed())
 			}
 			time.Sleep(20 * time.Millisecond)
 		}

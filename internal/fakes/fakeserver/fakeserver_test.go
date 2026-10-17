@@ -426,6 +426,37 @@ func TestCloseStopsRunningHandlers(t *testing.T) {
 	<-done
 }
 
+// TestCloseEndsSilentConnections: a connection that never sent a request, such as one a client's transport dialed
+// for a request that another connection took, does not hold Close up; net/http's Shutdown waits 5 seconds for one.
+func TestCloseEndsSilentConnections(t *testing.T) {
+	s := fakeserver.New("Test", &echo{})
+	if err := s.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	var d net.Dialer
+	silent, err := d.DialContext(t.Context(), "tcp", strings.TrimPrefix(s.URL(), "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer silent.Close()
+	// The server accepts in order: once a later connection is answered, it has accepted the silent one.
+	if r := do(t, http.MethodGet, s.URL()+"/after", ""); r.status != http.StatusOK {
+		t.Fatalf("the request after the silent connection = %d", r.status)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	begin := time.Now()
+	if err := s.Close(ctx); err != nil {
+		t.Errorf("Close with a silent connection: %v", err)
+	}
+	if elapsed := time.Since(begin); elapsed > 2*time.Second {
+		t.Errorf("Close took %v with a silent connection", elapsed)
+	}
+	if _, err := silent.Read(make([]byte, 1)); err == nil {
+		t.Error("the silent connection is still open")
+	}
+}
+
 func TestControlRefusesBrowsers(t *testing.T) {
 	s, _ := start(t)
 	tests := []struct {

@@ -359,15 +359,9 @@ func TestReminderButtonsExpired(t *testing.T) {
 	if x := eph[len(eph)-1]; x.Message != textExpired || x.RootID != root.ID {
 		t.Errorf("the expiry answer %+v", x)
 	}
-	expired := false
-	for line := range strings.Lines(r.Output()) {
-		var m map[string]any
-		if json.Unmarshal([]byte(line), &m) == nil && m["event"] == "mattermost_press" && m["outcome"] == "expired" {
-			expired = true
-		}
-	}
-	if !expired {
-		t.Error("no mattermost_press with the outcome expired")
+	// The press is the first one of this run; its line may reach the harness after the answer.
+	if line, _ := r.WaitLogLine(t, "mattermost_press"); line["outcome"] != "expired" {
+		t.Errorf("the mattermost_press of the expired reminder: %v", line)
 	}
 	e.callback(http.MethodPost, e.mmConn, fmt.Sprintf(`{"user_id":"u-bob","channel_id":%q,"post_id":%q,"context":%s}`,
 		fakemattermost.ChannelAlerts, root.ID, rootCtx), pressAnswer(textNotVerified))

@@ -36,6 +36,13 @@ const (
 
 const dialTimeout = 5 * time.Second
 
+// The answers after which the proxy closes the connection say so; a client that kept the connection for its next
+// request would race the close and see EOF or a reset instead of the answer (RFC 9112 §9.6).
+const (
+	answerProxyAuth  = "HTTP/1.1 407 Proxy Authentication Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+	answerBadGateway = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+)
+
 // Options configure a fake proxy.
 type Options struct {
 	// Username and Password, when set, are required: Proxy-Authorization Basic for HTTP, RFC 1929 for SOCKS5.
@@ -222,14 +229,14 @@ func (s *Server) serveHTTP(c net.Conn, r *bufio.Reader) {
 		want := "Basic " + base64.StdEncoding.EncodeToString([]byte(s.opts.Username+":"+s.opts.Password))
 		if req.Header.Get("Proxy-Authorization") != want {
 			s.refuse()
-			_, _ = io.WriteString(c, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
+			_, _ = io.WriteString(c, answerProxyAuth)
 			return
 		}
 	}
 	if req.Method == http.MethodConnect {
 		target, err := s.dial(req.Host)
 		if err != nil {
-			_, _ = io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+			_, _ = io.WriteString(c, answerBadGateway)
 			return
 		}
 		defer s.untrack(target)
@@ -245,7 +252,7 @@ func (s *Server) serveHTTP(c net.Conn, r *bufio.Reader) {
 	}
 	target, err := s.dial(host)
 	if err != nil {
-		_, _ = io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+		_, _ = io.WriteString(c, answerBadGateway)
 		return
 	}
 	defer s.untrack(target)
