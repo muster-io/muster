@@ -148,22 +148,26 @@ issue: 235
 
 ## Verification
 
-Playwright against `muster dev` with the fake bridge (`127.0.0.1:18094`), in `web/e2e`:
+Playwright against `muster dev` with the fake bridge (`127.0.0.1:18094`), in `web/e2e`. Each spec creates its own
+Bridge Connection "br" on the fake's second bot (`muster-dev-bridge-token-b`, polling) and deletes it, with its
+Destinations and Routes, at the end, and puts the fake's configuration back:
 
-1. `bridge-connection.spec.ts`: as the Admin, Connections → New → Bridge, "Base URL" `http://127.0.0.1:18094`,
-   "Token" `muster-dev-bridge-token-b`, "Polling", Save, Check → visible "Fake chat", "Protocol version 1", "Buttons",
-   "Thread messages"; switch to "Push" → visible "Push secret" and "The bridge posts events to http://localhost:8081/
-   api/v1/callbacks/bridge/CN…"; with the fake's `protocol_version` set to `2`, Check → visible "The bridge speaks
-   protocol version 2; this Muster speaks 1."; at 360 px no horizontal scroll; in Russian the type reads «Мост».
+1. `bridge-connection.spec.ts`: as the Admin, Connections → New → Bridge, "Name" `br`, "Base URL"
+   `http://127.0.0.1:18094`, "Token" `muster-dev-bridge-token-b`, "Polling", Save, Check → visible "Fake chat",
+   "Protocol version 1", "Buttons", "Thread messages"; switch to "Push" → visible "Push secret" and "The bridge posts
+   events to http://localhost:8081/api/v1/callbacks/bridge/CN…"; with the fake's `protocol_version` set to `2`, Check →
+   visible "The bridge speaks protocol version 2; this Muster speaks 1."; at 360 px no horizontal scroll; in Russian the
+   type reads «Мост».
 2. `bridge-destination.spec.ts`: Destinations → New → Bridge through "br", channel `ch-nobot`, Save → visible "The bot
    is not a member of this channel." at the channel field; channel `ch-alerts`, Save → the page shows "alerts"; the
-   Mention settings offer no "Everyone in the chat"; the Route editor's picker reads "alerts · Fake chat · via br ·
-   alerts".
-3. `account-links.spec.ts`: as bob, Profile → "Link through br" → the token and "Send this token to the bot in a direct
-   message"; the test posts it to `/_fake/link` as `u-bob` → the row "Fake chat · Bob Brown · via br" appears without
-   a reload; with the fake's `user_lookup` `email` and a check of the demo Connection "Dev Bridge", the fake's other
-   bot, so that Muster has read its `info`, the "Email" field and a code from `/_fake/direct-messages` link the account
-   through "Dev Bridge"; the Timeline of an Alert Group bob acknowledged through the fake shows "Bridge".
+   Mention settings offer only "Nobody", without a chat-wide mention or groups; the Route editor's picker reads "alerts
+   · Fake chat · via br · alerts".
+3. `account-links.spec.ts`: as link-bob (the profile spec owns "bob"), Profile → "Link through br" → the token and
+   "Send this token to the bot in a direct message"; the test posts it to `/_fake/link` as `u-bob` with `"bot": 2`, the
+   bot of "br" → the row "Fake chat · Bob Brown · via br" appears without a reload; with the fake's `user_lookup`
+   `email` and a check of the demo Connection "Dev Bridge", the fake's other bot, so that Muster has read its `info`,
+   the "Email" field and a code from `/_fake/direct-messages` link the account through "Dev Bridge"; the Timeline of an
+   Alert Group link-bob acknowledged through the fake shows "Bridge".
 
 ## Open questions
 

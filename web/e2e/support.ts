@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Helpers of the end-to-end specs: the API as the development Admin, the database of the run, the fake IdP of
-// `muster dev`, TOTP codes and the layout checks.
+// Helpers of the end-to-end specs: the API as the development Admin, the database of the run, the fake IdP and the fake
+// bridge of `muster dev`, TOTP codes and the layout checks.
 
 import { createHmac } from "node:crypto";
 
@@ -23,6 +23,13 @@ export const MM_TOKEN = "muster-dev-mattermost-token";
 /** The published tokens of the second bots of the fake servers, for which `muster dev` creates no Connection. */
 export const MM_SECOND_TOKEN = "muster-dev-mattermost-token-b";
 export const TG_SECOND_TOKEN = "234567:dev-telegram-token-b";
+/** The fake bridge of `muster dev` and its control API. */
+export const BRIDGE_URL = "http://127.0.0.1:18094";
+export const FBR = `${BRIDGE_URL}/_fake`;
+/** The published token of the fake bridge's first bot, the one of the demo Connection "Dev Bridge". */
+export const BRIDGE_TOKEN = "muster-dev-bridge-token";
+/** The published token of the fake bridge's second bot, for which `muster dev` creates no Connection. */
+export const BRIDGE_SECOND_TOKEN = "muster-dev-bridge-token-b";
 /** The ingestion endpoint that the fake Alertmanager's receivers send to. */
 export const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 const CLOCK = "http://localhost:8082/_dev/clock";
@@ -143,6 +150,98 @@ export async function deleteRoute(id: string): Promise<void> {
     await admin.call("DELETE", `/api/v1/routes/${id}`);
   } finally {
     await admin.dispose();
+  }
+}
+
+/** Calls the control API of the fake bridge and returns its answer, null for none. */
+export async function fbr<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${FBR}${path}`, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  expect(res.ok, `${method} ${path}: ${res.status} ${text}`).toBe(true);
+  return parse<T>(text === "" ? "null" : text);
+}
+
+/**
+ * Puts back what the specs change in the fake bridge's configuration, which both of its bots share: protocol version
+ * 1, user lookup by login, no link template, edits that never expire, both event delivery modes and nobody the bots
+ * cannot write to.
+ */
+export async function resetFakeBridge(): Promise<void> {
+  await fbr("PUT", "/config", {
+    protocol_version: "1",
+    user_lookup: "login",
+    link_url_template: null,
+    limits: { max_body_length: 4000, edit_max_age_seconds: null },
+    event_delivery: ["poll", "push"],
+    revoked: [],
+    dm_blocked: [],
+  });
+}
+
+interface NamedConnection {
+  id: string;
+  name: string;
+}
+
+/** The id of the Connection name; it fails when there is none. */
+export async function connectionNamed(admin: Api, name: string): Promise<string> {
+  const page = await admin.call<{ items: NamedConnection[] }>(
+    "GET",
+    "/api/v1/connections?limit=500",
+  );
+  const found = page.items.find((c) => c.name === name);
+  expect(found, `the Connection ${name}`).toBeDefined();
+  return found?.id ?? "";
+}
+
+/** Runs the check of a Connection, which stores the info a bridge answers, and expects it to pass. */
+export async function checkConnection(admin: Api, id: string): Promise<void> {
+  const result = await admin.call<{ ok: boolean }>("POST", `/api/v1/connections/${id}/checks`);
+  expect(result.ok, `the check of ${id}`).toBe(true);
+}
+
+/**
+ * Creates the Bridge Connection name to the fake bridge's second bot, polling, and checks it, so that Muster has read
+ * its info. Returns its id.
+ */
+export async function createBridgeConnection(admin: Api, name = "br"): Promise<string> {
+  const created = await admin.call<{ id: string }>("POST", "/api/v1/connections", {
+    type: "bridge",
+    name,
+    base_url: BRIDGE_URL,
+    bot_token: BRIDGE_SECOND_TOKEN,
+    event_delivery: "poll",
+    proxy: { enabled: false },
+    limiter: { limit: 10, per_seconds: 1 },
+  });
+  await checkConnection(admin, created.id);
+  return created.id;
+}
+
+/** Deletes every Connection named name, after the Destinations that use it, whatever an earlier run left. */
+export async function removeBridgeConnection(admin: Api, name = "br"): Promise<void> {
+  const connections = await admin.call<{ items: NamedConnection[] }>(
+    "GET",
+    "/api/v1/connections?limit=500",
+  );
+  const ids = connections.items.filter((c) => c.name === name).map((c) => c.id);
+  if (ids.length === 0) {
+    return;
+  }
+  const destinations = await admin.call<{ items: { id: string; connection_id?: string }[] }>(
+    "GET",
+    "/api/v1/destinations?limit=500",
+  );
+  for (const d of destinations.items) {
+    if (d.connection_id !== undefined && ids.includes(d.connection_id)) {
+      await admin.call("DELETE", `/api/v1/destinations/${d.id}`);
+    }
+  }
+  for (const id of ids) {
+    await admin.call("DELETE", `/api/v1/connections/${id}`);
   }
 }
 
