@@ -144,6 +144,9 @@ type Server struct {
 	// stop cancels the base context of every request with errClosed.
 	stop   context.CancelCauseFunc
 	closed bool
+	// silent are the connections that have not sent a request yet, which Close closes at once: Shutdown takes such a
+	// connection for idle only after 5 seconds.
+	silent map[net.Conn]struct{}
 }
 
 var errClosed = errors.New("fake server closed")
@@ -197,12 +200,13 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 		return err
 	}
 	base, stop := context.WithCancelCause(context.WithoutCancel(ctx))
-	s.ln, s.stop = ln, stop
+	s.ln, s.stop, s.silent = ln, stop, map[net.Conn]struct{}{}
 	s.srv = &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 		BaseContext:       func(net.Listener) context.Context { return base },
+		ConnState:         s.connState,
 	}
 	s.served = make(chan error, 1)
 	go func() { s.served <- s.srv.Serve(ln) }()
@@ -219,8 +223,9 @@ func (s *Server) URL() string {
 	return "http://" + s.ln.Addr().String()
 }
 
-// Close cancels the context of every request, so running handlers stop and held delays abort their responses, and
-// shuts the server down gracefully; when ctx ends first, it closes every connection.
+// Close cancels the context of every request, so running handlers stop and held delays abort their responses, closes
+// the connections that have not sent a request, and shuts the server down gracefully; when ctx ends first, it closes
+// every connection.
 func (s *Server) Close(ctx context.Context) error {
 	s.mu.Lock()
 	if s.closed {
@@ -229,6 +234,9 @@ func (s *Server) Close(ctx context.Context) error {
 	}
 	s.closed = true
 	srv, served, stop := s.srv, s.served, s.stop
+	for c := range s.silent {
+		_ = c.Close()
+	}
 	s.mu.Unlock()
 	if srv == nil {
 		return nil
@@ -245,6 +253,21 @@ func (s *Server) Close(ctx context.Context) error {
 		return fmt.Errorf("fake %s: close: %w", s.name, err)
 	}
 	return nil
+}
+
+// connState tracks the connections that have not sent a request yet; one accepted while the server closes is closed
+// at once.
+func (s *Server) connState(c net.Conn, state http.ConnState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case state != http.StateNew:
+		delete(s.silent, c)
+	case s.closed:
+		_ = c.Close()
+	default:
+		s.silent[c] = struct{}{}
+	}
 }
 
 // Requests returns the recorded requests in arrival order.
