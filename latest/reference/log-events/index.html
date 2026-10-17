@@ -1593,6 +1593,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_event_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_event_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_info_read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1604,10 +1626,54 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_poll_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_poll_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_press" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_press</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_press_dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_press_dropped</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_republished_past_edit_window" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>bridge_republished_past_edit_window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_text_command" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_text_command</code>
       </span>
     </span>
   </a>
@@ -2858,6 +2924,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_event_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_event_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_info_read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2869,10 +2957,54 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_poll_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_poll_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_press" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_press</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_press_dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_press_dropped</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_republished_past_edit_window" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>bridge_republished_past_edit_window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bridge_text_command" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_text_command</code>
       </span>
     </span>
   </a>
@@ -3889,12 +4021,30 @@ the event.</p>
 <h3 id="bootstrap_admin_missing"><code>bootstrap_admin_missing</code><a class="headerlink" href="#bootstrap_admin_missing" title="Permanent link">&para;</a></h3>
 <p>WARN · no fields · C-03</p>
 <p>The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.</p>
+<h3 id="bridge_event_failed"><code>bridge_event_failed</code><a class="headerlink" href="#bridge_event_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>event_id</code>, <code>type</code>, <code>error</code> · C-22</p>
+<p>The handling of a Bridge event failed — the read of a pushed event's Connection or of its secrets, its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed; a failed read of the Connection comes before the event is authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database refuses it.</p>
+<h3 id="bridge_event_rejected"><code>bridge_event_rejected</code><a class="headerlink" href="#bridge_event_rejected" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>reason</code> · C-22</p>
+<p>A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is missing or no signature matches the push secret), timestamp (webhook-timestamp is further than bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the signature, the push secret, the headers or the body.</p>
 <h3 id="bridge_info_read"><code>bridge_info_read</code><a class="headerlink" href="#bridge_info_read" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>protocol_version</code>, <code>features</code> · C-22</p>
 <p>Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.</p>
+<h3 id="bridge_poll_failed"><code>bridge_poll_failed</code><a class="headerlink" href="#bridge_poll_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>failures</code>, <code>error</code> · C-22</p>
+<p>A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the cursor after a batch could not be stored, or the Connection's client could not be built: connection is the public_id of the Connection, failures how many calls in a row failed — for a client that cannot be built, how many reads of the Connections in a row found it so, counted for each version of the Connection, which is not polled meanwhile — and error what failed, masked of the token and the push secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and polls again from the stored cursor. A failed poll makes no Destination Broken.</p>
+<h3 id="bridge_press"><code>bridge_press</code><a class="headerlink" href="#bridge_press" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>group</code>, <code>command</code>, <code>outcome</code>, <code>external_id</code>, <code>error</code> · C-22</p>
+<p>A press event of a Bridge Connection — a button press the bridge had already confirmed to its messenger — was handled, once its id was recorded: connection is the public_id of the Connection, external_id the messenger account that pressed; group the public_id of the Alert Group and command the Command, once the button data is verified against the pressed message; outcome done or unchanged for a Command that ran, which is not answered; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring; test for a press of a test message; unknown_message for a press on a message Muster did not post through the Connection, which is not answered; failed when the Command failed. Every outcome but done, unchanged and unknown_message is answered through answerEvent; error, when present, says why the press failed or why its answer was not made — no limiter token within the interactive budget, or the bridge refusing it — masked of the token. An answer that failed is not sent again.</p>
+<h3 id="bridge_press_dropped"><code>bridge_press_dropped</code><a class="headerlink" href="#bridge_press_dropped" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>external_id</code>, <code>age_seconds</code> · C-22</p>
+<p>A press event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's real clock, and was dropped without an answer: acting on it now could undo what people did since. connection is the public_id of the Connection, external_id the messenger account that pressed and age_seconds how old the press was. Nothing changed; the person can press again.</p>
 <h3 id="bridge_republished_past_edit_window"><code>bridge_republished_past_edit_window</code><a class="headerlink" href="#bridge_republished_past_edit_window" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>destination</code>, <code>group</code>, <code>old_message_id</code>, <code>new_message_id</code> · C-22</p>
 <p>The status of an Alert Group changed while its Bridge Root message was past the bridge's edit window, so Muster posted a new Root message Quietly and replied under the old one with a link to it: destination is the public_id of the Destination, group the public_id of the Alert Group, old_message_id and new_message_id the bridge's ids of the old and the new Root message. Later Thread replies go under the new one; the old one keeps working. Logged once the republication was recorded.</p>
+<h3 id="bridge_text_command"><code>bridge_text_command</code><a class="headerlink" href="#bridge_text_command" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>group</code>, <code>command</code>, <code>outcome</code>, <code>external_id</code>, <code>error</code> · C-22</p>
+<p>A thread_message event of a Bridge Connection was a Text command — one of the words of bridge.text_commands — and was handled once its id was recorded: connection is the public_id of the Connection, external_id the messenger account that wrote it, group the public_id of the Alert Group of the message whose Thread it is in, command the Command; outcome done or unchanged for a Command that ran, answered "Done: {command} #N"; refused, forbidden, not_linked, disabled or unknown_duration — a Snooze duration that is not one of the Route's — for a Text command that changed nothing; unknown_message for one in the Thread of a message Muster did not post through the Connection, which is not answered; dropped for one older than bridge.event_max_age, which is not answered; failed when the Command failed. error, when present, says why the Command failed or why its answer was not made, masked of the token. Any other text in a Thread is neither answered nor logged.</p>
 <h3 id="clock_skew"><code>clock_skew</code><a class="headerlink" href="#clock_skew" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>skew_seconds</code>, <code>warning_seconds</code> · C-02</p>
 <p>This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is positive when the replica's clock is ahead. Synchronise the clocks with NTP.</p>
