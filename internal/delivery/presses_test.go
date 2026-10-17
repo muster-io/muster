@@ -400,6 +400,27 @@ func (f *fakeDB) bridgeDest(id, conn int64) *fakeDest {
 	return ds
 }
 
+// bridgeRoot is the binding row of the delivery to a Bridge Destination of the Connection conn whose current Root
+// message, or older one when older is set, is messageID, the lowest delivery id first.
+func (f *fakeDB) bridgeRoot(conn int64, messageID string, older bool) (dbgen.GetBridgeRootBindingRow, bool) {
+	for _, d := range slices.SortedFunc(slices.Values(f.deliveries), func(a, b *fakeDelivery) int {
+		return int(a.id - b.id)
+	}) {
+		ds, g := f.bridgeDest(d.dest, conn), f.groups[d.group]
+		if ds == nil || g == nil {
+			continue
+		}
+		if (!older && (d.messageID == nil || *d.messageID != messageID)) ||
+			(older && !slices.Contains(d.superseded, messageID)) {
+			continue
+		}
+		return dbgen.GetBridgeRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+			DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, true
+	}
+	return dbgen.GetBridgeRootBindingRow{}, false
+}
+
 func (f *fakeDB) GetBridgeRootBinding(_ context.Context, arg dbgen.GetBridgeRootBindingParams) (
 	dbgen.GetBridgeRootBindingRow, error) {
 	f.mu.Lock()
@@ -407,25 +428,23 @@ func (f *fakeDB) GetBridgeRootBinding(_ context.Context, arg dbgen.GetBridgeRoot
 	if err := f.call("GetBridgeRootBinding"); err != nil {
 		return dbgen.GetBridgeRootBindingRow{}, err
 	}
-	// The current Root message wins over an older one, then the lower delivery id.
-	for _, older := range []bool{false, true} {
-		for _, d := range slices.SortedFunc(slices.Values(f.deliveries), func(a, b *fakeDelivery) int {
-			return int(a.id - b.id)
-		}) {
-			ds, g := f.bridgeDest(d.dest, arg.ConnectionID.Int64), f.groups[d.group]
-			if ds == nil || g == nil {
-				continue
-			}
-			current := d.messageID != nil && *d.messageID == arg.MessageID
-			if (!older && !current) || (older && (current || !slices.Contains(d.superseded, arg.MessageID))) {
-				continue
-			}
-			return dbgen.GetBridgeRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
-				DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
-				SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze), Superseded: older}, nil
-		}
+	if r, ok := f.bridgeRoot(arg.ConnectionID.Int64, arg.MessageID, false); ok {
+		return r, nil
 	}
 	return dbgen.GetBridgeRootBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetBridgeSupersededBinding(_ context.Context, arg dbgen.GetBridgeSupersededBindingParams) (
+	dbgen.GetBridgeSupersededBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeSupersededBinding"); err != nil {
+		return dbgen.GetBridgeSupersededBindingRow{}, err
+	}
+	if r, ok := f.bridgeRoot(arg.ConnectionID.Int64, arg.MessageID, true); ok {
+		return dbgen.GetBridgeSupersededBindingRow(r), nil
+	}
+	return dbgen.GetBridgeSupersededBindingRow{}, pgx.ErrNoRows
 }
 
 func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridgeReminderBindingParams) (
@@ -517,16 +536,19 @@ func TestBridgePressBinding(t *testing.T) {
 		}
 	}
 	e.db.dests[destMM].deleted = false
-	e.db.fail["GetBridgeRootBinding"] = errBoom
-	reads := e.db.calls["GetBridgeReminderBinding"]
-	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "m3"); !errors.Is(err, errBoom) ||
-		e.db.calls["GetBridgeReminderBinding"] != reads {
-		t.Errorf("a failed read of the Root message = %v, read the Reminders", err)
-	}
-	delete(e.db.fail, "GetBridgeRootBinding")
-	e.db.fail["GetBridgeReminderBinding"] = errBoom
-	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, errBoom) {
-		t.Errorf("a failed read of the Reminder = %v", err)
+	reads := []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding"}
+	for i, q := range reads {
+		e.db.fail[q] = errBoom
+		calls := maps.Clone(e.db.calls)
+		if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, errBoom) {
+			t.Errorf("a failed %s = %v", q, err)
+		}
+		for _, later := range reads[i+1:] {
+			if e.db.calls[later] != calls[later] {
+				t.Errorf("after a failed %s, %s was read", q, later)
+			}
+		}
+		delete(e.db.fail, q)
 	}
 }
 

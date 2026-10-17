@@ -1443,24 +1443,35 @@ FROM destinations ds
 WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
   AND ds.public_id = @public_id::text AND ds.mattermost_channel_id = @channel_id::text;
 
--- GetBridgeRootBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is a
--- Root message (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection that is not
--- deleted whose Root message it is, the current one or an older one that a republication past the bridge's edit
--- window replaced (superseded, C-22.FR-9), with the Alert Group and its Route's Snooze durations. A message id names
--- one message of a bot, so at most one delivery has it; the current Root message wins. The emptiness check beside @>
--- lets the partial GIN index deliveries_superseded_idx serve the older ones.
+-- GetBridgeRootBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
+-- the current Root message (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection that
+-- is not deleted whose Root message it is, with the Alert Group and its Route's Snooze durations. A message id names
+-- one message of a bot, so at most one delivery has it.
 -- name: GetBridgeRootBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds,
-       (d.message_id IS DISTINCT FROM @message_id::text)::boolean AS superseded
+       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
-  AND (d.message_id = @message_id::text
-       OR (d.superseded_message_ids <> '{}' AND d.superseded_message_ids @> ARRAY[@message_id::text]))
-ORDER BY superseded, d.id
+  AND d.message_id = @message_id::text
+ORDER BY d.id
+LIMIT 1;
+
+-- GetBridgeSupersededBinding is GetBridgeRootBinding for an older Root message that a republication past the bridge's
+-- edit window replaced (C-22.FR-9). The emptiness check beside @> lets the partial GIN index deliveries_superseded_idx
+-- serve it; it is a query of its own because an OR with the current message id would scan the deliveries.
+-- name: GetBridgeSupersededBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+FROM destinations ds
+JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND d.superseded_message_ids <> '{}' AND d.superseded_message_ids @> ARRAY[@message_id::text]
+ORDER BY d.id
 LIMIT 1;
 
 -- GetBridgeReminderBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is

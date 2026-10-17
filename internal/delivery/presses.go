@@ -151,6 +151,8 @@ func (s *Service) TestDestination(ctx context.Context, connectionID int64, publi
 type bridgePressQueries interface {
 	GetBridgeRootBinding(ctx context.Context, arg dbgen.GetBridgeRootBindingParams) (dbgen.GetBridgeRootBindingRow,
 		error)
+	GetBridgeSupersededBinding(ctx context.Context, arg dbgen.GetBridgeSupersededBindingParams) (
+		dbgen.GetBridgeSupersededBindingRow, error)
 	GetBridgeReminderBinding(ctx context.Context, arg dbgen.GetBridgeReminderBindingParams) (
 		dbgen.GetBridgeReminderBindingRow, error)
 }
@@ -171,39 +173,50 @@ type BridgeBinding struct {
 }
 
 // BridgePressBinding reads the binding of a press on the message messageID of the Bridge Connection connectionID
-// (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection, not deleted, whose current or
-// older Root message it is, otherwise a sent Reminder of such a Destination whose message it is; ErrNotBound when
-// there is none, as for a message Muster did not post through the Connection, a test message or a Storm summary.
+// (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection, not deleted, whose current
+// Root message it is, else whose older Root message it is, else a sent Reminder of such a Destination whose message it
+// is; ErrNotBound when there is none, as for a message Muster did not post through the Connection, a test message or a
+// Storm summary.
 func (s *Service) BridgePressBinding(ctx context.Context, connectionID int64, messageID string) (BridgeBinding,
 	error) {
 	conn := pgtype.Int8{Int64: connectionID, Valid: true}
 	q := s.store.q()
+	bound := func(kind buttons.Subject, superseded bool, id int64, publicID, name, group string, number int64,
+		snooze []int64) BridgeBinding {
+		return BridgeBinding{Kind: kind, Destination: Destination{ID: id, PublicID: publicID, Name: name,
+			Type: TypeBridge, Connection: &connectionID}, GroupPublicID: group, GroupNumber: number,
+			SnoozeSeconds: snooze, Superseded: superseded}
+	}
+	failed := func(what string, err error) (BridgeBinding, error) {
+		return BridgeBinding{}, fmt.Errorf("read the binding of a press on %s of the connection %d: %w", what,
+			connectionID, err)
+	}
 	r, err := q.GetBridgeRootBinding(ctx, dbgen.GetBridgeRootBindingParams{OrgID: s.orgID, ConnectionID: conn,
 		MessageID: messageID})
 	switch {
 	case err == nil:
-		return BridgeBinding{Kind: buttons.SubjectRoot, Destination: bridgeDestination(connectionID,
-			r.DestinationID, r.DestinationPublicID, r.DestinationName), GroupPublicID: r.GroupPublicID,
-			GroupNumber: r.GroupNumber, SnoozeSeconds: r.SnoozeDurationsSeconds, Superseded: r.Superseded}, nil
+		return bound(buttons.SubjectRoot, false, r.DestinationID, r.DestinationPublicID, r.DestinationName,
+			r.GroupPublicID, r.GroupNumber, r.SnoozeDurationsSeconds), nil
 	case !errors.Is(err, pgx.ErrNoRows):
-		return BridgeBinding{}, fmt.Errorf("read the binding of a press on a message of the connection %d: %w",
-			connectionID, err)
+		return failed("a root message", err)
+	}
+	o, err := q.GetBridgeSupersededBinding(ctx, dbgen.GetBridgeSupersededBindingParams{OrgID: s.orgID,
+		ConnectionID: conn, MessageID: messageID})
+	switch {
+	case err == nil:
+		return bound(buttons.SubjectRoot, true, o.DestinationID, o.DestinationPublicID, o.DestinationName,
+			o.GroupPublicID, o.GroupNumber, o.SnoozeDurationsSeconds), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return failed("an older root message", err)
 	}
 	rr, err := q.GetBridgeReminderBinding(ctx, dbgen.GetBridgeReminderBindingParams{OrgID: s.orgID,
 		ConnectionID: conn, MessageID: messageID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return BridgeBinding{}, ErrNotBound
+	switch {
+	case err == nil:
+		return bound(buttons.SubjectReply, false, rr.DestinationID, rr.DestinationPublicID, rr.DestinationName,
+			rr.GroupPublicID, rr.GroupNumber, rr.SnoozeDurationsSeconds), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return failed("a reminder", err)
 	}
-	if err != nil {
-		return BridgeBinding{}, fmt.Errorf("read the binding of a press on a reminder of the connection %d: %w",
-			connectionID, err)
-	}
-	return BridgeBinding{Kind: buttons.SubjectReply, Destination: bridgeDestination(connectionID, rr.DestinationID,
-		rr.DestinationPublicID, rr.DestinationName), GroupPublicID: rr.GroupPublicID, GroupNumber: rr.GroupNumber,
-		SnoozeSeconds: rr.SnoozeDurationsSeconds}, nil
-}
-
-// bridgeDestination is the Bridge Destination id of the Connection connectionID.
-func bridgeDestination(connectionID, id int64, publicID, name string) Destination {
-	return Destination{ID: id, PublicID: publicID, Name: name, Type: TypeBridge, Connection: &connectionID}
+	return BridgeBinding{}, ErrNotBound
 }
