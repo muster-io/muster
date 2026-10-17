@@ -6,9 +6,11 @@
 // which the demo Connection of `muster dev` uses, and SecondToken. getInfo answers the configured info — the
 // messenger "Fake chat", every feature on and both event delivery modes by default — checkChannel answers the
 // configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
-// their edits and Thread replies (messages.go), pollEvents and answerEvent serve the events of each bot (events.go),
-// findUsers and sendDirectMessage serve Account links by code (people.go), and every request with any other token,
-// none or a revoked one gets 401. Operations that no story has added yet answer 501.
+// their edits and Thread replies, and deleteMessage marks a message of the bot deleted, without a message_deleted
+// event, answering 204 also for one already deleted, of the other bot or unknown (messages.go), pollEvents and
+// answerEvent serve the events of each bot (events.go), findUsers and sendDirectMessage serve Account links by code
+// (people.go), and every request with any other token, none or a revoked one gets 401. Operations that no story has
+// added yet answer 501.
 //
 // Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
 // its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
@@ -213,6 +215,7 @@ func New() *Fake {
 	f.api.HandleFunc("POST /v1/channels/{channel_id}/check", f.checkChannel)
 	f.api.HandleFunc("POST /v1/messages", f.postMessage)
 	f.api.HandleFunc("PATCH /v1/messages/{message_id}", f.editMessage)
+	f.api.HandleFunc("DELETE /v1/messages/{message_id}", f.deleteBotMessage)
 	f.api.HandleFunc("POST /v1/messages/{message_id}/thread-replies", f.replyInThread)
 	f.api.HandleFunc("GET /v1/events", f.pollEvents)
 	f.api.HandleFunc("POST /v1/answers", f.answerEvent)

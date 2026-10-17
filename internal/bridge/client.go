@@ -7,9 +7,10 @@
 // class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
 // check (check.go); the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
 // envelope.go); the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once per
-// id and answered through answerEvent (events.go, poller.go, push.go, presses.go, commands.go); and the Account links
-// by a token sent to the bot or a code sent by direct message (links.go). The models are generated from
-// api/bridge.yaml into internal/bridge/gen.
+// id and answered through answerEvent (events.go, poller.go, push.go, presses.go, commands.go); the Account links by a
+// token sent to the bot or a code sent by direct message (links.go); and the conformance check `muster bridge check`,
+// which runs the protocol against a bridge outside any installation and also deletes its message (conformance.go). The
+// models are generated from api/bridge.yaml into internal/bridge/gen.
 package bridge
 
 import (
@@ -321,6 +322,13 @@ func (c *Client) ReplyInThread(ctx context.Context, class outbound.Class, messag
 		return gen.ThreadReplyPosted{}, notExpected(r.Status, "POST messages/{message_id}/thread-replies")
 	}
 	return out, r
+}
+
+// DeleteMessage calls deleteMessage in class: it deletes the message messageID of the bot, and a message that no
+// longer exists is a success too. Only the conformance check calls it (C-22.FR-21); Muster L1 never deletes a message.
+func (c *Client) DeleteMessage(ctx context.Context, class outbound.Class, messageID string) Result {
+	_, r := c.do(ctx, class, http.MethodDelete, "messages/"+Segment(messageID), nil, nil, nil)
+	return r
 }
 
 // maxCursor is the longest next_cursor of the protocol, in characters.

@@ -912,6 +912,46 @@ func TestDeletedMessage(t *testing.T) {
 	}
 }
 
+// TestBotDeletesItsMessage: deleteMessage, checked against api/bridge.yaml, marks a message of the token's bot deleted
+// without a message_deleted event, though deletion_events is on, after which an edit is gone; it answers 204 also for a
+// message already deleted, an unknown one and one of the other bot, which stays, and without capabilities.delete.
+// Muster's client reads the answer.
+func TestBotDeletesItsMessage(t *testing.T) {
+	s := start(t)
+	del := func(token, id string) answer {
+		return s.exchange(t, request{method: http.MethodDelete, path: "/v1/messages/" + bridge.Segment(id), token: token})
+	}
+	noContent := func(what string, a answer) {
+		t.Helper()
+		if a.invalid != nil || a.status != http.StatusNoContent || len(a.body) != 0 {
+			t.Errorf("%s = %d %s (%v)", what, a.status, a.body, a.invalid)
+		}
+	}
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	noContent("the deletion", del(fakebridge.Token, "m1"))
+	if ms := s.fake.Messages(); len(ms) != 1 || !ms[0].Deleted {
+		t.Fatalf("messages %+v", ms)
+	}
+	if evs := s.fake.Events(); len(evs) != 0 {
+		t.Errorf("events %+v", evs)
+	}
+	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).refused(t, http.StatusNotFound, gen.ErrorClassGone)
+	noContent("a second deletion", del(fakebridge.Token, "m1"))
+	noContent("the deletion of an unknown message", del(fakebridge.Token, "m99"))
+
+	s.post(t, fakebridge.Token, "k2", envelope(fakebridge.ChannelAlerts)).posted(t)
+	noContent("the deletion by the other bot", del(fakebridge.SecondToken, "m2"))
+	if ms := s.fake.Messages(); ms[1].Deleted {
+		t.Fatalf("the other bot deleted %+v", ms[1])
+	}
+	if r := s.client(t, fakebridge.Token).DeleteMessage(t.Context(), outbound.ClassInteractive, "m2"); !r.OK() ||
+		r.Status != http.StatusNoContent || !s.fake.Messages()[1].Deleted {
+		t.Fatalf("Muster's deletion = %+v", r)
+	}
+	s.configure(t, `{"capabilities":{"thread_messages":"all"}}`)
+	noContent("a deletion without capabilities.delete", del(fakebridge.Token, "m2"))
+}
+
 // TestMessageFaults: the faults of the harness answer the message operations with the problems a test scripts —
 // rate_limited with Retry-After and the scope bot on an edit, as api/bridge.yaml specifies and Muster's client maps
 // it — and change nothing; `*` matches one path segment, so an edit's fault leaves the Thread replies alone.

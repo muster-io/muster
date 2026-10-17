@@ -20,6 +20,8 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -118,6 +120,7 @@ var registry = []Probe{
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "bridge_links", Run: probeBridgeLinks},
+	{Name: "bridge_check", Run: probeBridgeCheck},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
 }
@@ -3269,6 +3272,231 @@ func (p *probeBridgeBot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		problem(http.StatusNotFound, "gone")
 	}
+}
+
+// probeBridgeCheck runs `muster bridge check` (C-22.FR-21) with the first secret as the token and the second, in
+// base64, as the push secret, both read from files, against a stand-in bridge whose problems echo them with the
+// request's Authorization and body and whose message ids carry them: once with an info that fails; once interactively
+// against a bridge that only pushes, whose push listener receives a push signed with the third secret, a stale one, one
+// whose body carries the secrets and the press, sent through an outbound client; once with replays that answer a second
+// message id that carries the push secret; and once with a push secret file that holds no push secret. Neither the
+// lines the command prints, which the probe copies to its log, its log lines, the listener's answers nor the errors may
+// carry them.
+func probeBridgeCheck(ctx context.Context, secrets []string, log io.Writer) error {
+	const (
+		modeInfoFails = iota
+		modePush
+		modeReplays
+	)
+	logger := logging.New(log, logging.LevelInfo)
+	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[1]))
+	dir, err := os.MkdirTemp("", "muster-probe-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	file := func(name, content string) (string, error) {
+		path := filepath.Join(dir, name)
+		return path, os.WriteFile(path, []byte(content), 0o600)
+	}
+	tokenFile, err := file("token", secrets[0]+"\n")
+	if err != nil {
+		return err
+	}
+	pushFile, err := file("push", pushSecret)
+	if err != nil {
+		return err
+	}
+	malformedFile, err := file("malformed", "whsec_"+secrets[1])
+	if err != nil {
+		return err
+	}
+
+	var mode atomic.Int32
+	var mu sync.Mutex
+	var data []string
+	posts := 0
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			answer := func(status int, v any) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_ = json.NewEncoder(w).Encode(v)
+			}
+			problem := func(status int, class string) {
+				echo := "token " + secrets[0] + " " + url.QueryEscape(secrets[0]) + " " + r.Header.Get("Authorization") +
+					" push secret " + pushSecret + " body " + string(body)
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(status)
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "detail": echo, "title": echo,
+					"type": "urn:" + secrets[0], "class": class})
+			}
+			delivery := []string{"push"}
+			if mode.Load() == modeReplays {
+				delivery = []string{"poll", "push"}
+			}
+			var in bgen.MessageInput
+			switch {
+			case r.URL.Path == "/v1/info" && mode.Load() == modeInfoFails:
+				problem(http.StatusInternalServerError, "transient")
+			case r.URL.Path == "/v1/info":
+				answer(http.StatusOK, map[string]any{"protocol_version": "1",
+					"bridge": map[string]any{"name": "probe", "version": "1"}, "messenger": map[string]any{"name": "probe"},
+					"capabilities": map[string]any{"buttons": map[string]any{"max_per_message": 4, "max_per_row": 4,
+						"data_max_bytes": 64, "styles": []string{}}, "direct_messages": map[string]any{"bot_can_start": true},
+						"delete": map[string]any{"max_age_seconds": nil}},
+					"limits":      map[string]any{"max_body_length": 4000, "edit_max_age_seconds": nil},
+					"user_lookup": "login", "event_delivery": delivery})
+			case r.URL.Path == "/v1/messages" && json.Unmarshal(body, &in) == nil && len(in.Buttons) > 0:
+				mu.Lock()
+				data = data[:0]
+				for _, b := range in.Buttons {
+					data = append(data, b.Data)
+				}
+				mu.Unlock()
+				answer(http.StatusCreated, map[string]any{"message_id": "b-" + secrets[0], "truncated": false,
+					"replayed": false})
+			case r.URL.Path == "/v1/messages" && mode.Load() == modeReplays:
+				mu.Lock()
+				posts++
+				id := "p-" + secrets[0]
+				if posts%2 == 0 {
+					id = "p-" + pushSecret
+				}
+				mu.Unlock()
+				answer(http.StatusCreated, map[string]any{"message_id": id, "truncated": false, "replayed": false})
+			case strings.HasPrefix(r.URL.Path, "/v1/channels/"):
+				problem(http.StatusInternalServerError, "transient")
+			case r.URL.Path == "/v1/users":
+				problem(http.StatusBadRequest, "invalid")
+			default:
+				problem(http.StatusForbidden, "forbidden")
+			}
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	base := "http://" + ln.Addr().String()
+
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	pusher, err := outbound.New(outbound.Config{Class: outbound.ClassInteractive, ConnectTimeout: 2 * time.Second,
+		Timeout: 5 * time.Second, Policy: outbound.StaticPolicy(policy), Logger: logger, Clock: clock.Real{}})
+	if err != nil {
+		return err
+	}
+	var errs []error
+	statuses := []int{}
+	push := func(target, id string, at time.Time, secret logging.Secret, body []byte) {
+		signature, err := webhooks.Sign([]logging.Secret{secret}, id, at, body)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		res, err := pusher.Do(ctx, outbound.Request{Method: http.MethodPost, URL: target, Body: body,
+			Header: http.Header{webhooks.HeaderID: {id}, webhooks.HeaderTimestamp: {strconv.FormatInt(at.Unix(), 10)},
+				webhooks.HeaderSignature: {signature}, "Content-Type": {"application/json"}}})
+		statuses = append(statuses, res.Status)
+		errs = append(errs, err, errors.New(string(res.Body)))
+	}
+	press := func(id, d string) []byte {
+		return fmt.Appendf(nil, `{"id":%q,"type":"press","occurred_at":%q,"message_id":%q,`+
+			`"user":{"external_id":"u-probe","display_name":"probe"},"data":%q}`, id,
+			time.Now().UTC().Format(time.RFC3339Nano), "b-"+secrets[0], d)
+	}
+
+	var printed strings.Builder
+	check := func(m int32, args ...string) int {
+		mode.Store(m)
+		printed.Reset()
+		lines := &probeLines{log: log, all: &printed}
+		lines.on = func(line string) {
+			kind, rest, _ := strings.Cut(line, " ")
+			switch {
+			case kind == "PUSH":
+				lines.push = strings.Fields(rest)[0]
+			case kind == "WAIT" && lines.push != "":
+				mu.Lock()
+				d := slices.Clone(data)
+				mu.Unlock()
+				if len(d) == 0 {
+					errs = append(errs, &probeIncomplete{"the buttons step posted no buttons"})
+					return
+				}
+				now := time.Now()
+				forged := logging.Secret("whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[2])))
+				push(lines.push, "ev-1", now, forged, press("ev-1", d[0]))
+				push(lines.push, "ev-1", now.Add(-6*time.Minute), logging.Secret(pushSecret), press("ev-1", d[0]))
+				push(lines.push, "ev-2", now, logging.Secret(pushSecret), []byte(`{"id":"ev-2","token":"`+secrets[0]+
+					`","secret":"`+pushSecret+`","x":"`+secrets[2]+`"}`))
+				push(lines.push, "ev-3", now, logging.Secret(pushSecret), press("ev-3", d[0]))
+			}
+		}
+		runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return cli.BridgeCheckCommand(runCtx, append([]string{base, "--token-file", tokenFile, "--channel", "c"},
+			args...), lines, lines)
+	}
+
+	if code := check(modeInfoFails, "--no-interactive", "--push-secret-file", pushFile); code != 1 ||
+		!strings.HasPrefix(printed.String(), "FAIL info: answered 500 transient: ") {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the check of a failing info exited %d", code)})
+	}
+	code := check(modePush, "--push-secret-file", pushFile, "--forbidden-channel", "x", "--handle", "alice")
+	want := []int{http.StatusUnauthorized, http.StatusUnauthorized, http.StatusBadRequest, http.StatusNoContent}
+	if code != 1 || !slices.Equal(statuses, want) || !strings.Contains(printed.String(), "PASS press\n") ||
+		!strings.Contains(printed.String(), "PASS push\n") {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the interactive check exited %d with the pushes answered %v, "+
+			"want 1 and %v with press and push passed", code, statuses, want)})
+	}
+	if code := check(modeReplays, "--no-interactive", "--push-secret-file", pushFile); code != 1 ||
+		!strings.Contains(printed.String(), "FAIL replayed_key: the second request with the same Idempotency-Key "+
+			"created message p-[redacted] instead of returning p-[redacted]\n") {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the check with replays exited %d", code)})
+	}
+	if code := check(modePush, "--push-secret-file", malformedFile); code != 2 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the check with a malformed push secret exited %d", code)})
+	}
+	return errors.Join(errs...)
+}
+
+// probeLines is the standard output and error of `muster bridge check` in probeBridgeCheck: it copies what is written
+// to the probe's log and to all and hands each line to on, outside its lock; push is the URL of the PUSH line.
+type probeLines struct {
+	log  io.Writer
+	all  *strings.Builder
+	on   func(line string)
+	push string
+
+	mu      sync.Mutex
+	pending string
+}
+
+func (p *probeLines) Write(b []byte) (int, error) {
+	p.mu.Lock()
+	_, _ = p.log.Write(b)
+	p.all.Write(b)
+	p.pending += string(b)
+	var lines []string
+	for {
+		line, rest, ok := strings.Cut(p.pending, "\n")
+		if !ok {
+			break
+		}
+		lines, p.pending = append(lines, line), rest
+	}
+	p.mu.Unlock()
+	for _, line := range lines {
+		p.on(line)
+	}
+	return len(b), nil
 }
 
 // probeOutgoingHeartbeat pushes the secrets through the outgoing heartbeat (C-19.FR-7): the first in the path and the

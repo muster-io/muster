@@ -357,6 +357,41 @@ func TestAnswersThatAreNotTheExpectedJSON(t *testing.T) {
 	}
 }
 
+// TestDeleteMessage: deleteMessage is a DELETE of the message's id as one path segment, with the token and no body or
+// Idempotency-Key; 204 succeeds, and a problem is classified by its class with its detail masked.
+func TestDeleteMessage(t *testing.T) {
+	b := startStandIn(t, answerJSON(http.StatusNoContent, "application/json", ""))
+	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
+	if r := c.DeleteMessage(t.Context(), outbound.ClassInteractive, "a/b"); !r.OK() || r.Status != http.StatusNoContent {
+		t.Fatalf("result %+v", r)
+	}
+	s := b.seen()
+	if len(s) != 1 || s[0].Method != http.MethodDelete || s[0].RawPath != "/v1/messages/a%2Fb" || s[0].Body != "" ||
+		s[0].Header.Get("Authorization") != "Bearer "+testToken || s[0].Header.Get("Content-Type") != "" ||
+		s[0].Header.Get("Idempotency-Key") != "" {
+		t.Fatalf("requests %+v", s)
+	}
+	for _, tc := range []struct {
+		status int
+		body   string
+		class  Class
+	}{
+		{http.StatusNotFound, `{"class":"gone","title":"Gone"}`, ClassGone},
+		{http.StatusForbidden, `{"class":"forbidden","detail":"not yours: ` + testToken + `"}`, ClassForbidden},
+	} {
+		b := startStandIn(t, answerJSON(tc.status, "application/problem+json", tc.body))
+		c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
+		r := c.DeleteMessage(t.Context(), outbound.ClassInteractive, "m1")
+		if r.OK() || r.Status != tc.status || r.Classification.Class != tc.class ||
+			strings.Contains(string(r.Error), testToken) {
+			t.Errorf("%d: result %+v", tc.status, r)
+		}
+		if tc.class == ClassForbidden && r.Error != "not yours: [redacted]" {
+			t.Errorf("error %q", r.Error)
+		}
+	}
+}
+
 // TestThroughTheProxy: with a proxy every request goes through it.
 func TestThroughTheProxy(t *testing.T) {
 	b := startStandIn(t, answerJSON(http.StatusOK, "application/json", string(validInfo(t, nil))))
