@@ -37,6 +37,10 @@ derived from it and stay closed. `make lint` runs Redocly over it with the same 
 Bridge Connections and Destinations, and the push callback itself, are in `openapi.yaml`, added by the stories that
 implement them.
 
+The bridge libraries for Go and Python, `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python`, each keep a
+copy of `bridge.yaml`, generate their types from it and fail their CI when the copy differs from the one on `master`
+here, so a change of `bridge.yaml` reaches each library as a pull request there (ADR-0017).
+
 ## Conventions (ADR-0008)
 
 | Topic | Rule |

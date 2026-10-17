@@ -54,6 +54,7 @@ issue: null
 | `capability` | The capability `C-NN` the story belongs to. |
 | `kind` | `be` (backend: Go, SQL, OpenAPI), `fe` (the web UI), `infra` (build, CI, release, deployment) or `docs` (the documentation site). |
 | `layer` | `L1` for every story of the first release. |
+| `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there closes the story's issue here with `Closes muster-io/muster#<issue>`; the contract and the issue stay in this repository. Without the key the story is for this repository. |
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
 | `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
@@ -95,11 +96,15 @@ and ADR-0009 (the SPA in `web/`); the foundation stories create it.
 | `internal/fakes/<name>/` | Fake servers of external systems (Alertmanager, Mattermost, Telegram, a bridge, OIDC, proxies) for tests and `muster dev`. |
 | `internal/tools/` | Generators run by `make generate`; never part of the binary. |
 | `api/` | `openapi.yaml`, its generator configuration and the package that embeds the spec for `/api/v1/openapi.yaml`; `bridge.yaml`, the Bridge protocol (MIT, ADR-0017). |
-| `examples/bridge/` | The example bridge: its own Go module under MIT, never part of the binary (S-078). |
 | `web/` | The SPA: `src/routes/` (file-based routes), `src/components/`, `src/locales/`, `e2e/` (Playwright). |
 | `deploy/helm/muster/`, `deploy/compose/`, `deploy/dev/` | The Helm chart, the docker-compose example and the development database. |
 | `docs/` | The documentation site; `docs/reference/` holds generated reference pages. |
 | `test/e2e/`, `test/load/`, `test/docs/` | The end-to-end harness, the load test and the check of the documented quick start. |
+
+The bridge libraries for Go and Python and the example bridge are not in this repository: they live in
+`muster-io/muster-bridge-go` and `muster-io/muster-bridge-python`, MIT without a CLA (ADR-0017), and the stories that
+build them name their repository in `repository` (S-083, S-084, S-085) and describe its layout in their contracts;
+the generated files there — each library's models and lock file — are never listed either.
 
 **Generated files are never listed** and are checked in: `internal/*/dbgen/` (sqlc), `internal/api/gen/` (the
 oapi-codegen strict server), `internal/bridge/gen/` (the models of the Bridge protocol, from S-073), `pkg/apiclient/`
@@ -176,6 +181,10 @@ with a recording test adapter in place of a messenger — and their pull request
 path for the parts of messages that need delivery. The messenger stories repeat the key checks against the fake servers
 (S-061, S-042, S-066, S-067).
 
+A story for another repository (`repository`) runs its `verify` and its live checks in that repository; where they
+need Muster, they use the development image `ghcr.io/muster-io/muster:edge` or, for a check by hand, `muster dev`
+from a checkout of this one.
+
 ## 6. IDs
 
 Story IDs are `S-NNN`, allocated in sequence as stories are written: `S-001`, `S-002`, … An ID is never reused. When a
@@ -205,10 +214,10 @@ title of every capability in `design/prd/l1/`, then:
 
 - creates the labels `story`, `capability`, `be`, `fe`, `infra`, `docs` and `operator-attention` and the milestone
   `L1` when they are missing;
-- keeps one issue per capability, `C-NN: <title>`, and one per story, `S-NNN: <title>`, labelled with its kind and,
-  when set, `operator-attention`, with the acceptance statements as a task list and `verify`; each issue links to its
-  file at the HEAD commit, each story issue is a sub-issue of its capability issue, and each `depends_on` entry is a
-  "blocked by" link;
+- keeps one issue per capability, `C-NN: <title>`, and one per story, `S-NNN: <title>`, labelled with its kind and, when
+  set, `operator-attention`, with the acceptance statements as a task list and `verify`, and the repository of a story
+  that names one; each issue links to its file at the HEAD commit, each story issue is a sub-issue of its capability
+  issue, and each `depends_on` entry is a "blocked by" link;
 - finds existing issues by their title prefix, open or closed, and changes only what differs, so it can run again
   after any change to the files; it closes the issue of a story whose file is gone as not planned, with a comment;
 - writes each issue number into the `issue:` line of the story file; that change is then committed.
@@ -229,7 +238,7 @@ stays ticked while its statement is unchanged. Edit the files, not the issues.
 
 All of L1, in phase order. Contracts were written in batches, and every story of the map now has its contract file; a
 later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` frontend, `infra` build and deployment,
-`docs` documentation.
+`docs` documentation. A story for another repository names it after its title.
 
 | Phase | Capabilities | Stories | Count |
 |---|---|---|---|
@@ -238,8 +247,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
-| Bridge | C-22, and S-060 of C-21 | S-073 – S-081, S-060 | 10 |
-| **L1** | 22 | | **82** |
+| Bridge | C-22, and S-060 of C-21 | S-073 – S-081, S-083 – S-086, S-060 | 14 |
+| **L1** | 22 | | **86** |
 
 ### Foundation
 
@@ -349,9 +358,13 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-075](S-075-bridge-events-by-polling-and-push-presses-answers-and-text-commands.md) | C-22 | Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE) | be | S-081 |
 | [S-076](S-076-bridge-account-links-by-token-and-code-and-mentions.md) | C-22 | Bridge Account links by a token sent to the bot or a code by direct message, and Mentions of linked people (BE) | be | S-075 |
 | [S-077](S-077-bridge-connection-and-destination-pages-and-profile-links.md) | C-22 | Bridge Connection and Destination pages, Account links through a Bridge in the profile, and labels (FE) | fe | S-076, S-070 |
-| [S-078](S-078-example-bridge-and-the-bridge-conformance-check.md) | C-22 | Example bridge under MIT and the conformance check `muster bridge check` (BE) | be | S-076 |
-| [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-078 |
-| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079 |
+| [S-078](S-078-example-bridge-and-the-bridge-conformance-check.md) | C-22 | The conformance check `muster bridge check` against the fake bridge (BE) | be | S-076 |
+| [S-083](S-083-go-bridge-library.md) | C-22 | The Go bridge library `muster-bridge-go` with its CI and releases (BE) — in `muster-io/muster-bridge-go` | be | S-078 |
+| [S-085](S-085-example-bridge-on-the-go-library.md) | C-22 | The example bridge on the Go bridge library, with its chat page and image (BE) — in `muster-io/muster-bridge-go` | be | S-083 |
+| [S-086](S-086-end-to-end-test-against-the-released-example-bridge.md) | C-22 | End-to-end test against the released image of the example bridge | infra | S-085 |
+| [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-086 |
+| [S-084](S-084-python-bridge-library.md) | C-22 | The Python bridge library `muster-bridge` with its CI and PyPI releases (BE) — in `muster-io/muster-bridge-python` | be | S-079 |
+| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079, S-084 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -407,7 +420,15 @@ on S-080 and S-075 on S-081; S-073 and S-074 keep their file names. Style hints 
 Telegram (D320), which the Bridge protocol brought in, became S-082 once their facts were checked on the test
 environment (F-066 to F-068, D329). It belongs to C-12, whose buttons it styles, but follows S-059 at the end of the
 Operations phase, before the Bridge phase; S-074 takes its mapping as the style hints of Bridge buttons, so it depends
-on S-082.
+on S-082. S-083 to S-086 were added when the maintainer decided that bridge libraries for Go and Python, in
+repositories of their own under MIT without a CLA, do the protocol's part of a bridge, and that the example bridge
+moves into the Go library's repository (D343). S-078 keeps `muster bridge check`, tested against the fake bridge, and
+its file name; it comes first, because the libraries' CI runs the check from Muster's development image. S-083 builds
+the Go library and S-085 the example bridge on it, both in `muster-io/muster-bridge-go` and split because together they
+touched about 46 files; S-086 then runs Muster's end-to-end test against the example's released image, pinned by
+digest, which completes C-22.AC-22 and covers C-22.AC-23. S-079 follows with Write a bridge, which leads with the Go
+library; S-084, the Python library in `muster-io/muster-bridge-python`, comes after S-079 as the maintainer ordered,
+and S-060, which follows it, adds the Python library's section of Write a bridge.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

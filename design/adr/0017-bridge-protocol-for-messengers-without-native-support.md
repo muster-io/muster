@@ -10,6 +10,11 @@
 - Amended: 2026-10-16 — after the second review of the Bridge stories (journal D335): lint 3 checks calls of the
   delivery adapter's methods, not the protocol client, so `muster bridge check` needs no lint entry; CI fails on a
   breaking change of the specification once it is published on the documentation site, not before
+- Amended: 2026-10-17 — bridge libraries (journal D343): libraries for Go and Python, in repositories of their own
+  under MIT without a CLA, do the protocol's part of a bridge; the example bridge moves into the Go library's
+  repository and is built on it; each library keeps a copy of the specification that its CI compares with Muster's and
+  runs `muster bridge check` from Muster's development image; Muster's end-to-end test runs a released image of the
+  example; the libraries are 0.x until Muster's first release, then follow the protocol's major version
 
 ## Context
 
@@ -178,15 +183,49 @@ interactive class for checks started by a person, answers and messages during li
 a bridge joins the closed list of Leader tasks (ADR-0007): it is safe to run twice, because an event polled twice is
 handled once by its id.
 
-**Licensing.** The repository ships an example bridge — a small chat server in Go with its own web page that offers
-every feature of the protocol — and the protocol specification, `api/bridge.yaml`. **Both are licensed MIT**, as an
-exception to the AGPL-3.0-only of ADR-0001, so that anyone may start a bridge from them, or generate code from the
-specification, and keep it closed: a bridge for an internal messenger often cannot be published. `api/bridge.yaml`
-states its licence in `info.license`, and `NOTICE` names both MIT parts. The example lives in its own directory with its
-own `LICENSE` and its own Go module, is listed in the exclusion list of `NOTICE` so that the licence header check
-accepts its MIT headers, and is never imported by the Muster binary, the image or the chart. A bridge talks to Muster
-only over HTTP, so it is a separate program whatever its licence. Contributions to these files fall under the CLA like
-any other.
+**Licensing.** The protocol specification, `api/bridge.yaml`, is **licensed MIT**, as an exception to the
+AGPL-3.0-only of ADR-0001, so that anyone may generate code from it and keep their bridge closed: a bridge for an
+internal messenger often cannot be published. It states its licence in `info.license`, and `NOTICE` names it. The
+bridge libraries and the example bridge are MIT too, in repositories of their own (below). A bridge talks to Muster
+only over HTTP, so it is a separate program whatever its licence. Contributions to `api/bridge.yaml` fall under the CLA
+like any other file of this repository.
+
+**Bridge libraries.** Most of a bridge is the same for every messenger: the HTTP server for the operations of the
+protocol with the validation of requests and their limits, the token check, idempotency keys and their replays,
+`info`, problems with their classes, the event queue behind `pollEvents`, and signed pushes with their retries. The
+project publishes that part as two libraries, so that a bridge author writes only the calls to their messenger — post,
+edit, reply in a Thread, check a channel, answer a person and, where the messenger offers them, find a person, send a
+direct message and delete — and reports to the library what people do there: presses, Thread messages, deleted
+messages and the direct messages that carry an Account link token.
+
+- `muster-io/muster-bridge-go`: the Go module `github.com/muster-io/muster-bridge-go`, package `bridge`, an
+  `http.Handler` on the standard library.
+- `muster-io/muster-bridge-python`: the PyPI package `muster-bridge`, module `muster_bridge`, for Python 3.11 or newer:
+  asynchronous, an ASGI application on Starlette that mounts into any ASGI application, FastAPI included, and runs
+  under uvicorn, with pydantic v2 models and httpx for pushes.
+
+Each library has a repository of its own, **licensed MIT without a CLA**: neither is part of Muster's binary, image or
+chart, the project has no reason to offer MIT code under other terms, and a person who improves the part every bridge
+copies should not have to sign an agreement for it. Separate repositories keep each language's tooling, release
+cadence and package registry apart from Muster's, and let a library be released when the protocol or the library
+changes, not when Muster does. The **example bridge** — a small chat server with its own web page that offers every
+feature of the protocol — lives in the Go library's repository and is built on it, so that it shows the library in
+use; its image `ghcr.io/muster-io/muster-example-bridge` is published from there.
+
+**The protocol reaches the libraries as a copy.** Each library keeps a copy of `api/bridge.yaml` and generates its
+types from it, and its CI fails, on every pull request and on a daily schedule, when the copy differs from the one on
+Muster's `master`; the fix is a pull request that takes the new copy and regenerates. The copy check makes every change
+of the protocol visible in each library, and the compatibility check of `api/bridge.yaml` above keeps such changes
+additive once the protocol is published. Each library's CI also runs `muster bridge check` from Muster's development
+image, `ghcr.io/muster-io/muster:edge`, against a bridge built on it, so a library that the newest check fails shows
+it at once. In the other direction, Muster's end-to-end tests run a released image of the example bridge, pinned by
+digest and updated by Renovate, so a change of Muster that breaks a released library fails Muster's CI.
+
+**Versions.** The libraries are `0.x` until Muster's first release, then `1.x` for protocol version 1; a new major
+path of the protocol is a new major version of each library. Releases come from release-please, as Muster's do: a Go
+release is a tag, which the Go module proxy serves; a Python release is published to PyPI by its workflow through
+trusted publishing, without a stored token. Renovate, CodeQL, OpenSSF Scorecard and Actions pinned by commit SHA are
+set up as in Muster's repository.
 
 **Settled with the maintainer** (journal D322): the specification is MIT like the example; one `answerEvent` call
 answers presses, Text commands and Account link requests; the Russian Text command words and `unsnooze` are those of
@@ -195,17 +234,24 @@ Destination, or half of the rates the bridge declares; an edit refused because t
 is `gone` with the `reason` `edit_window_closed`, not a class of its own; and a requested wait longer than
 `bridge.retry_after_max` counts as a temporary failure.
 
-**Delivered with the protocol**: the specification, a fake bridge among the fake servers of `muster dev`, the example
-bridge, a conformance check `muster bridge check <url>` that runs the protocol against a bridge without a Muster
-database, and a "Write a bridge" page on the documentation site.
+**Delivered with the protocol**: the specification, a fake bridge among the fake servers of `muster dev`, a
+conformance check `muster bridge check <url>` that runs the protocol against a bridge without a Muster database, and a
+"Write a bridge" page on the documentation site; in repositories of their own, the bridge libraries for Go and Python
+and the example bridge.
 
 ## Consequences
 
 - A team can reach any messenger with a bot API by writing one small service, in any language, without forking Muster
   and without publishing it.
 - Muster's core stays free of messenger quirks: only `gone`, `forbidden` and the features in `info` reach it.
-- Bridge authors carry real work: idempotency keys, confirming presses in time, safe truncation, and deciding `gone`.
-  The conformance check and the example bridge exist to make that work checkable.
+- Bridge authors carry real work: confirming presses in time, safe truncation, deciding `gone` and, without a library,
+  idempotency keys, the event queue and signed pushes. The bridge libraries take the protocol's part of that work in
+  Go and Python; the conformance check and the example bridge make the rest checkable.
+- Three repositories move together. A change of the protocol lands in Muster first; each library's copy check then
+  fails until the library takes it, and Muster's end-to-end test of the released example shows when Muster breaks a
+  released library.
+- Contributions to the libraries come under MIT alone, without the CLA, so the project cannot offer them under other
+  terms; for code that every bridge copies, nothing is lost.
 - A bridge is one more service to run and monitor; when it is down, its Destinations become Broken like any messenger.
 - Where a messenger limits edits, a long-lived Alert Group may get several Root messages, one per change of status
   after the window, each linked from the Thread before it.
@@ -246,3 +292,15 @@ database, and a "Write a bridge" page on the documentation site.
 - **Text commands for every messenger.** Mattermost and Telegram have buttons; commands are kept where they are needed.
 - **The protocol and the example under the AGPL.** A company could then hesitate to derive a closed bridge from them;
   MIT removes the question for the parts a bridge author copies.
+- **The libraries and the example in Muster's repository**, as modules of their own. Contributions would need the CLA
+  and Muster's toolchain and CI, a library would be released with Muster rather than with the protocol, a Python
+  package would live in a Go repository, and Muster's licence checks would need exceptions for every library file.
+- **Libraries generated from the specification alone**, with an OpenAPI generator. A generator gives types and a
+  server stub, not the behaviour — idempotency, the event queue, signed pushes, error classes — that is most of a
+  bridge author's work; the libraries generate their types and write the behaviour once.
+- **Libraries that read the specification from Muster when they are built.** A build would depend on the network and on
+  whatever `master` holds at that moment; a checked-in copy with a check turns each change into a reviewed pull
+  request.
+- **Libraries for more languages from the start.** Go and Python cover the bridges the maintainers expect; a bridge in
+  any other language speaks the protocol directly, as "Write a bridge" describes, and a library for it can follow the
+  same pattern later.

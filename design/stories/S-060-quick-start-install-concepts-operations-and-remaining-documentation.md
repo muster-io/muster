@@ -4,8 +4,8 @@ title: "Remaining documentation sections: Quick start, Install, Alertmanager, Si
 capability: C-21
 kind: docs
 layer: L1
-depends_on: [S-055, S-071, S-059, S-054, S-077, S-079]
-covers: [C-21.FR-2, C-21.FR-5, C-21.AC-2, C-19.FR-3]
+depends_on: [S-055, S-071, S-059, S-054, S-077, S-079, S-084]
+covers: [C-21.FR-2, C-21.FR-5, C-21.AC-2, C-19.FR-3, C-22.FR-23]
 files_touched:
   - docs/quick-start.md
   - docs/install/helm.md
@@ -27,7 +27,9 @@ files_touched:
   - docs/operations/monitoring.md
   - docs/operations/outgoing-heartbeat.md
   - docs/operations/cli.md
+  - docs/messengers/write-a-bridge.md
   - docs/index.md
+  - README.md
   - mkdocs.yml
   - test/docs/quickstart.sh
   - Makefile
@@ -38,6 +40,7 @@ acceptance:
   - "[C-21.AC-2] The nightly workflow runs the commands of Quick start, exactly as the page shows them, on a fresh runner and reaches a running Muster: `/health/ready` answers `200` and the bootstrap Admin signs in — against the `edge` image of `master` always, and against the last release once one exists."
   - "[C-19.FR-3] Operations → Monitoring tells users to send the critical chart rules through an Alertmanager route that bypasses Muster, with an example route, and explains the rule values and the dashboard flags."
   - "[C-21.FR-5] Every new page is in English and draws its diagrams as Mermaid."
+  - "[C-22.FR-23] Write a bridge has the Python bridge library beside the Go one — `pip install muster-bridge`, a `Messenger` for the messenger, `BridgeApp` served by uvicorn or mounted into a FastAPI application, and `muster bridge check` against it — and Quick start's next steps and the README's roadmap and licence sections name both libraries and the example bridge, checked against the list in Verification."
 verify: "make ci docs-check"
 operator_attention: false
 issue: 60
@@ -51,13 +54,16 @@ issue: 60
 
 - Quick start with docker-compose, and its nightly check on a clean machine.
 - Install, the missing parts of Alertmanager and Sign-in, proxies, Concepts and Operations.
+- The Python bridge library's section of Write a bridge, and the bridge libraries in Quick start's next steps and in
+  the README's roadmap and licence sections.
 
 **OUT**
 
 - Pages written with their capabilities: the Alertmanager receiver and Heartbeat (S-018, S-023), Mattermost and Telegram
   (S-061, S-042), Account links (S-051), outgoing webhooks (S-044, S-045), OIDC with Keycloak (S-013), the runbooks and
   "Telegram in restricted networks" (S-058), the Reference section (S-057), Bridge and Write a bridge with the protocol
-  reference (S-074, S-081, S-076, S-079).
+  reference (S-074, S-081, S-076, S-079), apart from Write a bridge's section on the Python library, which this story
+  adds; the libraries' own READMEs (S-083, S-084, S-085).
 
 ## Contracts
 
@@ -105,12 +111,21 @@ issue: 60
   commands", republication past an edit window in "Broken Destinations", the Leader's Bridge polling in "High
   availability" and `muster bridge check` in the CLI page — and link to Messengers → Bridge and Write a bridge (S-074,
   S-081, S-079) instead of repeating them.
+- **Bridge libraries** (C-22.FR-23, C-22.FR-25, D343): the Python library is published when this story starts (S-084),
+  after S-079 wrote Write a bridge with the Go library. Write a bridge gains the Python library's section beside the Go
+  one — `pip install muster-bridge`, a `Messenger` of `async` methods, `BridgeApp` served by uvicorn or mounted into a
+  FastAPI application with its `lifespan`, the reporting calls, and `muster bridge check` against it — taken from the
+  library's README; Quick start's next steps name both libraries for a messenger Muster does not support; the
+  README's L1 roadmap names Bridges with the libraries for Go and Python, and its licence section says that
+  `api/bridge.yaml` is MIT and that the libraries and the example bridge are MIT in repositories of their own.
 
 ## Steps
 
 1. Write Quick start and its check. Check: `make quickstart-check` passes on a machine with only Docker.
 2. Write Install and the additions to Alertmanager, Messengers and Sign-in. Check: `make docs-check`.
 3. Write Concepts and Operations. Check: `make docs-check`; the list in Verification.
+4. Add the Python library to Write a bridge and the libraries to Quick start and the README. Check: `make docs-check`;
+   the bridge library lines of Verification.
 
 ## Verification
 
@@ -132,7 +147,11 @@ T operations/backup-and-restore.md 'muster doctor'; T operations/upgrades.md dow
 T operations/key-rotation.md 'rotate-key'; T operations/key-rotation.md 'Not active yet'; T operations/key-rotation.md CSRF
 T operations/high-availability.md Leader; T operations/monitoring.md 'bypass'
 T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor'; T operations/cli.md 'muster bridge check'
+T messengers/write-a-bridge.md 'pip install muster-bridge'; T messengers/write-a-bridge.md BridgeApp
+T quick-start.md muster-bridge-go; T quick-start.md muster-bridge-python
 #                                                                       (no output)
+grep -c 'muster-bridge-go\|muster-bridge-python' README.md                 # 2 or more
+grep -c 'example bridge' README.md                                          # 1 or more
 for s in 'Quick start' Install Alertmanager Messengers 'Outgoing webhooks' Sign-in Concepts Operations Runbooks Reference; do
   grep -q "$s" site/index.html || echo "missing section $s"; done      # (no output)
 grep -l 'class="mermaid"' site/concepts/*/index.html site/operations/high-availability/index.html | wc -l   # 3
@@ -157,3 +176,4 @@ None.
 | C-21.FR-5 | partial | the pages of this story; with S-057 and S-058 complete |
 | C-21.AC-2 | full | |
 | C-19.FR-3 | partial | the documentation of the bypass route; with S-059 complete |
+| C-22.FR-23 | partial | the Python library in Write a bridge; with S-074, S-081, S-076 and S-079 complete |

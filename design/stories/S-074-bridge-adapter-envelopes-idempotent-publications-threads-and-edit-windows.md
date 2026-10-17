@@ -94,7 +94,7 @@ issue: 232
   final edit as a Thread reply — and their section of the page (S-081).
 - Presses, answers, Text commands, deleted-message events and the Transport `bridge` (S-075).
 - Mentions of linked people and their names in footers (S-076).
-- The pages (S-077); the example bridge and `muster bridge check` (S-078); "Write a bridge" (S-079).
+- The pages (S-077); `muster bridge check` (S-078); the example bridge (S-085); "Write a bridge" (S-079).
 - Interim states until later stories: Muster edits a Root message at any age, and a `gone` with the reason
   `edit_window_closed` starts the deleted Root message flow, until S-081 (the fake bridge declares
   `edit_max_age_seconds` null by default); a Mention of a User is their display name as text until S-076.
