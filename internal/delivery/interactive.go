@@ -136,8 +136,9 @@ type answerOp func(ctx context.Context, c Call) Outcome
 
 func (f answerOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
 
-// AnswerOp is a private answer to the person who pressed a button, such as a Mattermost ephemeral post (C-11.FR-2): it
-// changes no Root message and no Thread reply, and send is the adapter's own call.
+// AnswerOp is an answer to the person who pressed a button or wrote a Text command, such as a Mattermost ephemeral post,
+// Telegram's answerCallbackQuery or a bridge's answerEvent (C-11.FR-2, C-22.FR-13): it changes no Root message and no
+// Thread reply, even where the messenger shows it in the Thread, and send is the adapter's or the client's own call.
 func AnswerOp(send func(ctx context.Context, c Call) Outcome) Op { return answerOp(send) }
 
 type directOp func(ctx context.Context, c Call) Outcome

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -38,10 +39,12 @@ func eventually(t *testing.T, what string, cond func() bool) {
 // index of the next event, a cursor it does not know is invalid, and a call that finds no event waits for one until
 // its wait ends or its request is cancelled. With hold, every call waits until its request is cancelled; with fail, every
 // call is answered fail's status with a problem of class failClass. It records the query of each call and how many
-// requests were cancelled while it held them.
+// requests were cancelled while it held them, and answers answerEvent, counting the answers.
 type eventsBridge struct {
 	srv  *httptest.Server
 	done chan struct{}
+
+	answered int
 
 	mu        sync.Mutex
 	events    []json.RawMessage
@@ -92,6 +95,13 @@ func (b *eventsBridge) cancels() int {
 }
 
 func (b *eventsBridge) serve(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/answers" {
+		b.mu.Lock()
+		b.answered++
+		b.mu.Unlock()
+		answerJSON(http.StatusOK, "application/json", `{"shown_as":"thread","replayed":false}`)(w, r)
+		return
+	}
 	if r.Method != http.MethodGet || r.URL.Path != "/v1/events" ||
 		r.Header.Get("Authorization") != "Bearer "+testToken {
 		answerJSON(http.StatusNotFound, problemJSON, `{"class":"invalid","title":"not found"}`)(w, r)
@@ -338,6 +348,51 @@ func TestPollerHandlesAPressWithinOnePoll(t *testing.T) {
 	eventually(t, "the bridge seeing the held poll cancelled", func() bool { return e.bridge.cancels() == 1 })
 	if len(e.waits()) != 0 {
 		t.Errorf("paused %v", e.waits())
+	}
+}
+
+// answeredSource is a pollSource that records, at each store of a cursor, how many answers the bridge had received.
+type answeredSource struct {
+	*pollSource
+	bridge *eventsBridge
+
+	mu      sync.Mutex
+	answers []int
+}
+
+func (s *answeredSource) StoreEventsCursor(ctx context.Context, c Conn, cursor *string) error {
+	s.bridge.mu.Lock()
+	n := s.bridge.answered
+	s.bridge.mu.Unlock()
+	s.mu.Lock()
+	s.answers = append(s.answers, n)
+	s.mu.Unlock()
+	return s.pollSource.StoreEventsCursor(ctx, c, cursor)
+}
+
+func (s *answeredSource) seen() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.answers)
+}
+
+// TestAnswerBeforeTheCursor covers C-22.FR-11 and FR-13 in poll mode: an event is answered once its claim committed and
+// before the cursor after it is stored, which acknowledges it.
+func TestAnswerBeforeTheCursor(t *testing.T) {
+	e := newPollEnv(t)
+	now := eventTime.Add(2 * EventMaxAge)
+	e.bridge.add(eventJSON(t, eventFixture(TypePress, member("occurred_at", now.Format(time.RFC3339)),
+		member("data", e.sign(t, buttons.SubjectTest, pressDest.PublicID, buttons.CommandAcknowledge, 0)))))
+	src := &answeredSource{pollSource: e.source, bridge: e.bridge}
+	p := e.poller()
+	p.Source = src
+	stop := runPoller(t, p)
+	eventually(t, "the cursor", func() bool { return len(src.seen()) == 1 })
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if got := src.seen(); !slices.Equal(got, []int{1}) || !strings.Contains(e.log.String(), `"outcome":"test"`) {
+		t.Errorf("answers at each store %v, logged %s", got, e.log.String())
 	}
 }
 

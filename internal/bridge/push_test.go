@@ -13,12 +13,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/webhooks"
@@ -115,6 +118,13 @@ func (e *pushEnv) send(p pushed) *httptest.ResponseRecorder {
 }
 
 func (e *pushEnv) sendContext(ctx context.Context, p pushed) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	e.handler.ServeHTTP(w, e.request(ctx, p))
+	return w
+}
+
+// request is the request of the push p.
+func (e *pushEnv) request(ctx context.Context, p pushed) *http.Request {
 	r := httptest.NewRequestWithContext(ctx, http.MethodPost, CallbackPath+p.publicID, bytes.NewReader(p.body))
 	r.Header.Set("Content-Type", "application/json")
 	for k, v := range map[string]string{webhooks.HeaderID: p.id, webhooks.HeaderTimestamp: p.timestamp,
@@ -123,9 +133,56 @@ func (e *pushEnv) sendContext(ctx context.Context, p pushed) *httptest.ResponseR
 			r.Header.Set(k, v)
 		}
 	}
-	w := httptest.NewRecorder()
-	e.handler.ServeHTTP(w, r)
-	return w
+	return r
+}
+
+// watchedWriter is a ResponseRecorder that notes when the answer starts to be written.
+type watchedWriter struct {
+	*httptest.ResponseRecorder
+	written *atomic.Bool
+}
+
+func (w watchedWriter) WriteHeader(code int) {
+	w.written.Store(true)
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+func (w watchedWriter) Write(b []byte) (int, error) {
+	w.written.Store(true)
+	return w.ResponseRecorder.Write(b)
+}
+
+// TestAnswerBefore204 covers C-22.FR-11 and FR-13 in push mode: a pushed event is answered once its claim committed
+// and before the 204 that acknowledges it is written; a copy of it is acknowledged without a second answer.
+func TestAnswerBefore204(t *testing.T) {
+	e := newPushEnv(t)
+	var written atomic.Bool
+	var mu sync.Mutex
+	var during []bool
+	b := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		during = append(during, written.Load())
+		mu.Unlock()
+		answerJSON(http.StatusOK, "application/json", `{"shown_as":"ephemeral","replayed":false}`)(w, r)
+	})
+	e.conn.Client = newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken,
+		PushSecret: testPushSecret})
+	e.source.conn = e.conn
+	body := eventJSON(t, eventFixture(TypePress, member("occurred_at", eventTime.Add(2*EventMaxAge).Format(time.RFC3339)),
+		member("data", e.sign(t, buttons.SubjectTest, pressDest.PublicID, buttons.CommandAcknowledge, 0))))
+	for range 2 {
+		w := watchedWriter{ResponseRecorder: httptest.NewRecorder(), written: &written}
+		e.handler.ServeHTTP(w, e.request(t.Context(), signed(t, "ev-1", e.now, body)))
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("answered %d %s", w.Code, w.Body.String())
+		}
+		written.Store(false)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(during, []bool{false}) {
+		t.Errorf("the answers came with the 204 written: %v", during)
+	}
 }
 
 // answerProblem decodes the problem of an answer of the push callback.

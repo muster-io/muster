@@ -10,11 +10,15 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -384,5 +388,217 @@ func TestTelegramReplyBinding(t *testing.T) {
 	if _, err := e.svc.TelegramReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgGroup, 812); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// bridgeDest is the Destination of a delivery when it is a Bridge Destination of the Connection conn, not deleted.
+func (f *fakeDB) bridgeDest(id, conn int64) *fakeDest {
+	ds := f.dests[id]
+	if ds == nil || ds.typ != delivery.TypeBridge || ds.deleted || ds.connection == nil || *ds.connection != conn {
+		return nil
+	}
+	return ds
+}
+
+func (f *fakeDB) GetBridgeRootBinding(_ context.Context, arg dbgen.GetBridgeRootBindingParams) (
+	dbgen.GetBridgeRootBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeRootBinding"); err != nil {
+		return dbgen.GetBridgeRootBindingRow{}, err
+	}
+	// The current Root message wins over an older one, then the lower delivery id.
+	for _, older := range []bool{false, true} {
+		for _, d := range slices.SortedFunc(slices.Values(f.deliveries), func(a, b *fakeDelivery) int {
+			return int(a.id - b.id)
+		}) {
+			ds, g := f.bridgeDest(d.dest, arg.ConnectionID.Int64), f.groups[d.group]
+			if ds == nil || g == nil {
+				continue
+			}
+			current := d.messageID != nil && *d.messageID == arg.MessageID
+			if (!older && !current) || (older && (current || !slices.Contains(d.superseded, arg.MessageID))) {
+				continue
+			}
+			return dbgen.GetBridgeRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+				DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
+				SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze), Superseded: older}, nil
+		}
+	}
+	return dbgen.GetBridgeRootBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridgeReminderBindingParams) (
+	dbgen.GetBridgeReminderBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetBridgeReminderBinding"); err != nil {
+		return dbgen.GetBridgeReminderBindingRow{}, err
+	}
+	for _, r := range f.replies {
+		ds, g := f.bridgeDest(r.dest, arg.ConnectionID.Int64), f.groups[r.group]
+		if ds == nil || g == nil || r.event != "reminder" || r.state != "sent" || r.messageID == nil ||
+			*r.messageID != arg.MessageID {
+			continue
+		}
+		return dbgen.GetBridgeReminderBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+			DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, nil
+	}
+	return dbgen.GetBridgeReminderBindingRow{}, pgx.ErrNoRows
+}
+
+// TestBridgePressBinding is the binding of C-22.FR-12: a press on a message of a Bridge Connection is bound to the
+// delivery of an Alert Group to a Bridge Destination of the Connection whose current Root message it is, or whose older
+// Root message a republication past the edit window replaced, or to a sent Reminder there, with the Alert Group and
+// the Route's Snooze durations; another Connection, another type, a deleted Destination, a Thread reply that is not a
+// sent Reminder, a Storm summary or an unknown message is not bound, and a failed read is an error.
+func TestBridgePressBinding(t *testing.T) {
+	e, _ := bridged(t)
+	e.db.dests[destMM].name = "alerts"
+	r := e.db.routes[routeID]
+	r.snooze = []int64{3600, 14400, 86400}
+	e.db.routes[routeID] = r
+	current, reminder, other, summary := "m3", "r-1", "r-2", "s-1"
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", messageID: &current,
+			superseded: []string{"m1", "m2"}, publishedAt: at(business0)},
+		&fakeDelivery{id: 2, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
+			publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies,
+		&fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM, event: "reminder", state: "sent",
+			messageID: &reminder},
+		&fakeReply{id: 2, delivery: 1, group: groupID, dest: destMM, event: "alerts_added", state: "sent",
+			messageID: &other})
+	conn := int64(connID)
+	dest := delivery.Destination{ID: destMM, PublicID: bridgePublicID, Name: "alerts", Type: delivery.TypeBridge,
+		Connection: &conn}
+	for _, tc := range []struct {
+		message string
+		want    delivery.BridgeBinding
+	}{
+		{"m3", delivery.BridgeBinding{Kind: buttons.SubjectRoot}},
+		{"m1", delivery.BridgeBinding{Kind: buttons.SubjectRoot, Superseded: true}},
+		{"m2", delivery.BridgeBinding{Kind: buttons.SubjectRoot, Superseded: true}},
+		{"r-1", delivery.BridgeBinding{Kind: buttons.SubjectReply}},
+	} {
+		b, err := e.svc.BridgePressBinding(t.Context(), connID, tc.message)
+		if err != nil || b.Kind != tc.want.Kind || b.Superseded != tc.want.Superseded ||
+			b.Destination.ID != dest.ID || b.Destination.PublicID != dest.PublicID || b.Destination.Name != dest.Name ||
+			b.Destination.Type != dest.Type || b.Destination.Connection == nil || *b.Destination.Connection != conn ||
+			b.GroupPublicID != "AGAAAAAAAAAA21" || b.GroupNumber != 7 ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+			t.Errorf("BridgePressBinding(%s) = %+v, %v", tc.message, b, err)
+		}
+	}
+	for _, c := range []struct {
+		conn    int64
+		message string
+	}{{connID, "r-2"}, {connID, "s-1"}, {connID, "m9"}, {connID, ""}, {connID + 1, "m3"}, {connID + 1, "m1"},
+		{connID + 1, "r-1"}} {
+		if _, err := e.svc.BridgePressBinding(t.Context(), c.conn, c.message); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("BridgePressBinding(%d, %q) = %v, want ErrNotBound", c.conn, c.message, err)
+		}
+	}
+	e.db.replies[0].state = "pending"
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("an unsent Reminder = %v", err)
+	}
+	e.db.replies[0].state = "sent"
+	e.db.dests[destMM].typ = delivery.TypeMattermost
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "m3"); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("a Mattermost Destination = %v", err)
+	}
+	e.db.dests[destMM].typ = delivery.TypeBridge
+	e.db.dests[destMM].deleted = true
+	for _, m := range []string{"m3", "m1", "r-1"} {
+		if _, err := e.svc.BridgePressBinding(t.Context(), connID, m); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("%s of a deleted Destination = %v", m, err)
+		}
+	}
+	e.db.dests[destMM].deleted = false
+	e.db.fail["GetBridgeRootBinding"] = errBoom
+	reads := e.db.calls["GetBridgeReminderBinding"]
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "m3"); !errors.Is(err, errBoom) ||
+		e.db.calls["GetBridgeReminderBinding"] != reads {
+		t.Errorf("a failed read of the Root message = %v, read the Reminders", err)
+	}
+	delete(e.db.fail, "GetBridgeRootBinding")
+	e.db.fail["GetBridgeReminderBinding"] = errBoom
+	if _, err := e.svc.BridgePressBinding(t.Context(), connID, "r-1"); !errors.Is(err, errBoom) {
+		t.Errorf("a failed read of the Reminder = %v", err)
+	}
+}
+
+// TestBridgePressBindingPrefersTheCurrentRootMessage: should a message id be both the current Root message of one
+// delivery and an older one of another, the current one is bound.
+func TestBridgePressBindingPrefersTheCurrentRootMessage(t *testing.T) {
+	e, _ := bridged(t)
+	m := "m1"
+	e.db.groups[groupID+1] = &fakeGroup{id: groupID + 1, publicID: "AGAAAAAAAAAA22", number: 8, status: "firing",
+		route: routeID, created: business0}
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", superseded: []string{m}},
+		&fakeDelivery{id: 2, dest: destMM, group: groupID + 1, state: "delivered", messageID: &m})
+	b, err := e.svc.BridgePressBinding(t.Context(), connID, m)
+	if err != nil || b.GroupPublicID != "AGAAAAAAAAAA22" || b.Superseded {
+		t.Errorf("BridgePressBinding = %+v, %v", b, err)
+	}
+}
+
+// TestPressOnTheOlderRootMessage is C-22.FR-9 and FR-12 on the delivery side: a press on the older Root message of a
+// delivery republished past its bridge's edit window is bound to the Alert Group, and the re-render of the Command it
+// runs never edits that message — the worker reconciles only the current Root message, within its window or by
+// another republication whose pointer goes under the current one.
+func TestPressOnTheOlderRootMessage(t *testing.T) {
+	e, d, _ := publishedWindowed(t)
+	republished := business0.Add(11 * time.Minute)
+	e.business.Set(republished)
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m2", "t-2"))
+	e.acknowledged(t, 2)
+	e.round(t)
+	if *d.messageID != "m2" || !slices.Equal(d.superseded, []string{"m1"}) {
+		t.Fatalf("not republished: %+v", d)
+	}
+	e.rec.Reset()
+	b, err := e.svc.BridgePressBinding(t.Context(), connID, "m1")
+	if err != nil || b.Kind != buttons.SubjectRoot || !b.Superseded || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+		b.GroupNumber != 7 || b.Destination.PublicID != bridgePublicID {
+		t.Fatalf("BridgePressBinding(m1) = %+v, %v", b, err)
+	}
+	untouched := func(when string) {
+		t.Helper()
+		for _, c := range e.rec.Calls() {
+			if c.MessageID == "m1" || c.Root.MessageID == "m1" {
+				t.Errorf("%s: a call on the older Root message: %+v", when, c)
+			}
+		}
+	}
+	// The Command the press runs — Unacknowledge — re-renders within the current message's window: an edit of m2.
+	e.business.Set(republished.Add(time.Minute))
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventUnacknowledged, Variant: groups.VariantCommand, Loudness: groups.Quiet})
+	e.round(t)
+	if calls := e.rec.Calls(); len(calls) == 0 || calls[0].Method != deliverytest.MethodUpdate ||
+		calls[0].MessageID != "m2" {
+		t.Errorf("within the window: %s %+v", callMethods(calls), calls)
+	}
+	untouched("within the window")
+	// Past the current message's window as well, the next Command republishes again, pointing from m2, not m1.
+	e.rec.Reset()
+	e.business.Set(republished.Add(11 * time.Minute))
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m3", "t-3"))
+	e.acknowledged(t, 4)
+	e.round(t)
+	calls := e.rec.Calls()
+	if callMethods(calls) != "publish,reply" || calls[1].Root.MessageID != "m2" ||
+		!slices.Equal(d.superseded, []string{"m1", "m2"}) || *d.messageID != "m3" {
+		t.Errorf("past the window: %s %+v, delivery %+v", callMethods(calls), calls, d)
+	}
+	untouched("past the window")
+	for _, m := range []string{"m1", "m2"} {
+		if b, err := e.svc.BridgePressBinding(t.Context(), connID, m); err != nil || !b.Superseded {
+			t.Errorf("BridgePressBinding(%s) after two republications = %+v, %v", m, b, err)
+		}
 	}
 }

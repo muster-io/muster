@@ -931,8 +931,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Outages: conns, Clock: p.clocks.Business,
 		Log: p.log}
 	// The events of Bridge Connections reach one handler, from the Leader's poller or from the push callback, which
-	// claims each event id once per Connection (C-22.FR-11).
-	p.bridgeEvents = &bridge.Events{Store: conns, Clocks: p.clocks, Log: p.log}
+	// claims each event id once per Connection (C-22.FR-11), runs the Commands of presses as the linked Users through
+	// the dispatcher and answers the people behind them on the interactive path (C-22.FR-12, FR-13).
+	p.bridgeEvents = &bridge.Events{Store: conns, Bindings: p.delivery, Links: p.links, Commands: p.groups,
+		Roles: roles, Keys: p.keyring, Path: interactive, PublicURL: p.cfg.PublicURL.String(), Clocks: p.clocks,
+		Log: p.log}
 	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,

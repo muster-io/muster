@@ -263,13 +263,21 @@ func (s *claimStore) recorded(connectionID int64, eventID string) bool {
 	return s.seen[s.key(connectionID, eventID)]
 }
 
-// eventsEnv is an Events over a claimStore, with the real clock at now and the log in a buffer.
+// eventsEnv is an Events over a claimStore, with the real and the business clock at now and the log in a buffer; its
+// presses are verified with keys and bound by bindings, its accounts linked by links, its Commands run by commands and
+// its answers made on path, which takes every token at once, through the Connection's client, nil until a test sets
+// one.
 type eventsEnv struct {
-	events *Events
-	store  *claimStore
-	real   *clock.Manual
-	log    *syncBuffer
-	conn   Conn
+	events   *Events
+	store    *claimStore
+	real     *clock.Manual
+	log      *syncBuffer
+	conn     Conn
+	keys     *pressKeys
+	bindings *pressBindings
+	links    *pressLinks
+	commands *pressCommands
+	path     *answerPath
 }
 
 // syncBuffer is a log buffer that several goroutines write.
@@ -292,9 +300,12 @@ func (b *syncBuffer) String() string {
 
 func newEventsEnv(now time.Time) *eventsEnv {
 	e := &eventsEnv{store: newClaimStore(), real: clock.NewManual(now), log: &syncBuffer{},
-		conn: Conn{ID: 3, PublicID: "CN0000000000B3", Version: 1}}
-	e.events = &Events{Store: e.store, Clocks: clock.Clocks{Business: clock.NewManual(now), Real: e.real},
-		Log: logging.New(e.log, logging.LevelInfo)}
+		conn: Conn{ID: pressConnID, PublicID: "CN0000000000B3", Version: 1}, keys: newPressKeys(),
+		bindings: newPressBindings(), links: &pressLinks{users: pressUsers}, commands: &pressCommands{},
+		path: newTestPath(now)}
+	e.events = &Events{Store: e.store, Bindings: e.bindings, Links: e.links, Commands: e.commands, Roles: pressRoles,
+		Keys: e.keys, Path: e.path, PublicURL: "http://localhost:8080/",
+		Clocks: clock.Clocks{Business: clock.NewManual(now), Real: e.real}, Log: logging.New(e.log, logging.LevelInfo)}
 	return e
 }
 
@@ -309,11 +320,12 @@ func (e *eventsEnv) event(t *testing.T, typ string, mutate ...func(map[string]an
 
 // TestEventsHandleEveryType covers C-22.FR-11: an event of each type of the protocol is handled and its id recorded,
 // whatever the Connection's info declares, which Events never reads; an account_link event is acknowledged and changes
-// nothing; an event handled before is acknowledged again without handling.
+// nothing; an event handled before is acknowledged again without handling. The press, on a message the Connection did
+// not post, is the one line logged.
 func TestEventsHandleEveryType(t *testing.T) {
 	e := newEventsEnv(eventTime)
 	for i, typ := range []string{TypePress, TypeThreadMessage, TypeAccountLink, TypeMessageDeleted} {
-		ev := e.event(t, typ, member("id", "ev-"+typ))
+		ev := e.event(t, typ, member("id", "ev-"+typ), member("message_id", "m9"))
 		if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
 			t.Fatalf("%s: %v", typ, err)
 		}
@@ -324,8 +336,9 @@ func TestEventsHandleEveryType(t *testing.T) {
 			t.Errorf("%s again: %v", typ, err)
 		}
 	}
-	if e.log.String() != "" {
-		t.Errorf("logged %s", e.log.String())
+	if got := e.log.String(); strings.Count(got, "\n") != 1 ||
+		!strings.Contains(got, pressLine("", "", "unknown_message", "u-bob")+"}") {
+		t.Errorf("logged %s", got)
 	}
 }
 
@@ -348,7 +361,9 @@ func TestEventsDropAnOldPress(t *testing.T) {
 		t.Error("a dropped press was not recorded")
 	}
 	e = newEventsEnv(eventTime.Add(EventMaxAge))
-	if err := e.events.Handle(t.Context(), e.conn, e.event(t, TypePress)); err != nil || e.log.String() != "" {
+	if err := e.events.Handle(t.Context(), e.conn, e.event(t, TypePress, member("message_id", "m9"))); err != nil ||
+		strings.Contains(e.log.String(), "bridge_press_dropped") ||
+		!strings.Contains(e.log.String(), `"outcome":"unknown_message"`) {
 		t.Errorf("a press at the limit = %v, logged %s", err, e.log.String())
 	}
 	e = newEventsEnv(eventTime.Add(time.Minute + time.Second))

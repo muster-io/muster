@@ -6,8 +6,9 @@
 // the caller (ADR-0015), with the token registered for redaction; the classification of every answer by the problem's
 // class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
 // check (check.go); the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
-// envelope.go); and the events of the Connections, polled by the Leader or pushed to the ingest listener, and handled
-// once per id (events.go, poller.go, push.go). The models are generated from api/bridge.yaml into internal/bridge/gen.
+// envelope.go); and the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once
+// per id and answered through answerEvent (events.go, poller.go, push.go, presses.go). The models are generated from
+// api/bridge.yaml into internal/bridge/gen.
 package bridge
 
 import (
@@ -354,6 +355,31 @@ func (c *Client) PollEvents(ctx context.Context, cursor *string, wait time.Durat
 		return Batch{}, notExpected(r.Status, "GET events")
 	}
 	return Batch{Events: *out.Events, NextCursor: *out.NextCursor}, r
+}
+
+// MaxAnswerLength is the longest text of an answer to an event, in characters (C-22.FR-13).
+const MaxAnswerLength = 500
+
+// AnswerEvent calls answerEvent (C-22.FR-13): it shows text, a plain text cut to MaxAnswerLength characters, to the
+// person behind the event eventID, with the Idempotency-Key answer-<event id>, and returns where the bridge showed it.
+// A successful answer without a shown_as of the protocol is invalid.
+func (c *Client) AnswerEvent(ctx context.Context, class outbound.Class, eventID, text string) (gen.AnswerShown,
+	Result) {
+	var out gen.AnswerShown
+	_, r := c.do(ctx, class, http.MethodPost, "answers", idempotency("answer-"+eventID),
+		gen.AnswerInput{EventId: eventID, Text: cutText(text, MaxAnswerLength)}, &out)
+	if r.OK() && !out.ShownAs.Valid() {
+		return gen.AnswerShown{}, notExpected(r.Status, "POST answers")
+	}
+	return out, r
+}
+
+// cutText is s cut to at most n characters.
+func cutText(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 // idempotency is the header that carries key, none for an empty key.

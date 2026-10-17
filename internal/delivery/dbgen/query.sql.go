@@ -999,6 +999,104 @@ func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummary
 	return i, err
 }
 
+const getBridgeReminderBinding = `-- name: GetBridgeReminderBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+FROM destinations ds
+JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = t.org_id AND g.id = t.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND t.event = 'reminder' AND t.state = 'sent' AND t.message_id = $3::text
+ORDER BY t.id
+LIMIT 1
+`
+
+type GetBridgeReminderBindingParams struct {
+	OrgID        int64
+	ConnectionID pgtype.Int8
+	MessageID    string
+}
+
+type GetBridgeReminderBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	GroupPublicID          string
+	GroupNumber            int64
+	SnoozeDurationsSeconds []int64
+}
+
+// GetBridgeReminderBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
+// a Reminder (C-22.FR-12, C-17.FR-6): a sent Reminder of an Alert Group to a Bridge Destination of the Connection that
+// is not deleted, with the Alert Group and its Route's Snooze durations, found through the partial index
+// thread_replies_reminder_message_idx.
+func (q *Queries) GetBridgeReminderBinding(ctx context.Context, arg GetBridgeReminderBindingParams) (GetBridgeReminderBindingRow, error) {
+	row := q.db.QueryRow(ctx, getBridgeReminderBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
+	var i GetBridgeReminderBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.GroupPublicID,
+		&i.GroupNumber,
+		&i.SnoozeDurationsSeconds,
+	)
+	return i, err
+}
+
+const getBridgeRootBinding = `-- name: GetBridgeRootBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds,
+       (d.message_id IS DISTINCT FROM $1::text)::boolean AS superseded
+FROM destinations ds
+JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = $2 AND ds.connection_id = $3 AND ds.type = 'bridge' AND ds.deleted_at IS NULL
+  AND (d.message_id = $1::text
+       OR (d.superseded_message_ids <> '{}' AND d.superseded_message_ids @> ARRAY[$1::text]))
+ORDER BY superseded, d.id
+LIMIT 1
+`
+
+type GetBridgeRootBindingParams struct {
+	MessageID    string
+	OrgID        int64
+	ConnectionID pgtype.Int8
+}
+
+type GetBridgeRootBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	GroupPublicID          string
+	GroupNumber            int64
+	SnoozeDurationsSeconds []int64
+	Superseded             bool
+}
+
+// GetBridgeRootBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is a
+// Root message (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection that is not
+// deleted whose Root message it is, the current one or an older one that a republication past the bridge's edit
+// window replaced (superseded, C-22.FR-9), with the Alert Group and its Route's Snooze durations. A message id names
+// one message of a bot, so at most one delivery has it; the current Root message wins. The emptiness check beside @>
+// lets the partial GIN index deliveries_superseded_idx serve the older ones.
+func (q *Queries) GetBridgeRootBinding(ctx context.Context, arg GetBridgeRootBindingParams) (GetBridgeRootBindingRow, error) {
+	row := q.db.QueryRow(ctx, getBridgeRootBinding, arg.MessageID, arg.OrgID, arg.ConnectionID)
+	var i GetBridgeRootBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.GroupPublicID,
+		&i.GroupNumber,
+		&i.SnoozeDurationsSeconds,
+		&i.Superseded,
+	)
+	return i, err
+}
+
 const getCreatedEventDeliveredAt = `-- name: GetCreatedEventDeliveredAt :one
 SELECT delivered_at::timestamptz
 FROM webhook_events

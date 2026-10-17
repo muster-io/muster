@@ -8,6 +8,7 @@
   "alerts.more": "+{count} more",
   "bridge.commands": "Reply in the Thread: {commands}",
   "bridge.commandsMentioning": "Reply in the Thread, mentioning the bot: {commands}",
+  "bridge.notLinked": "Your account is not linked to Muster. Link it in your profile: {link}",
   "button.acknowledge": "Ack",
   "button.resolve": "Resolve",
   "button.snooze": "Snooze {duration}",

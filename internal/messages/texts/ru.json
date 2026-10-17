@@ -8,6 +8,7 @@
   "alerts.more": "и ещё {count}",
   "bridge.commands": "Ответьте в треде: {commands}",
   "bridge.commandsMentioning": "Ответьте в треде, упомянув бота: {commands}",
+  "bridge.notLinked": "Ваша учётная запись не связана с Muster. Свяжите её в профиле: {link}",
   "button.acknowledge": "Подтвердить",
   "button.resolve": "Закрыть",
   "button.snooze": "Отложить на {duration}",

@@ -10,11 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/bridge/gen"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 )
@@ -211,20 +214,42 @@ type Connections interface {
 		error)
 }
 
-// handled is what the handling of an event leads to once its claim committed: the line to log, when there is one.
+// handled is what the handling of an event leads to once its claim committed: the line to log, when there is one; the
+// text to answer the person behind the event with, empty for none; and what failed without failing the event, such
+// as a Command, logged with the line.
 type handled struct {
 	line   logging.Event
 	fields []logging.Field
+	answer string
+	err    error
 }
 
 // Events is the one handler of Bridge events for both event delivery modes (C-22.FR-11, ADR-0017): the poller and the
 // push callback hand it every event they decoded. It handles at most Parallel events at a time, claims each event id
 // of a Connection through Store, dispatches the event inside the claim — a Command runs through the dispatcher in its
-// own transaction — and logs what it did once the claim committed. Every event type of the protocol is handled,
-// whatever the Connection's info declares.
+// own transaction — and, once the claim committed, answers the person behind it and logs what it did, all before the
+// event is acknowledged. Every event type of the protocol is handled, whatever the Connection's info declares.
 type Events struct {
 	Store Connections
-	// Clocks: the real clock dates the age of a press against bridge.event_max_age.
+	// Bindings find the message an event names among the Connection's deliveries.
+	Bindings Bindings
+	// Links map the account behind an event to its User.
+	Links Links
+	// Commands run the Commands of presses through the dispatcher.
+	Commands Commands
+	// Roles are the Permissions of each Role, which a linked User acts with.
+	Roles auth.Roles
+	// Keys verify the signed data of a press: the Keyring.
+	Keys buttons.Keys
+	// Path is the interactive path, which the answers take.
+	Path Path
+	// Budget is delivery.interactive_budget, within which an answer is made or fails; zero is
+	// delivery.InteractiveBudget.
+	Budget time.Duration
+	// PublicURL is MUSTER_PUBLIC_URL, the base of the profile link of an account without an Account link.
+	PublicURL string
+	// Clocks: the real clock dates the age of a press against bridge.event_max_age, and a Snooze lasts its duration
+	// from the business clock.
 	Clocks clock.Clocks
 	// MaxAge is bridge.event_max_age; zero is EventMaxAge.
 	MaxAge time.Duration
@@ -257,7 +282,10 @@ func (e *Events) slot(ctx context.Context) (func(), error) {
 // Handle handles the event ev of the Connection c once a slot is free (C-22.FR-11). An event whose id the Connection
 // handled before is acknowledged without handling it. An error — no slot before ctx ended, or a claim or a handling
 // that failed, logged as bridge_event_failed unless ctx ended, as when the Leader stops polling — records nothing: the
-// poller keeps its cursor and the push callback answers 500, so that the event comes again.
+// poller keeps its cursor and the push callback answers 500, so that the event comes again. Once the claim committed,
+// the person behind the event is answered, when there is something to say (C-22.FR-13), before Handle returns and so
+// before the poller stores the next cursor or the push callback answers 204; a crash or a failure of the answer
+// leaves the person without one, which is logged with the event's line and never retried.
 func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 	release, err := e.slot(ctx)
 	if err != nil {
@@ -277,16 +305,28 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 		}
 		return fmt.Errorf("handle the %s event %s of the connection %s: %w", ev.Type, ev.ID, c.PublicID, err)
 	}
-	if ran && h.line.Name() != "" {
-		e.Log.Log(ctx, h.line, h.fields...)
+	if !ran {
+		return nil
+	}
+	if h.answer != "" {
+		if err := e.answer(ctx, c, ev.ID, h.answer); err != nil {
+			h.err = errors.Join(h.err, err)
+		}
+	}
+	if h.line.Name() != "" {
+		fields := h.fields
+		if h.err != nil {
+			fields = append(slices.Clip(fields), logging.F("error", h.err.Error()))
+		}
+		e.Log.Log(ctx, h.line, fields...)
 	}
 	return nil
 }
 
-// dispatch handles ev of the Connection c inside its claim and returns what to log once the claim committed; it sends
-// nothing. An event whose context ended fails, so that it is not recorded. A press older than MaxAge by the real clock
-// is dropped, unanswered. An account_link event is acknowledged and changes nothing until Account links through a
-// Bridge exist.
+// dispatch handles ev of the Connection c inside its claim and returns what to answer and log once the claim
+// committed; it sends nothing. An event whose context ended fails, so that it is not recorded. A press older than
+// MaxAge by the real clock is dropped, unanswered; a recent one runs its Command (presses.go). An account_link event is
+// acknowledged and changes nothing until Account links through a Bridge exist.
 func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err := ctx.Err(); err != nil {
 		return handled{}, err
@@ -297,6 +337,7 @@ func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error
 				logging.F("connection", c.PublicID), logging.F("external_id", ev.User.ExternalId),
 				logging.F("age_seconds", int64(age/time.Second))}}, nil
 		}
+		return e.press(ctx, c, ev)
 	}
 	return handled{}, nil
 }
