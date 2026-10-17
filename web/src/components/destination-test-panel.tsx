@@ -9,7 +9,8 @@
 // values. The "Button press" block of a Mattermost Destination says whether the bot's press of the test message reached
 // Muster and, when it did not, what to do, translated by its error code with the server's English text as the detail.
 // The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
-// and when a step failed the Destination stays Broken, which the result explains, the button press included.
+// and when a step failed the Destination stays Broken, which the result explains, the button press included. The hint
+// above the button says what the test of each type sends; a Bridge sends one test message through the bridge.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -281,8 +282,12 @@ function testHint(t: TFunction, type: DestinationType): string {
       return t("destinationTest.hints.mattermost");
     case "telegram":
       return t("destinationTest.hints.telegram");
-    default:
+    case "bridge":
+      return t("destinationTest.hints.bridge");
+    case "webhook":
       return t("destinationTest.hints.webhook");
+    default:
+      return unreachable(type);
   }
 }
 

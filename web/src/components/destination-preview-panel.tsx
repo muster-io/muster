@@ -7,7 +7,9 @@
 // the Bot API's subset of tags, both built element by element from text, so that no markup of the output is ever
 // parsed into the page; links are shown with their address and are never followed. The buttons are drawn as they
 // would appear. An outgoing webhook shows each request — the event, or "Create", "Update", "Open thread" and "Reply in
-// thread" — with its method, URL, headers and body; a request whose template fails shows its error.
+// thread" — with its method, URL, headers and body; a request whose template fails shows its error. A Bridge shows the
+// envelope Muster would post to the bridge, the item "message" in the format json, as formatted JSON text
+// (C-22.FR-17): the bridge renders it in its messenger's markup, so the page draws no message of its own.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -21,7 +23,7 @@ import type {
   DestinationPreviewItemName,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
-import { CodeText, RenderedRequest } from "./rendered-request";
+import { CodeText, RenderedRequest, readableBody } from "./rendered-request";
 import { isSourceGone, unreachable } from "./destination-test-panel";
 import { ExternalLink, inlineMarkdown } from "./template-preview";
 import { type PickedSource, TEST_SOURCE_QUERY, testSource } from "./test-source-picker";
@@ -447,6 +449,19 @@ function PreviewItem({
             </div>
           </details>
         )}
+      </>
+    );
+  } else if (
+    item.format === "json" &&
+    item.text !== null &&
+    item.text !== undefined &&
+    item.request === undefined
+  ) {
+    // A Bridge's envelope: the bridge renders it, so the page shows it as text.
+    body = (
+      <>
+        <p className="text-sm text-muted-foreground">{t("destinationPreview.envelope")}</p>
+        <CodeText text={readableBody(item.text)} testId="preview-envelope" />
       </>
     );
   } else if (item.request !== undefined) {

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-3): its health with
-// the Broken banner, its Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group
-// it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
+// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-1, FR-3, FR-17): its
+// messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its Routes, and its form —
+// Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge, which shows the channel's
+// name it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
 // destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
-// destinations:write. A Bridge Destination shows its name, health and Routes, without a form, a check, a test or a
-// preview yet.
+// destinations:write.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -29,12 +29,14 @@ import {
   useGetDestination,
 } from "../api/gen/endpoints/destinations/destinations";
 import type {
+  BridgeDestination,
   Destination,
   MattermostDestination,
   TelegramDestination,
   WebhookDestination,
 } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { BRIDGE_KIND } from "../components/bridge-destination-fields";
 import { DestinationCheck } from "../components/destination-check";
 import { DestinationDeleteDialog } from "../components/destination-delete-dialog";
 import {
@@ -43,7 +45,12 @@ import {
   versionAction,
 } from "../components/destination-form";
 import { DestinationSecrets, refreshWebhook } from "../components/destination-secrets";
-import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
+import {
+  BrokenBanner,
+  HealthBadge,
+  destinationMessengerName,
+} from "../components/destination-health";
+import { useConnectionsById } from "../components/destination-label";
 import { DestinationPreviewPanel } from "../components/destination-preview-panel";
 import { DestinationTestPanel } from "../components/destination-test-panel";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
@@ -63,15 +70,21 @@ export const Route = createFileRoute("/destinations/$destinationId")({
 });
 
 /** The types whose form is on this page. */
-type Editable = MattermostDestination | TelegramDestination | WebhookDestination;
+type Editable =
+  | MattermostDestination
+  | TelegramDestination
+  | BridgeDestination
+  | WebhookDestination;
 
 function isEditable(d: Destination): d is Editable {
-  return d.type === "mattermost" || d.type === "telegram" || d.type === "webhook";
+  return (
+    d.type === "mattermost" || d.type === "telegram" || d.type === "bridge" || d.type === "webhook"
+  );
 }
 
 /** The types with a Destination check; the outgoing webhook has none. */
 function hasCheck(d: Destination): boolean {
-  return d.type === "mattermost" || d.type === "telegram";
+  return d.type === "mattermost" || d.type === "telegram" || d.type === "bridge";
 }
 
 /** The version of the form: health is not part of it, so a change of health alone never replaces the form. */
@@ -307,6 +320,11 @@ function DestinationView({ destinationId }: { destinationId: string }) {
   const [dirty, setDirty] = useState(false);
   const query = useGetDestination(destinationId);
   const destination = query.data;
+  const connections = useConnectionsById();
+  const connection =
+    destination === undefined || destination.type === "webhook"
+      ? undefined
+      : connections.get(destination.connection_id);
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -324,8 +342,8 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             </h1>
             {destination !== undefined && (
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                <span data-testid="destination-type">
-                  {destinationTypeName(t, destination.type)}
+                <span className="wrap-anywhere" data-testid="destination-type">
+                  {destinationMessengerName(t, destination.type, connection)}
                 </span>
                 <HealthBadge health={destination.health} />
               </p>
@@ -351,14 +369,16 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
           ) : destination.type === "telegram" ? (
             <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
-          ) : destination.type === "bridge" ? null : (
+          ) : destination.type === "bridge" ? (
+            <EditForm current={destination} kind={BRIDGE_KIND} onDirtyChange={setDirty} />
+          ) : (
             <>
               <EditForm current={destination} kind={WEBHOOK_KIND} onDirtyChange={setDirty} />
               <DestinationSecrets destinationId={destination.id} />
               <SigningSecret destination={destination} />
             </>
           )}
-          {canTest && destination.type !== "bridge" && (
+          {canTest && (
             <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
           )}
         </>

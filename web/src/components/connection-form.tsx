@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The form of a Connection (C-13.FR-1, C-14.FR-1): its name, where it calls — the server URL of Mattermost, or the
-// Bot API base URL and the update mode of Telegram in their type slot — the write-only bot token, the proxy form and
-// the limiter. The bot token is never shown: a read gives only whether it is set and when it changed, and a save sends it
-// only when it was replaced. The stored token is sent only to the address it was entered for, so a new server URL or
-// base URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog
-// refuses a Connection that Destinations use (in_use).
+// The form of a Connection (C-13.FR-1, C-14.FR-1, C-22.FR-1): its name, where it calls — the server URL of Mattermost,
+// the Bot API base URL and the update mode of Telegram, or the base URL, the event delivery mode and, in push mode, the
+// push secret and the callback address of a Bridge in their type slot — the write-only bot token, the proxy form and
+// the limiter, which a Bridge Connection may take from the rate its bridge declares (C-22.FR-18). The bot token and the
+// push secret are never shown: a read gives only whether they are set and when they changed, and a save sends them only
+// when they were replaced. The stored token is sent only to the address it was entered for, so a new server URL or base
+// URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog refuses a
+// Connection that Destinations use (in_use).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -20,8 +22,23 @@ import {
   getGetConnectionQueryKey,
   getListConnectionsQueryKey,
 } from "../api/gen/endpoints/connections/connections";
-import type { Connection, ConnectionInput, TelegramUpdateMode } from "../api/gen/model";
+import type {
+  BridgeConnectionInput,
+  BridgeEventDelivery,
+  BridgeInfo,
+  Connection,
+  ConnectionInput,
+  TelegramUpdateMode,
+} from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import {
+  BridgeConnectionFields,
+  DEFAULT_BRIDGE_LIMITER,
+  DEFAULT_EVENT_DELIVERY,
+  LimiterProposal,
+  isPushSecret,
+} from "./bridge-connection-fields";
+import { unreachable } from "./destination-test-panel";
 import {
   LimiterField,
   type LimiterValues,
@@ -80,9 +97,27 @@ export interface ConnectionValues {
   bot_api_base_url: string;
   /** Telegram. */
   update_mode: TelegramUpdateMode;
+  /** Bridge. */
+  base_url: string;
+  /** Bridge. */
+  event_delivery: BridgeEventDelivery;
+  /** Bridge, in push mode. */
+  push_secret: SecretChange;
   bot_token: SecretChange;
   proxy: ProxyValues;
   limiter: LimiterValues;
+}
+
+/** The limiter of a new Connection of the type. */
+function defaultLimiter(type: ConnectionType) {
+  switch (type) {
+    case "telegram":
+      return DEFAULT_TELEGRAM_LIMITER;
+    case "bridge":
+      return DEFAULT_BRIDGE_LIMITER;
+    default:
+      return DEFAULT_MATTERMOST_LIMITER;
+  }
 }
 
 /** The values of a stored Connection, or of a new one of the type. */
@@ -91,39 +126,59 @@ export function connectionValues(
   type: ConnectionType = c?.type ?? "mattermost",
 ): ConnectionValues {
   const telegram = c?.type === "telegram" ? c : undefined;
+  const bridge = c?.type === "bridge" ? c : undefined;
   return {
     type,
     name: c?.name ?? "",
     server_url: c?.type === "mattermost" ? c.server_url : "",
     bot_api_base_url: telegram?.bot_api_base_url ?? DEFAULT_BOT_API_BASE_URL,
     update_mode: telegram?.update_mode ?? DEFAULT_UPDATE_MODE,
+    base_url: bridge?.base_url ?? "",
+    event_delivery: bridge?.event_delivery ?? DEFAULT_EVENT_DELIVERY,
+    push_secret: KEEP_SECRET,
     bot_token: KEEP_SECRET,
     proxy: proxyValues(c?.proxy),
-    limiter: limiterValues(
-      c?.limiter ?? (type === "telegram" ? DEFAULT_TELEGRAM_LIMITER : DEFAULT_MATTERMOST_LIMITER),
-    ),
+    limiter: limiterValues(c?.limiter ?? defaultLimiter(type)),
   };
 }
 
-/** The request of a save: the bot token only when it was replaced, so that an update keeps the stored one. */
+/** The fields of a save that depend on the type. */
+function typeInput(v: ConnectionValues): ConnectionInput {
+  const common = {
+    name: v.name.trim(),
+    proxy: proxyInput(v.proxy),
+    limiter: limiterInput(v.limiter),
+  };
+  if (v.type === "telegram") {
+    return {
+      type: "telegram",
+      ...common,
+      bot_api_base_url: v.bot_api_base_url.trim(),
+      update_mode: v.update_mode,
+    };
+  }
+  if (v.type === "bridge") {
+    const bridge: BridgeConnectionInput = {
+      type: "bridge",
+      ...common,
+      base_url: v.base_url.trim(),
+      event_delivery: v.event_delivery,
+    };
+    // Only push takes a push secret; a save in poll clears the stored one.
+    if (v.event_delivery === "push" && v.push_secret.mode === "replace") {
+      bridge.push_secret = v.push_secret.value;
+    }
+    return bridge;
+  }
+  return { type: "mattermost", ...common, server_url: v.server_url.trim() };
+}
+
+/**
+ * The request of a save: the bot token and the push secret only when they were replaced, so that an update keeps the
+ * stored ones.
+ */
 export function connectionInput(v: ConnectionValues): ConnectionInput {
-  const input: ConnectionInput =
-    v.type === "telegram"
-      ? {
-          type: "telegram",
-          name: v.name.trim(),
-          bot_api_base_url: v.bot_api_base_url.trim(),
-          update_mode: v.update_mode,
-          proxy: proxyInput(v.proxy),
-          limiter: limiterInput(v.limiter),
-        }
-      : {
-          type: "mattermost",
-          name: v.name.trim(),
-          server_url: v.server_url.trim(),
-          proxy: proxyInput(v.proxy),
-          limiter: limiterInput(v.limiter),
-        };
+  const input = typeInput(v);
   if (v.bot_token.mode === "replace") {
     input.bot_token = v.bot_token.value;
   }
@@ -158,8 +213,7 @@ export function addressChanged(v: ConnectionValues, stored: Connection | undefin
     case "telegram":
       return normalizeBaseUrl(v.bot_api_base_url) !== stored.bot_api_base_url;
     case "bridge":
-      // The form does not render for a Bridge yet; its address is the base URL.
-      return v.server_url.trim() !== stored.base_url;
+      return normalizeBaseUrl(v.base_url) !== stored.base_url;
     default:
       return v.server_url.trim() !== stored.server_url;
   }
@@ -176,6 +230,35 @@ export const BASE_URL_FORMAT = "base_url_format";
 
 /** The code of a save that setWebhook or deleteWebhook refused; its detail is the step's message. */
 export const WEBHOOK_CALL_FAILED = "webhook_call_failed";
+
+/** The code of a Bridge base URL that breaks the rules of C-22.FR-1. */
+export const BRIDGE_BASE_URL_FORMAT = "bridge_base_url_format";
+
+/** The code of a push secret that is not whsec_ followed by base64. */
+export const PUSH_SECRET_FORMAT = "push_secret_format";
+
+/** The checks of a Bridge's base URL and, in push mode, of its push secret: one sent now, or one stored. */
+function bridgeErrors(v: ConnectionValues, stored: Connection | undefined): ConnectionErrors {
+  const errors: ConnectionErrors = {};
+  if (v.base_url.trim() === "") {
+    errors["/base_url"] = "required";
+  } else if (!isBaseUrl(v.base_url)) {
+    errors["/base_url"] = BRIDGE_BASE_URL_FORMAT;
+  }
+  if (v.event_delivery === "push") {
+    const secret = v.push_secret;
+    if (secret.mode === "replace") {
+      if (secret.value === "") {
+        errors["/push_secret"] = "required";
+      } else if (!isPushSecret(secret.value)) {
+        errors["/push_secret"] = PUSH_SECRET_FORMAT;
+      }
+    } else if (!(stored?.type === "bridge" && stored.push_secret_status.set)) {
+      errors["/push_secret"] = "required";
+    }
+  }
+  return errors;
+}
 
 /** The checks the server repeats, before the form is sent; stored is the Connection of an edit. */
 export function connectionErrors(
@@ -195,6 +278,8 @@ export function connectionErrors(
     } else if (!isBaseUrl(v.bot_api_base_url)) {
       errors["/bot_api_base_url"] = BASE_URL_FORMAT;
     }
+  } else if (v.type === "bridge") {
+    Object.assign(errors, bridgeErrors(v, stored));
   } else if (v.server_url.trim() === "") {
     errors["/server_url"] = "required";
   } else if (!isServerUrl(v.server_url)) {
@@ -220,7 +305,8 @@ export function connectionErrors(
 
 /**
  * The field errors of a refused save by pointer. The server names the whole limiter as /limiter, a bot token that a
- * new address needs as /bot_token required, which the form explains, and a base URL it refuses as invalid_format.
+ * new address needs as /bot_token required, which the form explains, and a base URL or a push secret it refuses as
+ * invalid_format.
  */
 export function serverErrors(err: unknown, serverUrlChanged: boolean): ConnectionErrors {
   if (!isApiError(err)) {
@@ -238,6 +324,10 @@ export function serverErrors(err: unknown, serverUrlChanged: boolean): Connectio
       errors["/bot_token"] = TOKEN_FOR_NEW_SERVER;
     } else if (item.pointer === "/bot_api_base_url" && item.code === "invalid_format") {
       errors["/bot_api_base_url"] = BASE_URL_FORMAT;
+    } else if (item.pointer === "/base_url" && item.code === "invalid_format") {
+      errors["/base_url"] = BRIDGE_BASE_URL_FORMAT;
+    } else if (item.pointer === "/push_secret" && item.code === "invalid_format") {
+      errors["/push_secret"] = PUSH_SECRET_FORMAT;
     } else {
       errors[item.pointer] = item.code;
     }
@@ -266,6 +356,10 @@ export function connectionErrorText(t: TFunction, code: string, detail?: string)
       return t("connections.errors.tokenForNewServer");
     case BASE_URL_FORMAT:
       return t("connections.errors.baseUrlFormat");
+    case BRIDGE_BASE_URL_FORMAT:
+      return t("connections.bridge.baseUrlFormat");
+    case PUSH_SECRET_FORMAT:
+      return t("connections.bridge.pushSecretFormat");
     case WEBHOOK_CALL_FAILED:
       return detail === undefined
         ? t("connections.errors.webhookCallFailedNoDetail")
@@ -277,10 +371,36 @@ export function connectionErrorText(t: TFunction, code: string, detail?: string)
 
 /** The pointers of the fields that show their errors themselves. */
 const SHOWN =
-  /^\/(name|server_url|bot_api_base_url|update_mode|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
+  /^\/(name|server_url|bot_api_base_url|update_mode|base_url|event_delivery|push_secret|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
 
 function isOutdated(err: unknown): boolean {
   return isStale(err) || (isApiError(err) && err.status === 428);
+}
+
+function formTitle(t: TFunction, kind: ConnectionType): string {
+  switch (kind) {
+    case "mattermost":
+      return t("connections.form.mattermost");
+    case "telegram":
+      return t("connections.form.telegram");
+    case "bridge":
+      return t("connections.types.bridge");
+    default:
+      return unreachable(kind);
+  }
+}
+
+function limiterHint(t: TFunction, kind: ConnectionType): string {
+  switch (kind) {
+    case "mattermost":
+      return t("connections.form.limiterHint");
+    case "telegram":
+      return t("connections.telegram.limiterHint");
+    case "bridge":
+      return t("connections.bridge.limiterHint");
+    default:
+      return unreachable(kind);
+  }
 }
 
 export interface ConnectionFormProps {
@@ -297,6 +417,8 @@ export interface ConnectionFormProps {
   save: (input: ConnectionInput) => Promise<Connection | undefined>;
   /** The Bot API base URL in the form of a Telegram Connection, as it is typed: the check explains an unsaved one. */
   onBaseUrlChange?: (value: string) => void;
+  /** The info the last check of a Bridge Connection read, whose rate the limiter proposal halves. */
+  info?: BridgeInfo | null;
   /** A newer version of the Connection was read; a save would be refused. */
   stale?: boolean;
   onReload?: () => void;
@@ -318,6 +440,7 @@ export function ConnectionForm({
   saved = false,
   onCancel,
   onBaseUrlChange,
+  info,
 }: ConnectionFormProps) {
   const { t } = useTranslation();
   const [defaultValues] = useState(() => connectionValues(connection, type ?? connection?.type));
@@ -347,9 +470,14 @@ export function ConnectionForm({
         if (name === undefined) {
           return;
         }
-        const prefix = `/${name.split(".")[0]}`;
+        const field = name.split(".")[0];
+        // Another event delivery mode takes the push secret's problem with it: polling has no push secret.
+        const prefixes =
+          field === "event_delivery" ? ["/event_delivery", "/push_secret"] : [`/${field}`];
         setErrors((current) => {
-          const kept = Object.entries(current).filter(([pointer]) => !pointer.startsWith(prefix));
+          const kept = Object.entries(current).filter(
+            ([pointer]) => !prefixes.some((prefix) => pointer.startsWith(prefix)),
+          );
           return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
         });
       },
@@ -476,11 +604,7 @@ export function ConnectionForm({
         <Card>
           <CardHeader>
             <CardTitle>
-              <h2>
-                {kind === "telegram"
-                  ? t("connections.form.telegram")
-                  : t("connections.form.mattermost")}
-              </h2>
+              <h2>{formTitle(t, kind)}</h2>
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -498,7 +622,11 @@ export function ConnectionForm({
                 render={({ field }) => (
                   <SecretField
                     id={`${ID}-bot-token`}
-                    label={t("connections.fields.botToken")}
+                    label={
+                      kind === "bridge"
+                        ? t("connections.bridge.token")
+                        : t("connections.fields.botToken")
+                    }
                     status={connection?.bot_token_status}
                     value={field.value}
                     disabled={readOnly}
@@ -542,22 +670,71 @@ export function ConnectionForm({
                 )}
               />
             )}
+            {kind === "bridge" && (
+              <Controller
+                control={form.control}
+                name="base_url"
+                render={({ field: base }) => (
+                  <Controller
+                    control={form.control}
+                    name="event_delivery"
+                    render={({ field: mode }) => (
+                      <Controller
+                        control={form.control}
+                        name="push_secret"
+                        render={({ field: secret }) => (
+                          <BridgeConnectionFields
+                            id={ID}
+                            baseUrl={base.value}
+                            onBaseUrlChange={base.onChange}
+                            eventDelivery={mode.value}
+                            onEventDeliveryChange={mode.onChange}
+                            pushSecret={secret.value}
+                            onPushSecretChange={secret.onChange}
+                            pushSecretStatus={
+                              connection?.type === "bridge"
+                                ? connection.push_secret_status
+                                : undefined
+                            }
+                            callbackUrl={
+                              connection?.type === "bridge" ? connection.callback_url : undefined
+                            }
+                            errors={{
+                              baseUrl: err("/base_url"),
+                              eventDelivery: err("/event_delivery"),
+                              pushSecret: err("/push_secret"),
+                            }}
+                            disabled={readOnly}
+                          />
+                        )}
+                      />
+                    )}
+                  />
+                )}
+              />
+            )}
             <Controller
               control={form.control}
               name="limiter"
               render={({ field }) => (
-                <LimiterField
-                  id={`${ID}-limiter`}
-                  value={field.value}
-                  hint={
-                    kind === "telegram"
-                      ? t("connections.telegram.limiterHint")
-                      : t("connections.form.limiterHint")
-                  }
-                  errors={limiterFieldErrors}
-                  disabled={readOnly}
-                  onChange={field.onChange}
-                />
+                <div className="flex min-w-0 flex-col gap-2">
+                  <LimiterField
+                    id={`${ID}-limiter`}
+                    value={field.value}
+                    hint={limiterHint(t, kind)}
+                    errors={limiterFieldErrors}
+                    disabled={readOnly}
+                    onChange={field.onChange}
+                  />
+                  {kind === "bridge" && (
+                    <LimiterProposal
+                      info={info}
+                      value={field.value}
+                      disabled={readOnly}
+                      onUse={field.onChange}
+                    />
+                  )}
+                </div>
               )}
             />
           </CardContent>

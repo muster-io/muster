@@ -4,7 +4,9 @@
 // The Mattermost Connection form in a real browser: the request a save sends, with the bot token only when it was
 // replaced and never shown; the checks it repeats, a new server URL that needs the token again included; the refusals
 // it puts on its fields; the read-only form; the limiter; the connection check with its steps, path, latency, warning
-// and busy messenger; the callback address with its hint; and the in_use refusal of "Delete" in its plural forms.
+// and busy messenger; the callback address with its hint; and the in_use refusal of "Delete" in its plural forms. For a
+// Bridge, the request with the push secret only in push mode, the checks of the base URL and the push secret, and the
+// refusals of /base_url and /push_secret; its fields are in bridge-connection-fields.test.tsx.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -20,6 +22,7 @@ import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type {
+  BridgeConnection,
   ConnectionCheckResult,
   MattermostConnection,
   ConnectionInput,
@@ -31,9 +34,13 @@ import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { CallbackHint } from "./callback-hint";
 import { ConnectionCheck, checkErrorText } from "./connection-check";
 import {
+  BRIDGE_BASE_URL_FORMAT,
   ConnectionDeleteDialog,
   ConnectionForm,
+  PUSH_SECRET_FORMAT,
   TOKEN_FOR_NEW_SERVER,
+  addressChanged,
+  connectionErrorText,
   connectionErrors,
   connectionInput,
   connectionValues,
@@ -57,6 +64,24 @@ const CONNECTION: MattermostConnection = {
   destination_count: 1,
   callback_url: CALLBACK,
   created_at: "2026-10-08T09:30:00Z",
+  etag: '"1"',
+};
+
+const BRIDGE: BridgeConnection = {
+  id: "CN0000000000BR",
+  type: "bridge",
+  name: "br",
+  base_url: "http://127.0.0.1:18094",
+  event_delivery: "push",
+  limiter: { limit: 10, per_seconds: 1 },
+  bot_token_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
+  push_secret_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
+  callback_url: "http://localhost:8081/api/v1/callbacks/bridge/CN0000000000BR",
+  info: null,
+  info_read_at: null,
+  proxy: { enabled: false },
+  destination_count: 0,
+  created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
 };
 
@@ -153,6 +178,47 @@ describe("the request of a save", () => {
   test("starts a new Connection with the limiter of connection.mattermost.limiter", () => {
     expect(connectionValues(undefined).limiter).toEqual({ limit: "5", per_seconds: "1" });
   });
+
+  test("starts a new Bridge Connection with connection.bridge.limiter and polling", () => {
+    const fresh = connectionValues(undefined, "bridge");
+    expect(fresh.limiter).toEqual({ limit: "10", per_seconds: "1" });
+    expect(fresh.event_delivery).toBe("poll");
+    expect(fresh.base_url).toBe("");
+    expect(fresh.push_secret).toEqual({ mode: "keep" });
+  });
+
+  test("sends a Bridge's push secret only in push mode and keeps the stored one", () => {
+    const stored = connectionValues(BRIDGE);
+    expect(stored.base_url).toBe("http://127.0.0.1:18094");
+    expect(stored.event_delivery).toBe("push");
+    // Kept: neither the token nor the push secret is sent.
+    expect(connectionInput(stored)).toEqual({
+      type: "bridge",
+      name: "br",
+      base_url: "http://127.0.0.1:18094",
+      event_delivery: "push",
+      proxy: { enabled: false, type: "http", username: null },
+      limiter: { limit: 10, per_seconds: 1 },
+    });
+    const replaced = { ...stored, push_secret: { mode: "replace", value: "whsec_AA==" } } as const;
+    expect(connectionInput(replaced)).toEqual(
+      expect.objectContaining({ push_secret: "whsec_AA==" }),
+    );
+    // Polling takes no push secret, even one typed before the mode changed.
+    expect("push_secret" in connectionInput({ ...replaced, event_delivery: "poll" })).toBe(false);
+    expect(
+      connectionInput({
+        ...stored,
+        base_url: " http://127.0.0.1:18094/ ",
+        bot_token: { mode: "replace", value: "muster-dev-bridge-token" },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        base_url: "http://127.0.0.1:18094/",
+        bot_token: "muster-dev-bridge-token",
+      }),
+    );
+  });
 });
 
 describe("the checks before a save", () => {
@@ -195,6 +261,68 @@ describe("the checks before a save", () => {
     ).toEqual({});
   });
 
+  test("checks the base URL and the push secret as the server does, and asks for the token again for a new base URL", () => {
+    const fresh = { ...connectionValues(undefined, "bridge"), name: "br" };
+    expect(connectionErrors(fresh, undefined)).toEqual({
+      "/base_url": "required",
+      "/bot_token": "required",
+    });
+    const token = { mode: "replace", value: "muster-dev-bridge-token" } as const;
+    for (const bad of [
+      "bridge.example.org",
+      "ftp://bridge.example.org",
+      "https://user:pw@bridge.example.org",
+      "https://bridge.example.org/?x=1",
+      "https://bridge.example.org/#x",
+    ]) {
+      expect(
+        connectionErrors({ ...fresh, base_url: bad, bot_token: token }, undefined),
+        bad,
+      ).toEqual({ "/base_url": BRIDGE_BASE_URL_FORMAT });
+    }
+    const valid = { ...fresh, base_url: "https://bridge.example.org/prefix/", bot_token: token };
+    expect(connectionErrors(valid, undefined)).toEqual({});
+    // Push needs a push secret in the Standard Webhooks form, sent now or stored.
+    expect(connectionErrors({ ...valid, event_delivery: "push" }, undefined)).toEqual({
+      "/push_secret": "required",
+    });
+    expect(
+      connectionErrors(
+        { ...valid, event_delivery: "push", push_secret: { mode: "replace", value: "" } },
+        undefined,
+      ),
+    ).toEqual({ "/push_secret": "required" });
+    expect(
+      connectionErrors(
+        { ...valid, event_delivery: "push", push_secret: { mode: "replace", value: "secret" } },
+        undefined,
+      ),
+    ).toEqual({ "/push_secret": PUSH_SECRET_FORMAT });
+    expect(
+      connectionErrors(
+        { ...valid, event_delivery: "push", push_secret: { mode: "replace", value: "whsec_AA==" } },
+        undefined,
+      ),
+    ).toEqual({});
+    // A stored push secret is kept; one never stored is not.
+    const stored = connectionValues(BRIDGE);
+    expect(connectionErrors(stored, BRIDGE)).toEqual({});
+    expect(
+      connectionErrors(stored, {
+        ...BRIDGE,
+        event_delivery: "poll",
+        push_secret_status: { set: false },
+      }),
+    ).toEqual({ "/push_secret": "required" });
+    // A trailing slash is the same base URL; another one needs the token again.
+    expect(addressChanged({ ...stored, base_url: "http://127.0.0.1:18094/" }, BRIDGE)).toBe(false);
+    expect(addressChanged({ ...stored, base_url: "HTTP://127.0.0.1:18094" }, BRIDGE)).toBe(false);
+    const moved = { ...stored, base_url: "http://127.0.0.1:18095" };
+    expect(addressChanged(moved, BRIDGE)).toBe(true);
+    expect(connectionErrors(moved, BRIDGE)).toEqual({ "/bot_token": TOKEN_FOR_NEW_SERVER });
+    expect(connectionErrors({ ...moved, bot_token: token }, BRIDGE)).toEqual({});
+  });
+
   test("needs whole limiter numbers of at least 1", () => {
     expect(limiterErrors({ limit: "", per_seconds: "0" })).toEqual({
       limit: "required",
@@ -234,6 +362,34 @@ describe("the checks before a save", () => {
     expect(serverErrors(tokenAgain, true)).toEqual({ "/bot_token": TOKEN_FOR_NEW_SERVER });
     expect(serverErrors(tokenAgain, false)).toEqual({ "/bot_token": "required" });
     expect(serverErrors(new Error("network"), false)).toEqual({});
+  });
+
+  test("puts the server's refusals of /base_url and /push_secret on their fields", () => {
+    const found = serverErrors(
+      refusal(422, {
+        errors: [
+          { pointer: "/base_url", code: "invalid_format" },
+          { pointer: "/push_secret", code: "invalid_format" },
+        ],
+      }),
+      false,
+    );
+    expect(found).toEqual({
+      "/base_url": BRIDGE_BASE_URL_FORMAT,
+      "/push_secret": PUSH_SECRET_FORMAT,
+    });
+    expect(
+      serverErrors(
+        refusal(422, { errors: [{ pointer: "/push_secret", code: "required" }] }),
+        false,
+      ),
+    ).toEqual({ "/push_secret": "required" });
+    expect(connectionErrorText(i18n.t, BRIDGE_BASE_URL_FORMAT)).toBe(
+      "Enter an absolute http or https URL without user information, query or fragment, such as https://bridge.example.org. A path prefix is allowed.",
+    );
+    expect(connectionErrorText(i18n.t, PUSH_SECRET_FORMAT)).toBe(
+      "Enter the push secret as whsec_ followed by base64.",
+    );
   });
 });
 

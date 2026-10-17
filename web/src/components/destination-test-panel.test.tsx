@@ -7,7 +7,8 @@
 // status and body as plain text and the extracted values; why a failed test leaves a Broken Destination Broken, the
 // button press included; "Send test message" with the chosen source, disabled while it runs, the health of the result
 // taken by the page at once, and the refusal of an Alert Group that is no longer offered. The source selector offers
-// the example and the recent Alert Groups of the Destination's Routes. Both in English and Russian.
+// the example and the recent Alert Groups of the Destination's Routes. The hint of a Bridge Destination says what its
+// test sends instead of the outgoing webhook's. Both in English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -18,6 +19,7 @@ import { render } from "vitest-browser-react";
 
 import { getGetDestinationQueryKey } from "../api/gen/endpoints/destinations/destinations";
 import type {
+  BridgeDestination,
   DeliveryErrorClass,
   Destination,
   DestinationTestResult,
@@ -520,6 +522,53 @@ describe("DestinationTestPanel", () => {
     // Choosing another source clears it.
     await userEvent.selectOptions(select, "AG0000000000K1");
     await expect.element(page.getByTestId("test-source-gone")).not.toBeInTheDocument();
+  });
+
+  test("explains the test of a Bridge Destination", async () => {
+    const bridge: BridgeDestination = {
+      id: "DS0000000000BR",
+      type: "bridge",
+      name: "alerts",
+      connection_id: "CN0000000000BR",
+      channel_id: "ch-alerts",
+      channel_name: "alerts",
+      mentions: defaultMentions(),
+      limiter: { limit: 30, per_seconds: 60 },
+      health: { state: "healthy" },
+      routes: [],
+      created_at: "2026-10-17T09:30:00Z",
+      etag: '"1"',
+    };
+    const calls = fakeApi(() => Promise.resolve(json(500, {})));
+    const panel = () => (
+      <DestinationTestPanel
+        destination={bridge}
+        source={EXAMPLE}
+        dirty={false}
+        onSourceGone={() => undefined}
+      />
+    );
+    const screen = await render(providers(panel()).ui);
+    const hint = page.getByTestId("destination-test").getByText(/^Sends one test message/);
+    await expect
+      .element(hint)
+      .toHaveTextContent(
+        "Sends one test message, marked 🧪, through the bridge with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers that it is a test message. A test that succeeds in every step ends the Broken state.",
+      );
+    // Not the outgoing webhook's hint, and no language named: a Bridge answers in the linked User's language.
+    expect(document.body.textContent).not.toContain("the “Create” request");
+    expect(document.body.textContent).not.toContain("in English");
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    await screen.unmount();
+
+    await i18n.changeLanguage("ru");
+    await render(providers(panel()).ui);
+    await expect
+      .element(page.getByTestId("destination-test").getByText(/^Отправляет через мост/))
+      .toHaveTextContent(
+        "Отправляет через мост одно тестовое сообщение с пометкой 🧪 по сохранённым настройкам. Группы алертов не меняются; если человек нажмёт кнопку тестового сообщения, ничего не изменится, а Muster ответит, что это тестовое сообщение. Тест, успешный на каждом шаге, снимает состояние «сломано».",
+      );
+    expect(document.body.textContent).not.toContain("по-английски");
   });
 
   test("offers only the example without alert-groups:read", async () => {

@@ -4,9 +4,11 @@
 // The label of a Destination across the SPA (D309): its Connection and its channel — Mattermost "#<channel name>",
 // Telegram the channel title or the channel as entered, a Bridge the channel's name or its id —, or the host of an
 // outgoing webhook's URL. The full label "<name> · <messenger> · via <Connection> · <channel>" names a Destination in
-// the Route editor, its pickers and the tooltips of the Alert Group page. The chat a Destination posts in tells the
+// the Route editor, its pickers and the tooltips of the Alert Group page; a Bridge's messenger is the one its
+// Connection's bridge names, "Bridge" until a check read it (C-22.FR-1). The chat a Destination posts in tells the
 // Route editor when two Destinations would post the same Alert Group twice into one chat (D305): one Telegram chat id,
-// or one Mattermost server and channel.
+// one Mattermost server and channel, or one bridge base URL and channel. The Connections list names a Connection by its
+// messenger and the host it calls, or its Telegram bot.
 
 import type { TFunction } from "i18next";
 import { useMemo } from "react";
@@ -16,7 +18,8 @@ import { useListConnections } from "../api/gen/endpoints/connections/connections
 import { useListDestinations } from "../api/gen/endpoints/destinations/destinations";
 import type { Connection, Destination, WebhookDestination } from "../api/gen/model";
 import { useCan } from "./app-shell";
-import { destinationTypeName } from "./destination-health";
+import { destinationMessengerName } from "./destination-health";
+import { unreachable } from "./destination-test-panel";
 
 /**
  * The host (hostname and port) of an outgoing webhook's URL — `events.url`, or `template.create.url` in the mode
@@ -91,7 +94,7 @@ export function labelParts(
   const connection = connectionOf(d, connections);
   return [
     d.name,
-    destinationTypeName(t, d.type),
+    destinationMessengerName(t, d.type, connection),
     connection === undefined
       ? undefined
       : t("destinations.label.via", { connection: connection.name }),
@@ -108,7 +111,10 @@ export function fullLabel(
   return labelParts(t, d, connections).join(" · ");
 }
 
-/** A Mattermost server URL as one key: scheme and host lower-cased by URL, the path kept without its trailing "/". */
+/**
+ * A Mattermost server URL or a bridge's base URL as one key: scheme and host lower-cased by URL, the path kept without
+ * its trailing "/".
+ */
 export function normalizedServer(serverUrl: string): string {
   try {
     const u = new URL(serverUrl.trim());
@@ -120,7 +126,8 @@ export function normalizedServer(serverUrl: string): string {
 
 /**
  * The chat a Destination posts in: Telegram its numeric chat id once a check found it, else the channel as entered,
- * lower-cased; Mattermost its Connection's server and the channel id. An outgoing webhook has none.
+ * lower-cased; Mattermost its Connection's server and the channel id; a Bridge its Connection's base URL and the channel
+ * id, which is opaque and keeps its case. An outgoing webhook has none.
  */
 export function chatKey(
   d: Destination,
@@ -138,8 +145,60 @@ export function chatKey(
           : `connection:${d.connection_id}`;
       return `mm:${server}:${d.channel_id}`;
     }
+    case "bridge": {
+      const connection = connections.get(d.connection_id);
+      // Without its Connection, only Destinations of that one Connection are known to share a bridge.
+      const base =
+        connection?.type === "bridge"
+          ? normalizedServer(connection.base_url)
+          : `connection:${d.connection_id}`;
+      return `br:${base}:${d.channel_id}`;
+    }
     default:
       return undefined;
+  }
+}
+
+/**
+ * The messenger of a Connection in the Connections list: Mattermost, Telegram, or the messenger a Bridge's bridge
+ * names in the info a check read — untrusted text, shown as text only — and "Bridge" until then.
+ */
+export function connectionMessengerName(t: TFunction, c: Connection): string {
+  switch (c.type) {
+    case "mattermost":
+      return "Mattermost";
+    case "telegram":
+      return "Telegram";
+    case "bridge":
+      return c.info?.messenger.name || t("connections.types.bridge");
+    default:
+      return unreachable(c);
+  }
+}
+
+/** The host of a URL, or undefined when it does not parse. */
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a Connection calls, in the Connections list: the host of a Mattermost server URL or of a Bridge's base URL, or
+ * the @username of a Telegram bot once a check found it.
+ */
+export function connectionAccount(c: Connection): string | undefined {
+  switch (c.type) {
+    case "mattermost":
+      return hostOf(c.server_url);
+    case "telegram":
+      return c.bot_username ? `@${c.bot_username}` : undefined;
+    case "bridge":
+      return hostOf(c.base_url);
+    default:
+      return unreachable(c);
   }
 }
 

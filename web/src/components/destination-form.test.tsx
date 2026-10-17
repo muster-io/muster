@@ -5,7 +5,8 @@
 // through the bot; the name of the channel and the limiter of the Connection taken while untouched; the request a save
 // sends; the checks it repeats; the refusals it puts on its fields — destination_check_failed next to the channel with
 // the check's message, unknown_id at the Connection, name_taken, a busy messenger and a stale version; the read-only
-// form and the stored names without connections:write; the Broken banner in the user's time zone; and "Check".
+// form and the stored names without connections:write; the Broken banner in the user's time zone; and "Check", with the
+// one check item "Channel" of a Bridge Destination.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -21,6 +22,7 @@ import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type {
+  BridgeDestination,
   DestinationCheckResult,
   DestinationInput,
   MattermostChannel,
@@ -635,6 +637,70 @@ describe("Check", () => {
       .element(page.getByTestId("destination-check-item").nth(0))
       .toHaveTextContent("Токен: успешно");
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("names the Bridge check item Channel", async () => {
+    const bridge: BridgeDestination = {
+      id: "DS0000000000BR",
+      type: "bridge",
+      name: "alerts",
+      connection_id: "CN0000000000BR",
+      channel_id: "ch-nobot",
+      channel_name: null,
+      mentions: defaultMentions(),
+      limiter: { limit: 30, per_seconds: 60 },
+      health: { state: "healthy" },
+      routes: [],
+      created_at: "2026-10-17T09:30:00Z",
+      etag: '"1"',
+    };
+    const forbidden = {
+      ok: false,
+      checks: [
+        {
+          name: "channel",
+          ok: false,
+          code: "channel_forbidden",
+          message: "The bot is not a member of this channel.",
+        },
+      ],
+      health: { state: "healthy" },
+    };
+    const fetch = vi
+      .spyOn(window, "fetch")
+      .mockResolvedValueOnce(json(200, forbidden))
+      .mockResolvedValueOnce(
+        json(200, { ok: true, checks: [{ name: "channel", ok: true }], health: forbidden.health }),
+      )
+      .mockResolvedValue(json(200, forbidden));
+    const screen = await render(
+      providers(<DestinationCheck destination={bridge} dirty={false} />, WRITE),
+    );
+    const check = page.getByRole("button", { name: "Check", exact: true });
+    await check.click();
+    await expect
+      .element(page.getByTestId("destination-check-item"))
+      .toHaveTextContent(
+        "Channel: failed The bridge refused the channel: it does not exist, or the bot cannot use it.Details: The bot is not a member of this channel.",
+      );
+    await check.click();
+    await expect
+      .element(page.getByTestId("destination-check-summary"))
+      .toHaveTextContent("Check passed");
+    await expect
+      .element(page.getByTestId("destination-check-item"))
+      .toHaveTextContent("Channel: ok");
+    expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/destinations/DS0000000000BR/checks");
+    await screen.unmount();
+
+    await i18n.changeLanguage("ru");
+    await render(providers(<DestinationCheck destination={bridge} dirty={false} />, WRITE));
+    await page.getByRole("button", { name: "Проверить", exact: true }).click();
+    await expect
+      .element(page.getByTestId("destination-check-item"))
+      .toHaveTextContent(
+        "Канал: ошибка Мост отклонил канал: его нет или бот не может им пользоваться.Подробности: The bot is not a member of this channel.",
+      );
   });
 
   test("names a busy messenger with its wait", async () => {

@@ -4,14 +4,14 @@
 // The health of a Destination (C-13.FR-9, C-11.FR-9; reference.md, banners): "Healthy", or "Broken" with the banner
 // "Broken since HH:MM: {reason}. Muster tries again every {interval}." in the user's time zone. The reason comes from
 // the messenger and is shown as text only. The list, the Destination page and the Route editor's Destinations section
-// show the same banner.
+// show the same banner. The messenger of a Bridge Destination is the one its Connection's bridge names (C-22.FR-1).
 
 import type { TFunction } from "i18next";
 import { CircleCheckIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { DestinationHealth, DestinationType } from "../api/gen/model";
+import type { Connection, DestinationHealth, DestinationType } from "../api/gen/model";
 import { formatDuration, useTimeFormat } from "../lib/time";
 import { cn } from "./ui/utils";
 
@@ -30,6 +30,24 @@ export function destinationTypeName(t: TFunction, type: DestinationType): string
     default:
       return t("destinations.types.webhook");
   }
+}
+
+/**
+ * The messenger of a Bridge Destination: the name the bridge of its Connection gave in the info a check read, untrusted
+ * text shown as text only; the type's name "Bridge" until one was read or without the Connection.
+ */
+export function bridgeMessengerName(t: TFunction, connection: Connection | undefined): string {
+  const name = connection?.type === "bridge" ? connection.info?.messenger.name : undefined;
+  return name || t("destinations.types.bridge");
+}
+
+/** The messenger of a Destination: the type's name, or for a Bridge the messenger of its Connection. */
+export function destinationMessengerName(
+  t: TFunction,
+  type: DestinationType,
+  connection?: Connection,
+): string {
+  return type === "bridge" ? bridgeMessengerName(t, connection) : destinationTypeName(t, type);
 }
 
 export function healthText(t: TFunction, health: DestinationHealth): string {
