@@ -2,15 +2,17 @@
 // Copyright The Muster Authors
 
 // Package outbound is the only code that makes outbound HTTP requests (ADR-0015, C-02.FR-20 to FR-22): clients are
-// built per client class with a connect timeout and an overall timeout, never follow redirects, classify every answer
-// into an outcome, retry by the policy of their class, redact registered secrets from everything they log and return,
-// count their requests in the muster_client_* metrics, and connect only to addresses that pass the Organization's
-// outbound address policy, directly or through their own proxy. No other package creates an http.Client or an
-// http.Transport (architecture lint 4).
+// built per client class with a connect timeout and an overall timeout, never follow redirects, name Muster and its
+// version in the User-Agent of every request and every CONNECT to a proxy, classify every answer into an outcome,
+// retry by the policy of their class, redact registered secrets from everything they log and return, count their
+// requests in the muster_client_* metrics, and connect only to addresses that pass the Organization's outbound address
+// policy, directly or through their own proxy. No other package creates an http.Client or an http.Transport
+// (architecture lint 4).
 package outbound
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -26,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
@@ -33,6 +36,15 @@ import (
 
 // DefaultMaxBodyBytes is how much of an answer a client reads unless its configuration says otherwise.
 const DefaultMaxBodyBytes = 8 << 20
+
+// userAgent is the User-Agent of every request that does not set its own, and of every CONNECT to a proxy: Muster and
+// its version, nothing else.
+var userAgent = userAgentOf(buildinfo.Version)
+
+// userAgentOf is the User-Agent for version, without the v that a tag may carry.
+func userAgentOf(version string) string {
+	return "Muster/" + cmp.Or(strings.TrimPrefix(version, "v"), "unknown")
+}
 
 // Config is the configuration of one client.
 type Config struct {
@@ -183,6 +195,7 @@ func (c *Client) build() error {
 		return &http.Transport{
 			DialContext:         d.DialContext,
 			Proxy:               proxy,
+			ProxyConnectHeader:  http.Header{"User-Agent": {userAgent}},
 			ForceAttemptHTTP2:   true,
 			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
 			TLSHandshakeTimeout: cfg.ConnectTimeout,
@@ -381,6 +394,10 @@ func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, err
 	}
 	if req.Header != nil {
 		hreq.Header = req.Header.Clone()
+	}
+	// An outgoing webhook may name its own User-Agent in a header template.
+	if hreq.Header.Get("User-Agent") == "" {
+		hreq.Header.Set("User-Agent", userAgent)
 	}
 	resp, err := c.http.Do(hreq)
 	if err != nil {
