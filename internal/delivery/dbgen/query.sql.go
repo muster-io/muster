@@ -228,7 +228,10 @@ const buttonKeyInUse = `-- name: ButtonKeyInUse :one
 SELECT EXISTS (SELECT 1
                FROM deliveries d
                JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
-               WHERE d.org_id = $1 AND d.actual_button_key_id = $2::text
+               WHERE d.org_id = $1
+                 AND (d.actual_button_key_id = $2::text
+                      OR (d.superseded_button_key_ids <> '{}'
+                          AND d.superseded_button_key_ids @> ARRAY[$2::text]))
                  AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld')
                  AND g.status <> 'resolved')::boolean AS in_use
 `
@@ -239,7 +242,9 @@ type ButtonKeyInUseParams struct {
 }
 
 // ButtonKeyInUse reports whether a delivery of an open Alert Group that is not deleted in the messenger, retired or
-// withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed.
+// withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed: on its Root
+// message, or on an older one a republication past a bridge's edit window replaced, whose buttons still work
+// (C-22.FR-9). The second lookup repeats superseded_button_key_ids <> '{}' so that it uses the partial GIN index.
 func (q *Queries) ButtonKeyInUse(ctx context.Context, arg ButtonKeyInUseParams) (bool, error) {
 	row := q.db.QueryRow(ctx, buttonKeyInUse, arg.OrgID, arg.KeyID)
 	var in_use bool

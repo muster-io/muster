@@ -38,7 +38,8 @@ type KeyStatus struct {
 	Removable bool
 	State     KeyState
 	// EncryptedValues are the rows of encrypted_values the key encrypted, and OpenMessages the Root messages of open
-	// Alert Groups, not deleted in the messenger, retired or withheld, whose buttons it signed.
+	// Alert Groups, not deleted in the messenger, retired or withheld, whose buttons it signed, the older ones a
+	// republication past a bridge's edit window replaced included.
 	EncryptedValues int64
 	OpenMessages    int64
 }
@@ -79,10 +80,13 @@ func NewStatusQueries(db dbgen.DBTX) StatusQueries {
 // Organization.
 //
 // A key is needed when a row of encrypted_values carries its id or a delivery of an open Alert Group that is not
-// deleted in the messenger, retired or withheld has it as actual_button_key_id: the re-render after a rotation never
-// re-signs those, so they must not keep a key needed. It was active before when it is the active key, when it is
-// the before or after value of /active_key_id in a keyring.key_activated Audit entry, or when it is needed: only the
-// active key encrypts or signs. It is removable when it was active before and is neither active nor needed.
+// deleted in the messenger, retired or withheld has it as actual_button_key_id or among superseded_button_key_ids, the
+// keys of the older Root messages a republication past a bridge's edit window replaced, whose buttons still work
+// (C-22.FR-9). The re-render after a rotation never re-signs a delivery deleted in the messenger, retired or withheld,
+// so such a delivery must not keep a key needed; nor does it re-sign an older Root message, whose key stays needed
+// until its Alert Group resolves. It was active before when it is the active key, when it is the before or after value
+// of /active_key_id in a keyring.key_activated Audit entry, or when it is needed: only the active key encrypts or
+// signs. It is removable when it was active before and is neither active nor needed.
 func ReadStatus(ctx context.Context, q StatusQueries, held []string, now time.Time) (Status, error) {
 	active, err := q.GetActiveKeyID(ctx)
 	if err != nil {

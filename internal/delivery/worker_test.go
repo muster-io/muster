@@ -123,12 +123,13 @@ type (
 		// actualKey is actual_button_key_id: the key that signed the buttons of the message sent, empty for none.
 		actualKey *string
 		// actualStatus is the status the Root message shows, nil when unknown; pastEditWindow says that it is past its
-		// bridge's edit window, restarted is the start of a republication past it, and superseded are the ids of the
-		// older Root messages a republication replaced.
+		// bridge's edit window, restarted is the start of a republication past it, superseded are the ids of the
+		// older Root messages a republication replaced and supersededKeys the keys that signed their buttons.
 		actualStatus   *string
 		pastEditWindow bool
 		restarted      *time.Time
 		superseded     []string
+		supersededKeys []string
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -783,6 +784,9 @@ func (f *fakeDB) RecordRepublished(_ context.Context, arg dbgen.RecordRepublishe
 	}
 	if d.messageID != nil {
 		d.superseded = append(d.superseded, *d.messageID)
+		if d.actualKey != nil {
+			d.supersededKeys = append(d.supersededKeys, *d.actualKey)
+		}
 	}
 	d.messageID, d.messageURL, d.anchorID = &arg.MessageID, strOf(arg.MessageUrl), strOf(arg.ThreadRef)
 	// published_at = CASE WHEN @replayed THEN coalesce(republication_started_at, @now) ELSE @now END
