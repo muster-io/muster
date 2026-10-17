@@ -20,10 +20,13 @@ import (
 	"github.com/muster-io/muster/internal/messages"
 )
 
-// Bindings are delivery's read of what an event about a message of a Bridge Connection is bound to, declared by
-// their consumer; *delivery.Service implements them.
+// Bindings are what delivery does for an event about a message of a Bridge Connection, declared by their consumer:
+// the reads of what a press or a Thread message is bound to, and the deleted Root message flow of a message_deleted
+// event; *delivery.Service implements them.
 type Bindings interface {
 	BridgePressBinding(ctx context.Context, connectionID int64, messageID string) (delivery.BridgeBinding, error)
+	BridgeThreadBinding(ctx context.Context, connectionID int64, messageID string) (delivery.BridgeBinding, error)
+	RootDeleted(ctx context.Context, connectionID int64, messageID string) (bool, error)
 }
 
 // Links map an account of a Bridge Connection to its User; *accountlinks.Service implements them.
@@ -31,7 +34,7 @@ type Links interface {
 	Lookup(ctx context.Context, identitySpace, externalID string) (accountlinks.User, error)
 }
 
-// Commands are the Commands a press runs; *groups.Service implements them.
+// Commands are the Commands a press or a Text command runs; *groups.Service implements them.
 type Commands interface {
 	Acknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	Unacknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
@@ -58,11 +61,20 @@ const (
 // has, or a Command its kind of message does not carry.
 var errUnverifiable = errors.New("the button names no command of its message")
 
-// pressed is what a press led to, as bridge_press logs it, with the text it is answered with, empty for none.
+// pressed is what a press or a Text command led to, as bridge_press or bridge_text_command logs it, with the text it is
+// answered with, empty for none.
 type pressed struct {
 	group, command, outcome string
 	answer                  string
 	err                     error
+}
+
+// handled is what the press or the Text command ev of the Connection c led to as Handle logs and answers it: the line,
+// bridge_press or bridge_text_command, with the Connection, the Alert Group, the Command, the outcome and the account.
+func (r pressed) handled(line logging.Event, c Conn, ev Event) handled {
+	return handled{line: line, fields: []logging.Field{logging.F("connection", c.PublicID),
+		logging.F("group", r.group), logging.F("command", r.command), logging.F("outcome", r.outcome),
+		logging.F("external_id", ev.User.ExternalId)}, answer: r.answer, err: r.err}
 }
 
 // press handles a press that is recent enough (C-22.FR-12): it returns the bridge_press line and the answer, which
@@ -73,9 +85,7 @@ func (e *Events) press(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err != nil {
 		return handled{}, err
 	}
-	return handled{line: logging.BridgePress, fields: []logging.Field{logging.F("connection", c.PublicID),
-		logging.F("group", r.group), logging.F("command", r.command), logging.F("outcome", r.outcome),
-		logging.F("external_id", ev.User.ExternalId)}, answer: r.answer, err: r.err}, nil
+	return r.handled(logging.BridgePress, c, ev), nil
 }
 
 // pressOf verifies, binds and runs the press ev of the Connection c. The data — the compact action id, its key id
@@ -121,9 +131,7 @@ func (e *Events) pressOf(ctx context.Context, c Conn, ev Event) (pressed, error)
 	r := pressed{group: a.PublicID, command: a.Command}
 	switch {
 	case !linked:
-		r.outcome = outcomeNotLinked
-		r.answer = messages.T(messages.LanguageEnglish, "bridge.notLinked",
-			messages.Args{"link": strings.TrimSuffix(e.PublicURL, "/") + "/profile"})
+		r.outcome, r.answer = outcomeNotLinked, e.notLinked()
 		return r, nil
 	case u.Status == accountlinks.StatusDisabled:
 		r.outcome, r.answer = outcomeDisabled, messages.T(lang, "press.disabled", nil)
@@ -182,6 +190,13 @@ func (e *Events) lookup(ctx context.Context, c Conn, ev Event) (accountlinks.Use
 		return accountlinks.User{}, false, err
 	}
 	return u, true, nil
+}
+
+// notLinked is the answer to an account without an Account link for the Connection, in English: the link to the
+// profile, where the person links it.
+func (e *Events) notLinked() string {
+	return messages.T(messages.LanguageEnglish, "bridge.notLinked",
+		messages.Args{"link": strings.TrimSuffix(e.PublicURL, "/") + "/profile"})
 }
 
 // language is the language of the answers to a person: the profile language of the User the account is linked to —

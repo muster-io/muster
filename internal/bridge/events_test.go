@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -320,8 +321,8 @@ func (e *eventsEnv) event(t *testing.T, typ string, mutate ...func(map[string]an
 
 // TestEventsHandleEveryType covers C-22.FR-11: an event of each type of the protocol is handled and its id recorded,
 // whatever the Connection's info declares, which Events never reads; an account_link event is acknowledged and changes
-// nothing; an event handled before is acknowledged again without handling. The press, on a message the Connection did
-// not post, is the one line logged.
+// nothing; an event handled before is acknowledged again without handling. The press and the Text command, on a
+// message the Connection did not post, are the lines logged, and the message_deleted event reaches RootDeleted once.
 func TestEventsHandleEveryType(t *testing.T) {
 	e := newEventsEnv(eventTime)
 	for i, typ := range []string{TypePress, TypeThreadMessage, TypeAccountLink, TypeMessageDeleted} {
@@ -336,9 +337,13 @@ func TestEventsHandleEveryType(t *testing.T) {
 			t.Errorf("%s again: %v", typ, err)
 		}
 	}
-	if got := e.log.String(); strings.Count(got, "\n") != 1 ||
-		!strings.Contains(got, pressLine("", "", "unknown_message", "u-bob")+"}") {
+	if got := e.log.String(); strings.Count(got, "\n") != 2 ||
+		!strings.Contains(got, pressLine("", "", "unknown_message", "u-bob")+"}") ||
+		!strings.Contains(got, textLine("", "acknowledge", "unknown_message", "u-bob")+"}") {
 		t.Errorf("logged %s", got)
+	}
+	if d := e.bindings.deletions(); !slices.Equal(d, []string{"3/m9"}) {
+		t.Errorf("RootDeleted for %v", d)
 	}
 }
 
@@ -373,7 +378,8 @@ func TestEventsDropAnOldPress(t *testing.T) {
 		t.Errorf("a press past MaxAge = %v, logged %s", err, e.log.String())
 	}
 	e = newEventsEnv(eventTime.Add(2 * EventMaxAge))
-	if err := e.events.Handle(t.Context(), e.conn, e.event(t, TypeThreadMessage)); err != nil || e.log.String() != "" {
+	if err := e.events.Handle(t.Context(), e.conn, e.event(t, TypeThreadMessage)); err != nil ||
+		strings.Contains(e.log.String(), "bridge_press_dropped") {
 		t.Errorf("an old Thread message = %v, logged %s", err, e.log.String())
 	}
 }
@@ -516,5 +522,42 @@ func TestParallelEventsBound(t *testing.T) {
 	close(e.store.hold)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMessageDeletedCallsRootDeleted covers C-22.FR-10 and AC-17 on the event side: a message_deleted event hands the
+// Connection and the message to delivery's deleted Root message flow at once, whatever the message and however old the
+// event, and is recorded, answered by nothing and logged by nothing; delivery decides that only the current Root
+// message of an open delivery changes anything. A flow that fails fails the event, which is not recorded and runs the
+// flow again on redelivery.
+func TestMessageDeletedCallsRootDeleted(t *testing.T) {
+	e := newEventsEnv(eventTime.Add(2 * EventMaxAge))
+	for i, m := range []string{"m1", "m0", "r1"} {
+		e.handle(t, e.event(t, TypeMessageDeleted, member("id", fmt.Sprintf("ev-%d", i)), member("message_id", m)))
+		if !e.store.recorded(e.conn.ID, fmt.Sprintf("ev-%d", i)) {
+			t.Errorf("the deletion of %s was not recorded", m)
+		}
+	}
+	if d := e.bindings.deletions(); !slices.Equal(d, []string{"3/m1", "3/m0", "3/r1"}) {
+		t.Errorf("RootDeleted for %v", d)
+	}
+	if e.log.String() != "" || e.path.calls() != 0 || len(e.commands.ran()) != 0 {
+		t.Errorf("logged %s, %d answers, commands %+v", e.log.String(), e.path.calls(), e.commands.ran())
+	}
+	e.bindings.mu.Lock()
+	e.bindings.deleteErr = errors.New("the database is down")
+	e.bindings.mu.Unlock()
+	ev := e.event(t, TypeMessageDeleted, member("id", "ev-x"))
+	if err := e.events.Handle(t.Context(), e.conn, ev); err == nil || e.store.recorded(e.conn.ID, "ev-x") ||
+		!strings.Contains(e.log.String(), `"event":"bridge_event_failed","connection":"CN0000000000B3",`+
+			`"event_id":"ev-x","type":"message_deleted","error":"`) {
+		t.Errorf("a failed flow = %v, logged %s", err, e.log.String())
+	}
+	e.bindings.mu.Lock()
+	e.bindings.deleteErr = nil
+	e.bindings.mu.Unlock()
+	e.handle(t, ev)
+	if d := e.bindings.deletions(); len(d) != 5 || d[4] != "3/m1" || !e.store.recorded(e.conn.ID, "ev-x") {
+		t.Errorf("redelivered: RootDeleted for %v", d)
 	}
 }

@@ -474,6 +474,10 @@ func CommandsLine(m Message, mentionsOnly bool) string {
 	return T(m.Language, key, Args{"commands": strings.Join(words, " · ")})
 }
 
+// CommandDuration is a Snooze duration in lang as a Text command writes it (C-22.FR-14), as the commands line of a
+// Root message shows it: the answer to a Snooze for a duration the Route does not have names the Route's this way.
+func CommandDuration(lang string, seconds int64) string { return commandDuration(lang, seconds) }
+
 // commandDuration is a Snooze duration as a Text command writes it (C-22.FR-14): days above a day, then hours, or
 // minutes rounded up — "1h", "24h", "2d", "30m"; "1ч" in Russian.
 func commandDuration(lang string, seconds int64) string {

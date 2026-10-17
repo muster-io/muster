@@ -231,11 +231,12 @@ type handled struct {
 // event is acknowledged. Every event type of the protocol is handled, whatever the Connection's info declares.
 type Events struct {
 	Store Connections
-	// Bindings find the message an event names among the Connection's deliveries.
+	// Bindings find the message an event names among the Connection's deliveries, and start the deleted Root message
+	// flow.
 	Bindings Bindings
 	// Links map the account behind an event to its User.
 	Links Links
-	// Commands run the Commands of presses through the dispatcher.
+	// Commands run the Commands of presses and Text commands through the dispatcher.
 	Commands Commands
 	// Roles are the Permissions of each Role, which a linked User acts with.
 	Roles auth.Roles
@@ -248,8 +249,8 @@ type Events struct {
 	Budget time.Duration
 	// PublicURL is MUSTER_PUBLIC_URL, the base of the profile link of an account without an Account link.
 	PublicURL string
-	// Clocks: the real clock dates the age of a press against bridge.event_max_age, and a Snooze lasts its duration
-	// from the business clock.
+	// Clocks: the real clock dates the age of a press or a Text command against bridge.event_max_age, and a Snooze
+	// lasts its duration from the business clock.
 	Clocks clock.Clocks
 	// MaxAge is bridge.event_max_age; zero is EventMaxAge.
 	MaxAge time.Duration
@@ -325,19 +326,29 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 
 // dispatch handles ev of the Connection c inside its claim and returns what to answer and log once the claim
 // committed; it sends nothing. An event whose context ended fails, so that it is not recorded. A press older than
-// MaxAge by the real clock is dropped, unanswered; a recent one runs its Command (presses.go). An account_link event is
-// acknowledged and changes nothing until Account links through a Bridge exist.
+// MaxAge by the real clock is dropped, unanswered; a recent one runs its Command (presses.go). A Thread message that is
+// a Text command runs its Command, and any other is ignored (commands.go). A message_deleted event starts the deleted
+// Root message flow at once when it names the current Root message of an open delivery, and changes nothing
+// otherwise; a failed start fails the event (C-22.FR-10). An account_link event is acknowledged and changes nothing
+// until Account links through a Bridge exist.
 func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err := ctx.Err(); err != nil {
 		return handled{}, err
 	}
-	if ev.Type == TypePress {
+	switch ev.Type {
+	case TypePress:
 		if age, old := e.tooOld(ev); old {
 			return handled{line: logging.BridgePressDropped, fields: []logging.Field{
 				logging.F("connection", c.PublicID), logging.F("external_id", ev.User.ExternalId),
 				logging.F("age_seconds", int64(age/time.Second))}}, nil
 		}
 		return e.press(ctx, c, ev)
+	case TypeThreadMessage:
+		return e.thread(ctx, c, ev)
+	case TypeMessageDeleted:
+		if _, err := e.Bindings.RootDeleted(ctx, c.ID, ev.MessageID); err != nil {
+			return handled{}, err
+		}
 	}
 	return handled{}, nil
 }
