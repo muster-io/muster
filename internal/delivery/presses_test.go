@@ -415,8 +415,7 @@ func (f *fakeDB) bridgeRoot(conn int64, messageID string, older bool) (dbgen.Get
 			(older && !slices.Contains(d.superseded, messageID)) {
 			continue
 		}
-		return dbgen.GetBridgeRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
-			DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
+		return dbgen.GetBridgeRootBindingRow{GroupPublicID: g.publicID,
 			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, true
 	}
 	return dbgen.GetBridgeRootBindingRow{}, false
@@ -461,8 +460,7 @@ func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridge
 			*r.messageID != arg.MessageID {
 			continue
 		}
-		return dbgen.GetBridgeReminderBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
-			DestinationName: ds.name, GroupPublicID: g.publicID, GroupNumber: g.number,
+		return dbgen.GetBridgeReminderBindingRow{GroupPublicID: g.publicID,
 			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, nil
 	}
 	return dbgen.GetBridgeReminderBindingRow{}, pgx.ErrNoRows
@@ -490,25 +488,26 @@ func TestBridgePressBinding(t *testing.T) {
 			messageID: &reminder},
 		&fakeReply{id: 2, delivery: 1, group: groupID, dest: destMM, event: "alerts_added", state: "sent",
 			messageID: &other})
-	conn := int64(connID)
-	dest := delivery.Destination{ID: destMM, PublicID: bridgePublicID, Name: "alerts", Type: delivery.TypeBridge,
-		Connection: &conn}
 	for _, tc := range []struct {
 		message string
-		want    delivery.BridgeBinding
+		kind    buttons.Subject
+		// reads are the reads of the binding, the current Root message's first.
+		reads []string
 	}{
-		{"m3", delivery.BridgeBinding{Kind: buttons.SubjectRoot}},
-		{"m1", delivery.BridgeBinding{Kind: buttons.SubjectRoot, Superseded: true}},
-		{"m2", delivery.BridgeBinding{Kind: buttons.SubjectRoot, Superseded: true}},
-		{"r-1", delivery.BridgeBinding{Kind: buttons.SubjectReply}},
+		{"m3", buttons.SubjectRoot, []string{"GetBridgeRootBinding"}},
+		{"m1", buttons.SubjectRoot, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+		{"m2", buttons.SubjectRoot, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+		{"r-1", buttons.SubjectReply, []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding",
+			"GetBridgeReminderBinding"}},
 	} {
+		calls := maps.Clone(e.db.calls)
 		b, err := e.svc.BridgePressBinding(t.Context(), connID, tc.message)
-		if err != nil || b.Kind != tc.want.Kind || b.Superseded != tc.want.Superseded ||
-			b.Destination.ID != dest.ID || b.Destination.PublicID != dest.PublicID || b.Destination.Name != dest.Name ||
-			b.Destination.Type != dest.Type || b.Destination.Connection == nil || *b.Destination.Connection != conn ||
-			b.GroupPublicID != "AGAAAAAAAAAA21" || b.GroupNumber != 7 ||
+		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" ||
 			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) {
 			t.Errorf("BridgePressBinding(%s) = %+v, %v", tc.message, b, err)
+		}
+		if got := readsSince(calls, e.db.calls); !slices.Equal(got, tc.reads) {
+			t.Errorf("BridgePressBinding(%s) read %v", tc.message, got)
 		}
 	}
 	for _, c := range []struct {
@@ -564,9 +563,20 @@ func TestBridgePressBindingPrefersTheCurrentRootMessage(t *testing.T) {
 		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", superseded: []string{m}},
 		&fakeDelivery{id: 2, dest: destMM, group: groupID + 1, state: "delivered", messageID: &m})
 	b, err := e.svc.BridgePressBinding(t.Context(), connID, m)
-	if err != nil || b.GroupPublicID != "AGAAAAAAAAAA22" || b.Superseded {
+	if err != nil || b.GroupPublicID != "AGAAAAAAAAAA22" || e.db.calls["GetBridgeSupersededBinding"] != 0 {
 		t.Errorf("BridgePressBinding = %+v, %v", b, err)
 	}
+}
+
+// readsSince are the reads of a Bridge binding made since before, in the order the bindings make them.
+func readsSince(before, now map[string]int) []string {
+	var out []string
+	for _, q := range []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding"} {
+		if now[q] != before[q] {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // TestPressOnTheOlderRootMessage is C-22.FR-9 and FR-12 on the delivery side: a press on the older Root message of a
@@ -584,9 +594,10 @@ func TestPressOnTheOlderRootMessage(t *testing.T) {
 		t.Fatalf("not republished: %+v", d)
 	}
 	e.rec.Reset()
+	calls := maps.Clone(e.db.calls)
 	b, err := e.svc.BridgePressBinding(t.Context(), connID, "m1")
-	if err != nil || b.Kind != buttons.SubjectRoot || !b.Superseded || b.GroupPublicID != "AGAAAAAAAAAA21" ||
-		b.GroupNumber != 7 || b.Destination.PublicID != bridgePublicID {
+	if err != nil || b.Kind != buttons.SubjectRoot || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+		!slices.Equal(readsSince(calls, e.db.calls), []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}) {
 		t.Fatalf("BridgePressBinding(m1) = %+v, %v", b, err)
 	}
 	untouched := func(when string) {
@@ -613,14 +624,17 @@ func TestPressOnTheOlderRootMessage(t *testing.T) {
 	e.rec.Script(deliverytest.MethodPublish, publishedAs("m3", "t-3"))
 	e.acknowledged(t, 4)
 	e.round(t)
-	calls := e.rec.Calls()
-	if callMethods(calls) != "publish,reply" || calls[1].Root.MessageID != "m2" ||
+	sent := e.rec.Calls()
+	if callMethods(sent) != "publish,reply" || sent[1].Root.MessageID != "m2" ||
 		!slices.Equal(d.superseded, []string{"m1", "m2"}) || *d.messageID != "m3" {
-		t.Errorf("past the window: %s %+v, delivery %+v", callMethods(calls), calls, d)
+		t.Errorf("past the window: %s %+v, delivery %+v", callMethods(sent), sent, d)
 	}
 	untouched("past the window")
 	for _, m := range []string{"m1", "m2"} {
-		if b, err := e.svc.BridgePressBinding(t.Context(), connID, m); err != nil || !b.Superseded {
+		calls := maps.Clone(e.db.calls)
+		if b, err := e.svc.BridgePressBinding(t.Context(), connID, m); err != nil ||
+			b.GroupPublicID != "AGAAAAAAAAAA21" || !slices.Equal(readsSince(calls, e.db.calls),
+			[]string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}) {
 			t.Errorf("BridgePressBinding(%s) after two republications = %+v, %v", m, b, err)
 		}
 	}
@@ -672,15 +686,17 @@ func TestBridgeThreadBinding(t *testing.T) {
 	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM,
 		event: "reminder", state: "sent", messageID: &reminder})
 	for _, tc := range []struct {
-		message    string
-		superseded bool
-	}{{"m3", false}, {"m1", true}} {
+		message string
+		reads   []string
+	}{
+		{"m3", []string{"GetBridgeRootBinding"}},
+		{"m1", []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding"}},
+	} {
+		calls := maps.Clone(e.db.calls)
 		b, err := e.svc.BridgeThreadBinding(t.Context(), connID, tc.message)
-		if err != nil || b.Kind != buttons.SubjectRoot || b.Superseded != tc.superseded ||
-			b.Destination.PublicID != bridgePublicID || b.Destination.Type != delivery.TypeBridge ||
-			b.Destination.Connection == nil || *b.Destination.Connection != connID ||
-			b.GroupPublicID != "AGAAAAAAAAAA21" || b.GroupNumber != 7 ||
-			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+		if err != nil || b.Kind != buttons.SubjectRoot || b.GroupPublicID != "AGAAAAAAAAAA21" ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) ||
+			!slices.Equal(readsSince(calls, e.db.calls), tc.reads) {
 			t.Errorf("BridgeThreadBinding(%s) = %+v, %v", tc.message, b, err)
 		}
 	}
@@ -736,9 +752,8 @@ func TestRootDeleted(t *testing.T) {
 	deleted := time.Date(2026, 10, 7, 12, 42, 0, 0, time.UTC)
 	e.business.Set(deleted)
 	woken, hints := e.db.notified, len(e.db.hints)
-	found, err := e.svc.RootDeleted(t.Context(), connID, "m1")
-	if err != nil || !found {
-		t.Fatalf("RootDeleted(m1) = %v, %v", found, err)
+	if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+		t.Fatalf("RootDeleted(m1) = %v", err)
 	}
 	if d.state != "pending" || !d.republished || d.messageID != nil || d.threadState != "none" || d.anchorID != nil ||
 		!d.next.Equal(deleted) || e.db.notified != woken+1 || len(e.db.hints) != hints+1 {
@@ -763,18 +778,21 @@ func TestRootDeleted(t *testing.T) {
 	e.db.replies = append(e.db.replies, &fakeReply{id: 1, delivery: d.id, group: groupID, dest: destMM,
 		event: "alerts_added", state: pending})
 	e.rec.Reset()
-	if found, err := e.svc.RootDeleted(t.Context(), connID, "m2"); err != nil || !found {
-		t.Fatalf("RootDeleted(m2) = %v, %v", found, err)
+	if err := e.svc.RootDeleted(t.Context(), connID, "m2"); err != nil {
+		t.Fatalf("RootDeleted(m2) = %v", err)
 	}
 	if d.state != "deleted_in_messenger" || e.db.replies[0].state != "dropped" ||
 		e.eventKinds()[len(e.db.events)-1] != "deleted_in_messenger" {
 		t.Errorf("the pair %+v, reply %s, events %v", d, e.db.replies[0].state, e.eventKinds())
 	}
-	events := len(e.db.events)
+	events, lockedRows := len(e.db.events), e.db.calls["LockBridgeDeletedRoot"]
 	for _, m := range []string{"m2", "m1"} {
-		if found, err := e.svc.RootDeleted(t.Context(), connID, m); err != nil || found {
-			t.Errorf("RootDeleted(%s) after the pair = %v, %v", m, found, err)
+		if err := e.svc.RootDeleted(t.Context(), connID, m); err != nil || len(e.db.events) != events {
+			t.Errorf("RootDeleted(%s) after the pair = %v, events %v", m, err, e.eventKinds())
 		}
+	}
+	if e.db.calls["LockBridgeDeletedRoot"] != lockedRows+2 {
+		t.Errorf("%d locks after the pair", e.db.calls["LockBridgeDeletedRoot"]-lockedRows)
 	}
 	e.business.Advance(time.Hour)
 	e.round(t)
@@ -789,8 +807,8 @@ func TestRootDeletedResolved(t *testing.T) {
 	e, d, _ := publishedBridge(t, publishedAs("m1", "t-1"))
 	e.db.groups[groupID].status = string(groups.StatusResolved)
 	e.db.events = nil
-	if found, err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil || !found {
-		t.Fatalf("RootDeleted = %v, %v", found, err)
+	if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+		t.Fatalf("RootDeleted = %v", err)
 	}
 	if d.state != "deleted_in_messenger" || d.republished || !slices.Equal(e.eventKinds(), []string{
 		"deleted_in_messenger"}) {
@@ -806,8 +824,8 @@ func TestRootDeletedStormSummary(t *testing.T) {
 	d := &fakeDelivery{id: 1, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
 		publishedAt: at(business0)}
 	e.db.deliveries = append(e.db.deliveries, d)
-	if found, err := e.svc.RootDeleted(t.Context(), connID, "s-1"); err != nil || !found {
-		t.Fatalf("RootDeleted = %v, %v", found, err)
+	if err := e.svc.RootDeleted(t.Context(), connID, "s-1"); err != nil {
+		t.Fatalf("RootDeleted = %v", err)
 	}
 	if d.state != "pending" || !d.republished || d.messageID != nil || len(e.db.events) != 1 ||
 		e.db.events[0].StormID.Int64 != 9 || e.db.events[0].AlertGroupID.Valid {
@@ -838,8 +856,8 @@ func TestRootDeletedOtherMessages(t *testing.T) {
 		conn    int64
 		message string
 	}{{connID, "m0"}, {connID, "r-1"}, {connID, "m9"}, {connID, ""}, {connID + 1, "m1"}} {
-		if found, err := e.svc.RootDeleted(t.Context(), c.conn, c.message); err != nil || found {
-			t.Errorf("RootDeleted(%d, %q) = %v, %v", c.conn, c.message, found, err)
+		if err := e.svc.RootDeleted(t.Context(), c.conn, c.message); err != nil {
+			t.Errorf("RootDeleted(%d, %q) = %v", c.conn, c.message, err)
 		}
 		unchanged(c.message)
 	}
@@ -850,16 +868,16 @@ func TestRootDeletedOtherMessages(t *testing.T) {
 	} {
 		ds, row := *e.db.dests[destMM], *d
 		change()
-		if found, err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil || found {
-			t.Errorf("%s: RootDeleted = %v, %v", name, found, err)
+		if err := e.svc.RootDeleted(t.Context(), connID, "m1"); err != nil {
+			t.Errorf("%s: RootDeleted = %v", name, err)
 		}
 		*e.db.dests[destMM], *d = ds, row
 		unchanged(name)
 	}
 	for _, q := range []string{"LockBridgeDeletedRoot", "ResetForRepublish", "InsertDeliveryEvent", "NotifyDelivery"} {
 		e.db.fail[q] = errBoom
-		if found, err := e.svc.RootDeleted(t.Context(), connID, "m1"); !errors.Is(err, errBoom) || found {
-			t.Errorf("a failed %s = %v, %v", q, found, err)
+		if err := e.svc.RootDeleted(t.Context(), connID, "m1"); !errors.Is(err, errBoom) {
+			t.Errorf("a failed %s = %v", q, err)
 		}
 		delete(e.db.fail, q)
 		*d = before

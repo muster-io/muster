@@ -5,6 +5,7 @@ package bridge
 
 import (
 	"context"
+	"maps"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -39,7 +40,9 @@ const (
 // so that a new Leader goes on where the old one stopped. A cursor the bridge refuses as invalid is dropped, and the
 // next poll starts without one. A failed call backs off from 1 s to 1 min, counted per call, and logs bridge_poll_failed
 // at the first failure in a row and every tenth; it is no delivery outcome and makes nothing Broken. A batch whose
-// handling fails keeps the cursor, so that it is polled again.
+// handling fails keeps the cursor, so that it is polled again. A Connection whose client cannot be built is not
+// polled; bridge_poll_failed is logged at the first read of the Connections that finds it so and every tenth, counted
+// for each version of the Connection.
 //
 // Every call runs under the context of the run, so that losing leadership or stopping the replica cancels a poll in
 // flight at once. Running it on a frozen old Leader and its successor at once is safe: an event polled twice is handled
@@ -83,12 +86,19 @@ type pollWorker struct {
 	done    chan struct{}
 }
 
+// unbuilt counts the reads in a row that found the client of one version of a Connection impossible to build.
+type unbuilt struct {
+	version  int64
+	failures int
+}
+
 // Run polls until ctx ends, which is when the Leader loses the lock or stops, and stops every loop before it returns:
 // a loop starts for each Bridge Connection in poll mode, starts again when the Connection's version changes and stops
-// when it leaves poll mode or is deleted. A failed read of the Connections stops them too and returns its error, so
-// that the Leader task runs again.
+// when it leaves poll mode or is deleted, or its client cannot be built. A failed read of the Connections stops them
+// too and returns its error, so that the Leader task runs again.
 func (p *Poller) Run(ctx context.Context) error {
 	running := map[int64]*pollWorker{}
+	broken := map[int64]unbuilt{}
 	stop := func(id int64) {
 		w := running[id]
 		w.cancel()
@@ -113,9 +123,23 @@ func (p *Poller) Run(ctx context.Context) error {
 			return err
 		}
 		want := make(map[int64]Polled, len(list))
+		listed := make(map[int64]bool, len(list))
 		for _, c := range list {
-			want[c.Conn.ID] = c
+			listed[c.Conn.ID] = true
+			if c.Err == nil {
+				want[c.Conn.ID] = c
+				delete(broken, c.Conn.ID)
+				continue
+			}
+			b := broken[c.Conn.ID]
+			if b.version != c.Conn.Version {
+				b = unbuilt{version: c.Conn.Version}
+			}
+			b.failures++
+			broken[c.Conn.ID] = b
+			p.logFailure(ctx, c.Conn, c.Err.Error(), b.failures)
 		}
+		maps.DeleteFunc(broken, func(id int64, _ unbuilt) bool { return !listed[id] })
 		for id, w := range running {
 			if c, ok := want[id]; !ok || c.Conn.Version != w.version {
 				stop(id)
@@ -242,13 +266,19 @@ func (p *Poller) handle(ctx context.Context, c Conn, batch Batch) bool {
 	return true
 }
 
-// failed logs the failures-th failure in a row of the Connection c at the first and every tenth, and backs off.
+// failed logs the failures-th failure in a row of the Connection c, and backs off.
 func (p *Poller) failed(ctx context.Context, c Conn, text string, failures int) {
+	p.logFailure(ctx, c, text, failures)
+	p.pause(ctx, p.backoff(failures))
+}
+
+// logFailure logs bridge_poll_failed for the failures-th failure in a row of the Connection c at the first and every
+// tenth.
+func (p *Poller) logFailure(ctx context.Context, c Conn, text string, failures int) {
 	if failures == 1 || failures%failureLogEvery == 0 {
 		p.Log.Log(ctx, logging.BridgePollFailed, logging.F("connection", c.PublicID),
 			logging.F("failures", failures), logging.F("error", text))
 	}
-	p.pause(ctx, p.backoff(failures))
 }
 
 // backoff is the wait after n failures in a row: exponential from 1 s up to 1 min, with equal jitter.

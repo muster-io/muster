@@ -84,7 +84,7 @@ The Organization has no Admin and the bootstrap variables are not set, so nobody
 
 WARN · fields: `connection`, `event_id`, `type`, `error` · C-22
 
-The handling of a Bridge event failed — its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database or the dispatcher refuses it.
+The handling of a Bridge event failed — the read of a pushed event's Connection or of its push secret, its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed; a failed read of the Connection comes before the event is authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database or the dispatcher refuses it.
 
 ### `bridge_event_rejected`
 
@@ -102,7 +102,7 @@ Muster read the info of a Bridge Connection, on a Connection check or because it
 
 WARN · fields: `connection`, `failures`, `error` · C-22
 
-A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the cursor after a batch could not be stored, or the Connection's client could not be built: connection is the public_id of the Connection, failures how many calls in a row failed, and error what failed, masked of the token and the push secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and polls again from the stored cursor. A failed poll makes no Destination Broken.
+A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the cursor after a batch could not be stored, or the Connection's client could not be built: connection is the public_id of the Connection, failures how many calls in a row failed — for a client that cannot be built, how many reads of the Connections in a row found it so, counted for each version of the Connection, which is not polled meanwhile — and error what failed, masked of the token and the push secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and polls again from the stored cursor. A failed poll makes no Destination Broken.
 
 ### `bridge_press`
 

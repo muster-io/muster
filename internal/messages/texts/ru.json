@@ -15,6 +15,7 @@
   "bridge.did.unacknowledge": "Подтверждение снято",
   "bridge.did.unsnooze": "Откладывание отменено",
   "bridge.done": "Готово: {command} #{number}",
+  "bridge.noSnoozeDurations": "У маршрута этой группы алертов нет сроков откладывания; ничего не изменилось.",
   "bridge.notLinked": "Ваша учётная запись не связана с Muster. Свяжите её в профиле: {link}",
   "bridge.snoozeDurations": "Отложить можно на: {durations}",
   "button.acknowledge": "Подтвердить",

@@ -133,7 +133,8 @@ func (e *Events) thread(ctx context.Context, c Conn, ev Event) (handled, error) 
 // the real clock is dropped, unanswered. The message must be a current or older Root message of a Bridge Destination
 // of the Connection, else the Text command is ignored without an answer. The account is mapped to its User through its
 // Account link in the Connection's identity space; an account without a link and a disabled User are answered as
-// their presses are. A Snooze for a duration that is not one of the Route's is answered with the Route's. The Command
+// their presses are. A Snooze for a duration that is not one of the Route's is answered with the Route's, or, on a
+// Route without any, that it has none. The Command
 // runs as that User with the Transport bridge through the dispatcher — "still on it" answers the open Reminder
 // (C-17.FR-10) — and is answered "Done: {command} #N", or with its refusal (C-10.FR-2), in the profile language of the
 // linked User.
@@ -165,12 +166,7 @@ func (e *Events) textCommandOf(ctx context.Context, c Conn, ev Event, tc textCom
 		r.outcome, r.answer = outcomeDisabled, messages.T(lang, "press.disabled", nil)
 		return r, nil
 	case tc.command == buttons.CommandSnooze && !slices.Contains(b.SnoozeSeconds, tc.seconds):
-		durations := make([]string, len(b.SnoozeSeconds))
-		for i, s := range b.SnoozeSeconds {
-			durations[i] = messages.CommandDuration(lang, s)
-		}
-		r.outcome = outcomeUnknownDuration
-		r.answer = messages.T(lang, "bridge.snoozeDurations", messages.Args{"durations": strings.Join(durations, ", ")})
+		r.outcome, r.answer = outcomeUnknownDuration, snoozeDurations(lang, b.SnoozeSeconds)
 		return r, nil
 	}
 	res, err := e.run(ctx, e.caller(u), tc.command, b.GroupPublicID, time.Duration(tc.seconds)*time.Second)
@@ -186,4 +182,18 @@ func (e *Events) textCommandOf(ctx context.Context, c Conn, ev Event, tc textCom
 	}
 	r.outcome, r.answer, r.err = refusal(lang, err)
 	return r, nil
+}
+
+// snoozeDurations is the answer, in lang, to a Snooze for a duration that is not one of seconds, the Route's Snooze
+// durations (C-22.FR-14): the Route's durations as Text commands write them, or, for a Route without any, that it has
+// none, since a Snooze from the Thread needs one of them.
+func snoozeDurations(lang string, seconds []int64) string {
+	if len(seconds) == 0 {
+		return messages.T(lang, "bridge.noSnoozeDurations", nil)
+	}
+	durations := make([]string, len(seconds))
+	for i, s := range seconds {
+		durations[i] = messages.CommandDuration(lang, s)
+	}
+	return messages.T(lang, "bridge.snoozeDurations", messages.Args{"durations": strings.Join(durations, ", ")})
 }

@@ -242,9 +242,9 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
 // Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open
 // Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated, and the polling of the
-// events of Bridge Connections in poll mode (C-22.FR-11). Later capabilities add theirs at the end of the list. The Keeper calls the result at every leadership, so each one
-// starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
-// downtime the takeover records (C-07.FR-4).
+// events of Bridge Connections in poll mode (C-22.FR-11). Later capabilities add theirs at the end of the list. The
+// Keeper calls the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it,
+// so that it measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()

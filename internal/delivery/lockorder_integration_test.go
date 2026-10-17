@@ -187,11 +187,7 @@ func TestRootDeletedAgainstDispatcherLockOrder(t *testing.T) {
 		}
 		l.rec.Reset()
 		l.againstDispatcherDo(t, gid, func(ctx context.Context) error {
-			found, err := l.svc.RootDeleted(ctx, conn, message)
-			if err == nil && !found {
-				t.Errorf("RootDeleted(%s) found no root message", message)
-			}
-			return err
+			return l.svc.RootDeleted(ctx, conn, message)
 		})
 		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
 			WHERE g.public_id = $1 AND g.status = 'acknowledged' AND d.destination_id = $2 AND d.state = 'pending'
@@ -207,8 +203,9 @@ func TestRootDeletedAgainstDispatcherLockOrder(t *testing.T) {
 				"The previous message was deleted at ") || calls[0].Message.Colour != "acknowledged" {
 			t.Errorf("calls %s %+v", callMethods(calls), calls)
 		}
-		if found, err := l.svc.RootDeleted(t.Context(), conn, message); err != nil || found {
-			t.Errorf("RootDeleted(%s) of the deleted message again = %v, %v", message, found, err)
+		if err := l.svc.RootDeleted(t.Context(), conn, message); err != nil ||
+			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind IN ('republished', 'deleted_in_messenger')`) != 1 {
+			t.Errorf("RootDeleted(%s) of the deleted message again = %v\n%s", message, err, l.log)
 		}
 	})
 }

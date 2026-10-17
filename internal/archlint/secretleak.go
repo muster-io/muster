@@ -2027,10 +2027,8 @@ func probeBridgeEvents(ctx context.Context, secrets []string, log io.Writer) err
 type probeBridgeBindings struct{}
 
 func (probeBridgeBindings) BridgePressBinding(context.Context, int64, string) (delivery.BridgeBinding, error) {
-	conn := int64(1)
-	return delivery.BridgeBinding{Kind: buttons.SubjectRoot, Destination: delivery.Destination{ID: 2,
-		PublicID: "DSAAAAAAAAAAA2", Type: delivery.TypeBridge, Connection: &conn}, GroupPublicID: "AGAAAAAAAAAAA1",
-		GroupNumber: 1, SnoozeSeconds: []int64{3600}}, nil
+	return delivery.BridgeBinding{Kind: buttons.SubjectRoot, GroupPublicID: "AGAAAAAAAAAAA1",
+		SnoozeSeconds: []int64{3600}}, nil
 }
 
 func (b probeBridgeBindings) BridgeThreadBinding(ctx context.Context, conn int64, message string) (
@@ -2038,8 +2036,8 @@ func (b probeBridgeBindings) BridgeThreadBinding(ctx context.Context, conn int64
 	return b.BridgePressBinding(ctx, conn, message)
 }
 
-func (probeBridgeBindings) RootDeleted(context.Context, int64, string) (bool, error) {
-	return false, nil
+func (probeBridgeBindings) RootDeleted(context.Context, int64, string) error {
+	return nil
 }
 
 // probeConnections is the one Connection of probeMattermost in memory, with the cursor of its Bridge events and the

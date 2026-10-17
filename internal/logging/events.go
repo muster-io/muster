@@ -714,20 +714,24 @@ var BridgeEventRejected = newEvent("bridge_event_rejected", LevelInfo, "C-22",
 // BridgeEventFailed is logged when the handling of a Bridge event failed and its id was not recorded
 // (C-22.FR-11, FR-24).
 var BridgeEventFailed = newEvent("bridge_event_failed", LevelWarn, "C-22",
-	"The handling of a Bridge event failed — its claim, the read of the message it names or of the Account link, or "+
-		"the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the "+
-		"Connection, event_id the event's id, type its type and error what failed. In poll mode the cursor stays "+
-		"and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines "+
-		"that keep coming for one event mean that the database or the dispatcher refuses it.",
+	"The handling of a Bridge event failed — the read of a pushed event's Connection or of its push secret, its "+
+		"claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its "+
+		"id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, "+
+		"type its type and error what failed; a failed read of the Connection comes before the event is "+
+		"authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is "+
+		"polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming "+
+		"for one event mean that the database or the dispatcher refuses it.",
 	"connection", "event_id", "type", "error")
 
 // BridgePollFailed is logged when a poll of the events of a Bridge Connection failed (C-22.FR-11, FR-24).
 var BridgePollFailed = newEvent("bridge_poll_failed", LevelWarn, "C-22",
 	"A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the "+
 		"cursor after a batch could not be stored, or the Connection's client could not be built: connection is "+
-		"the public_id of the Connection, failures how many calls in a row failed, and error what failed, masked "+
-		"of the token and the push secret. Logged at the first failure and every tenth; the poller backs off from 1 "+
-		"s to 1 min per call and polls again from the stored cursor. A failed poll makes no Destination Broken.",
+		"the public_id of the Connection, failures how many calls in a row failed — for a client that cannot be "+
+		"built, how many reads of the Connections in a row found it so, counted for each version of the "+
+		"Connection, which is not polled meanwhile — and error what failed, masked of the token and the push "+
+		"secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and "+
+		"polls again from the stored cursor. A failed poll makes no Destination Broken.",
 	"connection", "failures", "error")
 
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).

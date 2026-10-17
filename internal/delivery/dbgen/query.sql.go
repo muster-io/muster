@@ -1000,8 +1000,7 @@ func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummary
 }
 
 const getBridgeReminderBinding = `-- name: GetBridgeReminderBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = t.org_id AND g.id = t.alert_group_id
@@ -1019,11 +1018,7 @@ type GetBridgeReminderBindingParams struct {
 }
 
 type GetBridgeReminderBindingRow struct {
-	DestinationID          int64
-	DestinationPublicID    string
-	DestinationName        string
 	GroupPublicID          string
-	GroupNumber            int64
 	SnoozeDurationsSeconds []int64
 }
 
@@ -1034,20 +1029,12 @@ type GetBridgeReminderBindingRow struct {
 func (q *Queries) GetBridgeReminderBinding(ctx context.Context, arg GetBridgeReminderBindingParams) (GetBridgeReminderBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeReminderBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeReminderBindingRow
-	err := row.Scan(
-		&i.DestinationID,
-		&i.DestinationPublicID,
-		&i.DestinationName,
-		&i.GroupPublicID,
-		&i.GroupNumber,
-		&i.SnoozeDurationsSeconds,
-	)
+	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
 	return i, err
 }
 
 const getBridgeRootBinding = `-- name: GetBridgeRootBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1065,11 +1052,7 @@ type GetBridgeRootBindingParams struct {
 }
 
 type GetBridgeRootBindingRow struct {
-	DestinationID          int64
-	DestinationPublicID    string
-	DestinationName        string
 	GroupPublicID          string
-	GroupNumber            int64
 	SnoozeDurationsSeconds []int64
 }
 
@@ -1080,20 +1063,12 @@ type GetBridgeRootBindingRow struct {
 func (q *Queries) GetBridgeRootBinding(ctx context.Context, arg GetBridgeRootBindingParams) (GetBridgeRootBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeRootBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeRootBindingRow
-	err := row.Scan(
-		&i.DestinationID,
-		&i.DestinationPublicID,
-		&i.DestinationName,
-		&i.GroupPublicID,
-		&i.GroupNumber,
-		&i.SnoozeDurationsSeconds,
-	)
+	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
 	return i, err
 }
 
 const getBridgeSupersededBinding = `-- name: GetBridgeSupersededBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1111,11 +1086,7 @@ type GetBridgeSupersededBindingParams struct {
 }
 
 type GetBridgeSupersededBindingRow struct {
-	DestinationID          int64
-	DestinationPublicID    string
-	DestinationName        string
 	GroupPublicID          string
-	GroupNumber            int64
 	SnoozeDurationsSeconds []int64
 }
 
@@ -1125,14 +1096,7 @@ type GetBridgeSupersededBindingRow struct {
 func (q *Queries) GetBridgeSupersededBinding(ctx context.Context, arg GetBridgeSupersededBindingParams) (GetBridgeSupersededBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeSupersededBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeSupersededBindingRow
-	err := row.Scan(
-		&i.DestinationID,
-		&i.DestinationPublicID,
-		&i.DestinationName,
-		&i.GroupPublicID,
-		&i.GroupNumber,
-		&i.SnoozeDurationsSeconds,
-	)
+	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
 	return i, err
 }
 

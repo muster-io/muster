@@ -188,20 +188,24 @@ func checkPerson(raw json.RawMessage, p gen.Person) error {
 }
 
 // Polled is a Bridge Connection that receives its events by polling, with the stored cursor of its events, nil for
-// none.
+// none. Err is why its client could not be built, such as a token that cannot be opened: the Connection then has no
+// client and is not polled.
 type Polled struct {
 	Conn   Conn
 	Cursor *string
+	Err    error
 }
 
 // Connections are the Bridge Connections as the event paths need them, declared by their consumer;
 // *connections.Service implements them and internal/runtime wires it, since internal/connections imports this package.
 type Connections interface {
-	// PushConnection is the Bridge Connection publicID with its client, whose settings hold the push secret, and its
-	// event delivery mode; a Connection that is unknown, deleted or not a Bridge Connection is ErrNoConnection.
+	// PushConnection is the Bridge Connection publicID with its event delivery mode, and in push mode its client,
+	// whose settings hold the push secret; a Connection in poll mode has no client, since its secrets are never opened
+	// for a push. A Connection that is unknown, deleted or not a Bridge Connection is ErrNoConnection.
 	PushConnection(ctx context.Context, publicID string) (Conn, string, error)
 	// PollingConnections lists the Bridge Connections that are not deleted and receive their events by polling, each
-	// with its client, kept until the Connection changes, and its stored cursor.
+	// with its client, kept until the Connection changes, and its stored cursor; one whose client cannot be built has
+	// Err instead of a client.
 	PollingConnections(ctx context.Context) ([]Polled, error)
 	// StoreEventsCursor stores the cursor of the events of c, or drops it when cursor is nil, unless the Connection
 	// changed since c was read.
@@ -260,6 +264,8 @@ type Events struct {
 
 	slotsOnce sync.Once
 	slots     chan struct{}
+	// parked, when set, is called when an event finds no free slot and starts to wait for one; tests set it.
+	parked func()
 }
 
 // slot waits until fewer than Parallel events are being handled, or ctx ends, and returns the release of the slot it
@@ -272,9 +278,18 @@ func (e *Events) slot(ctx context.Context) (func(), error) {
 		}
 		e.slots = make(chan struct{}, n)
 	})
+	release := func() { <-e.slots }
 	select {
 	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
+		return release, nil
+	default:
+	}
+	if e.parked != nil {
+		e.parked()
+	}
+	select {
+	case e.slots <- struct{}{}:
+		return release, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -346,7 +361,7 @@ func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error
 	case TypeThreadMessage:
 		return e.thread(ctx, c, ev)
 	case TypeMessageDeleted:
-		if _, err := e.Bindings.RootDeleted(ctx, c.ID, ev.MessageID); err != nil {
+		if err := e.Bindings.RootDeleted(ctx, c.ID, ev.MessageID); err != nil {
 			return handled{}, err
 		}
 	}

@@ -203,6 +203,31 @@ func TestTextCommandSnoozeDurations(t *testing.T) {
 	}
 }
 
+// TestTextCommandSnoozeWithoutDurations covers C-22.FR-14: on a Route without Snooze durations, a Snooze from the
+// Thread changes nothing and is answered that the Route has none, in the profile language, never with an empty list.
+func TestTextCommandSnoozeWithoutDurations(t *testing.T) {
+	e := newPressEnv(t)
+	for id, b := range e.bindings.bound {
+		b.SnoozeSeconds = nil
+		e.bindings.bound[id] = b
+	}
+	e.handle(t, e.said(t, "ev-1", "m1", "u-bob", "snooze 4h"))
+	e.handle(t, e.said(t, "ev-2", "m0", "u-ivan", "отложить 4ч"))
+	if calls := e.commands.ran(); len(calls) != 0 {
+		t.Errorf("a Snooze without durations ran %+v", calls)
+	}
+	if got := e.texts(t); !slices.Equal(got, []string{
+		"This Alert Group's Route has no Snooze durations; nothing was changed.",
+		"У маршрута этой группы алертов нет сроков откладывания; ничего не изменилось."}) {
+		t.Errorf("answers %q", got)
+	}
+	got := e.log.String()
+	if !strings.Contains(got, textLine(pressGroup, "snooze", "unknown_duration", "u-bob")+"}") ||
+		!strings.Contains(got, textLine(pressGroup, "snooze", "unknown_duration", "u-ivan")+"}") {
+		t.Errorf("logged %s", got)
+	}
+}
+
 // TestTextCommandStillOnIt covers C-22.FR-14 and C-17.FR-10: "still on it" answers the open Reminder through the
 // dispatcher, which refuses it when no Reminder waits or the writer is not the Owner, and the refusal is the answer.
 func TestTextCommandStillOnIt(t *testing.T) {

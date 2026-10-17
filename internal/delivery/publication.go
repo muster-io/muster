@@ -103,16 +103,14 @@ type rootOf struct {
 
 // RootDeleted starts at once the deleted Root message flow (C-11.FR-13) for a message_deleted event of the Bridge
 // Connection connectionID (C-22.FR-10) when messageID is the current Root message of a delivery to a Bridge
-// Destination of the Connection, not deleted, and reports whether it is: the Root message of an open Alert Group is
-// published again, Quietly, with the deletion note, and the delivery workers are woken; the republished one, or one of
-// a resolved Alert Group, marks the pair deleted in the messenger. Any other message — an older Root message a
-// republication past the edit window replaced, a Thread reply, a message of another Connection, or the Root message of
-// a delivery that retires or ended — changes nothing; a retiring delivery learns of the deletion from the gone answer
-// to its final edit. As after a gone answer, it locks the delivery row only, never the Alert Group before it (D307).
-func (s *Service) RootDeleted(ctx context.Context, connectionID int64, messageID string) (bool, error) {
-	var found bool
+// Destination of the Connection, not deleted: the Root message of an open Alert Group is published again, Quietly,
+// with the deletion note, and the delivery workers are woken; the republished one, or one of a resolved Alert Group,
+// marks the pair deleted in the messenger. Any other message — an older Root message a republication past the edit
+// window replaced, a Thread reply, a message of another Connection, or the Root message of a delivery that retires or
+// ended — changes nothing; a retiring delivery learns of the deletion from the gone answer to its final edit. As after
+// a gone answer, it locks the delivery row only, never the Alert Group before it (D307).
+func (s *Service) RootDeleted(ctx context.Context, connectionID int64, messageID string) error {
 	err := s.store.inTx(ctx, func(q queries) error {
-		found = false
 		r, err := q.LockBridgeDeletedRoot(ctx, dbgen.LockBridgeDeletedRootParams{OrgID: s.orgID,
 			ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, MessageID: messageID})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -121,15 +119,14 @@ func (s *Service) RootDeleted(ctx context.Context, connectionID int64, messageID
 		if err != nil {
 			return fmt.Errorf("lock the delivery of the deleted root message: %w", err)
 		}
-		found = true
 		return rootGone(ctx, q, s.orgID, rootOf{delivery: r.ID, destination: r.DestinationID,
 			group: int8Of(r.AlertGroupID), storm: int8Of(r.StormID), groupPublicID: r.GroupPublicID,
 			resolved: r.Resolved, republished: r.RepublishedAfterDelete}, s.clock.Now().UTC())
 	})
 	if err != nil {
-		return false, fmt.Errorf("handle the deleted root message of the connection %d: %w", connectionID, err)
+		return fmt.Errorf("handle the deleted root message of the connection %d: %w", connectionID, err)
 	}
-	return found, nil
+	return nil
 }
 
 // rootGone is the deleted Root message flow (C-11.FR-13): the Root message of an open Alert Group is published again

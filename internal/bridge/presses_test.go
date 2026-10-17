@@ -120,8 +120,8 @@ var (
 )
 
 // pressBindings bind the messages of the Connection 3: the Root message m1 and the older Root message m0 of Alert
-// Group A, and its Reminder r1. It counts the reads, and records the messages RootDeleted was called for, which it
-// reports as the current Root message m1 only, or fails with deleteErr.
+// Group A, and its Reminder r1. It counts the reads, and records the messages RootDeleted was called for, which fails
+// with deleteErr.
 type pressBindings struct {
 	mu        sync.Mutex
 	bound     map[string]delivery.BridgeBinding
@@ -132,10 +132,9 @@ type pressBindings struct {
 }
 
 func newPressBindings() *pressBindings {
-	root := delivery.BridgeBinding{Kind: buttons.SubjectRoot, Destination: pressDest, GroupPublicID: pressGroup,
-		GroupNumber: 1, SnoozeSeconds: []int64{3600, 14400, 86400}}
+	root := delivery.BridgeBinding{Kind: buttons.SubjectRoot, GroupPublicID: pressGroup,
+		SnoozeSeconds: []int64{3600, 14400, 86400}}
 	older, reminder := root, root
-	older.Superseded = true
 	reminder.Kind = buttons.SubjectReply
 	return &pressBindings{bound: map[string]delivery.BridgeBinding{"m1": root, "m0": older, "r1": reminder}}
 }
@@ -164,14 +163,11 @@ func (b *pressBindings) BridgeThreadBinding(ctx context.Context, connectionID in
 	return bound, err
 }
 
-func (b *pressBindings) RootDeleted(_ context.Context, connectionID int64, messageID string) (bool, error) {
+func (b *pressBindings) RootDeleted(_ context.Context, connectionID int64, messageID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.deleted = append(b.deleted, fmt.Sprintf("%d/%s", connectionID, messageID))
-	if b.deleteErr != nil {
-		return false, b.deleteErr
-	}
-	return connectionID == pressConnID && messageID == "m1", nil
+	return b.deleteErr
 }
 
 // deletions are the Connections and messages RootDeleted was called for, as connection/message.

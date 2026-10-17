@@ -34,8 +34,9 @@ const (
 	brokenID  = "CN0000000000E1"
 )
 
-// pushSource finds the Connections of a push: pushID in push mode, pollingID in poll mode, brokenID whose read fails;
-// any other is unknown, deleted or not a Bridge Connection. It counts the reads.
+// pushSource finds the Connections of a push as *connections.Service does: pushID in push mode, with its client;
+// pollingID in poll mode, without one, since the secrets of a Connection in poll mode are never opened for a push;
+// brokenID whose read fails; any other is unknown, deleted or not a Bridge Connection. It counts the reads.
 type pushSource struct {
 	conn Conn
 
@@ -51,9 +52,7 @@ func (s *pushSource) PushConnection(_ context.Context, publicID string) (Conn, s
 	case pushID:
 		return s.conn, EventDeliveryPush, nil
 	case pollingID:
-		c := s.conn
-		c.ID, c.PublicID = 4, pollingID
-		return c, EventDeliveryPoll, nil
+		return Conn{ID: 4, PublicID: pollingID, Version: s.conn.Version}, EventDeliveryPoll, nil
 	case brokenID:
 		return Conn{}, "", errors.New("the database went away")
 	}
@@ -432,6 +431,8 @@ func TestPushWaitsForASlot(t *testing.T) {
 	e := newPushEnv(t)
 	e.events.Parallel = 1
 	e.store.hold = make(chan struct{})
+	parked := make(chan struct{}, 1)
+	e.events.parked = func() { parked <- struct{}{} }
 	codes := make(chan int, 2)
 	for _, id := range []string{"ev-1", "ev-2"} {
 		p := signed(t, id, e.now, eventJSON(t, eventFixture(TypeMessageDeleted, member("id", id))))
@@ -442,7 +443,8 @@ func TestPushWaitsForASlot(t *testing.T) {
 		defer e.store.mu.Unlock()
 		return e.store.running == 1
 	})
-	time.Sleep(20 * time.Millisecond)
+	// The other push waits for the slot.
+	<-parked
 	select {
 	case code := <-codes:
 		t.Fatalf("a push was answered %d while the slot was taken", code)
@@ -462,6 +464,10 @@ func TestPushWaitsForASlot(t *testing.T) {
 	e = newPushEnv(t)
 	e.events.Parallel = 1
 	e.store.hold = make(chan struct{})
+	// The late push's request ends once it waits for the slot.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	e.events.parked = cancel
 	busy := make(chan int, 1)
 	first := signed(t, "ev-1", e.now, eventJSON(t, eventFixture(TypeMessageDeleted)))
 	go func() { busy <- e.send(first).Code }()
@@ -470,8 +476,6 @@ func TestPushWaitsForASlot(t *testing.T) {
 		defer e.store.mu.Unlock()
 		return e.store.running == 1
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
 	late := signed(t, "ev-2", e.now, eventJSON(t, eventFixture(TypeMessageDeleted, member("id", "ev-2"))))
 	if w := e.sendContext(ctx, late); w.Code != http.StatusInternalServerError || e.store.recorded(e.conn.ID, "ev-2") {
 		t.Errorf("a push that ended waiting answered %d", w.Code)

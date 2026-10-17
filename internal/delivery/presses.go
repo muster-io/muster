@@ -162,25 +162,19 @@ type bridgePressQueries interface {
 
 // BridgeBinding is what a press or a Thread message on a message of a Bridge Connection is bound to (C-22.FR-12,
 // FR-14): the kind of the message — a Root message, buttons.SubjectRoot, or a sent Reminder, buttons.SubjectReply — the
-// Bridge Destination it was delivered to, the Alert Group, by public_id and #N, and its Route's Snooze durations.
-// Superseded is an older Root message that a republication past the bridge's edit window replaced (C-22.FR-9): a press
-// or a Text command there acts on the Alert Group as on the current one, and nothing ever edits it again, since the
-// worker reconciles only the current Root message of a delivery.
+// Alert Group, by public_id, and its Route's Snooze durations. An older Root message that a republication past the
+// bridge's edit window replaced (C-22.FR-9) is bound as the current one is: a press or a Text command there acts on
+// the Alert Group as on the current one, and nothing ever edits it again, since the worker reconciles only the current
+// Root message of a delivery.
 type BridgeBinding struct {
 	Kind          buttons.Subject
-	Destination   Destination
 	GroupPublicID string
-	GroupNumber   int64
 	SnoozeSeconds []int64
-	Superseded    bool
 }
 
-// bridgeBound is the binding of a message of the Bridge Connection connectionID from the columns its reads share.
-func bridgeBound(connectionID int64, kind buttons.Subject, superseded bool,
-	r dbgen.GetBridgeRootBindingRow) BridgeBinding {
-	return BridgeBinding{Kind: kind, Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
-		Name: r.DestinationName, Type: TypeBridge, Connection: &connectionID}, GroupPublicID: r.GroupPublicID,
-		GroupNumber: r.GroupNumber, SnoozeSeconds: r.SnoozeDurationsSeconds, Superseded: superseded}
+// bridgeBound is the binding of a message of the kind kind from the columns its reads share.
+func bridgeBound(kind buttons.Subject, r dbgen.GetBridgeRootBindingRow) BridgeBinding {
+	return BridgeBinding{Kind: kind, GroupPublicID: r.GroupPublicID, SnoozeSeconds: r.SnoozeDurationsSeconds}
 }
 
 // BridgePressBinding reads the binding of a press on the message messageID of the Bridge Connection connectionID
@@ -203,7 +197,7 @@ func (s *Service) BridgePressBinding(ctx context.Context, connectionID int64, me
 		return BridgeBinding{}, fmt.Errorf("read the binding of a press on a reminder of the connection %d: %w",
 			connectionID, err)
 	}
-	return bridgeBound(connectionID, buttons.SubjectReply, false, dbgen.GetBridgeRootBindingRow(r)), nil
+	return bridgeBound(buttons.SubjectReply, dbgen.GetBridgeRootBindingRow(r)), nil
 }
 
 // BridgeThreadBinding reads the binding of a Thread message in the Thread of the message messageID of the Bridge
@@ -230,7 +224,7 @@ func (s *Service) bridgeRootBinding(ctx context.Context, connectionID int64, mes
 		MessageID: messageID})
 	switch {
 	case err == nil:
-		return bridgeBound(connectionID, buttons.SubjectRoot, false, r), nil
+		return bridgeBound(buttons.SubjectRoot, r), nil
 	case !errors.Is(err, pgx.ErrNoRows):
 		return failed("a root message", err)
 	}
@@ -238,7 +232,7 @@ func (s *Service) bridgeRootBinding(ctx context.Context, connectionID int64, mes
 		ConnectionID: conn, MessageID: messageID})
 	switch {
 	case err == nil:
-		return bridgeBound(connectionID, buttons.SubjectRoot, true, dbgen.GetBridgeRootBindingRow(o)), nil
+		return bridgeBound(buttons.SubjectRoot, dbgen.GetBridgeRootBindingRow(o)), nil
 	case !errors.Is(err, pgx.ErrNoRows):
 		return failed("an older root message", err)
 	}

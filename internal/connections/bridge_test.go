@@ -1022,9 +1022,11 @@ func TestBridgeInfoForDelivery(t *testing.T) {
 }
 
 // TestBridgePushConnection is the Connection of a pushed Bridge event (C-22.FR-11): a Bridge Connection in either
-// mode, by its public_id in any case, with its mode and a client whose settings hold the push secret, kept while the
-// Connection is unchanged; a Connection that is unknown, deleted, malformed or not a Bridge is bridge.ErrNoConnection;
-// a failed read or a secret that cannot be opened is another error.
+// mode, by its public_id in any case, with its mode, and in push mode a client whose settings hold the push secret,
+// kept while the Connection is unchanged; a Connection in poll mode has no client, and its secrets are not opened, so
+// that one whose token cannot be opened is still only in poll mode; a Connection that is unknown, deleted, malformed
+// or not a Bridge is bridge.ErrNoConnection; a failed read, or a push secret that cannot be opened in push mode, is
+// another error.
 func TestBridgePushConnection(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	ctx := t.Context()
@@ -1039,8 +1041,14 @@ func TestBridgePushConnection(t *testing.T) {
 		t.Errorf("the client of an unchanged Connection was built again: %v", err)
 	}
 	if c, mode, err := e.svc.PushConnection(ctx, poll.PublicID); err != nil || mode != bridge.EventDeliveryPoll ||
-		c.ID != poll.ID {
+		c.ID != poll.ID || c.PublicID != poll.PublicID || c.Client != nil {
 		t.Errorf("poll = %+v, %q, %v", c, mode, err)
+	}
+	e.store.rows[poll.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[poll.ID].row.Version++
+	if c, mode, err := e.svc.PushConnection(ctx, poll.PublicID); err != nil || mode != bridge.EventDeliveryPoll ||
+		c.Client != nil {
+		t.Errorf("poll with a token that cannot be opened = %+v, %q, %v", c, mode, err)
 	}
 	mm := e.create(t, "mm")
 	gone := e.createBridge(t, "gone", b.srv.URL, connections.EventDeliveryPush)
@@ -1067,8 +1075,8 @@ func TestBridgePushConnection(t *testing.T) {
 
 // TestBridgePollingConnections is the list of the Leader's poller (C-22.FR-11): the Bridge Connections in poll mode
 // that are not deleted, in id order, each with its client, kept while the Connection is unchanged and built again after
-// it changed, and its stored cursor; a Connection whose client cannot be built is left out with bridge_poll_failed, and
-// a failed read is an error.
+// it changed, and its stored cursor; a Connection whose client cannot be built is listed with the error instead of a
+// client, which the poller logs, and a failed read is an error.
 func TestBridgePollingConnections(t *testing.T) {
 	e, b := newBridgeEnv(t)
 	ctx := t.Context()
@@ -1105,11 +1113,13 @@ func TestBridgePollingConnections(t *testing.T) {
 	e.store.rows[second.ID].row.Version++
 	e.log.Reset()
 	left, err := e.svc.PollingConnections(ctx)
-	if err != nil || len(left) != 1 || left[0].Conn.ID != first.ID {
+	if err != nil || len(left) != 2 || left[0].Conn.ID != first.ID || left[0].Err != nil ||
+		left[1].Conn.ID != second.ID || left[1].Conn.PublicID != second.PublicID || left[1].Conn.Client != nil ||
+		left[1].Err == nil || !strings.Contains(left[1].Err.Error(), "open the token") {
 		t.Errorf("a token that cannot be opened = %+v, %v", left, err)
 	}
-	if !strings.Contains(e.log.String(), `"event":"bridge_poll_failed","connection":"`+second.PublicID+`"`) {
-		t.Errorf("logged %s", e.log.String())
+	if strings.Contains(e.log.String(), "bridge_poll_failed") {
+		t.Errorf("the list logged %s", e.log.String())
 	}
 	e.store.fail["ListBridgePollingConnections"] = errors.New("down")
 	if _, err := e.svc.PollingConnections(ctx); err == nil {

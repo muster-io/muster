@@ -202,10 +202,15 @@ func (e *liveEnv) bridgeEventClaim(t *testing.T) {
 		ran, _ := e.conns.HandleEventOnce(ctx, c.ID, "ev-1", func(context.Context) error { return nil })
 		second <- ran
 	}()
+	waitUntil(t, "the second copy waiting for the claim's lock", func() bool {
+		return e.count(t, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			AND classid = $1::int::oid AND objsubid = 2`, 0x6d75_0007) == 1
+	})
 	select {
 	case <-second:
 		t.Fatal("the second copy did not wait for the first")
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
 	if !locked() {
 		t.Fatal("the claim lock is free while the event is handled")

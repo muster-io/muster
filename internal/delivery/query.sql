@@ -1455,8 +1455,7 @@ WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'm
 -- is not deleted whose Root message it is, with the Alert Group and its Route's Snooze durations. A message id names
 -- one message of a bot, so at most one delivery has it.
 -- name: GetBridgeRootBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1470,8 +1469,7 @@ LIMIT 1;
 -- edit window replaced (C-22.FR-9). The emptiness check beside @> lets the partial GIN index deliveries_superseded_idx
 -- serve it; it is a query of its own because an OR with the current message id would scan the deliveries.
 -- name: GetBridgeSupersededBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1486,8 +1484,7 @@ LIMIT 1;
 -- is not deleted, with the Alert Group and its Route's Snooze durations, found through the partial index
 -- thread_replies_reminder_message_idx.
 -- name: GetBridgeReminderBinding :one
-SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.public_id AS group_public_id, g.number AS group_number, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = t.org_id AND g.id = t.alert_group_id

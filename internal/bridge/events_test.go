@@ -464,6 +464,8 @@ func TestParallelEventsBound(t *testing.T) {
 		e := newEventsEnv(eventTime)
 		e.events.Parallel = tc.parallel
 		e.store.hold = make(chan struct{})
+		parked := make(chan struct{}, tc.want+1)
+		e.events.parked = func() { parked <- struct{}{} }
 		errs := make(chan error, tc.want+1)
 		for i := range tc.want + 1 {
 			ev := e.event(t, TypeMessageDeleted, member("id", "ev-"+string(rune('a'+i))))
@@ -482,7 +484,14 @@ func TestParallelEventsBound(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		time.Sleep(20 * time.Millisecond)
+		// The event beyond the bound waits for a slot, and so has not reached the claim.
+		<-parked
+		e.store.mu.Lock()
+		running := e.store.running
+		e.store.mu.Unlock()
+		if running != tc.want {
+			t.Fatalf("parallel %d: %d events at the claim while one waits for a slot", tc.parallel, running)
+		}
 		close(e.store.hold)
 		for range tc.want + 1 {
 			if err := <-errs; err != nil {
@@ -497,6 +506,10 @@ func TestParallelEventsBound(t *testing.T) {
 	e := newEventsEnv(eventTime)
 	e.events.Parallel = 1
 	e.store.hold = make(chan struct{})
+	// The waiting event's context ends once it waits for a slot.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	e.events.parked = cancel
 	done := make(chan error, 1)
 	go func() { done <- e.events.Handle(t.Context(), e.conn, e.event(t, TypeMessageDeleted)) }()
 	deadline := time.Now().Add(5 * time.Second)
@@ -512,10 +525,8 @@ func TestParallelEventsBound(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
 	waiting := e.event(t, TypeMessageDeleted, member("id", "ev-waiting"))
-	if err := e.events.Handle(ctx, e.conn, waiting); !errors.Is(err, context.DeadlineExceeded) ||
+	if err := e.events.Handle(ctx, e.conn, waiting); !errors.Is(err, context.Canceled) ||
 		e.store.recorded(e.conn.ID, waiting.ID) {
 		t.Errorf("an event without a slot = %v", err)
 	}

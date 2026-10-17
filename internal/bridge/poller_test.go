@@ -751,6 +751,67 @@ func TestPollerFollowsTheConnections(t *testing.T) {
 	}
 }
 
+// TestPollerUnbuiltClient covers C-22.FR-11 and FR-24: a Connection whose client cannot be built is not polled, and
+// bridge_poll_failed is logged at the first read of the Connections that finds it so and every tenth, counted for each
+// version, not at every read; a new version counts from one again, a Connection that left the list is forgotten, and
+// one whose client is built again is polled.
+func TestPollerUnbuiltClient(t *testing.T) {
+	e := newPollEnv(t)
+	e.bridge.set(func(b *eventsBridge) { b.hold = true })
+	unbuilt := func(version int64) Polled {
+		return Polled{Conn: Conn{ID: e.conn.ID, PublicID: e.conn.PublicID, Version: version},
+			Err: errors.New("open the token: the key left the keyring")}
+	}
+	e.source.set(unbuilt(1))
+	p := e.poller()
+	stop := runPoller(t, p)
+	reads := func() int {
+		e.source.mu.Lock()
+		defer e.source.mu.Unlock()
+		return e.source.reads
+	}
+	read := func() {
+		t.Helper()
+		n := reads()
+		p.Wake()
+		eventually(t, "a read of the Connections", func() bool { return reads() > n })
+	}
+	eventually(t, "the first read", func() bool { return reads() == 1 })
+	for range 10 {
+		read()
+	}
+	e.source.set(unbuilt(2))
+	read()
+	e.source.set()
+	read()
+	e.source.set(unbuilt(2))
+	read()
+	var failures []float64
+	for line := range strings.Lines(e.log.String()) {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) != nil || m["event"] != "bridge_poll_failed" {
+			continue
+		}
+		if m["level"] != "WARN" || m["connection"] != "CN0000000000B3" ||
+			m["error"] != "open the token: the key left the keyring" {
+			t.Errorf("line %v", m)
+		}
+		failures = append(failures, m["failures"].(float64))
+	}
+	if !slices.Equal(failures, []float64{1, 10, 1, 1}) {
+		t.Errorf("logged the failures %v", failures)
+	}
+	if n := len(e.bridge.calls()); n != 0 {
+		t.Fatalf("%d polls without a client", n)
+	}
+	e.source.set(e.polled)
+	p.Wake()
+	eventually(t, "the poll once the client is built", func() bool { return len(e.bridge.calls()) == 1 })
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestPollerBatchFailureKeepsTheCursor covers C-22.FR-11: an event whose handling fails is not recorded, the cursor
 // stays, and after a back-off the batch is polled again from it and handled.
 func TestPollerBatchFailureKeepsTheCursor(t *testing.T) {

@@ -353,9 +353,11 @@ func (s *Service) StoreInfo(ctx context.Context, conn bridge.Conn, i bridge.Info
 	})
 }
 
-// PushConnection is the Bridge Connection publicID for the push callback (bridge.Connections): its client, kept until
-// the Connection changes, whose settings hold the push secret, and its event delivery mode. A Connection that is
-// unknown, deleted or not a Bridge Connection is bridge.ErrNoConnection.
+// PushConnection is the Bridge Connection publicID for the push callback (bridge.Connections) with its event delivery
+// mode, and in push mode its client, kept until the Connection changes, whose settings hold the push secret. A
+// Connection in poll mode has no client: its secrets are never opened, so that the callback refuses it as it refuses
+// an unknown one, whether they can be opened or not. A Connection that is unknown, deleted or not a Bridge Connection
+// is bridge.ErrNoConnection.
 func (s *Service) PushConnection(ctx context.Context, publicID string) (bridge.Conn, string, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
 	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeBridge) {
@@ -364,17 +366,22 @@ func (s *Service) PushConnection(ctx context.Context, publicID string) (bridge.C
 	if err != nil {
 		return bridge.Conn{}, "", err
 	}
-	c, err := s.cachedBridgeClient(row.ID, row.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+	conn, mode := bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version}, row.BridgeEventDelivery.String
+	if mode != bridge.EventDeliveryPush {
+		return conn, mode, nil
+	}
+	conn.Client, err = s.cachedBridgeClient(row.ID, row.Version, func() (*bridge.Client, error) {
+		return s.bridgeClient(row)
+	})
 	if err != nil {
 		return bridge.Conn{}, "", err
 	}
-	return bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c},
-		row.BridgeEventDelivery.String, nil
+	return conn, mode, nil
 }
 
 // PollingConnections lists the Bridge Connections in poll mode for the Leader's poller (bridge.Connections), each with
-// its client, kept until the Connection changes, and its stored cursor. A Connection whose client cannot be built is
-// left out, with bridge_poll_failed.
+// its client, kept until the Connection changes, and its stored cursor. A Connection whose client cannot be built has
+// the error instead of a client, and the poller logs it.
 func (s *Service) PollingConnections(ctx context.Context) ([]bridge.Polled, error) {
 	rows, err := s.cfg.Store.ListBridgePollingConnections(ctx, s.cfg.OrgID)
 	if err != nil {
@@ -387,13 +394,10 @@ func (s *Service) PollingConnections(ctx context.Context) ([]bridge.Polled, erro
 			BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext,
 			ProxyPasswordKeyID: r.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt,
 			Version: r.Version}
-		c, err := s.cachedBridgeClient(r.ID, r.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
-		if err != nil {
-			s.cfg.Log.Log(ctx, logging.BridgePollFailed, logging.F("connection", r.PublicID),
-				logging.F("error", err.Error()))
-			continue
-		}
-		p := bridge.Polled{Conn: bridge.Conn{ID: r.ID, PublicID: r.PublicID, Version: r.Version, Client: c}}
+		p := bridge.Polled{Conn: bridge.Conn{ID: r.ID, PublicID: r.PublicID, Version: r.Version}}
+		p.Conn.Client, p.Err = s.cachedBridgeClient(r.ID, r.Version, func() (*bridge.Client, error) {
+			return s.bridgeClient(row)
+		})
 		if r.BridgeEventsCursor.Valid {
 			p.Cursor = &r.BridgeEventsCursor.String
 		}

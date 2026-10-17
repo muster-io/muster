@@ -26,7 +26,7 @@ import (
 type Bindings interface {
 	BridgePressBinding(ctx context.Context, connectionID int64, messageID string) (delivery.BridgeBinding, error)
 	BridgeThreadBinding(ctx context.Context, connectionID int64, messageID string) (delivery.BridgeBinding, error)
-	RootDeleted(ctx context.Context, connectionID int64, messageID string) (bool, error)
+	RootDeleted(ctx context.Context, connectionID int64, messageID string) error
 }
 
 // Links map an account of a Bridge Connection to its User; *accountlinks.Service implements them.
