@@ -191,13 +191,14 @@ type BridgeLinked struct {
 	Log    func(ctx context.Context, answerErr error)
 }
 
-// bridgeOutcome is how an account_link event ended in its transaction: the link, or the reason it was rejected, and
-// the answer.
+// bridgeOutcome is how an account_link event ended in its transaction: the link, the reason it was rejected, or that
+// the token had already linked this account, and the answer.
 type bridgeOutcome struct {
 	link   Link
 	old    *view
 	user   string
 	reason string
+	again  bool
 	answer string
 }
 
@@ -209,9 +210,11 @@ type bridgeOutcome struct {
 // account linked to another User is rejected with conflict and the answer that it is linked to another user, the
 // request kept. Otherwise, in one transaction, the User's previous link for the Connection is replaced, the account is
 // linked with its external id, display name and handle, the request consumed, the link recorded with the Transport
-// bridge and the hint sent; the answer is "Linked to Muster user {name} ({login})". It answers nothing itself: the
-// caller answers once the event's claim committed and then calls Log. An error is a database failure, which leaves the
-// event to come again.
+// bridge and the hint sent; the answer is "Linked to Muster user {name} ({login})". A consumed token whose User has
+// the sender's account linked in the Connection's identity space — the event again after a crash between this
+// transaction and the commit of its claim — is answered the same again, with nothing recorded or logged. It answers
+// nothing itself: the caller answers once the event's claim committed and then calls Log. An error is a database
+// failure, which leaves the event to come again.
 func (s *Service) LinkBridge(ctx context.Context, conn BridgeConnection, token string, from BridgeAccount) (
 	BridgeLinked, error) {
 	name := from.DisplayName
@@ -235,11 +238,13 @@ func (s *Service) LinkBridge(ctx context.Context, conn BridgeConnection, token s
 		return BridgeLinked{}, err
 	}
 	return BridgeLinked{Answer: out.answer, Log: func(ctx context.Context, answerErr error) {
-		if out.reason != "" {
+		switch {
+		case out.again:
+		case out.reason != "":
 			s.logRejected(ctx, MessengerBridge, conn.PublicID, out.reason, answerErr)
-			return
+		default:
+			s.logLinked(ctx, out.link, out.old, out.user, answerErr)
 		}
-		s.logLinked(ctx, out.link, out.old, out.user, answerErr)
 	}}, nil
 }
 
@@ -262,7 +267,19 @@ func (s *Service) linkBridge(ctx context.Context, q Queries, a account, conn Bri
 		return fmt.Errorf("lock the user %s: %w", r.UserPublicID, err)
 	}
 	lang := language(u.Language)
+	linked := messages.T(lang, "accountLink.linkedBridge", messages.Args{"name": u.Name, "login": u.Login})
 	switch {
+	case r.ConsumedAt.Valid && r.ConnectionID == conn.ID && u.Status != statusDeleted:
+		mine, err := q.GetUserLinkInSpace(ctx, dbgen.GetUserLinkInSpaceParams{OrgID: s.cfg.OrgID, UserID: u.ID,
+			IdentitySpace: a.space})
+		switch {
+		case err == nil && mine.ExternalID == a.external:
+			out.again, out.answer = true, linked
+			return nil
+		case err != nil && !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("read the user's account link: %w", err)
+		}
+		out.reason = ReasonTokenUsed
 	case r.ConsumedAt.Valid || r.VoidedAt.Valid || u.Status == statusDeleted:
 		out.reason = ReasonTokenUsed
 	case !r.ExpiresAt.After(s.now()):
@@ -286,8 +303,7 @@ func (s *Service) linkBridge(ctx context.Context, q Queries, a account, conn Bri
 		ID: r.ID}); err != nil {
 		return fmt.Errorf("consume the link request: %w", err)
 	}
-	out.link, out.old, out.user = l, old, u.PublicID
-	out.answer = messages.T(lang, "accountLink.linkedBridge", messages.Args{"name": u.Name, "login": u.Login})
+	out.link, out.old, out.user, out.answer = l, old, u.PublicID, linked
 	return nil
 }
 
@@ -300,12 +316,12 @@ type BridgeCodeStarted struct {
 }
 
 // StartBridgeCode starts a link of the requesting User to the account with handle of the Bridge Connection
-// connectionPublicID by code (C-22.FR-15): handle is trimmed and may not be empty. Code requests beyond
-// account_link.bridge_code_requests within the last hour — of the User, or for the target account — are a
-// *RateLimitedError until the oldest one counted is an hour old; the User's are counted before the bridge is called,
-// and both again in the transaction that stores the request, under the lock of the User and of the target account.
-// With one limiter token of the interactive path: a Connection whose info offers no code is ErrCodeNotOffered; the
-// account is found with findUsers (none: FieldError handle_not_found); an account linked to another User is
+// connectionPublicID by code (C-22.FR-15): handle is trimmed and may not be empty. With one limiter token of the
+// interactive path: a Connection whose info offers no code is ErrCodeNotOffered, whatever the limits; code requests
+// beyond account_link.bridge_code_requests within the last hour — of the User, or for the target account — are a
+// *RateLimitedError until the oldest one counted is an hour old, the User's counted before the bridge looks the
+// account up, and both again in the transaction that stores the request, under the lock of the User and of the target
+// account; the account is found with findUsers (none: FieldError handle_not_found); an account linked to another User is
 // ErrLinkedElsewhere, recorded as link_rejected with conflict; otherwise the User's pending code requests for the
 // Connection are voided, a code of account_link.bridge_code is stored as its SHA-256 with the account's external id,
 // handle and display name, and the bot sends it with sendDirectMessage, key dm-<request public_id>. A message that
@@ -320,9 +336,6 @@ func (s *Service) StartBridgeCode(ctx context.Context, r Requester, connectionPu
 	handle = strings.TrimSpace(handle)
 	if handle == "" {
 		return BridgeCodeStarted{}, &FieldError{Pointer: pointerHandle, Code: CodeRequired, Detail: "The handle is empty."}
-	}
-	if err := s.bridgeUserCodeLimit(ctx, s.cfg.Store, r.UserID, s.now()); err != nil {
-		return BridgeCodeStarted{}, err
 	}
 	ref := connRef{id: conn.ID, publicID: conn.PublicID, name: conn.Name}
 	var started BridgeCodeStarted
@@ -344,6 +357,9 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 	offer := b.Offer()
 	if !offer.Code() {
 		return BridgeCodeStarted{}, ErrCodeNotOffered
+	}
+	if err := s.bridgeUserCodeLimit(ctx, s.cfg.Store, r.UserID, s.now()); err != nil {
+		return BridgeCodeStarted{}, err
 	}
 	acct, err := b.FindUser(ctx, handle)
 	if errors.Is(err, ErrMessengerUserNotFound) {
@@ -522,19 +538,20 @@ type codeOutcome struct {
 }
 
 // checkCode is the transaction of ConfirmBridge: it checks code against the request requestID of the requesting User
-// and links the account a when it is right.
+// and links the account a when it is right. It locks the User before the request, as StartBridgeCode locks the User
+// before it voids the User's pending requests, so that a confirmation and a new request of one User do not deadlock.
 func (s *Service) checkCode(ctx context.Context, r Requester, requestID int64, a account, code string) (codeOutcome,
 	error) {
 	var out codeOutcome
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		out = codeOutcome{}
-		row, err := q.LockLinkRequest(ctx, dbgen.LockLinkRequestParams{OrgID: s.cfg.OrgID, ID: requestID})
-		if err != nil {
-			return fmt.Errorf("lock the link request: %w", err)
-		}
 		u, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID})
 		if err != nil {
 			return fmt.Errorf("lock the user: %w", err)
+		}
+		row, err := q.LockLinkRequest(ctx, dbgen.LockLinkRequestParams{OrgID: s.cfg.OrgID, ID: requestID})
+		if err != nil {
+			return fmt.Errorf("lock the link request: %w", err)
 		}
 		now := s.now()
 		switch {

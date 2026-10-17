@@ -13,6 +13,7 @@
 package mentions
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 
@@ -455,18 +458,33 @@ func (s *Service) owners(ctx context.Context, q Queries, org int64, r Request) (
 
 // FooterNames are the names, by identity space, of the user the footer of the Alert Group groupID names — its Owner,
 // who snoozed it or who resolved it — read through db, or the main pool for a nil one (C-12.FR-12): the username of a
-// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16).
+// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16), each on one line, a
+// link whose name is blank left out.
 func (s *Service) FooterNames(ctx context.Context, db DBTX, groupID int64) (map[string]string, error) {
 	rows, err := s.q(db).ListFooterUsernames(ctx, dbgen.ListFooterUsernamesParams{OrgID: s.orgID, ID: groupID})
 	if err != nil {
 		return nil, fmt.Errorf("read the usernames of the footer of alert group %d: %w", groupID, err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	out := make(map[string]string, len(rows))
+	var out map[string]string
 	for _, r := range rows {
-		out[r.IdentitySpace] = r.Username
+		name := oneLine(r.Username)
+		if r.Messenger == TypeBridge {
+			name = cmp.Or(oneLine(r.DisplayName), name)
+		}
+		if name == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(rows))
+		}
+		out[r.IdentitySpace] = name
 	}
 	return out, nil
+}
+
+// oneLine is s on one line: every run of white space and control characters a single space, trimmed, as a Bridge
+// envelope writes the names of its Mentions.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }),
+		" ")
 }

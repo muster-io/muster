@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -365,7 +366,8 @@ func TestResolve(t *testing.T) {
 }
 
 // TestNames (C-12.FR-12): a user is shown by the username of their Account link, else by the display name; the
-// footer's usernames come by identity space; identity spaces follow the Destination type and Connection.
+// footer's names come by identity space, a Bridge link's display name before its username, each on one line, and a
+// blank one left out (C-22.FR-16); identity spaces follow the Destination type and Connection.
 func TestNames(t *testing.T) {
 	if (User{Name: "Alice", Username: "alice"}).Display() != "alice" || (User{Name: "Alice"}).Display() != "Alice" {
 		t.Error("display names")
@@ -381,12 +383,22 @@ func TestNames(t *testing.T) {
 	if got, err := s.FooterNames(t.Context(), nil, 5); err != nil || got != nil {
 		t.Errorf("no links: %v %v", got, err)
 	}
-	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "bridge:4", Username: "Alice Smith"},
-		{IdentitySpace: "mattermost:3", Username: "alice.mm"}, {IdentitySpace: "telegram", Username: "alice_tg"}}
+	f.footer = []dbgen.ListFooterUsernamesRow{
+		{IdentitySpace: "bridge:4", Messenger: TypeBridge, Username: "alice@example.org", DisplayName: "Alice Smith"},
+		{IdentitySpace: "bridge:5", Messenger: TypeBridge, DisplayName: " Alice\n\t Smith\u0085\r\n"},
+		{IdentitySpace: "bridge:6", Messenger: TypeBridge, Username: "alice@example.org", DisplayName: " \n "},
+		{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\n"},
+		{IdentitySpace: "mattermost:3", Messenger: TypeMattermost, Username: "alice.mm", DisplayName: "Alice Smith"},
+		{IdentitySpace: "mattermost:8", Messenger: TypeMattermost},
+		{IdentitySpace: "telegram", Messenger: TypeTelegram, Username: "alice_tg"}}
 	got, err := s.FooterNames(t.Context(), nil, 5)
-	if err != nil || got["telegram"] != "alice_tg" || got["mattermost:3"] != "alice.mm" ||
-		got["bridge:4"] != "Alice Smith" {
-		t.Errorf("footer names %v %v", got, err)
+	if want := map[string]string{"bridge:4": "Alice Smith", "bridge:5": "Alice Smith", "bridge:6": "alice@example.org",
+		"mattermost:3": "alice.mm", "telegram": "alice_tg"}; err != nil || !maps.Equal(got, want) {
+		t.Errorf("footer names %q %v, want %q", got, err, want)
+	}
+	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\t"}}
+	if got, err := s.FooterNames(t.Context(), nil, 5); err != nil || got != nil {
+		t.Errorf("only blank names: %v %v", got, err)
 	}
 	f.fail["ListFooterUsernames"] = errors.New("boom")
 	if _, err := s.FooterNames(t.Context(), nil, 5); err == nil {

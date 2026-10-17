@@ -50,7 +50,7 @@ files_touched:
   - test/e2e/several_connections_test.go
 acceptance:
   - "[C-22.FR-15, C-22.AC-18] `startBridgeLink` for a Bridge Connection returns a single-use token of 43 base64url characters, valid for `account_link.bridge_token_ttl`, and `link_url` built from the bridge's `link_url_template` when it is an `http` or `https` URL (null without one); it accepts the web session only (403 `session_required` with an API token); the operation is in the implemented operations of `internal/api/server.go`, so it no longer answers 501."
-  - "[C-22.FR-15, C-22.FR-13, C-22.AC-18] When the fake bridge reports an `account_link` event with that token, the sender's account is linked to the User — `external_id`, `display_name` and the handle the bridge reported — and the event is answered \"Linked to Muster user {name} ({login})\" in the User's profile language; the same token again, an expired one and a token of another Connection link nothing, are answered \"This link is invalid or expired. Start again from your Muster profile.\", in English, and are recorded as `account_link.link_rejected`."
+  - "[C-22.FR-15, C-22.FR-13, C-22.AC-18] When the fake bridge reports an `account_link` event with that token, the sender's account is linked to the User — `external_id`, `display_name` and the handle the bridge reported — and the event is answered \"Linked to Muster user {name} ({login})\" in the User's profile language; the same token again from another account, an expired one and a token of another Connection link nothing, are answered \"This link is invalid or expired. Start again from your Muster profile.\" in the profile language of the User the token is bound to, in English when no User is found, and are recorded as `account_link.link_rejected`; the same token again from the account it linked, as an event redelivered after a crash, is answered \"Linked to Muster user {name} ({login})\" again, with no Audit log entry and no log event."
   - "[C-22.FR-15, C-22.AC-19] With `user_lookup` `email` and `direct_messages.bot_can_start`, `startBridgeCodeLink` with a known address sends the code through `sendDirectMessage` with \"You requested a link to Muster. Do not share this code.\" and answers 202 with `request_id`, `expires_at` and `attempts_remaining` 5, and `confirmBridgeLink` with that `request_id` and the code links the account; a wrong code is refused with 422 `link_code_invalid` at `/code` and `attempts_remaining` one lower, and after five wrong codes the sixth attempt is refused even with the right code; an address the bridge does not find is refused with 422 `handle_not_found` at `/handle`, and one the bridge answers `forbidden` for when sending the code with 422 `direct_message_refused` at `/handle`; code requests follow `account_link.bridge_code_requests`, and one more is refused with 429 `link_code_requests_exceeded` and `retry_after_seconds`."
   - "[C-22.FR-15, C-22.AC-19] A Bridge Connection whose `info` has `user_lookup` `none`, or no `direct_messages` with `bot_can_start`, refuses a code request with 409 `code_not_offered`; `listLinkableConnections` now returns Bridge Connections, each with its link methods (`token`, and `code` where offered) and the lookup kind, and only `token` with no lookup kind while Muster has not read the Connection's `info`; `TestSeveralConnectionsRoute` lists the demo Connection \"Dev Bridge\" among them."
   - "[C-22.FR-15] Linking rules of C-18 hold for Bridges: one account per User per Bridge Connection, an account linked to another User refused, unlinking in the profile and by an Admin, the Audit log with the messenger `bridge`, and the Identity space `bridge:<connection>`; two Bridge Connections to the same bridge need two links; `AccountLink` returns `display_name`, an optional member like `LinkableConnection.link_methods` and `handle_kind`, so the SPA's fixtures of Mattermost and Telegram links still type-check and the key check of `account_links_test.go` admits them on Bridge rows only."
@@ -113,10 +113,14 @@ issue: 234
   to the User and the Connection, found by their hash with the Connection checked; codes as for Mattermost, with
   `account_link.bridge_code` and `account_link.bridge_code_requests`; the conflict, replacement and unlink rules and the
   Audit log entries of S-051 with the messenger `bridge`; `account_link.request_prune_after` prunes Bridge requests
-  too. A link's `username` is the handle the bridge reported — the event's `user.handle`, or for a code the handle of
-  the account `findUsers` found, else the handle it was found by — and its `display_name` the name the bridge reported.
-  A code request whose direct message fails is voided and still counts toward `account_link.bridge_code_requests`, as
-  for Mattermost. A right code links without a confirming direct message: C-22.FR-15 asks for none, so
+  too. An `account_link` event with a consumed token whose User has the sender's account linked through that
+  Connection — the event again after a crash between the link's commit and the commit of its claim — is answered
+  "Linked to Muster user {name} ({login})" again, with no Audit log entry and no log event. A confirmation locks the
+  User before the request, as a new code request locks the User before it voids the User's pending ones. A link's
+  `username` is the handle the bridge reported — the event's `user.handle`, or for a code the handle of the account
+  `findUsers` found, else the handle it was found by — and its `display_name` the name the bridge reported. A code
+  request whose direct message fails is voided and still counts toward `account_link.bridge_code_requests`, as for
+  Mattermost. A right code links without a confirming direct message: C-22.FR-15 asks for none, so
   `confirmBridgeLink` makes no call to the bridge. `listLinkableConnections` drops S-073's filter; the link methods come
   from the Connection's stored `info` — only `token`, and no lookup kind, while `bridge_info` is null.
 - **Events and calls** (`internal/bridge/links.go`, `internal/accountlinks/accountlinks.go`): `internal/accountlinks`
@@ -125,9 +129,9 @@ issue: 234
   `account_link` events from S-075's handler link inside the event's claim and are answered through `answerEvent` by
   `bridge.Events` once the claim committed, as presses are (S-075), in the profile language of the User the token is
   bound to, and in English when no User is found; `findUsers` and `sendDirectMessage` (key `dm-<request public_id>`)
-  go through the interactive path (C-18.FR-11) in one session of the Connection, which decides first whether the code
-  is offered from the Connection's `info`, read again when Muster's copy is older than `bridge.info_max_age`
-  (C-22.FR-2); a bridge answering `forbidden` to the direct message refuses the code request with
+  go through the interactive path (C-18.FR-11) in one session of the Connection, which decides first, before any limit
+  is counted, whether the code is offered from the Connection's `info`, read again when Muster's copy is older than
+  `bridge.info_max_age` (C-22.FR-2); a bridge answering `forbidden` to the direct message refuses the code request with
   `direct_message_refused`, which the SPA shows as "The bot cannot send you a direct message. Send it the token
   instead." A code request is a row of `account_link_requests` found by its `public_id` (`request_id`), as for
   Mattermost: its attempts count down on each wrong code, and a request without attempts left refuses the right code
@@ -135,12 +139,13 @@ issue: 234
   `messages.SafeURL` accepts the result.
 - **Mentions and footers** (`internal/mentions`, `internal/bridge/envelope.go`): `mentions.IdentitySpace("bridge",
   connection)` is `bridge:<connection>`; `ListMentionUsers` returns the link's `display_name`, and
-  `ListFooterUsernames` names a User linked through a Bridge by `coalesce(nullif(display_name, ''), username)`, and one
-  linked through Mattermost or Telegram by `username` as before, so a Bridge link names its User by the account's name
-  (C-22.FR-16, C-12.FR-12), also without a username; a Mention target of a User with a link for the Destination's
-  Connection carries `external_id` and `display_name`; the envelope lists it in `mentions` with a `ref` (`m1`, `m2`,
-  …) and puts the markers on the first line of the body of a Loud message; a User without a link is their display name
-  as text.
+  `ListFooterUsernames` returns each link's messenger, username and display name, and `FooterNames` names a User
+  linked through a Bridge by the display name, else the username, and one linked through Mattermost or Telegram by
+  `username` as before, each with its white space folded onto one line as the envelope's Mention names are, a blank
+  one left out, so a Bridge link names its User by the account's name (C-22.FR-16, C-12.FR-12), also without a
+  username; a Mention target of a User with a link for the Destination's Connection carries `external_id` and
+  `display_name`; the envelope lists it in `mentions` with a `ref` (`m1`, `m2`, …) and puts the markers on the first
+  line of the body of a Loud message; a User without a link is their display name as text.
 - **Fake bridge** (`people.go`, `fakebridge.go`, `events.go`): `findUsers` by the kind in `/_fake/config` — `email`
   (`alice@example.org`, `bob@example.org`), `login` or `none`; `sendDirectMessage` recorded at
   `/_fake/direct-messages`, `forbidden` for users set through `/_fake/config` `dm_blocked`; `/_fake/config` also sets
@@ -191,7 +196,7 @@ curl -s -X POST $FB/link -d "{\"user_id\":\"u-alice\",\"token\":\"$(jq -r .token
 curl -s $FB/answers | jq -r '.[-1].text'                                    # Linked to Muster user Alice Smith (alice)
 curl -s -b jara $API/me/account-links | jq -c '[.items[] | select(.messenger == "bridge") | {external_id, display_name}]'
 # [{"external_id":"u-alice","display_name":"Alice Smith"}]
-curl -s -X POST $FB/link -d "{\"user_id\":\"u-alice\",\"token\":\"$(jq -r .token <<<"$T")\",\"bot\":2}" > /dev/null; sleep 2
+curl -s -X POST $FB/link -d "{\"user_id\":\"u-bob\",\"token\":\"$(jq -r .token <<<"$T")\",\"bot\":2}" > /dev/null; sleep 2
 curl -s $FB/answers | jq -r '.[-1].text'           # This link is invalid or expired. Start again from your Muster profile.
 curl -s -b jar "$API/audit-log?action=account_link.link_rejected&limit=1" | jq -r '.items[0].details.messenger'   # bridge
 T2=$(curl -s "${HA[@]}" $API/me/account-links/bridge -d "{\"connection_id\":\"$C\"}" | jq -r .token)
@@ -251,6 +256,10 @@ None.
   token of a Telegram Connection sent to a bridge's bot links nothing.
 - The operation names follow those of Telegram and Mattermost (`start…Link`, `confirm…Link`); the paths are those of
   the C-22 API surface.
+- `PruneLinkRequests` is rewritten to choose its batch once, in a `MATERIALIZED` CTE joined by `USING`, still filtered
+  by `org_id` at both levels: after migration 0012 the previous `id IN (… LIMIT … FOR UPDATE SKIP LOCKED)` form could
+  be planned as a nested loop that ran the choice once per row and deleted more than the batch;
+  `TestLivePruneBatches` pins exactly one batch per run.
 - `files_touched` lists 41 files, past the guide of 30 to 40: the schema version that `internal/db`'s tests pin, the
   fakes of the store in `accountlinks_test.go`, the `account_link` branch of `bridge/events.go`, the delivery calls that
   carry Mentions, the Connection that a code's session reads and the fake's config and events all change with it. The

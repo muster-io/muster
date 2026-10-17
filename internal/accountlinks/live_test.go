@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/accountlinks"
@@ -370,6 +371,132 @@ func TestLiveLinks(t *testing.T) {
 		if pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID+1, t0.Add(48*time.Hour), 1000); err != nil ||
 			pruned != 0 {
 			t.Errorf("another Organization pruned %d, %v", pruned, err)
+		}
+	})
+}
+
+// TestLivePruneBatches is account_link.request_prune_after on PostgreSQL: each run deletes exactly its batch of the
+// Organization's requests that expired a day before, the lowest ids first, also planned as a nested loop over the table
+// it deletes from, where a batch chosen in a subquery ran once per row and deleted more than the batch; a request that
+// another transaction holds is skipped and taken at the next run; requests that have not expired, and those of another
+// Organization, stay.
+func TestLivePruneBatches(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+		d, err := db.Open(ctx, conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+		if err := d.Migrate(ctx, logger); err != nil {
+			t.Fatal(err)
+		}
+		if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+			t.Fatal(err)
+		}
+		org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var other int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO organizations (public_id, name, time_zone, severity_label,
+			severity_mapping, severity_styles, critical_is_urgent, instance_labels, retention_stored_snapshots_days,
+			retention_alert_details_days, retention_alert_group_summaries_days, retention_audit_log_days,
+			totp_required, oidc_token_grace_seconds, created_at, updated_at)
+			SELECT 'RG0000000000ZZ', 'Other', time_zone, severity_label, severity_mapping, severity_styles,
+				critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+				retention_alert_group_summaries_days, retention_audit_log_days, totp_required,
+				oidc_token_grace_seconds, created_at, updated_at
+			FROM organizations WHERE id = $1
+			RETURNING id`, org.ID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		type owner struct{ user, conn int64 }
+		owners := map[int64]owner{}
+		for _, o := range []int64{org.ID, other} {
+			var w owner
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+				telegram_bot_api_base_url, telegram_update_mode, bot_token_ciphertext, bot_token_key_id,
+				bot_token_updated_at, bot_username, limiter_limit, limiter_per_seconds, created_at, updated_at)
+				VALUES ($1, 'CNAAAAAAAAAAP1', 'telegram', 'tg', 'https://api.telegram.org', 'long_polling', '\x00', 'k1',
+				$2, 'muster_dev_bot', 10, 1, $2, $2) RETURNING id`, o, t0).Scan(&w.conn); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+				created_at, updated_at) VALUES ($1, 'SRAAAAAAAAAAP1', 'pat', 'Pat', 'responder', 'local', 'active', $2,
+				$2) RETURNING id`, o, t0).Scan(&w.user); err != nil {
+				t.Fatal(err)
+			}
+			owners[o] = w
+		}
+		next := 0
+		add := func(o int64, n int, expires time.Time) {
+			t.Helper()
+			if _, err := d.Pool.Exec(ctx, `INSERT INTO account_link_requests (org_id, public_id, user_id, messenger,
+				connection_id, secret_hash, created_at, expires_at)
+				SELECT $1::bigint, 'AR' || lpad(i::text, 12, '0'), $2::bigint, 'telegram', $3::bigint,
+					sha256(convert_to(i::text, 'UTF8')), $4::timestamptz, $5::timestamptz
+				FROM generate_series($6::int, $6::int + $7::int - 1) i`, o, owners[o].user, owners[o].conn,
+				t0.Add(-10*time.Minute), expires, next+1, n); err != nil {
+				t.Fatal(err)
+			}
+			next += n
+		}
+		fresh := t0.Add(48 * time.Hour)
+		add(org.ID, 4, t0)
+		add(other, 3, t0)
+		add(org.ID, 2, fresh)
+		add(org.ID, 3, t0)
+		now := t0.Add(accountlinks.RequestPruneAfter + time.Hour)
+		count := func(o int64, expired bool) int {
+			t.Helper()
+			var n int
+			if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM account_link_requests WHERE org_id = $1 AND
+				(expires_at < $2) = $3`, o, t0.Add(time.Hour), expired).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		want := func(step string, pruned int64, err error, wantPruned int64, expiredLeft int) {
+			t.Helper()
+			if err != nil || pruned != wantPruned || count(org.ID, true) != expiredLeft || count(org.ID, false) != 2 ||
+				count(other, true) != 3 {
+				t.Errorf("%s: pruned %d, %v; %d expired and %d fresh left, %d of the other Organization", step, pruned,
+					err, count(org.ID, true), count(org.ID, false), count(other, true))
+			}
+		}
+		var pruned int64
+		loops := dbtest.LockRowsLoops(t, d.Pool.Config().ConnString(), func(ctx context.Context, c *pgx.Conn) {
+			pruned, err = accountlinks.NewPruner(c).Requests(ctx, org.ID, now, 3)
+		})
+		want("a nested loop", pruned, err, 3, 4)
+		if loops != 1 {
+			t.Errorf("the prune chose its batch %d times in one run", loops)
+		}
+		tx, err := d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+		var held int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM account_link_requests WHERE org_id = $1 AND expires_at < $2
+			ORDER BY id LIMIT 1 FOR UPDATE`, org.ID, t0.Add(time.Hour)).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("a held request", pruned, err, 3, 1)
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("the held request released", pruned, err, 1, 0)
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("nothing left", pruned, err, 0, 0)
+		if pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, other, now, 2); err != nil || pruned != 2 ||
+			count(other, true) != 1 || count(org.ID, false) != 2 {
+			t.Errorf("the other Organization pruned %d, %v", pruned, err)
 		}
 	})
 }
@@ -825,7 +952,8 @@ func TestLiveBridgeLinks(t *testing.T) {
 			t.Errorf("List = %+v, %v", mine, err)
 		}
 		// The footer of an Alert Group bob acknowledged names him in the identity space of the Connection by the display
-		// name of his link, also without a username, and by its username without a display name (C-22.FR-16).
+		// name of his link on one line, also without a username, and by its username without a display name or with a
+		// blank one (C-22.FR-16).
 		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
 			t.Fatal(err)
 		}
@@ -847,6 +975,8 @@ func TestLiveBridgeLinks(t *testing.T) {
 			{"", "Bob Brown"},
 			{"username = NULL", "Bob Brown"},
 			{"display_name = NULL, username = 'bob@example.org'", "bob@example.org"},
+			{"display_name = E'Bob\\n  Brown\\r\\n'", "Bob Brown"},
+			{"display_name = E' \\n'", "bob@example.org"},
 			{"display_name = 'Bob Brown'", "Bob Brown"},
 		} {
 			if step.set != "" {

@@ -325,6 +325,47 @@ func TestLinkBridge(t *testing.T) {
 	}
 }
 
+// TestLinkBridgeAgain: an account_link event that comes again with the token that linked its sender's account — after
+// a crash between the link's commit and the commit of the event's claim — is answered as linked again, in the User's
+// language, with no Audit log entry and nothing logged; the token from another account, from the account once it was
+// unlinked, or at another Connection's bot is still refused as used.
+func TestLinkBridgeAgain(t *testing.T) {
+	e := newEnv(t)
+	tok := e.startBR(t, bob, brPID)
+	e.sendBR(t, brID, brPID, tok, BridgeAccount{ExternalID: "u-bob", DisplayName: "Bob Brown"}, nil)
+	entries, logged := len(e.store.audit), e.log.Len()
+	if answer := e.sendBR(t, brID, brPID, tok, BridgeAccount{ExternalID: "u-bob", DisplayName: "Bob Brown"},
+		errors.New("lost")); answer != "Учётная запись связана с пользователем Muster Bob (bob)" ||
+		len(e.store.audit) != entries || e.log.Len() != logged || len(e.store.links) != 1 || len(e.store.hints) != 1 {
+		t.Fatalf("the event again: %q, %d entries, log %s", answer, len(e.store.audit)-entries,
+			e.log.String()[logged:])
+	}
+	for _, c := range []struct {
+		connID  int64
+		connPID string
+		ext     string
+	}{{brID, brPID, "u-mallory"}, {br2ID, br2PID, "u-bob"}} {
+		answer := e.sendBR(t, c.connID, c.connPID, tok, BridgeAccount{ExternalID: c.ext, DisplayName: "X"}, nil)
+		if got := e.lastEntry(); answer != "Эта ссылка недействительна или устарела. Начните заново в своём профиле Muster." ||
+			got.Details["reason"] != ReasonTokenUsed || got.Resource != c.connPID {
+			t.Errorf("the used token from %s at %s: %q, %+v", c.ext, c.connPID, answer, got)
+		}
+	}
+	if err := e.s.Unlink(t.Context(), bob, e.store.links[0].publicID); err != nil {
+		t.Fatal(err)
+	}
+	if answer := e.sendBR(t, brID, brPID, tok, BridgeAccount{ExternalID: "u-bob", DisplayName: "Bob Brown"},
+		nil); answer == "Учётная запись связана с пользователем Muster Bob (bob)" ||
+		e.lastEntry().Details["reason"] != ReasonTokenUsed || len(e.store.links) != 0 {
+		t.Errorf("the used token after the unlink: %q", answer)
+	}
+	e.store.fail["GetUserLinkInSpace"] = errBoom
+	if _, err := e.s.LinkBridge(t.Context(), BridgeConnection{ID: brID, PublicID: brPID}, tok,
+		BridgeAccount{ExternalID: "u-bob"}); !errors.Is(err, errBoom) {
+		t.Errorf("a failed read of the link = %v", err)
+	}
+}
+
 // TestLinkBridgeSameAccount is C-18.FR-4 for a Bridge account linked again by its own User: the link is kept, its
 // handle and display name become the new ones, and the Audit log shows what changed.
 func TestLinkBridgeSameAccount(t *testing.T) {
@@ -410,7 +451,11 @@ func TestBridgeCode(t *testing.T) {
 		attemptsLeft(err) != 4 || e.lastEntry().Details["reason"] != ReasonWrongCode {
 		t.Fatalf("a wrong code = %v", err)
 	}
+	e.store.locks = nil
 	l, err := e.s.ConfirmBridge(t.Context(), bob, st.RequestPublicID, strings.ToLower(code))
+	if !slices.Equal(e.store.locks, []string{"user", "request"}) {
+		t.Errorf("locked %q: the User first, as a new request does", e.store.locks)
+	}
 	if err != nil || l.Messenger != MessengerBridge || l.ExternalID != "u-bob" || *l.Username != "bob@example.org" ||
 		*l.DisplayName != "Bob Brown" || l.ConnectionPublicID != brPID || l.ConnectionName != "Dev Bridge" ||
 		!strings.HasPrefix(l.PublicID, "AK") || len(e.br.sent) != 1 || len(e.br.sessions) != 1 {
@@ -458,8 +503,9 @@ func TestBridgeCode(t *testing.T) {
 
 // TestBridgeCodeRequestLimits is C-22.FR-15 with account_link.bridge_code_requests on a manual clock: the sixth request
 // of one User within an hour and the fourth for one target account are refused until the oldest counted request is an
-// hour old, counted before the bridge is called and again in the transaction; a new request voids the User's earlier
-// pending one, and a request whose direct message failed still counts.
+// hour old, counted before the bridge looks the account up and again in the transaction; a Connection that offers no
+// code refuses that first, whatever the limits; a new request voids the User's earlier pending one, and a request
+// whose direct message failed still counts.
 func TestBridgeCodeRequestLimits(t *testing.T) {
 	e := newEnv(t)
 	e.startCode(t, alice, "dana@example.org")
@@ -481,10 +527,17 @@ func TestBridgeCodeRequestLimits(t *testing.T) {
 		t.Fatal("a new request did not void the earlier one")
 	}
 	var rl *RateLimitedError
+	e.br.onFind = func() { t.Error("an account looked up past the limit") }
 	if _, err := e.s.StartBridgeCode(t.Context(), alice, brPID, "bob@example.org"); !errors.As(err, &rl) ||
-		rl.RetryAfter != 56*time.Minute || len(e.store.reqs) != 5 || len(e.br.sessions) != 5 {
+		rl.RetryAfter != 56*time.Minute || len(e.store.reqs) != 5 || len(e.br.sessions) != 6 {
 		t.Fatalf("the sixth request = %v, %d sessions", err, len(e.br.sessions))
 	}
+	e.br.offer = BridgeOffer{Read: true, UserLookup: LookupNone, BotCanStart: true}
+	if _, err := e.s.StartBridgeCode(t.Context(), alice, brPID, "bob@example.org"); !errors.Is(err,
+		ErrCodeNotOffered) {
+		t.Fatalf("no code offered past the limit = %v", err)
+	}
+	e.br.offer, e.br.onFind = newFakeBR().offer, nil
 	// Mattermost requests are counted apart.
 	if st := e.startMM(t, alice, "bob"); st.RequestPublicID == "" {
 		t.Error("a Mattermost request is limited by Bridge requests")

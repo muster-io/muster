@@ -64,15 +64,14 @@ func (q *Queries) GetEventOwners(ctx context.Context, arg GetEventOwnersParams) 
 }
 
 const listFooterUsernames = `-- name: ListFooterUsernames :many
-SELECT al.identity_space, n.name::text AS username
+SELECT al.identity_space, al.messenger, coalesce(al.username, '')::text AS username,
+       coalesce(al.display_name, '')::text AS display_name
 FROM alert_groups g
 JOIN account_links al ON al.org_id = g.org_id
                      AND al.user_id = CASE g.status WHEN 'acknowledged' THEN g.owner_user_id
                                                     WHEN 'snoozed' THEN g.snoozed_by_user_id
                                                     WHEN 'resolved' THEN g.resolved_by_user_id END
-CROSS JOIN LATERAL (SELECT CASE WHEN al.messenger = 'bridge' THEN coalesce(nullif(al.display_name, ''), al.username)
-                                ELSE al.username END AS name) n
-WHERE g.org_id = $1 AND g.id = $2 AND n.name IS NOT NULL AND n.name <> ''
+WHERE g.org_id = $1 AND g.id = $2
 ORDER BY al.identity_space
 `
 
@@ -83,12 +82,14 @@ type ListFooterUsernamesParams struct {
 
 type ListFooterUsernamesRow struct {
 	IdentitySpace string
+	Messenger     string
 	Username      string
+	DisplayName   string
 }
 
-// ListFooterUsernames lists the names, by identity space, of the user the footer of an Alert Group names: its Owner
-// while acknowledged, who snoozed it while snoozed, who resolved it while resolved. A Mattermost or Telegram link names
-// the user by its username; a Bridge link by the display name the bridge reported, else its username (C-22.FR-16).
+// ListFooterUsernames lists the Account links, by identity space, of the user the footer of an Alert Group names: its
+// Owner while acknowledged, who snoozed it while snoozed, who resolved it while resolved, with the messenger, the
+// username and the display name of each, empty without one; FooterNames picks the name (C-22.FR-16).
 func (q *Queries) ListFooterUsernames(ctx context.Context, arg ListFooterUsernamesParams) ([]ListFooterUsernamesRow, error) {
 	rows, err := q.db.Query(ctx, listFooterUsernames, arg.OrgID, arg.ID)
 	if err != nil {
@@ -98,7 +99,12 @@ func (q *Queries) ListFooterUsernames(ctx context.Context, arg ListFooterUsernam
 	items := []ListFooterUsernamesRow{}
 	for rows.Next() {
 		var i ListFooterUsernamesRow
-		if err := rows.Scan(&i.IdentitySpace, &i.Username); err != nil {
+		if err := rows.Scan(
+			&i.IdentitySpace,
+			&i.Messenger,
+			&i.Username,
+			&i.DisplayName,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

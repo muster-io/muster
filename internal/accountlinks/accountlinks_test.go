@@ -118,7 +118,9 @@ type fakeStore struct {
 	hints []db.Hint
 	// counted are the request counts and the locks of code targets, in order, each marked whether it ran in a
 	// transaction.
-	counted    []string
+	counted []string
+	// locks are the rows LockLinkUser and LockLinkRequest locked, in order.
+	locks      []string
 	fail       map[string]error
 	next       int64
 	inTx       bool
@@ -258,6 +260,7 @@ func (s *fakeStore) LockLinkUser(_ context.Context, a dbgen.LockLinkUserParams) 
 	if err := s.err("LockLinkUser"); err != nil {
 		return dbgen.LockLinkUserRow{}, err
 	}
+	s.locks = append(s.locks, "user")
 	u, ok := s.user(a.ID)
 	if !ok || a.OrgID != org {
 		return dbgen.LockLinkUserRow{}, pgx.ErrNoRows
@@ -446,6 +449,7 @@ func (s *fakeStore) LockLinkRequest(_ context.Context, a dbgen.LockLinkRequestPa
 	if err := s.err("LockLinkRequest"); err != nil {
 		return dbgen.LockLinkRequestRow{}, err
 	}
+	s.locks = append(s.locks, "request")
 	r := s.req(a.ID)
 	if r == nil || a.OrgID != org {
 		return dbgen.LockLinkRequestRow{}, pgx.ErrNoRows
