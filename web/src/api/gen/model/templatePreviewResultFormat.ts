@@ -28,4 +28,5 @@ export type TemplatePreviewResultFormat = typeof TemplatePreviewResultFormat[key
 export const TemplatePreviewResultFormat = {
   markdown: 'markdown',
   html: 'html',
+  commonmark: 'commonmark',
 } as const;

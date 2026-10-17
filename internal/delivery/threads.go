@@ -22,6 +22,9 @@ import (
 // exists, one delivery's replies in id order. A collecting batch of new Alerts closes when its Thread batching window
 // ends; a reply lists at most delivery.thread_alerts_listed new Alerts.
 //
+// A bridge's reply carries the last `thread_ref` its post or a reply returned, stored as the delivery's Thread anchor,
+// and the idempotency key of the reply (C-22.FR-6).
+//
 // In Telegram (C-14.FR-3, copies.go) a reply goes to the discussion group: as a reply to the post's automatic copy
 // while the Thread is attached; while it waits for the copy, at most telegram.copy_wait from the Publication, after
 // which it starts a chain of replies not attached to the post, each a reply to the last, and the Thread is unattached
@@ -107,7 +110,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		now := w.Lease.Clocks.Business.Now().UTC()
 		d := Destination{ID: row.DestinationID, PublicID: row.DestinationPublicID, Name: row.DestinationName,
 			Type: row.DestinationType, Connection: int8Of(row.ConnectionID)}
-		root, chain := Root{MessageID: row.MessageID.String}, false
+		root, chain := Root{MessageID: row.MessageID.String, ThreadAnchorID: row.ThreadAnchorID.String}, false
 		if d.Type == TypeTelegram {
 			var until time.Time
 			if root, chain, until, err = telegramThread(ctx, q, org, row, now); err != nil {
@@ -175,6 +178,9 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: mentions, Targets: targets, Webhook: webhook},
 			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, after: pending}
+		if idem, ok := w.idempotent(d.Type); ok {
+			a.call.Key = idem.ReplyKey(d, row.ID)
+		}
 		ok = true
 		return nil
 	})

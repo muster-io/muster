@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 )
 
@@ -130,6 +131,14 @@ func storedPushSecret(r dbgen.GetConnectionRow) keyring.StoredSecret {
 	return s
 }
 
+var _ bridge.Targets = (*Service)(nil)
+
+// cachedBridge is the Bridge client of a version of a Connection.
+type cachedBridge struct {
+	version int64
+	client  *bridge.Client
+}
+
 // bridgeClient builds the client of the stored Bridge Connection row, with its decrypted token, push secret and proxy
 // password; the bridge knows the push secret too, so the client masks it like the token.
 func (s *Service) bridgeClient(row dbgen.GetConnectionRow) (*bridge.Client, error) {
@@ -151,6 +160,65 @@ func (s *Service) bridgeClient(row dbgen.GetConnectionRow) (*bridge.Client, erro
 	}
 	return bridge.NewClient(bridge.Network(s.cfg.Network), bridge.Settings{BaseURL: row.BridgeBaseUrl.String,
 		Token: token, PushSecret: pushSecret, Proxy: p.Outbound(password)})
+}
+
+// cachedBridgeClient is the Bridge client of the Connection id at version for delivery, built again when the version
+// changed; the checks and muster doctor build their own.
+func (s *Service) cachedBridgeClient(id, version int64, build func() (*bridge.Client, error)) (*bridge.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cc, ok := s.bridgeClients[id]; ok && cc.version == version {
+		return cc.client, nil
+	}
+	c, err := build()
+	if err != nil {
+		return nil, err
+	}
+	s.bridgeClients[id] = cachedBridge{version: version, client: c}
+	return c, nil
+}
+
+// forgetBridgeClient drops the cached Bridge client of the deleted Connection id.
+func (s *Service) forgetBridgeClient(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.bridgeClients, id)
+}
+
+// BridgeTarget is where the Bridge Destination destinationID posts, for the Bridge delivery (bridge.Targets): its
+// channel id and its Connection with the protocol client, kept until the Connection changes. A deleted Destination
+// still has one, for its final edit. A Destination that is unknown or not a Bridge one, or whose Connection is deleted
+// or not a Bridge Connection, is bridge.ErrNoTarget.
+func (s *Service) BridgeTarget(ctx context.Context, destinationID int64) (bridge.Target, error) {
+	r, err := s.cfg.Store.GetBridgeDestinationTarget(ctx, dbgen.GetBridgeDestinationTargetParams{OrgID: s.cfg.OrgID,
+		DestinationID: destinationID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return bridge.Target{}, bridge.ErrNoTarget
+	}
+	if err != nil {
+		return bridge.Target{}, fmt.Errorf("read the connection of the destination %d: %w", destinationID, err)
+	}
+	if r.Type != TypeBridge {
+		return bridge.Target{}, bridge.ErrNoTarget
+	}
+	row := dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: r.Type, Name: r.Name,
+		BridgeBaseUrl: r.BridgeBaseUrl, BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID,
+		BotTokenUpdatedAt: r.BotTokenUpdatedAt, BridgePushSecretCiphertext: r.BridgePushSecretCiphertext,
+		BridgePushSecretKeyID: r.BridgePushSecretKeyID, BridgePushSecretUpdatedAt: r.BridgePushSecretUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}
+	c, err := s.cachedBridgeClient(r.ID, r.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+	if err != nil {
+		return bridge.Target{}, err
+	}
+	return bridge.Target{Conn: bridge.Conn{ID: r.ID, PublicID: r.PublicID, Version: r.Version, Client: c},
+		ChannelID: r.BridgeChannelID.String}, nil
+}
+
+// BridgeInfo is the info of the Bridge Connection conn for the Bridge delivery (bridge.Targets): Muster's copy, through
+// the InfoCache, read again through conn's client in class when it is older than bridge.info_max_age.
+func (s *Service) BridgeInfo(ctx context.Context, conn bridge.Conn, class outbound.Class) (bridge.Info, bridge.Result) {
+	return s.info.Info(ctx, conn, class)
 }
 
 // checkBridge runs the check of the Bridge Connection row (C-22.FR-2) on the interactive path, limited by the

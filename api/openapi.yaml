@@ -4520,7 +4520,7 @@ paths:
         mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked
         in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination
         ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`.
-        A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+        A Bridge Destination posts one test message of the kind `test` with `postMessage`.
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4563,7 +4563,8 @@ paths:
       - Destinations
       summary: Preview a message or request
       description: Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending
-        anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+        anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format
+        `json`).
       x-permission: destinations:test
       x-listener: app
       security:
@@ -12532,7 +12533,7 @@ components:
           type:
           - string
           - 'null'
-          description: The rendered Root message text.
+          description: The rendered Root message text; for a Bridge, the envelope as JSON.
         request:
           $ref: '#/components/schemas/RenderedRequest'
     DestinationPreview:
@@ -12804,9 +12805,11 @@ components:
           enum:
           - markdown
           - html
+          - commonmark
           - null
           description: The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost
-            (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.
+            (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and
+            `webhook_request`, which have no markup.
         route_id:
           $ref: '#/components/schemas/NullablePublicId'
         stored_snapshot_id:
@@ -12848,6 +12851,7 @@ components:
           enum:
           - markdown
           - html
+          - commonmark
           - null
           description: The markup of `output`; null for kinds without markup.
         source:

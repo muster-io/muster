@@ -132,7 +132,7 @@ A delivery ended as Not delivered after an answer the adapter could not classify
 
 WARN · fields: `destination`, `group` · C-11
 
-A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice.
+A Publication started again after an earlier start whose outcome was never recorded, such as after a crash, or, for a bridge, after a request that got no answer, and the bridge did not replay it: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice.
 
 ### `delivery_work_failed`
 

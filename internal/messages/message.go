@@ -9,9 +9,11 @@
 package messages
 
 import (
+	"cmp"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,12 +25,14 @@ import (
 // Markup is the markup an adapter writes, which template output is written in and alert data are escaped for.
 type Markup string
 
-// The markups of C-12.FR-7: Mattermost Markdown, Telegram HTML, and plain text for outgoing webhooks and the stored
-// text of a Desired state.
+// The markups of C-12.FR-7: Mattermost Markdown, Telegram HTML, CommonMark for bridges, and plain text for outgoing
+// webhooks and the stored text of a Desired state.
 const (
 	MarkupMarkdown Markup = "markdown"
 	MarkupHTML     Markup = "html"
 	MarkupPlain    Markup = "plain"
+	// MarkupCommonMark is CommonMark 0.31 with strikethrough, a bridge's envelope body (C-22.FR-4).
+	MarkupCommonMark Markup = "commonmark"
 )
 
 // Kind is what a message is.
@@ -58,7 +62,10 @@ const (
 // escapes its neutral text (C-13.FR-8, C-14.FR-13); a Body and the template lines of Alerts are already written in
 // their Markup, where a trusted Mention token of the `mention` function stands for the adapter to render
 // (C-12.FR-8). Footers are the footer per identity space whose username names the user (C-12.FR-12). Language and
-// TimeZone are those it was rendered in, for the notes delivery adds at call time.
+// TimeZone are those it was rendered in, for the notes delivery adds at call time. SnoozeSeconds are the Route's
+// Snooze durations, which its Snooze buttons name by index, set only in CommonMark: a bridge writes the first in the
+// commands line and drops Snooze buttons from the longest (C-22.FR-5), and the Desired states of the other markups keep
+// their hashes.
 type Message struct {
 	Kind              Kind              `json:"kind"`
 	Language          string            `json:"language"`
@@ -78,6 +85,7 @@ type Message struct {
 	Footer            string            `json:"footer,omitempty"`
 	Footers           map[string]string `json:"footers,omitempty"`
 	Buttons           []Button          `json:"buttons"`
+	SnoozeSeconds     []int64           `json:"snooze_seconds,omitempty"`
 }
 
 // FooterIn is the footer in an identity space — "telegram" or "mattermost:<connection>" — naming the user by the
@@ -164,10 +172,31 @@ var statusEmoji = map[string]string{
 	ColourFiring: "🔴", ColourAcknowledged: "🟠", ColourResolved: "🟢", ColourSnoozed: "⚪", ColourStorm: "⛈",
 }
 
+// statusColours are the colour of item 1 as RGB (C-12.FR-1), which a Mattermost attachment and a bridge's envelope
+// show.
+var statusColours = map[string]string{
+	ColourFiring: "#d32f2f", ColourAcknowledged: "#f57c00", ColourResolved: "#388e3c", ColourSnoozed: "#9e9e9e",
+	ColourStorm: "#6a1b9a",
+}
+
+// StatusColour is the colour of a message as RGB, "#d32f2f" for firing; empty for an unknown one.
+func StatusColour(colour string) string {
+	return statusColours[colour]
+}
+
+// StatusEmoji is the colour of a message as an emoji, 🔴 for firing; empty for an unknown one.
+func StatusEmoji(colour string) string {
+	return statusEmoji[colour]
+}
+
 // Layout lays m out as text in a markup, as the preview shows it: one section per line, neutral text escaped for the
-// markup and without Mention tokens, template output as written with its tokens shown as `@` names, and the buttons as a last line of bracketed labels. The adapters of S-061 and
-// S-042 lay messages out for their messengers.
+// markup and without Mention tokens, template output as written with its tokens shown as `@` names, and the buttons
+// as a last line of bracketed labels. The adapters of S-061 and S-042 lay messages out for their messengers.
+// CommonMark has a layout of its own, which a bridge's envelope body takes.
 func Layout(m Message, markup Markup) string {
+	if markup == MarkupCommonMark {
+		return layoutCommonMark(m)
+	}
 	escape := Escaper(markup)
 	// Only template output may carry a Mention token; neutral text never shows one.
 	esc := func(s string) string { return escape(templates.StripTokens(s)) }
@@ -254,6 +283,9 @@ func tokenText(tk templates.Token) string {
 // markdownURL escapes the characters that end or break the target of a Markdown link.
 var markdownURL = strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "\\", "%5C")
 
+// commonMarkURL escapes the characters that end or break the destination of a CommonMark link, a space included.
+var commonMarkURL = strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "\\", "%5C", " ", "%20")
+
 func link(markup Markup, text, url string) string {
 	esc := Escaper(markup)
 	if url == "" {
@@ -264,17 +296,30 @@ func link(markup Markup, text, url string) string {
 		return "[" + esc(text) + "](" + markdownURL.Replace(url) + ")"
 	case MarkupHTML:
 		return `<a href="` + esc(url) + `">` + esc(text) + "</a>"
+	case MarkupCommonMark:
+		return commonMarkLink(esc(text), url)
 	case MarkupPlain:
 	}
 	return text + " " + url
 }
 
+// commonMarkLink is a CommonMark link to url whose text is already escaped; text alone without a url.
+func commonMarkLink(text, url string) string {
+	if url == "" {
+		return text
+	}
+	return "[" + text + "](" + commonMarkURL.Replace(url) + ")"
+}
+
+// italic and struck trim s in CommonMark, where a delimiter next to a space opens or closes nothing.
 func italic(markup Markup, s string) string {
 	switch markup {
 	case MarkupMarkdown:
 		return "_" + s + "_"
 	case MarkupHTML:
 		return "<i>" + s + "</i>"
+	case MarkupCommonMark:
+		return around("*", strings.TrimSpace(s))
 	case MarkupPlain:
 	}
 	return s
@@ -286,16 +331,159 @@ func struck(markup Markup, s string) string {
 		return "~~" + s + "~~"
 	case MarkupHTML:
 		return "<s>" + s + "</s>"
+	case MarkupCommonMark:
+		return around("~~", strings.TrimSpace(s))
 	case MarkupPlain:
 	}
 	return s
 }
 
+// around puts a delimiter around s, which stays empty when it is.
+func around(delimiter, s string) string {
+	if s == "" {
+		return ""
+	}
+	return delimiter + s + delimiter
+}
+
 func bullet(markup Markup) string {
-	if markup == MarkupMarkdown {
+	if markup == MarkupMarkdown || markup == MarkupCommonMark {
 		return "- "
 	}
 	return "• "
+}
+
+// hardBreak ends a line inside a CommonMark paragraph or block quote.
+const hardBreak = "\\\n"
+
+// layoutCommonMark lays m out in CommonMark with strikethrough, as a bridge's envelope body (C-22.FR-4): one block per
+// section, separated by blank lines — the heading, the environment, each label section as a block quote of bold names
+// and their values, the summary in italics, the body, the Alerts as a bullet list with resolved ones struck through,
+// the distinct values, the link to the full list, the text lines, the links, each notice, the footer and the buttons —
+// with the lines of a block joined by hard line breaks. Neutral text is escaped and template output kept as written.
+func layoutCommonMark(m Message) string {
+	esc := func(s string) string { return EscapeCommonMark(templates.StripTokens(s)) }
+	var out []string
+	add := func(s string) {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	// lines joins the lines that are not empty with hard line breaks, each after prefix.
+	lines := func(prefix string, ls []string) string {
+		ls = slices.DeleteFunc(slices.Clone(ls), func(s string) bool { return s == "" })
+		if len(ls) == 0 {
+			return ""
+		}
+		return prefix + strings.Join(ls, hardBreak+prefix)
+	}
+	if h := m.Heading; h != nil {
+		title := "#" + strconv.FormatInt(h.Number, 10) + " " + esc(h.Title)
+		add(strings.TrimSpace(statusEmoji[m.Colour] + " " + commonMarkLink(title, h.URL)))
+	}
+	add(esc(m.Environment))
+	for _, section := range [][]Label{m.GroupLabels, m.CommonLabels, m.CommonAnnotations} {
+		quoted := make([]string, len(section))
+		for i, l := range section {
+			quoted[i] = strings.TrimSpace(around("**", esc(l.Name)) + " " + esc(l.Value))
+		}
+		add(lines("> ", quoted))
+	}
+	add(italic(MarkupCommonMark, esc(m.Summary)))
+	if m.Body != nil {
+		add(templates.ReplaceTokens(strings.TrimRight(m.Body.Text, "\n"), tokenText))
+	}
+	if a := m.Alerts; a != nil {
+		items := make([]string, 0, len(a.Lines))
+		for _, l := range a.Lines {
+			text := templates.ReplaceTokens(l.Text, tokenText)
+			if l.Markup == "" {
+				text = esc(l.Text)
+			}
+			if l.Resolved {
+				text = struck(MarkupCommonMark, text)
+			}
+			if text != "" {
+				items = append(items, bullet(MarkupCommonMark)+text)
+			}
+		}
+		add(strings.Join(items, "\n"))
+		if len(a.Lines) == 0 {
+			distinct := make([]string, len(a.Distinct))
+			for i, d := range a.Distinct {
+				line := d.Label + ": " + strings.Join(d.Values, ", ")
+				if d.More > 0 {
+					line += " " + T(m.Language, "alerts.more", Args{"count": strconv.Itoa(d.More)})
+				}
+				distinct[i] = esc(line)
+			}
+			add(lines("", distinct))
+		}
+		if a.FullList != nil {
+			add(link(MarkupCommonMark, a.FullList.Text, a.FullList.URL))
+		}
+	}
+	text := make([]string, len(m.Lines))
+	for i, l := range m.Lines {
+		text[i] = esc(l)
+	}
+	add(lines("", text))
+	links := make([]string, len(m.Links))
+	for i, l := range m.Links {
+		links[i] = link(MarkupCommonMark, l.Text, l.URL)
+	}
+	add(strings.Join(links, " · "))
+	for _, n := range m.Notices {
+		add(esc(n))
+	}
+	add(esc(m.Footer))
+	labels := make([]string, len(m.Buttons))
+	for i, b := range m.Buttons {
+		labels[i] = `\[` + esc(b.Label) + `\]`
+	}
+	add(strings.Join(labels, " "))
+	return strings.Join(out, "\n\n")
+}
+
+// CommandsLine is the line that ends the body of a Root message for a bridge that forwards Thread messages and has no
+// buttons (C-22.FR-5): the Text commands of its buttons in its language, the first Snooze duration only — "Reply in
+// the Thread: ack · resolve · snooze 1h" — or with mentionsOnly, for a bridge that forwards only messages that mention
+// the bot, "Reply in the Thread, mentioning the bot: …". A message without buttons, a resolved one, has none.
+func CommandsLine(m Message, mentionsOnly bool) string {
+	var words []string
+	snooze := false
+	for _, b := range m.Buttons {
+		if b.Command != buttons.CommandSnooze {
+			key := map[string]string{buttons.CommandStillOnIt: "stillOnIt"}[b.Command]
+			words = append(words, T(m.Language, "textCommand."+cmp.Or(key, b.Command), nil))
+			continue
+		}
+		if !snooze && b.Argument < len(m.SnoozeSeconds) {
+			words = append(words, T(m.Language, "textCommand.snooze",
+				Args{"duration": commandDuration(m.Language, m.SnoozeSeconds[b.Argument])}))
+		}
+		snooze = true
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	key := "bridge.commands"
+	if mentionsOnly {
+		key = "bridge.commandsMentioning"
+	}
+	return T(m.Language, key, Args{"commands": strings.Join(words, " · ")})
+}
+
+// commandDuration is a Snooze duration as a Text command writes it (C-22.FR-14): days above a day, then hours, or
+// minutes rounded up — "1h", "24h", "2d", "30m"; "1ч" in Russian.
+func commandDuration(lang string, seconds int64) string {
+	switch {
+	case seconds > 86400 && seconds%86400 == 0:
+		return T(lang, "textCommand.days", Args{"count": strconv.FormatInt(seconds/86400, 10)})
+	case seconds >= 3600 && seconds%3600 == 0:
+		return T(lang, "textCommand.hours", Args{"count": strconv.FormatInt(seconds/3600, 10)})
+	}
+	return T(lang, "textCommand.minutes", Args{"count": strconv.FormatInt((seconds+59)/60, 10)})
 }
 
 // The languages of messages (route.language); English serves any other.

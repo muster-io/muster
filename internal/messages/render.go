@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -308,7 +309,8 @@ type Rendered struct {
 
 // Root renders the Root message of src for a markup (C-12.FR-1, FR-2, FR-6): Muster's colour, heading, links,
 // notices, footer and buttons around the body of the Route's root_message template or the default content with the
-// Route's line template; when a Route template fails, the Fallback template.
+// Route's line template; when a Route template fails, the Fallback template. In CommonMark it also carries the Route's
+// Snooze durations, for a bridge.
 func (r *Renderer) Root(src *Source, markup Markup) Rendered {
 	return r.root(src, markup, true)
 }
@@ -319,6 +321,9 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 	defer func() { observe(TemplateRootMessage, r.real.Now().Sub(start)) }()
 	lang := language(src.Route.Language)
 	m, keyID := r.frame(src, lang, sign)
+	if markup == MarkupCommonMark {
+		m.SnoozeSeconds = slices.Clone(src.Route.SnoozeDurations)
+	}
 	out := Rendered{KeyID: keyID}
 	if t := src.Route.RootMessage; t != nil {
 		body, err := r.execute(TemplateRootMessage, *t, SafeData(r.data(src), markup))

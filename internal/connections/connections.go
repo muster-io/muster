@@ -248,6 +248,8 @@ type Queries interface {
 		error)
 	GetTelegramDestinationTarget(ctx context.Context, arg dbgen.GetTelegramDestinationTargetParams) (
 		dbgen.GetTelegramDestinationTargetRow, error)
+	GetBridgeDestinationTarget(ctx context.Context, arg dbgen.GetBridgeDestinationTargetParams) (
+		dbgen.GetBridgeDestinationTargetRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or transaction the queries run in, which the Abandon hook writes through.
@@ -322,9 +324,10 @@ type Service struct {
 	cfg  Config
 	info *bridge.InfoCache
 
-	mu        sync.Mutex
-	clients   map[int64]cachedClient
-	tgClients map[int64]cachedTelegram
+	mu            sync.Mutex
+	clients       map[int64]cachedClient
+	tgClients     map[int64]cachedTelegram
+	bridgeClients map[int64]cachedBridge
 }
 
 // cachedClient is the client of a version of a Connection.
@@ -335,7 +338,8 @@ type cachedClient struct {
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
-	s := &Service{cfg: cfg, clients: map[int64]cachedClient{}, tgClients: map[int64]cachedTelegram{}}
+	s := &Service{cfg: cfg, clients: map[int64]cachedClient{}, tgClients: map[int64]cachedTelegram{},
+		bridgeClients: map[int64]cachedBridge{}}
 	s.info = bridge.NewInfoCache(s, cfg.Clocks.Business, bridge.DefaultInfoMaxAge, cfg.Log)
 	return s
 }
@@ -793,6 +797,7 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 	if done != nil {
 		done(ctx)
 	}
+	s.forgetBridgeClient(deleted.ID)
 	s.unhook(ctx, deleted)
 	return nil
 }

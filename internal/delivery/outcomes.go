@@ -41,6 +41,12 @@ import (
 //
 // A failure of a call to a Destination that is Broken already, which only a probe makes, keeps it Broken with that
 // error as the reason.
+//
+// For an Idempotent adapter (C-22.FR-6) a failed Publication that may have reached the messenger keeps its start for
+// the retry (keepStarted), and an ok one decides the possible duplicate: a retry after a started Publication records
+// one unless its answer was replayed. A replayed Publication is dated from its first attempt and stays pending, so the
+// next call edits it to the latest Desired state — or to the final edit, when the retry carried it because the
+// Destination left meanwhile; a final edit posted as a Publication that was not replayed is the final message itself.
 
 // outcomeQueries are the queries of the outcome rules, the late Publication, the possible duplicate and the deleted
 // Root message.
@@ -54,6 +60,7 @@ type outcomeQueries interface {
 	DropPendingReplies(ctx context.Context, arg dbgen.DropPendingRepliesParams) error
 	SettleResolvedPublication(ctx context.Context, arg dbgen.SettleResolvedPublicationParams) error
 	ReminderReached(ctx context.Context, arg dbgen.ReminderReachedParams) (bool, error)
+	RecordThreadRef(ctx context.Context, arg dbgen.RecordThreadRefParams) error
 }
 
 // The texts an outcome without an error of its own records.
@@ -153,21 +160,21 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	id := a.row.ID
 	switch out.Kind {
 	case OutcomeOK:
-		if a.row.DesiredRetire {
-			return w.retired(ctx, q, org, a, now, true, logs)
+		if a.row.DesiredRetire && !a.replayed(out) {
+			return w.retired(ctx, q, org, a, now, true, a.duplicate(out), logs)
 		}
 		return w.delivered(ctx, q, org, a, c, out, now, logs)
 	case OutcomeRetryAfter:
 		until := now.Add(out.RetryAfter)
-		ok, err := w.retry(ctx, q, org, id, until.Add(TokenMargin), false, out, now)
+		ok, err := w.retry(ctx, q, org, a, until.Add(TokenMargin), false, out, now)
 		if err != nil || !ok {
 			return ok, err
 		}
 		return true, holdBucket(ctx, q, org, a.destination, out, until)
 	case OutcomeTransient:
 		r, err := q.RecordDeliveryRetry(ctx, dbgen.RecordDeliveryRetryParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-			At: now.Add(w.backoff(a.row.Attempts + 1)), Counted: true, ErrorClass: nonEmpty(errorClass(out.Kind)),
-			Error: nonEmpty(string(out.Error)), Now: now})
+			At: now.Add(w.backoff(a.row.Attempts + 1)), Counted: true, KeepStarted: a.keepStarted(out),
+			ErrorClass: nonEmpty(errorClass(out.Kind)), Error: nonEmpty(string(out.Error)), Now: now})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
@@ -177,7 +184,7 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 		return true, w.transient(ctx, q, org, a.destination, a.row.DestinationHealth == healthBroken, r.Attempts,
 			r.FirstFailedAt, out, now, logs)
 	case OutcomeFatal:
-		ok, err := w.retry(ctx, q, org, id, now, false, out, now)
+		ok, err := w.retry(ctx, q, org, a, now, false, out, now)
 		if err != nil || !ok {
 			return ok, err
 		}
@@ -186,7 +193,7 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	case OutcomeGone:
 		switch {
 		case a.row.DesiredRetire:
-			return w.retired(ctx, q, org, a, now, false, logs)
+			return w.retired(ctx, q, org, a, now, false, false, logs)
 		case a.publication:
 			return w.notDelivered(ctx, q, org, a, out, now, logs)
 		}
@@ -195,16 +202,24 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 			resolved:    a.row.GroupStatus == string(groups.StatusResolved),
 			republished: a.row.RepublishedAfterDelete}, now)
 	case OutcomeThreadLost:
-		return w.retry(ctx, q, org, id, now.Add(TransientFirstStep), false, out, now)
+		return w.retry(ctx, q, org, a, now.Add(TransientFirstStep), false, out, now)
 	default:
 		return w.notDelivered(ctx, q, org, a, out, now, logs)
 	}
 }
 
 // retired records the final edit of a delivery, made or found gone: the row is retired, with the final_edit delivery
-// event when the edit was made, and a Broken Destination that a probe reached is healthy again.
-func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, now time.Time, edited bool,
+// event when the edit was made, and a Broken Destination that a probe reached is healthy again. A final edit posted
+// as a Publication that may show twice records the possible duplicate (duplicate), as delivered does.
+func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, now time.Time, edited, duplicate bool,
 	logs *after) (bool, error) {
+	if duplicate {
+		// Before the row is retired, while the lease is still held.
+		if err := q.MarkPossibleDuplicate(ctx, dbgen.MarkPossibleDuplicateParams{OrgID: org, ID: a.row.ID,
+			Owner: w.Lease.Owner, Now: now}); err != nil {
+			return false, fmt.Errorf("mark the possible duplicate: %w", err)
+		}
+	}
 	_, err := q.RecordRetired(ctx, dbgen.RecordRetiredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner, Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -214,6 +229,11 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 	}
 	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
 		return false, err
+	}
+	if duplicate {
+		if err := duplicateRecorded(ctx, q, org, a.row, now, logs); err != nil {
+			return false, err
+		}
 	}
 	if err := released(ctx, q, org, a.row.ActualButtonKeyID.String, ""); err != nil {
 		return false, err
@@ -234,7 +254,9 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 // delivered records a call the messenger accepted: the delivery event of a first Publication — storm_summary for a
 // Storm summary — and of a late one, the Thread of a Telegram post — attached to its known copy or waiting for it,
 // under the lock of the post — and the end of the Broken state of a Destination that a probe reached. A Publication of
-// an Alert Group not yet marked published, or any later call while it is still unmarked, marks it once committed.
+// an Alert Group not yet marked published, or any later call while it is still unmarked, marks it once committed, at
+// the delivery's published_at. For an Idempotent adapter it also stores the answer's `thread_ref` and records the
+// possible duplicate of a retry after a started Publication that was not replayed, before its publication event.
 func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt, c Call, out Outcome, now time.Time,
 	logs *after) (bool, error) {
 	p, telegramPost := publicationPost(a, out.MessageID)
@@ -244,9 +266,11 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		}
 	}
 	key := buttonKeyOf(a.message)
-	_, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
+	duplicate := a.duplicate(out)
+	r, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
-		MessageUrl: nonEmpty(out.MessageURL), Published: a.publication, ResponseValues: valuesJSON(out.Values),
+		MessageUrl: nonEmpty(out.MessageURL), ThreadRef: nonEmpty(out.ThreadRef), Published: a.publication,
+		Replayed: a.replayed(out), PossibleDuplicate: duplicate, ResponseValues: valuesJSON(out.Values),
 		ButtonKeyID: nonEmpty(key), Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -266,6 +290,11 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		}
 	}
 	if a.publication {
+		if duplicate {
+			if err := duplicateRecorded(ctx, q, org, a.row, now, logs); err != nil {
+				return false, err
+			}
+		}
 		kind := EventPublication
 		if a.row.StormID.Valid {
 			kind = EventStormSummary
@@ -284,8 +313,8 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 	}
 	if a.row.GroupUnpublished && (a.publication || a.row.PublishedAt.Valid) {
 		at := now
-		if a.row.PublishedAt.Valid {
-			at = a.row.PublishedAt.Time
+		if r.PublishedAt.Valid {
+			at = r.PublishedAt.Time
 		}
 		logs.add(w.markPublished(a.row.AlertGroupID, at))
 	}
@@ -337,12 +366,12 @@ func (w *Worker) markPublished(groupID int64, at time.Time) func(ctx context.Con
 	}
 }
 
-// retry records an outcome retried at at; ok is false when the lease went to another replica.
-func (w *Worker) retry(ctx context.Context, q queries, org, id int64, at time.Time, counted bool, out Outcome,
+// retry records an outcome of the attempt a retried at at; ok is false when the lease went to another replica.
+func (w *Worker) retry(ctx context.Context, q queries, org int64, a attempt, at time.Time, counted bool, out Outcome,
 	now time.Time) (bool, error) {
-	_, err := q.RecordDeliveryRetry(ctx, dbgen.RecordDeliveryRetryParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-		At: at, Counted: counted, ErrorClass: nonEmpty(errorClass(out.Kind)), Error: nonEmpty(string(out.Error)),
-		Now: now})
+	_, err := q.RecordDeliveryRetry(ctx, dbgen.RecordDeliveryRetryParams{OrgID: org, ID: a.row.ID,
+		Owner: w.Lease.Owner, At: at, Counted: counted, KeepStarted: a.keepStarted(out),
+		ErrorClass: nonEmpty(errorClass(out.Kind)), Error: nonEmpty(string(out.Error)), Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -535,6 +564,14 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		if err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)), Now: now}); err != nil {
 			return false, fmt.Errorf("record the sent thread reply: %w", err)
+		}
+		if out.ThreadRef == "" {
+			return true, nil
+		}
+		// The bridge's thread_ref goes with the next reply under the same Root message (C-22.FR-6).
+		if err := q.RecordThreadRef(ctx, dbgen.RecordThreadRefParams{OrgID: org, ID: a.row.DeliveryID,
+			ThreadRef: out.ThreadRef, MessageID: a.row.MessageID.String, Now: now}); err != nil {
+			return false, fmt.Errorf("record the thread_ref of the thread reply: %w", err)
 		}
 		return true, nil
 	case OutcomeRetryAfter:

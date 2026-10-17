@@ -2397,6 +2397,7 @@ func (e TemplateKind) Valid() bool {
 
 // Defines values for TemplatePreviewRequestFormat.
 const (
+	TemplatePreviewRequestFormatCommonmark  TemplatePreviewRequestFormat = "commonmark"
 	TemplatePreviewRequestFormatHtml        TemplatePreviewRequestFormat = "html"
 	TemplatePreviewRequestFormatLessThannil TemplatePreviewRequestFormat = "<nil>"
 	TemplatePreviewRequestFormatMarkdown    TemplatePreviewRequestFormat = "markdown"
@@ -2405,6 +2406,8 @@ const (
 // Valid indicates whether the value is a known member of the TemplatePreviewRequestFormat enum.
 func (e TemplatePreviewRequestFormat) Valid() bool {
 	switch e {
+	case TemplatePreviewRequestFormatCommonmark:
+		return true
 	case TemplatePreviewRequestFormatHtml:
 		return true
 	case TemplatePreviewRequestFormatLessThannil:
@@ -2418,6 +2421,7 @@ func (e TemplatePreviewRequestFormat) Valid() bool {
 
 // Defines values for TemplatePreviewResultFormat.
 const (
+	TemplatePreviewResultFormatCommonmark  TemplatePreviewResultFormat = "commonmark"
 	TemplatePreviewResultFormatHtml        TemplatePreviewResultFormat = "html"
 	TemplatePreviewResultFormatLessThannil TemplatePreviewResultFormat = "<nil>"
 	TemplatePreviewResultFormatMarkdown    TemplatePreviewResultFormat = "markdown"
@@ -2426,6 +2430,8 @@ const (
 // Valid indicates whether the value is a known member of the TemplatePreviewResultFormat enum.
 func (e TemplatePreviewResultFormat) Valid() bool {
 	switch e {
+	case TemplatePreviewResultFormatCommonmark:
+		return true
 	case TemplatePreviewResultFormatHtml:
 		return true
 	case TemplatePreviewResultFormatLessThannil:
@@ -3912,7 +3918,7 @@ type DestinationPreviewItem struct {
 	// Request A request as it would be or was sent, with Secrets, the Signing secret and tokens masked.
 	Request *RenderedRequest `json:"request,omitempty"`
 
-	// Text The rendered Root message text.
+	// Text The rendered Root message text; for a Bridge, the envelope as JSON.
 	Text nullable.Nullable[string] `json:"text,omitempty"`
 }
 
@@ -6020,7 +6026,7 @@ type TemplatePreviewRequest struct {
 	// AlertGroupId A `public_id` in the format of `PublicId`, or null.
 	AlertGroupId nullable.Nullable[NullablePublicId] `json:"alert_group_id,omitempty"`
 
-	// Format The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.
+	// Format The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
 	Format nullable.Nullable[TemplatePreviewRequestFormat] `json:"format,omitempty"`
 	Kind   TemplateKind                                    `json:"kind"`
 
@@ -6040,7 +6046,7 @@ type TemplatePreviewRequest struct {
 	Template string `json:"template"`
 }
 
-// TemplatePreviewRequestFormat The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.
+// TemplatePreviewRequestFormat The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
 type TemplatePreviewRequestFormat string
 
 // TemplatePreviewResult defines model for TemplatePreviewResult.
@@ -9399,7 +9405,7 @@ type ClientInterface interface {
 
 	// PreviewDestinationWithBody Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9408,7 +9414,7 @@ type ClientInterface interface {
 
 	// PreviewDestination Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9470,7 +9476,7 @@ type ClientInterface interface {
 
 	// TestDestinationWithBody Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9479,7 +9485,7 @@ type ClientInterface interface {
 
 	// TestDestination Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11358,7 +11364,7 @@ func (c *Client) CheckDestination(ctx context.Context, destinationId Destination
 
 // PreviewDestinationWithBody Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 //
 // Takes any type of body and a specified content type.
 //
@@ -11377,7 +11383,7 @@ func (c *Client) PreviewDestinationWithBody(ctx context.Context, destinationId D
 
 // PreviewDestination Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -11519,7 +11525,7 @@ func (c *Client) RetirePreviousSigningSecret(ctx context.Context, destinationId 
 
 // TestDestinationWithBody Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11538,7 +11544,7 @@ func (c *Client) TestDestinationWithBody(ctx context.Context, destinationId Dest
 
 // TestDestination Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -21590,7 +21596,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithBodyWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21599,7 +21605,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21671,7 +21677,7 @@ type ClientWithResponsesInterface interface {
 
 	// TestDestinationWithBodyWithResponse Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21680,7 +21686,7 @@ type ClientWithResponsesInterface interface {
 
 	// TestDestinationWithResponse Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -35756,7 +35762,7 @@ func (c *ClientWithResponses) CheckDestinationWithResponse(ctx context.Context, 
 
 // PreviewDestinationWithBodyWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35771,7 +35777,7 @@ func (c *ClientWithResponses) PreviewDestinationWithBodyWithResponse(ctx context
 
 // PreviewDestinationWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35891,7 +35897,7 @@ func (c *ClientWithResponses) RetirePreviousSigningSecretWithResponse(ctx contex
 
 // TestDestinationWithBodyWithResponse Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35906,7 +35912,7 @@ func (c *ClientWithResponses) TestDestinationWithBodyWithResponse(ctx context.Co
 
 // TestDestinationWithResponse Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

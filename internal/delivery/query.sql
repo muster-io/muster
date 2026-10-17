@@ -158,7 +158,7 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -197,10 +197,17 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- name: TryShareUpdateLock :one
 SELECT pg_try_advisory_xact_lock_shared(@lock_class::int, hashint8(@connection_id::bigint))::boolean AS free;
 
--- StartPublication records, before the call, that a Publication started; a retry after it publishes again.
+-- StartPublication records, before the call, that a Publication started; a retry after it publishes again. With @keep,
+-- for an adapter whose messenger keeps idempotency keys (C-22.FR-6), the start of an earlier attempt of the same
+-- Publication is kept: it dates a Publication the messenger replays, and its retry records a possible duplicate only
+-- when the answer is not replayed.
 -- name: StartPublication :exec
 UPDATE deliveries
-SET publication_started_at = @now::timestamptz, updated_at = @now::timestamptz
+SET publication_started_at = CASE
+                                 WHEN @keep::boolean THEN coalesce(publication_started_at, @now::timestamptz)
+                                 ELSE @now::timestamptz
+                             END,
+    updated_at             = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
@@ -215,15 +222,25 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
 -- gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
 -- message that now exists is kept current. The key that signed the buttons of the message sent becomes the actual one
--- (@button_key_id, none for a message without buttons).
+-- (@button_key_id, none for a message without buttons). A bridge's `thread_ref` (@thread_ref) becomes the Thread
+-- anchor. A Publication the messenger @replayed (C-22.FR-6) records its message, url and `thread_ref`, is dated from
+-- the start of its first attempt, when the message was really posted, and stays pending without an actual version,
+-- its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
+-- to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
 -- name: RecordDelivered :one
 UPDATE deliveries d
-SET actual_version      = @version::bigint,
-    actual_hash         = @hash,
+SET actual_version      = CASE WHEN @replayed::boolean THEN d.actual_version ELSE @version::bigint END,
+    actual_hash         = CASE WHEN @replayed::boolean THEN NULL ELSE @hash::bytea END,
     actual_button_key_id = sqlc.narg('button_key_id')::text,
     message_id          = coalesce(sqlc.narg('message_id')::text, d.message_id),
     message_url         = coalesce(sqlc.narg('message_url')::text, d.message_url),
-    published_at        = CASE WHEN @published::boolean THEN coalesce(d.published_at, @now::timestamptz) ELSE d.published_at END,
+    thread_anchor_id    = coalesce(sqlc.narg('thread_ref')::text, d.thread_anchor_id),
+    published_at        = CASE
+                              WHEN @published::boolean THEN coalesce(d.published_at,
+                                  CASE WHEN @replayed::boolean THEN d.publication_started_at END, @now::timestamptz)
+                              ELSE d.published_at
+                          END,
+    possible_duplicate  = d.possible_duplicate OR @possible_duplicate::boolean,
     publications        = d.publications + CASE WHEN @published::boolean THEN 1 ELSE 0 END,
     response_values     = CASE
                               WHEN @published::boolean THEN coalesce(sqlc.narg('response_values')::jsonb, '{}'::jsonb)
@@ -235,11 +252,12 @@ SET actual_version      = @version::bigint,
                               WHEN f.ended AND NOT f.raced THEN d.state
                               WHEN f.raced AND d.storm_id IS NOT NULL THEN 'retired'
                               WHEN f.raced AND f.left_destination THEN 'pending'
-                              WHEN d.desired_version = @version::bigint AND NOT d.desired_retire THEN 'delivered'
+                              WHEN d.desired_version = @version::bigint AND NOT d.desired_retire
+                                  AND NOT @replayed::boolean THEN 'delivered'
                               ELSE 'pending'
                           END,
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
-    desired_received_at = NULL,
+    desired_received_at = CASE WHEN @replayed::boolean THEN d.desired_received_at END,
     next_attempt_at     = @now::timestamptz,
     attempts            = 0,
     first_failed_at     = NULL,
@@ -263,17 +281,23 @@ FROM (SELECT x.id,
       FROM deliveries x
       WHERE x.org_id = @org_id AND x.id = @id) AS f
 WHERE d.org_id = @org_id AND d.id = f.id AND d.lease_owner = @owner::text
-RETURNING d.state;
+RETURNING d.state, d.published_at;
 
 -- RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter or a Fatal error, which leave the
 -- budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
--- did not take a Publication, so its start is cleared. No row when the lease went to another replica.
+-- did not take a Publication, so its start is cleared, unless @keep_started: for an adapter whose messenger keeps
+-- idempotency keys, a Publication that may have reached it — started before this attempt, or a request without an
+-- answer — keeps the start of its first attempt for the retry (C-22.FR-6). No row when the lease went to another
+-- replica.
 -- name: RecordDeliveryRetry :one
 UPDATE deliveries
 SET next_attempt_at        = @at,
     attempts               = attempts + CASE WHEN @counted::boolean THEN 1 ELSE 0 END,
     first_failed_at        = CASE WHEN @counted::boolean THEN coalesce(first_failed_at, @now) ELSE first_failed_at END,
-    publication_started_at = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
+    publication_started_at = CASE
+                                 WHEN published_at IS NULL AND NOT @keep_started::boolean THEN NULL
+                                 ELSE publication_started_at
+                             END,
     last_error_class       = sqlc.narg('error_class')::text,
     last_error             = sqlc.narg('error')::text,
     lease_owner            = NULL,
@@ -472,6 +496,14 @@ SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, state =
 FROM due
 WHERE r.org_id = @org_id AND r.id = due.id
 RETURNING r.id, r.next_attempt_at;
+
+-- RecordThreadRef stores the `thread_ref` a bridge returned for a Thread reply as the Thread anchor of its delivery,
+-- which the next reply sends (C-22.FR-6); a Root message published again meanwhile, with another message id, is left
+-- alone. The record of the reply locked the delivery first (LockReplyDelivery).
+-- name: RecordThreadRef :exec
+UPDATE deliveries
+SET thread_anchor_id = @thread_ref::text, updated_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND message_id = @message_id::text;
 
 -- LockReplyDelivery locks the delivery of a Thread reply, before the reply itself: a transaction that writes a Thread
 -- reply takes its delivery's row first, in the lock order of worker.go. Nothing is locked when the reply is gone.

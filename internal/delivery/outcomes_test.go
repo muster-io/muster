@@ -4,11 +4,14 @@
 package delivery_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -931,5 +934,265 @@ func TestMarkPublishedAfterCommit(t *testing.T) {
 	e.round(t)
 	if strings.Contains(e.log.String(), "mark_published") {
 		t.Errorf("log %s", e.log)
+	}
+}
+
+// bridgeLatency is how many calls observed muster_delivery_latency_seconds for the Bridge of the fixtures so far.
+func bridgeLatency(t *testing.T) int {
+	t.Helper()
+	prefix := `muster_delivery_latency_seconds_count{destination="` + bridgePublicID + `"} `
+	for line := range strings.Lines(scrape(t)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				t.Fatalf("%s: %v", line, err)
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+// TestReplayedPublication is C-22.FR-6, AC-6 and C-17.FR-1 through the recorder: a Publication whose answer was lost
+// is retried with the same key and answered replayed. No possible duplicate is recorded; its message id, url and
+// thread_ref are; published_at and the Alert Group's first Publication are the start of the first attempt, when the
+// message was really posted; actual_hash stays unset, so the delivery stays pending and the next call is an edit to
+// the latest Desired state, which carries the Acknowledge that came before the retry. The replayed call observes no
+// latency; the edit, which delivers the Snapshot's change, does.
+func TestReplayedPublication(t *testing.T) {
+	e, idem := bridged(t)
+	calls := e.recordPublished()
+	received := business0.Add(-2 * time.Second)
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring, "a"),
+		Actor: groups.System, Events: []groups.Recorded{created()}, ReceivedAt: &received}); err != nil {
+		t.Fatal(err)
+	}
+	d := e.only(t)
+	first := e.business.Now()
+	e.rec.Script(deliverytest.MethodPublish, timedOut(),
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-1",
+			MessageURL: "https://bridge.example.org/m/m-1", ThreadRef: "t-m-1", Replayed: true}})
+	e.round(t)
+	if d.started == nil || !d.started.Equal(first) || d.state != "pending" || d.attempts != 1 {
+		t.Fatalf("after the lost answer %+v", d)
+	}
+	e.business.Advance(time.Second)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), person, groups.Recorded{Seq: 2,
+		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	latency := bridgeLatency(t)
+	e.business.Set(d.next)
+	retried := e.business.Now()
+	e.round(t)
+	if d.state != "pending" || d.actualHash != nil || d.actualVersion != 0 || *d.messageID != "m-1" ||
+		*d.messageURL != "https://bridge.example.org/m/m-1" || d.anchorID == nil || *d.anchorID != "t-m-1" ||
+		d.publications != 1 || d.possibleDuplicate || d.receivedAt == nil || !d.receivedAt.Equal(received) ||
+		!d.next.Equal(retried) {
+		t.Fatalf("after the replay %+v", d)
+	}
+	if d.publishedAt == nil || !d.publishedAt.Equal(first) || len(*calls) != 1 ||
+		(*calls)[0] != (publishedCall{groupID, first, false}) {
+		t.Errorf("published at %v, marked %+v", d.publishedAt, *calls)
+	}
+	if !slices.Equal(e.eventKinds(), []string{"publication"}) || bridgeLatency(t) != latency {
+		t.Errorf("events %v, latency observed", e.eventKinds())
+	}
+	e.round(t)
+	cs := e.rec.Calls()
+	if callMethods(cs) != "publish,publish,update" || cs[2].MessageID != "m-1" ||
+		!strings.Contains(textOf(cs[2]), "Acknowledged") {
+		t.Fatalf("calls %s %+v", callMethods(cs), cs)
+	}
+	key := fmt.Sprintf("pub-%s-%d-1", bridgePublicID, d.id)
+	if !slices.Equal(idem.Keys(), []string{key, key, ""}) {
+		t.Errorf("keys %v", idem.Keys())
+	}
+	if d.state != "delivered" || d.actualVersion != d.version || !bytes.Equal(d.actualHash, d.hash) ||
+		d.receivedAt != nil || !d.publishedAt.Equal(first) || *d.anchorID != "t-m-1" || len(*calls) != 1 {
+		t.Errorf("after the edit %+v", d)
+	}
+	if bridgeLatency(t) != latency+1 {
+		t.Errorf("latency count %d, want %d", bridgeLatency(t), latency+1)
+	}
+}
+
+// TestReplayedOutcomeRecord is C-22.FR-6: what the record of an ok outcome keeps from a bridge's answer. A Publication
+// answered with a thread_ref, not replayed, stores it and is delivered; a replayed answer to an edit is an ordinary ok;
+// an answer without a thread_ref keeps the stored one.
+func TestReplayedOutcomeRecord(t *testing.T) {
+	e, d, _ := publishedBridge(t, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m-1", ThreadRef: "t-m-1"}})
+	if d.anchorID == nil || *d.anchorID != "t-m-1" || d.possibleDuplicate || d.publishedAt == nil ||
+		!d.publishedAt.Equal(business0) {
+		t.Fatalf("published %+v", d)
+	}
+	e.business.Advance(time.Minute)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), person, groups.Recorded{Seq: 2,
+		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		Replayed: true}})
+	e.round(t)
+	if d.state != "delivered" || d.actualVersion != 2 || !bytes.Equal(d.actualHash, d.hash) || *d.anchorID != "t-m-1" ||
+		!d.publishedAt.Equal(business0) || d.publications != 1 {
+		t.Errorf("a replayed edit %+v", d)
+	}
+}
+
+// TestStartedKeptOnlyWhenUnanswered is C-22.FR-6: for an Idempotent adapter a failed Publication keeps the start of its
+// first attempt only when it may have reached the bridge — a request without an answer, or a retry of one started
+// before — and the retry that is not replayed then records a possible duplicate. An answered failure, or a refused
+// connection, which sent nothing, clears it, and the retry after it records none; Not delivered clears it; a
+// non-Idempotent adapter ignores Unanswered.
+func TestStartedKeptOnlyWhenUnanswered(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		answers []deliverytest.Answer
+		kept    bool
+	}{
+		{"answered transient", []deliverytest.Answer{deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503")},
+			false},
+		{"retry_after", []deliverytest.Answer{deliverytest.RetryAfter(7*time.Second, delivery.ScopeConnection)}, false},
+		{"timeout", []deliverytest.Answer{timedOut()}, true},
+		{"timeout, then answered transient", []deliverytest.Answer{timedOut(),
+			deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503")}, true},
+		{"timeout, then retry_after", []deliverytest.Answer{timedOut(),
+			deliverytest.RetryAfter(7*time.Second, delivery.ScopeDestination)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, d, _ := pendingBridge(t)
+			first := e.business.Now()
+			e.rec.Script(deliverytest.MethodPublish, tc.answers...)
+			for range tc.answers {
+				e.round(t)
+				if kept := d.started != nil && d.started.Equal(first); kept != tc.kept || d.state != "pending" {
+					t.Fatalf("started %v, want kept %v: %+v", d.started, tc.kept, d)
+				}
+				e.business.Set(d.next)
+			}
+			e.round(t)
+			if d.state != "delivered" || d.possibleDuplicate != tc.kept || e.db.calls["MarkPossibleDuplicate"] != 0 ||
+				slices.Contains(e.eventKinds(), "possible_duplicate") != tc.kept {
+				t.Errorf("delivered %+v, events %v", d, e.eventKinds())
+			}
+		})
+	}
+	// Fatal keeps a start the bridge may have taken; the Destination waits Broken.
+	e, d, _ := pendingBridge(t)
+	e.rec.Script(deliverytest.MethodPublish, timedOut(),
+		deliverytest.Failure(delivery.OutcomeFatal, "The bot was removed from this channel."))
+	e.round(t)
+	e.business.Set(d.next)
+	e.round(t)
+	if d.started == nil || !d.started.Equal(business0) || e.db.dests[destMM].health != "broken" {
+		t.Errorf("fatal %+v", d)
+	}
+	// Not delivered clears it.
+	e, d, _ = pendingBridge(t)
+	e.rec.Script(deliverytest.MethodPublish, timedOut(),
+		deliverytest.Failure(delivery.OutcomeUnknown, "invalid"))
+	e.round(t)
+	e.business.Set(d.next)
+	e.round(t)
+	if d.started != nil || d.state != "not_delivered" {
+		t.Errorf("not delivered %+v", d)
+	}
+	// Without Idempotent, Unanswered changes nothing: the start is cleared, and the retry records no duplicate.
+	e, d = pending(t)
+	e.rec.Script(deliverytest.MethodPublish, timedOut())
+	e.round(t)
+	if d.started != nil {
+		t.Errorf("mattermost kept %+v", d)
+	}
+	e.business.Set(d.next)
+	e.round(t)
+	if d.state != "delivered" || d.possibleDuplicate {
+		t.Errorf("mattermost %+v", d)
+	}
+}
+
+// TestReplayedFinalEdit is C-22.FR-6 with C-11.FR-14: a Bridge Publication whose answer was lost keeps its start, so a
+// Destination that leaves the Route before the retry gives it the final edit instead of withholding it. The retry
+// keeps the key, Quiet and without buttons, carrying the final edit; a replayed answer names the Root message the
+// first attempt posted, the delivery stays pending with its final edit due, and the next call edits that message to
+// the final text before the delivery retires. Answered without a replay, the final message just posted retires the
+// delivery at once, with a possible duplicate.
+func TestReplayedFinalEdit(t *testing.T) {
+	leave := func(t *testing.T, answers ...deliverytest.Answer) (*env, *fakeDelivery, idempotentRecorder) {
+		t.Helper()
+		e, d, idem := pendingBridge(t)
+		e.w.PublicURL = publicURL
+		e.rec.Script(deliverytest.MethodPublish, append([]deliverytest.Answer{timedOut()}, answers...)...)
+		e.round(t)
+		e.db.routeDests[routeID] = nil
+		e.changed(t, routeID, nil, []int64{destMM})
+		if d.state != "pending" || !d.desiredRetire || d.started == nil || !d.started.Equal(business0) {
+			t.Fatalf("left after the lost answer %+v", d)
+		}
+		e.business.Set(d.next)
+		e.round(t)
+		cs := e.rec.Calls()
+		key := fmt.Sprintf("pub-%s-%d-1", bridgePublicID, d.id)
+		if callMethods(cs) != "publish,publish" || cs[1].Loudness != groups.Quiet || len(cs[1].Mentions) != 0 ||
+			len(cs[1].Message.Buttons) != 0 || !slices.Contains(cs[1].Message.Notices, finalText("AGAAAAAAAAAA21")) ||
+			!slices.Equal(idem.Keys(), []string{key, key}) {
+			t.Fatalf("calls %s %+v, keys %v", callMethods(cs), cs, idem.Keys())
+		}
+		return e, d, idem
+	}
+
+	e, d, _ := leave(t, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-1",
+		MessageURL: "https://bridge.example.org/m/m-1", ThreadRef: "t-m-1", Replayed: true}})
+	if d.state != "pending" || !d.desiredRetire || d.messageID == nil || *d.messageID != "m-1" ||
+		d.publishedAt == nil || !d.publishedAt.Equal(business0) || d.possibleDuplicate {
+		t.Fatalf("after the replay %+v", d)
+	}
+	e.round(t)
+	cs := e.rec.Calls()
+	if callMethods(cs) != "publish,publish,update" || cs[2].MessageID != "m-1" ||
+		cs[2].Message.Notices[len(cs[2].Message.Notices)-1] != finalText("AGAAAAAAAAAA21") {
+		t.Fatalf("calls %s %+v", callMethods(cs), cs)
+	}
+	if d.state != "retired" || d.desiredRetire || d.possibleDuplicate ||
+		!slices.Equal(e.eventKinds(), []string{"publication", "final_edit"}) {
+		t.Errorf("after the final edit %+v, events %v", d, e.eventKinds())
+	}
+
+	e, d, _ = leave(t, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-2"}})
+	if d.state != "retired" || d.desiredRetire || !d.possibleDuplicate ||
+		!slices.Equal(e.eventKinds(), []string{"possible_duplicate", "final_edit"}) ||
+		!strings.Contains(e.log.String(), `"event":"delivery_possible_duplicate"`) {
+		t.Errorf("final message without a replay %+v, events %v", d, e.eventKinds())
+	}
+	e.round(t)
+	if len(e.rec.Calls()) != 2 {
+		t.Errorf("called after the final message: %s", callMethods(e.rec.Calls()))
+	}
+
+	// The lease went to another replica during the call: nothing is recorded.
+	e, d, _ = pendingBridge(t)
+	e.rec.Script(deliverytest.MethodPublish, timedOut(), deliverytest.Answer{Outcome: deliverytest.OK().Outcome,
+		Then: func() { e.db.deliveries[0].owner = "other" }})
+	e.round(t)
+	e.db.routeDests[routeID] = nil
+	e.changed(t, routeID, nil, []int64{destMM})
+	e.business.Set(d.next)
+	e.round(t)
+	if d.possibleDuplicate || slices.Contains(e.eventKinds(), "possible_duplicate") || d.state != "pending" {
+		t.Errorf("lease lost %+v, events %v", d, e.eventKinds())
+	}
+
+	// A failure to record the possible duplicate is logged.
+	for _, query := range []string{"MarkPossibleDuplicate", "InsertDeliveryEvent"} {
+		e, d, _ := pendingBridge(t)
+		e.rec.Script(deliverytest.MethodPublish, timedOut(), deliverytest.Answer{
+			Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-2"},
+			Then:    func() { e.db.fail[query] = errBoom }})
+		e.round(t)
+		e.db.routeDests[routeID] = nil
+		e.changed(t, routeID, nil, []int64{destMM})
+		e.business.Set(d.next)
+		e.round(t)
+		if !strings.Contains(e.log.String(), `"event":"delivery_work_failed"`) {
+			t.Errorf("%s: log %s", query, e.log)
+		}
 	}
 }

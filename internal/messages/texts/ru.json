@@ -6,6 +6,8 @@
   "accountLink.linkedTelegram": "Учётная запись связана с пользователем Muster {name} ({login})",
   "alerts.fullList": "Полный список в Muster",
   "alerts.more": "и ещё {count}",
+  "bridge.commands": "Ответьте в треде: {commands}",
+  "bridge.commandsMentioning": "Ответьте в треде, упомянув бота: {commands}",
   "button.acknowledge": "Подтвердить",
   "button.resolve": "Закрыть",
   "button.snooze": "Отложить на {duration}",
@@ -87,5 +89,14 @@
   "storm.urgent_few": "{count} срочные",
   "storm.urgent_many": "{count} срочных",
   "storm.urgent_other": "{count} срочной",
-  "test.mark": "🧪 Тестовое сообщение"
+  "test.mark": "🧪 Тестовое сообщение",
+  "textCommand.acknowledge": "взял",
+  "textCommand.days": "{count}д",
+  "textCommand.hours": "{count}ч",
+  "textCommand.minutes": "{count}м",
+  "textCommand.resolve": "решено",
+  "textCommand.snooze": "отложить {duration}",
+  "textCommand.stillOnIt": "ещё работаю",
+  "textCommand.unacknowledge": "отпускаю",
+  "textCommand.unsnooze": "вернуть"
 }

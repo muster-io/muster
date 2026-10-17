@@ -59,12 +59,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
   `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and
-  stores and shows the channel's name; it fails with the bridge's `detail` when the bridge answers `forbidden`, and
-  with the error class otherwise. The check runs when the Destination is saved, which refuses a failing one, from
-  "Check" on the Destination page — both through the interactive path — as the Broken probe when nothing is waiting
-  (C-11.FR-9), in the delivery client class and never on the interactive path, and in `muster doctor` (C-02.FR-14); a
-  successful check of a Broken Destination ends the Broken state. Mention settings take nobody or chosen users, as in
-  Telegram; everyone in the chat and messenger groups are refused.
+  stores and shows the channel's name; it fails with the bridge's `detail` when the bridge answers `forbidden`, as
+  `proxy_refused` when the Connection's proxy refuses its credentials (FR-8), and with the error class otherwise. The
+  check runs when the Destination is saved, which refuses a failing one, from "Check" on the Destination page — both
+  through the interactive path — as the Broken probe when nothing is waiting (C-11.FR-9), in the delivery client class
+  and never on the interactive path, and in `muster doctor` (C-02.FR-14); a successful check of a Broken Destination
+  ends the Broken state. Mention settings take nobody or chosen users, as in Telegram; everyone in the chat and
+  messenger groups are refused.
 - **C-22.FR-4** Every message Muster posts through a bridge is an envelope (`MessageInput`): the kind (`root`,
   `storm_summary`, `test`), the status with its colour and emoji (item 1 of C-12.FR-1), the title — `#N` and the
   Alert Group's title (item 2) — the link to the Alert Group page as "Open in Muster", the body, the buttons, the
@@ -109,7 +110,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   classified by the protocol's own mapping (ADR-0017), not by that of outgoing webhooks (C-15.FR-6): `401` and `403` →
   Fatal; `408` → Transient; `429`, and `503` with `Retry-After`, → RetryAfter as above, Transient without it; other
   `5xx`, timeouts and network errors → Transient; `404`, `410`, a redirect and everything else → unknown. Muster never
-  decides that a message is gone from a status code.
+  decides that a message is gone from a status code. A `407` of the Connection's proxy is no answer of the bridge: it
+  counts as a request without an answer — Transient — and the checks of FR-2 and FR-3 report it as `proxy_refused`, as
+  the Telegram check does (C-14.FR-11).
 - **C-22.FR-9** When `info` declares `limits.edit_max_age_seconds`, Muster does not edit a Root message once it is older
   than that less `bridge.edit_window_margin`, measured from its Publication on the business clock. When the status of
   its Alert Group changes after that, Muster publishes a new Root message Quietly, sends a Thread reply under the old one

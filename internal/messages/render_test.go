@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1070,6 +1071,248 @@ func TestButtonStyleNotStored(t *testing.T) {
 	for i, b := range stored.Buttons {
 		if _, ok := b["style"]; ok || b["command"] != m.Buttons[i].Command {
 			t.Errorf("stored button %d = %v", i, b)
+		}
+	}
+}
+
+// TestLayoutCommonMark is C-22.FR-4 on the renderer: the default Root message in CommonMark is one block per section
+// — the label sections as block quotes of bold names, the summary in italics, the Alerts as a bullet list with
+// resolved ones struck through — with alert data escaped for CommonMark and `@` neutralized; a Route's root_message and
+// line templates write CommonMark around alert data escaped for it; text lines, distinct values, links, notices and
+// buttons have their blocks too.
+func TestLayoutCommonMark(t *testing.T) {
+	r := newRenderer(t)
+	src := source("acknowledged", 3)
+	src.Owner, src.ReopenCount = "Alice", 2
+	src.CommonLabels["team"] = "web_*ops*"
+	out := r.Root(src, MarkupCommonMark)
+	want := strings.Join([]string{
+		"🟠 [#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
+		"prod · production · Started 2026-10-04 14:05 UTC",
+		"> **namespace** shop",
+		"> **cluster** prod\\\n> **owner** @\u200bchannel\\\n> **team** web\\_\\*ops\\*",
+		"> **dashboard** https://grafana/d",
+		"*Pods are down*",
+		"- pod: p1\n- ~~pod: p2~~\n- pod: p3",
+		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
+		"🔁 Reopened ×2",
+		"Acknowledged by Alice",
+		"\\[Unack\\] \\[Resolve\\] \\[Snooze 1 h\\] \\[Snooze 4 h\\] \\[Snooze 24 h\\]",
+	}, "\n\n")
+	if got := Layout(out.Message, MarkupCommonMark); out.Failure != nil || got != want {
+		t.Errorf("layout\n%s\nwant\n%s", got, want)
+	}
+
+	// A line template writes CommonMark around escaped alert data; resolved lines are struck through, trimmed.
+	src = source("firing", 3)
+	src.Alerts[0].Labels["pod"] = "<p1>"
+	src.Route.Line = ptr(`{{ .Labels.pod }} *on* {{ .Labels.cluster }} `)
+	out = r.Root(src, MarkupCommonMark)
+	if l := out.Message.Alerts.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != `\<p1\> *on* prod ` ||
+		l[0].Markup != MarkupCommonMark {
+		t.Fatalf("line template %+v", out)
+	}
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- \\<p1\\> *on* prod \n- ~~p2 *on* prod~~\n- p3 *on* prod \n\n")
+
+	// A later line of alert data, indented by spaces or a tab, stays text inside its list item: no heading, nested list,
+	// ordered list or setext underline forms, from the default line or from a line template.
+	src = source("firing", 4)
+	src.Alerts[0].Labels["pod"] = "a\n    # head"
+	src.Alerts[1].Labels["pod"] = "b\n\t- x"
+	src.Alerts[2].Labels["pod"] = "c\n    1. x"
+	src.Alerts[3].Labels["pod"] = "d\n    ==="
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark),
+		"\n\n- pod: a\n    \\# head\n- ~~pod: b\n\t\\- x~~\n- pod: c\n    1\\. x\n- pod: d\n    \\===\n\n")
+	src.Route.Line = ptr(`{{ .Annotations.description }}`)
+	src.Alerts[0].Annotations["description"] = "x\n\t# y\n  \t1) z"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- x\n\t\\# y\n  \t1\\) z\n- ")
+
+	// A blank line of alert data starts no indented code block and ends no block quote: the rest of the value continues
+	// its list item, the Environment and its quoted label, from the default line or from a line template.
+	src = source("firing", 3)
+	src.Alerts[0].Labels["pod"] = "a\n\n      code *x*"
+	src.CommonLabels["environment"] = "env\n\n    code"
+	src.CommonLabels["team"] = "web\n \t\n\nrest *x*"
+	src.CommonLabels["zone"] = "z"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\nprod · env\n    code · Started 2026-10-04 14:05 UTC\n\n",
+		"> **team** web\nrest \\*x\\*\\\n> **zone** z\n\n", "\n\n- pod: a\n      code \\*x\\*\n- ")
+	src.Route.Line = ptr(`{{ .Annotations.description }}`)
+	src.Alerts[0].Annotations["description"] = "\n\n\tcode"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- code\n- ")
+
+	// A root_message template replaces the body; its Mention tokens show as `@` names.
+	src = source("firing", 1)
+	src.CommonLabels["team"] = "web_ops"
+	src.Route.RootMessage = ptr("**{{ .AlertGroup.Title }}** for {{ .CommonLabels.team }} " +
+		templates.MentionToken(templates.Token{Name: templates.MentionAll}) + "\n")
+	out = r.Root(src, MarkupCommonMark)
+	if b := out.Message.Body; out.Failure != nil || b == nil || b.Markup != MarkupCommonMark ||
+		!strings.HasPrefix(b.Text, "**PodDown** for web\\_ops ") {
+		t.Fatalf("root template %+v", out)
+	}
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n**PodDown** for web\\_ops @all\n\n")
+
+	// The other sections: a label without a value, a padded summary, distinct values above message.alerts_listed and
+	// the full list, text lines, a link with a space and parentheses, a link without a URL and the notices.
+	m := Message{Kind: KindReply, Language: "en", Colour: ColourFiring, Buttons: []Button{},
+		CommonLabels: []Label{{Name: "empty"}}, Summary: "  padded  ",
+		Alerts: &AlertList{Lines: nil, Distinct: []Distinct{{Label: "pod", Values: []string{"p1", "p_2"}, More: 3},
+			{Label: "zone", Values: []string{"a"}}}, FullList: &Link{Text: "Full list in Muster",
+			URL: "https://muster.example.org/a b(1)"}},
+		Lines:   []string{"New alerts (2):", "", "# not a heading"},
+		Links:   []Link{{Text: "Runbook", URL: "https://runbooks.example.org/x"}, {Text: "no_url"}},
+		Notices: []string{"⚠ one", "* two"}}
+	want = strings.Join([]string{
+		"> **empty**",
+		"*padded*",
+		"pod: p1, p\\_2 +3 more\\\nzone: a",
+		"[Full list in Muster](https://muster.example.org/a%20b%281%29)",
+		"New alerts (2):\\\n\\# not a heading",
+		"[Runbook](https://runbooks.example.org/x) · no\\_url",
+		"⚠ one",
+		"\\* two",
+	}, "\n\n")
+	if got := Layout(m, MarkupCommonMark); got != want {
+		t.Errorf("sections\n%s\nwant\n%s", got, want)
+	}
+	// Alert lines win over the distinct values; an empty resolved line and a blank summary leave nothing, and a heading
+	// without a colour or a URL is its text.
+	m = Message{Colour: "unknown", Summary: " ", Heading: &Heading{Number: 3, Title: "-x"},
+		Alerts: &AlertList{Lines: []AlertLine{{Text: " ", Resolved: true}, {Text: "a"}},
+			Distinct: []Distinct{{Label: "pod", Values: []string{"p1"}}}}}
+	if got := Layout(m, MarkupCommonMark); got != "#3 \\-x\n\n- a" {
+		t.Errorf("lines over distinct values %q", got)
+	}
+}
+
+// TestPreviewCommonMark is C-22.FR-4 for previewTemplate: the format commonmark renders the default Root message, a
+// Root message template and a line template in CommonMark with alert data escaped, and answers commonmark.
+func TestPreviewCommonMark(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 3)}
+	f.group.Alerts[0].Labels["pod"] = "*p1*"
+	f.group.CommonLabels["team"] = "<b>web</b>"
+	r := withFake(t, f)
+	ctx := t.Context()
+	res, err := r.Preview(ctx, PreviewRequest{Kind: "root_message", AlertGroupID: "AGK7M3QX9P2RTA",
+		Format: MarkupCommonMark})
+	if err != nil || !res.Valid || res.Format != MarkupCommonMark {
+		t.Fatalf("default = %+v, %v", res, err)
+	}
+	mustKeep(t, res.Output, "🔴 [#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)\n\n",
+		"\n\n> **namespace** shop\n\n", "> **owner** @\u200bchannel\\\n> **team** \\<b\\>web\\</b\\>",
+		"\n\n- pod: \\*p1\\*\n- ~~pod: p2~~\n- pod: p3\n\n", "\\[Ack\\] \\[Resolve\\] \\[Snooze 1 h\\]")
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: "team **{{ .CommonLabels.team }}**",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupCommonMark})
+	if err != nil || !res.Valid || res.Format != MarkupCommonMark ||
+		!strings.Contains(res.Output, "\n\nteam **\\<b\\>web\\</b\\>**\n\n") {
+		t.Errorf("root template = %+v, %v", res, err)
+	}
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "{{ .Labels.pod }} **{{ .Labels.cluster }}**",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupCommonMark})
+	if err != nil || !res.Valid || res.Format != MarkupCommonMark ||
+		res.Output != "- \\*p1\\* **prod**\n- ~~p2 **prod**~~\n- p3 **prod**" {
+		t.Errorf("line template = %+v, %v", res, err)
+	}
+}
+
+// TestSnoozeSecondsOnlyInCommonMark (C-22.FR-5): a Root message rendered in CommonMark carries a copy of the Route's
+// Snooze durations, for a bridge's commands line and its Snooze buttons, also as the Fallback template and as a test
+// message; in the other markups it has none, so their stored Desired states and hashes do not change.
+func TestSnoozeSecondsOnlyInCommonMark(t *testing.T) {
+	r := newRenderer(t)
+	src := source("firing", 2)
+	cm := r.Root(src, MarkupCommonMark).Message
+	src.Route.SnoozeDurations[0] = 60
+	if !slices.Equal(cm.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+		t.Errorf("commonmark snooze seconds %v", cm.SnoozeSeconds)
+	}
+	for _, mk := range []Markup{MarkupMarkdown, MarkupHTML, MarkupPlain} {
+		m := r.Root(src, mk).Message
+		raw, _ := json.Marshal(m)
+		if m.SnoozeSeconds != nil || strings.Contains(string(raw), "snooze_seconds") {
+			t.Errorf("%s: %v %s", mk, m.SnoozeSeconds, raw)
+		}
+	}
+	if raw, _ := json.Marshal(cm); !strings.Contains(string(raw), `"snooze_seconds":[3600,14400,86400]`) {
+		t.Errorf("commonmark json %s", raw)
+	}
+	src.Route.Line = ptr(`{{ env "HOME" }}`)
+	if out := r.Root(src, MarkupCommonMark); out.Failure == nil || !slices.Equal(out.Message.SnoozeSeconds,
+		[]int64{60, 14400, 86400}) {
+		t.Errorf("fallback %+v", out)
+	}
+	src.Route.Line = nil
+	if m := r.TestRoot(src, MarkupCommonMark, "DSAAAAAAAAAA11").Message; len(m.SnoozeSeconds) != 3 {
+		t.Errorf("test message %v", m.SnoozeSeconds)
+	}
+}
+
+// TestStatusColour: the colours and emoji of item 1 by the colour of a message, which a Mattermost attachment and a
+// bridge's envelope show.
+func TestStatusColour(t *testing.T) {
+	for colour, want := range map[string][2]string{
+		ColourFiring: {"#d32f2f", "🔴"}, ColourAcknowledged: {"#f57c00", "🟠"}, ColourResolved: {"#388e3c", "🟢"},
+		ColourSnoozed: {"#9e9e9e", "⚪"}, ColourStorm: {"#6a1b9a", "⛈"}, "unknown": {"", ""},
+	} {
+		if StatusColour(colour) != want[0] || StatusEmoji(colour) != want[1] {
+			t.Errorf("%s = %q %q", colour, StatusColour(colour), StatusEmoji(colour))
+		}
+	}
+}
+
+// TestCommandsLine is C-22.FR-5 and C-22.AC-11 on the renderer: the Text commands of a Root message's buttons in its
+// language, with the first Snooze duration only, as a Text command writes it; "mentioning the bot" for a bridge that
+// forwards only mentions; none for a resolved message.
+func TestCommandsLine(t *testing.T) {
+	r := newRenderer(t)
+	line := func(status, lang string, mentionsOnly bool) string {
+		src := source(status, 1)
+		src.Route.Language = lang
+		return CommandsLine(r.Root(src, MarkupCommonMark).Message, mentionsOnly)
+	}
+	for _, tc := range []struct {
+		status, lang string
+		mentionsOnly bool
+		want         string
+	}{
+		{"firing", "en", false, "Reply in the Thread: ack · resolve · snooze 1h"},
+		{"acknowledged", "en", false, "Reply in the Thread: unack · resolve · snooze 1h"},
+		{"snoozed", "en", false, "Reply in the Thread: ack · unsnooze · resolve"},
+		{"resolved", "en", false, ""},
+		{"firing", "en", true, "Reply in the Thread, mentioning the bot: ack · resolve · snooze 1h"},
+		{"firing", "ru", false, "Ответьте в треде: взял · решено · отложить 1ч"},
+		{"acknowledged", "ru", true, "Ответьте в треде, упомянув бота: отпускаю · решено · отложить 1ч"},
+		{"snoozed", "ru", false, "Ответьте в треде: взял · вернуть · решено"},
+		{"resolved", "ru", true, ""},
+	} {
+		if got := line(tc.status, tc.lang, tc.mentionsOnly); got != tc.want {
+			t.Errorf("%s/%s/%v = %q, want %q", tc.status, tc.lang, tc.mentionsOnly, got, tc.want)
+		}
+	}
+	reminder := Message{Language: "en", Buttons: []Button{{Command: buttons.CommandStillOnIt},
+		{Command: buttons.CommandUnacknowledge}}}
+	if got := CommandsLine(reminder, false); got != "Reply in the Thread: still on it · unack" {
+		t.Errorf("reminder %q", got)
+	}
+	// Without the durations — a message of another markup — the Snooze command is left out.
+	if got := CommandsLine(r.Root(source("firing", 1), MarkupMarkdown).Message, false); got !=
+		"Reply in the Thread: ack · resolve" {
+		t.Errorf("without durations %q", got)
+	}
+	for _, tc := range []struct {
+		lang    string
+		seconds int64
+		want    string
+	}{
+		{"en", 1800, "30m"}, {"en", 90, "2m"}, {"en", 5400, "90m"}, {"en", 3600, "1h"}, {"en", 86400, "24h"},
+		{"en", 172800, "2d"}, {"ru", 172800, "2д"}, {"ru", 14400, "4ч"}, {"ru", 600, "10м"},
+	} {
+		if got := commandDuration(tc.lang, tc.seconds); got != tc.want {
+			t.Errorf("%s %d = %q, want %q", tc.lang, tc.seconds, got, tc.want)
 		}
 	}
 }

@@ -18,6 +18,11 @@ import (
 // resolved while its first Publication waited, the possible duplicate after a Publication whose outcome was never
 // recorded, and the Root message deleted in the messenger. Their notes are rendered in the language and time zone of
 // the message (C-12.FR-3); they are added at call time and never change the hash of the Desired state.
+//
+// A bridge keeps idempotency keys (C-22.FR-6, Idempotent): every retry of a Publication carries the key of its first
+// attempt, whose start is kept, so the bridge posts it once. Its possible duplicate is decided by the outcome, not
+// before the call: a retry after a started Publication records one when its answer is not replayed — the bridge did not
+// know the key — and none when it is.
 
 // settleResolved decides, when an Alert Group resolves, its first Publication in a Destination that is still pending
 // (C-11.FR-11, FR-19): withheld while the Destination is Broken; Quiet with the late note when it waited for a
@@ -62,6 +67,14 @@ func (w *Worker) possibleDuplicate(ctx context.Context, q queries, org int64, ro
 	if err := hintGroup(ctx, q, org, row.AlertGroupPublicID); err != nil {
 		return err
 	}
+	return duplicateRecorded(ctx, q, org, row, now, logs)
+}
+
+// duplicateRecorded records, once possible_duplicate of the delivery row is set, the possible_duplicate delivery event
+// and, once committed, the delivery_possible_duplicate line: before the call for most adapters, from the outcome for
+// an Idempotent one.
+func duplicateRecorded(ctx context.Context, q queries, org int64, row dbgen.GetLeasedDeliveryRow, now time.Time,
+	logs *after) error {
 	if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: row.DestinationID, AlertGroupID: groupOf(row),
 		StormID: int8Of(row.StormID), Kind: EventPossibleDuplicate}); err != nil {
 		return err

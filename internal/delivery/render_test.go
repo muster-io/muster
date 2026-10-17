@@ -191,3 +191,47 @@ func TestRenderOncePerMarkup(t *testing.T) {
 		t.Errorf("telegram = %v, %v", err, markups)
 	}
 }
+
+// replyMarkups renders as stubRenderer does and records the markup each Thread reply was rendered for.
+type replyMarkups struct {
+	stubRenderer
+	replies *[]messages.Markup
+}
+
+func (r replyMarkups) Reply(ctx context.Context, db messages.DBTX, rv delivery.ReplyView, g delivery.GroupView) (
+	delivery.Message, error) {
+	*r.replies = append(*r.replies, rv.Markup)
+	return r.stubRenderer.Reply(ctx, db, rv, g)
+}
+
+// TestBridgeMarkup is C-22.FR-4 on delivery: the Root messages of a Bridge Destination are rendered in CommonMark,
+// beside the markups of the Route's other Destinations, and so are its Thread replies.
+func TestBridgeMarkup(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].typ = delivery.TypeBridge
+	e.db.dests[destMM].limit = 600
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	var roots [][]messages.Markup
+	var replies []messages.Markup
+	r := replyMarkups{stubRenderer: stubRenderer{markups: &roots}, replies: &replies}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Renderer: r})
+	e.w.Renderer = r
+	e.w.Adapters[delivery.TypeBridge] = e.rec
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	if len(roots) != 1 || !slices.Equal(roots[0], []messages.Markup{messages.MarkupCommonMark, messages.MarkupPlain}) {
+		t.Fatalf("root markups %v", roots)
+	}
+	if calls := e.callsTo(destMM); len(calls) != 1 || calls[0].Method != deliverytest.MethodPublish {
+		t.Fatalf("calls to the bridge %+v", calls)
+	}
+	e.rec.Reset()
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 2,
+		Event: groups.EventAckTimeout, Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionAckTimeout}})
+	e.round(t)
+	calls := e.callsTo(destMM)
+	if !slices.Equal(replies, []messages.Markup{messages.MarkupCommonMark}) || len(calls) != 1 ||
+		calls[0].Method != deliverytest.MethodReply {
+		t.Errorf("reply markups %v, calls to the bridge %+v", replies, calls)
+	}
+}

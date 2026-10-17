@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
@@ -549,11 +550,12 @@ type process struct {
 	roles       auth.Roles
 	// links are the Account links, which map the presses of both messengers to their Users.
 	links *accountlinks.Service
-	// mattermost and telegram are the adapters of the messenger Destinations, which the delivery worker and the
-	// Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by the
+	// mattermost, telegram and bridge are the adapters of the messenger Destinations, which the delivery worker and
+	// the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by the
 	// callback of any replica, with the test that waits for it.
 	mattermost  *mattermost.Adapter
 	telegram    *telegram.Adapter
+	bridge      *bridge.Adapter
 	testPresses *mattermost.PressWaits
 	// updates routes the updates of Telegram Connections, from the Leader's poller or the webhook endpoint, and poller
 	// is the long polling the Leader task telegram_polling runs.
@@ -742,8 +744,8 @@ func (p *process) serve(ctx context.Context) error {
 	return nil
 }
 
-// messengerAdapters makes the adapters of the Mattermost and Telegram Destinations once, over the Connections, with
-// the public and ingest addresses of the configuration: the delivery worker and the Destination tests share them.
+// messengerAdapters makes the adapters of the Mattermost, Telegram and Bridge Destinations once, over the Connections,
+// with the public and ingest addresses of the configuration: the delivery worker and the Destination tests share them.
 func (p *process) messengerAdapters() {
 	if p.mattermost == nil {
 		p.mattermost = &mattermost.Adapter{Targets: p.connections, PublicURL: p.cfg.PublicURL.String(),
@@ -751,6 +753,9 @@ func (p *process) messengerAdapters() {
 	}
 	if p.telegram == nil {
 		p.telegram = &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}
+	}
+	if p.bridge == nil {
+		p.bridge = &bridge.Adapter{Targets: p.connections}
 	}
 }
 
@@ -937,6 +942,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			destinations.TypeMattermost: &mattermost.Tester{Adapter: p.mattermost, Path: interactive,
 				Renderer: p.renderer, Waits: p.testPresses, Real: p.clocks.Real},
 			destinations.TypeTelegram: &telegram.Tester{Adapter: p.telegram, Path: interactive, Renderer: p.renderer,
+				Real: p.clocks.Real},
+			destinations.TypeBridge: &bridge.Tester{Adapter: p.bridge, Path: interactive, Renderer: p.renderer,
 				Real: p.clocks.Real},
 			destinations.TypeWebhook: &webhooks.Tester{Adapter: p.requests, Path: interactive, Data: p.renderer,
 				DB: pool},
@@ -1313,7 +1320,7 @@ func (p *process) configureWorker() {
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.messengerAdapters()
 	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: p.mattermost, delivery.TypeTelegram: p.telegram,
-		delivery.TypeWebhook: p.requests}
+		delivery.TypeBridge: p.bridge, delivery.TypeWebhook: p.requests}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}

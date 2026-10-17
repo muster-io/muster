@@ -78,6 +78,65 @@ func EscapeHTML(s string) string {
 	return html.EscapeString(s)
 }
 
+// commonMarkSpecial are the characters CommonMark with strikethrough gives a meaning to inside a line: escapes, code
+// spans, emphasis, strikethrough, links and images, autolinks and raw HTML, and entities.
+var commonMarkSpecial = strings.NewReplacer(`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "~", `\~`, "[", `\[`,
+	"]", `\]`, "<", `\<`, ">", `\>`, "&", `\&`)
+
+// EscapeCommonMark escapes s for CommonMark with strikethrough, a bridge's envelope body (C-22.FR-4): every
+// punctuation that can start markup inside a line, and the marker a line starts with after any spaces and tabs — of a
+// heading, a list item or a setext underline — so that alert data stay literal text. Any indentation, not only up to
+// three spaces: a line of alert data laid out inside a list item is indented relative to it. It drops the lines of
+// only spaces and tabs, the line ending after the last line and the spaces and tabs s starts with: without a blank
+// line every later line continues the paragraph s starts, which an indented code block cannot interrupt, inside its
+// list item or block quote. It does not neutralize `@`: Value does that first.
+func EscapeCommonMark(s string) string {
+	s = commonMarkSpecial.Replace(s)
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	ending := ""
+	for s != "" {
+		line, end := s, ""
+		if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+			line, end = s[:i], s[i:i+1]
+			if strings.HasPrefix(s[i:], "\r\n") {
+				end = "\r\n"
+			}
+		}
+		s = s[len(line)+len(end):]
+		if strings.Trim(line, " \t") == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			line = strings.TrimLeft(line, " \t")
+		}
+		b.WriteString(ending)
+		b.WriteString(escapeLineStart(line))
+		ending = end
+	}
+	return b.String()
+}
+
+// escapeLineStart escapes the block marker that starts a line after any spaces and tabs: `#`, `-`, `+` or `=`, and
+// the `.` or `)` after one to nine digits.
+func escapeLineStart(line string) string {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	if i < len(line) && strings.IndexByte("#-+=", line[i]) >= 0 {
+		return line[:i] + `\` + line[i:]
+	}
+	j := i
+	for j < len(line) && j-i < 10 && line[j] >= '0' && line[j] <= '9' {
+		j++
+	}
+	if digits := j - i; digits >= 1 && digits <= 9 && j < len(line) && (line[j] == '.' || line[j] == ')') {
+		return line[:j] + `\` + line[j:]
+	}
+	return line
+}
+
 // Escaper is the escaper of a markup; plain text is left as it is.
 func Escaper(m Markup) func(string) string {
 	switch m {
@@ -85,6 +144,8 @@ func Escaper(m Markup) func(string) string {
 		return EscapeMarkdown
 	case MarkupHTML:
 		return EscapeHTML
+	case MarkupCommonMark:
+		return EscapeCommonMark
 	case MarkupPlain:
 	}
 	return func(s string) string { return s }

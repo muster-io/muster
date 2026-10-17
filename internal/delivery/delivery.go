@@ -80,6 +80,7 @@ const (
 	TypeMattermost = "mattermost"
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
+	TypeBridge     = "bridge"
 )
 
 // Destination is a Destination as delivery calls it: Connection is the internal id of its Connection, nil for an
@@ -128,11 +129,15 @@ const (
 
 // Outcome is what an adapter call ended with. An ok Publication or Thread reply names its message; a RetryAfter the
 // exact delay and its scope; a failure carries the provider's error text, masked of secrets and untrusted. Status is
-// the HTTP status of the answer of an outgoing webhook, 0 without one. An outgoing webhook in the template mode also
-// reports the values the extraction rules of its "create" or "open thread" found (Values), by rule name, and the rules
-// that found nothing (Missing); that "open thread" ran (ThreadOpened), whatever the reply after it came to; that its
-// request templates rendered (Rendered), which ends the Destination's template error; and the request it ended with
-// (Request: create, update, open_thread, reply_in_thread or events) (C-15.FR-3, FR-4, FR-7).
+// the HTTP status of the answer of an outgoing webhook or a bridge, 0 without one. An outgoing webhook in the template
+// mode also reports the values the extraction rules of its "create" or "open thread" found (Values), by rule name, and
+// the rules that found nothing (Missing); that "open thread" ran (ThreadOpened), whatever the reply after it came to;
+// that its request templates rendered (Rendered), which ends the Destination's template error; and the request it
+// ended with (Request: create, update, open_thread, reply_in_thread or events) (C-15.FR-3, FR-4, FR-7). A bridge's
+// Publication or Thread reply also reports the Thread its answer named (ThreadRef, the `thread_ref` stored for the next
+// reply), whether the answer was the first result of the call's idempotency key (Replayed), and, when the call failed,
+// whether the request may have reached the messenger without its answer — a timeout, or a connection lost after the
+// request was sent (Unanswered) (C-22.FR-6).
 type Outcome struct {
 	Kind         OutcomeKind
 	MessageID    string
@@ -146,13 +151,16 @@ type Outcome struct {
 	ThreadOpened bool
 	Rendered     bool
 	Request      string
+	ThreadRef    string
+	Replayed     bool
+	Unanswered   bool
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
 // path — its Destination, and for a new message its loudness, its symbolic Mentions and, for a Loud one, their
 // targets in the Destination (C-12.FR-8), which the adapter renders in its messenger's syntax. An edit is always Quiet
 // and mentions nobody. Plain asks for the same text without markup, after the messenger rejected the markup
-// (C-11.FR-8).
+// (C-11.FR-8). Key is the idempotency key of a Publication or a Thread reply to an Idempotent adapter, empty otherwise.
 type Call struct {
 	Class       outbound.Class
 	Destination Destination
@@ -160,6 +168,7 @@ type Call struct {
 	Mentions    []groups.Mention
 	Targets     []mentions.Target
 	Plain       bool
+	Key         string
 	// Webhook is what a request of an outgoing webhook in the template mode reads besides the Message, which it does
 	// not use; nil for a messenger.
 	Webhook *WebhookCall
@@ -211,9 +220,10 @@ func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Des
 	return out, nil
 }
 
-// Root is the Root message a Thread reply goes under: its message id and, in Telegram, the automatic copy in the
-// discussion group while the Thread is attached to it, or the last reply of a Thread that is not attached; neither
-// for the first reply of an unattached chain.
+// Root is the Root message a Thread reply goes under: its message id and its Thread anchor — in Telegram, the
+// automatic copy in the discussion group while the Thread is attached to it, or the last reply of a Thread that is
+// not attached, neither for the first reply of an unattached chain; for a bridge, the last `thread_ref` its post or a
+// reply returned, empty without one.
 type Root struct {
 	MessageID      string
 	ThreadAnchorID string
@@ -228,6 +238,16 @@ type Adapter interface {
 	Update(ctx context.Context, c Call, messageID string, m Message) Outcome
 	Reply(ctx context.Context, c Call, root Root, m Message) Outcome
 	LengthLimit() int
+}
+
+// Idempotent is an Adapter whose messenger keeps idempotency keys (C-22.FR-6): its Publications and Thread replies
+// carry the key of their Call, a retry of a started Publication records no possible duplicate before the call, and
+// its outcome records one unless it was Replayed. *bridge.Adapter implements it. PublicationKey is the key of the
+// Publication number publication of the delivery deliveryID, the same for every retry of it; ReplyKey that of the
+// Thread reply replyID.
+type Idempotent interface {
+	PublicationKey(d Destination, deliveryID, publication int64) string
+	ReplyKey(d Destination, replyID int64) string
 }
 
 // Checker is the Destination check an adapter may offer (C-13.FR-10, C-14.FR-14): whether the bot can still reach and
@@ -325,7 +345,7 @@ type queries interface {
 	RescheduleDelivery(ctx context.Context, arg dbgen.RescheduleDeliveryParams) error
 	TryShareUpdateLock(ctx context.Context, arg dbgen.TryShareUpdateLockParams) (bool, error)
 	StartPublication(ctx context.Context, arg dbgen.StartPublicationParams) error
-	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (string, error)
+	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (dbgen.RecordDeliveredRow, error)
 	RecordDeliveryRetry(ctx context.Context, arg dbgen.RecordDeliveryRetryParams) (dbgen.RecordDeliveryRetryRow, error)
 	EnsureBuckets(ctx context.Context, arg dbgen.EnsureBucketsParams) error
 	TakeTokens(ctx context.Context, arg dbgen.TakeTokensParams) (dbgen.TakeTokensRow, error)

@@ -4,8 +4,9 @@
 // Package bridge is Muster's client of the Bridge protocol (ADR-0017, C-22): requests to `<base>/v1/…` with the
 // Connection's token as a bearer token, through internal/outbound with the Connection's proxy, in the client class of
 // the caller (ADR-0015), with the token registered for redaction; the classification of every answer by the problem's
-// class or the protocol's status mapping (classify.go); and `info` with Muster's copy of it (info.go). The models are
-// generated from api/bridge.yaml into internal/bridge/gen.
+// class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
+// check (check.go); and the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
+// envelope.go). The models are generated from api/bridge.yaml into internal/bridge/gen.
 package bridge
 
 import (
@@ -15,11 +16,13 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +62,13 @@ const maxRetryAfter = 365 * 24 * time.Hour
 // DefaultRetryAfterMax is bridge.retry_after_max: a rate_limited answer that asks for a longer wait counts as
 // Transient.
 const DefaultRetryAfterMax = 15 * time.Minute
+
+// MessageProxyRefused is the message of a request that the Connection's proxy refused with 407 (D338), as Telegram's
+// check says it.
+const MessageProxyRefused = "The proxy refused the connection (407)"
+
+// maxID is the longest message_id and thread_ref of the protocol, in characters.
+const maxID = 512
 
 // ErrBaseURL is a base URL that breaks the rules of C-22.FR-1.
 var ErrBaseURL = errors.New("the base URL is not an absolute http or https URL without user information, query or " +
@@ -175,6 +185,8 @@ func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
 // detail, or its title, when the bridge sent one, otherwise what outbound reports. Code is the check code the protocol
 // names for the failure (token_invalid, protocol_version_unknown, protocol_mismatch), empty otherwise; Network is what
 // failed when the call got no answer (outbound.Network*), and Blocked whether the outbound address policy refused it.
+// Unanswered is a call without an answer whose request may have reached the bridge: one written in full before the
+// answer was lost to a timeout or a lost connection — not one that failed while connecting, which sent nothing.
 type Result struct {
 	Status         int
 	Classification Classification
@@ -182,6 +194,7 @@ type Result struct {
 	Code           string
 	Network        string
 	Blocked        bool
+	Unanswered     bool
 }
 
 // OK reports whether the call succeeded.
@@ -202,9 +215,10 @@ func (r Result) CheckCode() string {
 // Outcome is the Result for delivery (C-22.FR-8): rate_limited waits for the channel's Destination or, with the scope
 // bot, for every Destination of the Connection, and is Transient without a Retry-After or with one longer than
 // DefaultRetryAfterMax, so that a long pause ends in Broken; forbidden is Fatal, gone is Gone and invalid is unknown,
-// which ends the delivery as Not delivered.
+// which ends the delivery as Not delivered. Unanswered is kept, so that delivery knows the request may have been
+// posted.
 func (r Result) Outcome() delivery.Outcome {
-	o := delivery.Outcome{Error: r.Error, Status: r.Status}
+	o := delivery.Outcome{Error: r.Error, Status: r.Status, Unanswered: r.Unanswered}
 	switch r.Classification.Class {
 	case "":
 		o.Kind = delivery.OutcomeOK
@@ -248,9 +262,73 @@ func (c *Client) CheckChannel(ctx context.Context, class outbound.Class, channel
 	return c.settings.mask(out.Name), r
 }
 
+// PostMessage calls postMessage (C-22.FR-4, FR-6): it posts the envelope in to its channel with the idempotency key,
+// sent as Idempotency-Key unless it is empty. A successful answer without a message_id of 1 to 512 characters, or with
+// a longer thread_ref, is invalid.
+func (c *Client) PostMessage(ctx context.Context, class outbound.Class, key string, in gen.MessageInput) (
+	gen.MessagePosted, Result) {
+	out, _, r := c.postMessage(ctx, class, key, in)
+	return out, r
+}
+
+// postMessage is PostMessage that also returns the outbound result, whose answer a test message shows.
+func (c *Client) postMessage(ctx context.Context, class outbound.Class, key string, in gen.MessageInput) (
+	gen.MessagePosted, outbound.Result, Result) {
+	var out gen.MessagePosted
+	res, r := c.do(ctx, class, http.MethodPost, "messages", idempotency(key), in, &out)
+	if r.OK() && (!validID(out.MessageId) || utf8.RuneCountInString(out.ThreadRef.GetOrEmpty()) > maxID) {
+		return gen.MessagePosted{}, res, notExpected(r.Status, "POST messages")
+	}
+	return out, res, r
+}
+
+// EditMessage calls editMessage (C-22.FR-6): it replaces the message messageID with the envelope in, which has no
+// Mentions and is always Quiet.
+func (c *Client) EditMessage(ctx context.Context, class outbound.Class, messageID string, in gen.MessageContent) (
+	gen.MessageEdited, Result) {
+	var out gen.MessageEdited
+	_, r := c.do(ctx, class, http.MethodPatch, "messages/"+Segment(messageID), nil, in, &out)
+	return out, r
+}
+
+// ReplyInThread calls replyInThread (C-22.FR-6): it posts the reply in into the Thread of the message messageID with
+// the idempotency key, sent as Idempotency-Key unless it is empty. A successful answer without a message_id and a
+// thread_ref of 1 to 512 characters each is invalid.
+func (c *Client) ReplyInThread(ctx context.Context, class outbound.Class, messageID, key string,
+	in gen.ThreadReplyInput) (gen.ThreadReplyPosted, Result) {
+	var out gen.ThreadReplyPosted
+	_, r := c.do(ctx, class, http.MethodPost, "messages/"+Segment(messageID)+"/thread-replies", idempotency(key), in,
+		&out)
+	if r.OK() && (!validID(out.MessageId) || !validID(out.ThreadRef)) {
+		return gen.ThreadReplyPosted{}, notExpected(r.Status, "POST messages/{message_id}/thread-replies")
+	}
+	return out, r
+}
+
+// idempotency is the header that carries key, none for an empty key.
+func idempotency(key string) http.Header {
+	if key == "" {
+		return nil
+	}
+	return http.Header{"Idempotency-Key": {key}}
+}
+
+// validID reports whether id is a message_id or thread_ref of the protocol: 1 to 512 characters.
+func validID(id string) bool {
+	n := utf8.RuneCountInString(id)
+	return n >= 1 && n <= maxID
+}
+
+// notExpected is the Result of a successful status whose answer does not match the protocol.
+func notExpected(status int, call string) Result {
+	return Result{Status: status, Classification: Classification{Class: ClassInvalid},
+		Error: outbound.Untrusted(call + ": the answer is not the expected JSON")}
+}
+
 // do makes one call of method on path below `<base>/v1/` in the client class, with body as JSON unless it is nil and
 // the extra header, such as Idempotency-Key, and reads a successful answer into out unless it is nil. It returns the
-// outbound result, whose body the caller may read, and how the call ended.
+// outbound result, whose body the caller may read, and how the call ended. Whether the request was written is traced
+// on the request's context: a call without an answer whose request was written may have reached the bridge.
 func (c *Client) do(ctx context.Context, class outbound.Class, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
 	oc, err := c.client(class)
@@ -272,9 +350,15 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 		}
 		h.Set("Content-Type", "application/json")
 	}
+	var wrote atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: func(w httptrace.WroteRequestInfo) {
+		if w.Err == nil {
+			wrote.Store(true)
+		}
+	}})
 	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: "v1/" + path, Header: h, Body: data,
 		Mapping: mapping, ClassifyBody: problemText})
-	r := c.resultOf(res, err)
+	r := c.resultOf(res, err, wrote.Load())
 	if !r.OK() || out == nil {
 		return res, r
 	}
@@ -286,9 +370,10 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 }
 
 // resultOf is the Result of an outbound call: without an answer it is transient — a request that could not be built
-// is invalid and a blocked address forbidden — and an error answer is classified by Classify, with the masked text of
-// its problem.
-func (c *Client) resultOf(res outbound.Result, err error) Result {
+// is invalid and a blocked address forbidden — and Unanswered when its request was written (wrote); an error answer
+// is classified by Classify, with the masked text of its problem. A 407 through the Connection's proxy is the proxy's
+// refusal, not an answer of the bridge (D338): a call without an answer, as the HTTPS CONNECT that a proxy refuses is.
+func (c *Client) resultOf(res outbound.Result, err error, wrote bool) Result {
 	r := Result{Status: res.Status}
 	if err == nil {
 		return r
@@ -296,7 +381,8 @@ func (c *Client) resultOf(res outbound.Result, err error) Result {
 	r.Error = outbound.Untrusted(err.Error())
 	switch {
 	case res.Status == 0:
-		if oe, ok := errors.AsType[*outbound.Error](err); ok {
+		oe, _ := errors.AsType[*outbound.Error](err)
+		if oe != nil {
 			r.Network = oe.Network
 		}
 		r.Blocked = res.Outcome == outbound.OutcomeBlocked
@@ -307,7 +393,11 @@ func (c *Client) resultOf(res outbound.Result, err error) Result {
 			r.Classification = Classification{Class: ClassInvalid}
 		default:
 			r.Classification = Classify(0, 0, false, nil)
+			r.Unanswered = wrote
 		}
+	case res.Status == http.StatusProxyAuthRequired && c.settings.Proxy != nil:
+		r.Status, r.Network, r.Error = 0, outbound.NetworkProxyAuth, MessageProxyRefused
+		r.Classification = Classify(0, 0, false, nil)
 	case res.Status < http.StatusMultipleChoices, res.Outcome == outbound.OutcomeRedirect:
 		// A successful status whose answer was not read (larger than maxAnswerBytes), and a redirect, never followed.
 		r.Classification = Classification{Class: ClassInvalid}

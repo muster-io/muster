@@ -30,15 +30,6 @@ import (
 // (F-057).
 const LengthLimit = 16_383
 
-// colours are the colours of the attachment by the colour of the message.
-var colours = map[string]string{
-	messages.ColourFiring:       "#d32f2f",
-	messages.ColourAcknowledged: "#f57c00",
-	messages.ColourResolved:     "#388e3c",
-	messages.ColourSnoozed:      "#9e9e9e",
-	messages.ColourStorm:        "#6a1b9a",
-}
-
 // statusEmoji starts the summary line, by the colour of the message (C-12.FR-1 item 1).
 var statusEmoji = map[string]string{
 	messages.ColourFiring: "🔴", messages.ColourAcknowledged: "🟠", messages.ColourResolved: "🟢",
@@ -82,7 +73,7 @@ func rootPost(m messages.Message, l look, mentions string) post {
 	if h == nil {
 		return post{Message: cutEnd(joinLines(text(m, l), mentions), l.limit), Props: buttonsOnly(m, l)}
 	}
-	att := attachment{Color: colours[m.Colour], Title: "#" + strconv.FormatInt(h.Number, 10) + " " +
+	att := attachment{Color: messages.StatusColour(m.Colour), Title: "#" + strconv.FormatInt(h.Number, 10) + " " +
 		templates.StripTokens(h.Title), TitleLink: h.URL, Text: text(m, l), Footer: l.footer, FooterIcon: l.icon,
 		Actions: actions(m.Buttons, l.callback)}
 	return post{Message: cutEnd(joinLines(summaryLine(m, l.markup), mentions), l.limit),
@@ -96,8 +87,8 @@ func replyPost(m messages.Message, l look, mentions string) post {
 	if len(m.Buttons) == 0 {
 		return post{Message: cutEnd(joinLines(mentions, text(m, l)), l.limit)}
 	}
-	return post{Message: cutEnd(mentions, l.limit), Props: &props{Attachments: []attachment{{Color: colours[m.Colour],
-		Text: text(m, l), Actions: actions(m.Buttons, l.callback)}}}}
+	return post{Message: cutEnd(mentions, l.limit), Props: &props{Attachments: []attachment{{
+		Color: messages.StatusColour(m.Colour), Text: text(m, l), Actions: actions(m.Buttons, l.callback)}}}}
 }
 
 // buttonsOnly are the props of a post without a heading: one attachment with its buttons, or none.
@@ -105,7 +96,8 @@ func buttonsOnly(m messages.Message, l look) *props {
 	if len(m.Buttons) == 0 {
 		return &props{Attachments: []attachment{}}
 	}
-	return &props{Attachments: []attachment{{Color: colours[m.Colour], Actions: actions(m.Buttons, l.callback)}}}
+	return &props{Attachments: []attachment{{Color: messages.StatusColour(m.Colour),
+		Actions: actions(m.Buttons, l.callback)}}}
 }
 
 // summaryLine is the status emoji, #N and the title, escaped like alert data.

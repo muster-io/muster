@@ -51,6 +51,69 @@ func (q *Queries) FindConnectionByName(ctx context.Context, arg FindConnectionBy
 	return id, err
 }
 
+const getBridgeDestinationTarget = `-- name: GetBridgeDestinationTarget :one
+SELECT d.bridge_channel_id, c.id, c.public_id, c.type, c.name, c.bridge_base_url, c.bot_token_ciphertext,
+       c.bot_token_key_id, c.bot_token_updated_at, c.bridge_push_secret_ciphertext, c.bridge_push_secret_key_id,
+       c.bridge_push_secret_updated_at, c.proxy, c.proxy_password_ciphertext, c.proxy_password_key_id,
+       c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = $1 AND d.id = $2 AND d.type = 'bridge' AND c.deleted_at IS NULL
+`
+
+type GetBridgeDestinationTargetParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type GetBridgeDestinationTargetRow struct {
+	BridgeChannelID            pgtype.Text
+	ID                         int64
+	PublicID                   string
+	Type                       string
+	Name                       string
+	BridgeBaseUrl              pgtype.Text
+	BotTokenCiphertext         []byte
+	BotTokenKeyID              pgtype.Text
+	BotTokenUpdatedAt          time.Time
+	BridgePushSecretCiphertext []byte
+	BridgePushSecretKeyID      pgtype.Text
+	BridgePushSecretUpdatedAt  pgtype.Timestamptz
+	Proxy                      []byte
+	ProxyPasswordCiphertext    []byte
+	ProxyPasswordKeyID         pgtype.Text
+	ProxyPasswordUpdatedAt     pgtype.Timestamptz
+	Version                    int64
+}
+
+// GetBridgeDestinationTarget reads where a Bridge Destination posts — its channel id as the messenger names it — with
+// the Connection it posts through, that Connection's secrets as stored and its version, which its client is cached for.
+// A deleted Destination is read too, since its final edit still runs; its Connection must not be deleted.
+func (q *Queries) GetBridgeDestinationTarget(ctx context.Context, arg GetBridgeDestinationTargetParams) (GetBridgeDestinationTargetRow, error) {
+	row := q.db.QueryRow(ctx, getBridgeDestinationTarget, arg.OrgID, arg.DestinationID)
+	var i GetBridgeDestinationTargetRow
+	err := row.Scan(
+		&i.BridgeChannelID,
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.Name,
+		&i.BridgeBaseUrl,
+		&i.BotTokenCiphertext,
+		&i.BotTokenKeyID,
+		&i.BotTokenUpdatedAt,
+		&i.BridgePushSecretCiphertext,
+		&i.BridgePushSecretKeyID,
+		&i.BridgePushSecretUpdatedAt,
+		&i.Proxy,
+		&i.ProxyPasswordCiphertext,
+		&i.ProxyPasswordKeyID,
+		&i.ProxyPasswordUpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const getConnection = `-- name: GetConnection :one
 SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bot_api_base_url,
        c.telegram_update_mode, c.telegram_update_offset, c.telegram_webhook_secret_ciphertext,

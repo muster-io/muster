@@ -6,6 +6,8 @@
   "accountLink.linkedTelegram": "Linked to Muster user {name} ({login})",
   "alerts.fullList": "Full list in Muster",
   "alerts.more": "+{count} more",
+  "bridge.commands": "Reply in the Thread: {commands}",
+  "bridge.commandsMentioning": "Reply in the Thread, mentioning the bot: {commands}",
   "button.acknowledge": "Ack",
   "button.resolve": "Resolve",
   "button.snooze": "Snooze {duration}",
@@ -77,5 +79,14 @@
   "storm.over_other": "Storm over: {count} Alert Groups still open",
   "storm.urgent_one": "{count} urgent",
   "storm.urgent_other": "{count} urgent",
-  "test.mark": "🧪 Test message"
+  "test.mark": "🧪 Test message",
+  "textCommand.acknowledge": "ack",
+  "textCommand.days": "{count}d",
+  "textCommand.hours": "{count}h",
+  "textCommand.minutes": "{count}m",
+  "textCommand.resolve": "resolve",
+  "textCommand.snooze": "snooze {duration}",
+  "textCommand.stillOnIt": "still on it",
+  "textCommand.unacknowledge": "unack",
+  "textCommand.unsnooze": "unsnooze"
 }

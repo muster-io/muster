@@ -26,7 +26,7 @@ export interface DestinationPreviewItem {
   /** @nullable */
   format?: DestinationPreviewItemFormat;
   /**
-     * The rendered Root message text.
+     * The rendered Root message text; for a Bridge, the envelope as JSON.
      * @nullable
      */
   text?: string | null;
