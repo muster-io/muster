@@ -80,7 +80,8 @@ func TestSafeOutput(t *testing.T) {
 // punctuation that can start markup inside a line is escaped, and so is the marker of a heading, a list item or a
 // setext underline at the start of a line, after any spaces and tabs — a continuation line laid out inside a list item
 // is indented relative to it; `@` is neutralized by Value before, so a hostile label value is no Mention, no emphasis,
-// no HTML and no link.
+// no HTML and no link. Blank lines, the last line ending and the spaces and tabs a value starts with are dropped, so
+// that no indented code block starts in alert data and a value stays inside its list item or block quote.
 func TestEscapeCommonMark(t *testing.T) {
 	hostile := "@all *x* <b>y</b> [z](http://evil)"
 	if got := EscapeCommonMark(Value(hostile)); got != "@\u200ball \\*x\\* \\<b\\>y\\</b\\> \\[z\\](http://evil)" {
@@ -90,9 +91,10 @@ func TestEscapeCommonMark(t *testing.T) {
 		"a_b `c` ~~d~~ &amp; \\":          "a\\_b \\`c\\` \\~\\~d\\~\\~ \\&amp; \\\\",
 		"![i](http://x/i.png) <http://x>": "!\\[i\\](http://x/i.png) \\<http://x\\>",
 		"# heading":                       "\\# heading",
-		"   ## three spaces":              "   \\## three spaces",
-		"    # four spaces":               "    \\# four spaces",
-		"\t# tab":                         "\t\\# tab",
+		"   ## three spaces":              "\\## three spaces",
+		"    # four spaces":               "\\# four spaces",
+		"\t# tab":                         "\\# tab",
+		"    code":                        "code",
 		"a\n    # head":                   "a\n    \\# head",
 		"a\n\t# head":                     "a\n\t\\# head",
 		"a\n\t- x":                        "a\n\t\\- x",
@@ -121,8 +123,16 @@ func TestEscapeCommonMark(t *testing.T) {
 		"v1. mid-line # - + = 2.":         "v1. mid-line # - + = 2.",
 		"x\r# carriage return":            "x\r\\# carriage return",
 		"x\r\n- crlf":                     "x\r\n\\- crlf",
-		"\n\n= blank lines":               "\n\n\\= blank lines",
-		"   ":                             "   ",
+		"\n\n= blank lines":               "\\= blank lines",
+		"pod: a\n\n      code *x*":        "pod: a\n      code \\*x\\*",
+		"env\n\n    code":                 "env\n    code",
+		"\n\n\tcode":                      "code",
+		"web\n \t\n\nrest *x*":            "web\nrest \\*x\\*",
+		"a\r\n \t\r\n\r\n    code":        "a\r\n    code",
+		"a\r\r \r    code":                "a\r    code",
+		"a\n\n":                           "a",
+		" \t\n  a\n\t \n":                 "a",
+		"   ":                             "",
 		"":                                "",
 	} {
 		if got := EscapeCommonMark(in); got != want {

@@ -1129,6 +1129,21 @@ func TestLayoutCommonMark(t *testing.T) {
 	out = r.Root(src, MarkupCommonMark)
 	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- x\n\t\\# y\n  \t1\\) z\n- ")
 
+	// A blank line of alert data starts no indented code block and ends no block quote: the rest of the value continues
+	// its list item, the Environment and its quoted label, from the default line or from a line template.
+	src = source("firing", 3)
+	src.Alerts[0].Labels["pod"] = "a\n\n      code *x*"
+	src.CommonLabels["environment"] = "env\n\n    code"
+	src.CommonLabels["team"] = "web\n \t\n\nrest *x*"
+	src.CommonLabels["zone"] = "z"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\nprod · env\n    code · Started 2026-10-04 14:05 UTC\n\n",
+		"> **team** web\nrest \\*x\\*\\\n> **zone** z\n\n", "\n\n- pod: a\n      code \\*x\\*\n- ")
+	src.Route.Line = ptr(`{{ .Annotations.description }}`)
+	src.Alerts[0].Annotations["description"] = "\n\n\tcode"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- code\n- ")
+
 	// A root_message template replaces the body; its Mention tokens show as `@` names.
 	src = source("firing", 1)
 	src.CommonLabels["team"] = "web_ops"
