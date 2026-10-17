@@ -379,6 +379,24 @@ func (s *Service) PushConnection(ctx context.Context, publicID string) (bridge.C
 	return conn, mode, nil
 }
 
+// BridgeConn is the Bridge Connection publicID with its client, kept until the Connection changes, for the calls of an
+// Account link by code (bridge.LinkConnections); a Connection that is unknown, deleted or not a Bridge Connection is
+// bridge.ErrNoConnection.
+func (s *Service) BridgeConn(ctx context.Context, publicID string) (bridge.Conn, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeBridge) {
+		return bridge.Conn{}, bridge.ErrNoConnection
+	}
+	if err != nil {
+		return bridge.Conn{}, err
+	}
+	c, err := s.cachedBridgeClient(row.ID, row.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+	if err != nil {
+		return bridge.Conn{}, err
+	}
+	return bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}, nil
+}
+
 // PollingConnections lists the Bridge Connections in poll mode for the Leader's poller (bridge.Connections), each with
 // its client, kept until the Connection changes, and its stored cursor. A Connection whose client cannot be built has
 // the error instead of a client, and the poller logs it.

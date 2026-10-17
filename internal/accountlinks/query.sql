@@ -1,8 +1,9 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 
--- Account links (C-18): the messenger accounts linked to Users, one per identity space and User, and the link
--- requests started from the web session — a hashed Telegram deep-link token or a hashed Mattermost code.
+-- Account links (C-18, C-22.FR-15): the messenger accounts linked to Users, one per identity space and User, and the
+-- link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, or a hashed
+-- Bridge token or code.
 
 -- LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
 -- their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
@@ -20,19 +21,24 @@ UPDATE account_links
 SET last_used_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND (last_used_at IS NULL OR last_used_at < @stale_before::timestamptz);
 
--- GetLinkConnection reads a Connection that is not deleted, for starting a link through it.
+-- GetLinkConnection reads a Connection that is not deleted, for starting a link through it, with the
+-- link_url_template of a Bridge Connection's stored info, empty without one.
 -- name: GetLinkConnection :one
-SELECT id, public_id, type, name, bot_user_id, bot_username
+SELECT id, public_id, type, name, bot_user_id, bot_username,
+       coalesce(bridge_info->>'link_url_template', '')::text AS link_url_template
 FROM connections
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
--- ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
--- Bridge Connections are not linkable until their Account links exist (S-076): LinkableConnection.messenger has no
--- bridge.
+-- ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
+-- a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
+-- its bot can start a direct chat.
 -- name: ListLinkableConnections :many
-SELECT public_id, name, type
+SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
+       coalesce(bridge_info->>'user_lookup', '')::text AS user_lookup,
+       coalesce((bridge_info->'capabilities'->'direct_messages'->>'bot_can_start')::boolean, false)::boolean
+           AS bot_can_start
 FROM connections
-WHERE org_id = @org_id AND deleted_at IS NULL AND type <> 'bridge'
+WHERE org_id = @org_id AND deleted_at IS NULL
 ORDER BY type, lower(name), id;
 
 -- LockLinkUser locks the User a link is made for, so that the links of one User change one at a time.
@@ -50,7 +56,7 @@ WHERE org_id = @org_id AND public_id = @public_id;
 
 -- ListAccountLinksOfUser lists the links of a User with the Connection each was made through.
 -- name: ListAccountLinksOfUser :many
-SELECT al.public_id, al.messenger, al.external_id, al.username, al.last_used_at, al.created_at,
+SELECT al.public_id, al.messenger, al.external_id, al.username, al.display_name, al.last_used_at, al.created_at,
        c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
@@ -59,7 +65,7 @@ ORDER BY al.messenger, al.created_at, al.id;
 
 -- GetAccountLinkOfUser locks the link public_id of a User, for unlinking it.
 -- name: GetAccountLinkOfUser :one
-SELECT al.id, al.public_id, al.messenger, al.external_id, al.username,
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.display_name,
        c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
@@ -76,8 +82,8 @@ FOR UPDATE;
 -- GetUserLinkInSpace locks the link a User has in the identity space, which a new link replaces or, for the same
 -- account, keeps.
 -- name: GetUserLinkInSpace :one
-SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.created_at, al.last_used_at,
-       c.public_id AS connection_public_id, c.name AS connection_name
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.display_name, al.created_at,
+       al.last_used_at, c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
 WHERE al.org_id = @org_id AND al.user_id = @user_id AND al.identity_space = @identity_space
@@ -87,23 +93,25 @@ FOR UPDATE OF al;
 DELETE FROM account_links
 WHERE org_id = @org_id AND id = @id;
 
--- UpdateAccountLink keeps a link whose account is linked again by its User, with the username and the Connection of
--- the new link.
+-- UpdateAccountLink keeps a link whose account is linked again by its User, with the username, the display name and
+-- the Connection of the new link.
 -- name: UpdateAccountLink :exec
 UPDATE account_links
-SET username = @username, connection_id = @connection_id
+SET username = @username, display_name = @display_name, connection_id = @connection_id
 WHERE org_id = @org_id AND id = @id;
 
 -- name: InsertAccountLink :one
-INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username, created_at)
-VALUES (@org_id, @public_id, @user_id, @messenger, @connection_id, @external_id, @username, @created_at::timestamptz)
+INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username, display_name,
+                           created_at)
+VALUES (@org_id, @public_id, @user_id, @messenger, @connection_id, @external_id, @username, @display_name,
+        @created_at::timestamptz)
 RETURNING id;
 
 -- name: InsertLinkRequest :one
-INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, secret_hash,
-                                   target_external_id, target_username, created_at, expires_at)
-VALUES (@org_id, @public_id, @user_id, @messenger, @connection_id, @secret_hash, @target_external_id,
-        @target_username, @created_at::timestamptz, @expires_at::timestamptz)
+INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, method, secret_hash,
+                                   target_external_id, target_username, target_display_name, created_at, expires_at)
+VALUES (@org_id, @public_id, @user_id, @messenger, @connection_id, @method, @secret_hash, @target_external_id,
+        @target_username, @target_display_name, @created_at::timestamptz, @expires_at::timestamptz)
 RETURNING id;
 
 -- GetTelegramRequestByHash locks the Telegram link request of a token, which `/start` names by its hash alone, with
@@ -117,10 +125,22 @@ JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = @org_id AND r.messenger = 'telegram' AND r.secret_hash = @secret_hash
 FOR UPDATE OF r;
 
--- GetLinkRequest reads a link request by its public_id, with its Connection.
+-- GetBridgeTokenRequestByHash locks the Bridge token request of a token, which an account_link event names by its hash
+-- alone, with its User and the Connection it is bound to.
+-- name: GetBridgeTokenRequestByHash :one
+SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
+       u.public_id AS user_public_id, c.public_id AS connection_public_id
+FROM account_link_requests r
+JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = @org_id AND r.messenger = 'bridge' AND r.method = 'token' AND r.secret_hash = @secret_hash
+FOR UPDATE OF r;
+
+-- GetLinkRequest reads a link request by its public_id, with its Connection and whether that is deleted.
 -- name: GetLinkRequest :one
-SELECT r.id, r.user_id, r.messenger, r.connection_id, r.target_external_id, r.target_username,
-       c.public_id AS connection_public_id, c.name AS connection_name
+SELECT r.id, r.user_id, r.messenger, r.connection_id, r.method, r.target_external_id, r.target_username,
+       r.target_display_name, c.public_id AS connection_public_id, c.name AS connection_name,
+       (c.deleted_at IS NOT NULL)::boolean AS connection_deleted
 FROM account_link_requests r
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = @org_id AND r.public_id = @public_id;
@@ -153,13 +173,21 @@ SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND user_id = @user_id AND connection_id = @connection_id AND messenger = 'mattermost'
   AND consumed_at IS NULL AND voided_at IS NULL;
 
+-- VoidPendingBridgeCodeRequests voids the pending Bridge code requests of a User for a Connection, which a new one
+-- replaces.
+-- name: VoidPendingBridgeCodeRequests :execrows
+UPDATE account_link_requests
+SET voided_at = @now::timestamptz
+WHERE org_id = @org_id AND user_id = @user_id AND connection_id = @connection_id AND messenger = 'bridge'
+  AND method = 'code' AND consumed_at IS NULL AND voided_at IS NULL;
+
 -- name: VoidLinkRequest :exec
 UPDATE account_link_requests
 SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND consumed_at IS NULL AND voided_at IS NULL;
 
--- LockCodeTarget takes, until the transaction ends, the lock of the Mattermost code requests for one account of a
--- Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
+-- LockCodeTarget takes, until the transaction ends, the lock of the Mattermost or Bridge code requests for one account
+-- of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
 -- concurrent requests serialize. A collision of the hash only serializes two accounts.
 -- name: LockCodeTarget :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(format('%s/%s/%s', @org_id::bigint, @connection_id::bigint,
@@ -179,14 +207,29 @@ FROM account_link_requests
 WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
   AND messenger = 'mattermost' AND created_at > @since::timestamptz;
 
+-- CountUserBridgeCodeRequests counts the Bridge code requests of a User made after since, with the oldest of them.
+-- name: CountUserBridgeCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = @org_id AND user_id = @user_id AND messenger = 'bridge' AND method = 'code'
+  AND created_at > @since::timestamptz;
+
+-- CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since, by
+-- any User, with the oldest of them.
+-- name: CountTargetBridgeCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
+  AND messenger = 'bridge' AND method = 'code' AND created_at > @since::timestamptz;
+
 -- DeleteUserAccountLinks deletes every link of a User and returns them with their Connections (C-03.FR-13).
 -- name: DeleteUserAccountLinks :many
 WITH deleted AS (
     DELETE FROM account_links
     WHERE org_id = @org_id AND user_id = @user_id
-    RETURNING id, public_id, messenger, connection_id, external_id, username
+    RETURNING id, public_id, messenger, connection_id, external_id, username, display_name
 )
-SELECT d.public_id, d.messenger, d.external_id, d.username, c.public_id AS connection_public_id,
+SELECT d.public_id, d.messenger, d.external_id, d.username, d.display_name, c.public_id AS connection_public_id,
        c.name AS connection_name
 FROM deleted d
 JOIN connections c ON c.org_id = @org_id AND c.id = d.connection_id
@@ -198,13 +241,17 @@ SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND user_id = @user_id AND consumed_at IS NULL AND voided_at IS NULL;
 
 -- PruneLinkRequests deletes up to batch_size link requests that expired before @before, consumed and voided ones
--- included. A request being used is skipped and taken at the next run.
+-- included, whatever their messenger. A request being used is skipped and taken at the next run. The batch is chosen
+-- once, in a materialized CTE: a subquery that a plan scans again for each deleted row skips the rows the statement
+-- already deleted, as locked by itself, and takes more than the batch.
 -- name: PruneLinkRequests :execrows
-DELETE FROM account_link_requests r
-WHERE r.org_id = @org_id AND r.id IN (
+WITH doomed AS MATERIALIZED (
     SELECT o.id FROM account_link_requests o
     WHERE o.org_id = @org_id AND o.expires_at < @before::timestamptz
     ORDER BY o.id
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED
-);
+)
+DELETE FROM account_link_requests r
+USING doomed d
+WHERE r.org_id = @org_id AND r.id = d.id;

@@ -23,7 +23,9 @@
   [`0010_bridge_edit_windows`](../../internal/db/migrations/0010_bridge_edit_windows.up.sql)
   (the edit windows of Bridge Root messages, S-081) and
   [`0011_bridge_events`](../../internal/db/migrations/0011_bridge_events.up.sql)
-  (Bridge events: the Transport `bridge`, Bridge Account links, `bridge_events_seen`, S-075), in
+  (Bridge events: the Transport `bridge`, Bridge Account links, `bridge_events_seen`, S-075) and
+  [`0012_bridge_account_link_requests`](../../internal/db/migrations/0012_bridge_account_link_requests.up.sql)
+  (Bridge Account link requests, S-076), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -226,6 +228,8 @@ erDiagram
     }
     account_link_requests {
         bigint id PK
+        text messenger "telegram mattermost bridge"
+        text method "token code; required for bridge"
         bytea secret_hash "token or code"
         bigint attempts
         timestamptz expires_at
@@ -737,13 +741,25 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
   renames the new one and adds the constraints again under their old names, under one exclusive lock of the small
   table; the values of Mattermost and Telegram links do not change, so an earlier binary reads and writes the column and
   catches the unique violations by name as before. Its down migration deletes the Bridge links and swaps the column
-  back the same way.
+  back the same way. S-076 writes `display_name` for every Bridge link, and the footer names a User linked through a
+  Bridge by it, else by the link's `username` (C-22.FR-16).
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
-  per target account (`account_link.mattermost_code_requests`). A request is deleted by `short_lived_pruning`
-  `account_link.request_prune_after` past its `expires_at`, consumed and voided ones included, which keeps the hour the
-  limits count; the batched delete scans the small table without an index of its own.
+  per target account (`account_link.mattermost_code_requests`). A Bridge request (migration 0012, C-22.FR-15) has a
+  `method`: `token`, the hashed token a person sends to the bot, which an `account_link` event names alone, so that it
+  is found by its hash through its own partial unique index `account_link_requests_bridge_token_key`
+  (`messenger = 'bridge' AND method = 'token'`), beside the Telegram one; or `code`, the hashed code sent by direct
+  message, with its target account — `target_external_id`, `target_username` (the handle the bridge reported) and
+  `target_display_name`, which the link takes on confirmation — and `attempts` (`account_link.bridge_code`). Three
+  CHECKs hold `method` to `token` or `code`, require it on a Bridge request and require a Bridge code's
+  `target_external_id`; `method` stays nullable because an earlier binary writes Telegram and Mattermost requests
+  without it. `account_link_requests_bridge_target_idx` backs the per-target limit of
+  `account_link.bridge_code_requests`, as `account_link_requests_target_idx` backs Mattermost's; the per-User count
+  uses `account_link_requests_user_idx`. The composite foreign key `(connection_id, messenger)` binds a Bridge request
+  to a Bridge Connection. A request is deleted by `short_lived_pruning` `account_link.request_prune_after` past its
+  `expires_at`, consumed and voided ones included, whatever its messenger, which keeps the hour the limits count; the
+  batched delete scans the small table without an index of its own.
 
 ### 4.6 Integrations and ingestion
 

@@ -308,6 +308,7 @@ var implemented = map[string]bool{
 	"RetirePreviousSigningSecret": true, "TestDestination": true, "PreviewDestination": true,
 	"ListMyAccountLinks": true, "ListLinkableConnections": true, "DeleteMyAccountLink": true,
 	"StartTelegramLink": true, "StartMattermostLink": true, "ConfirmMattermostLink": true,
+	"StartBridgeLink": true, "StartBridgeCodeLink": true, "ConfirmBridgeLink": true,
 	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true, "GetKeyring": true,
 }
 

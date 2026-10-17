@@ -909,10 +909,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
 	p.connections, p.interactive, p.roles = conns, interactive, roles
-	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013).
+	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013,
+	// C-22.FR-15).
 	p.links = accountlinks.New(accountlinks.Config{OrgID: orgID, Store: accountlinks.NewStore(p.db.AccountLinksDB()),
 		Audit: w, Business: p.clocks.Business, Log: p.log, Telegram: telegram.Bots{Conns: conns, Path: interactive},
-		Mattermost: mattermost.LinkBots{Conns: conns, Path: interactive}})
+		Mattermost: mattermost.LinkBots{Conns: conns, Path: interactive},
+		Bridge:     bridge.LinkBots{Conns: conns, Path: interactive}})
 	p.messengerAdapters()
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
@@ -932,10 +934,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Log: p.log}
 	// The events of Bridge Connections reach one handler, from the Leader's poller or from the push callback, which
 	// claims each event id once per Connection (C-22.FR-11), runs the Commands of presses as the linked Users through
-	// the dispatcher and answers the people behind them on the interactive path (C-22.FR-12, FR-13).
-	p.bridgeEvents = &bridge.Events{Store: conns, Bindings: p.delivery, Links: p.links, Commands: p.groups,
-		Roles: roles, Keys: p.keyring, Path: interactive, PublicURL: p.cfg.PublicURL.String(), Clocks: p.clocks,
-		Log: p.log}
+	// the dispatcher, links the accounts that send a token to the bot and answers the people behind them on the
+	// interactive path (C-22.FR-12, FR-13, FR-15).
+	p.bridgeEvents = &bridge.Events{Store: conns, Bindings: p.delivery, Links: p.links, Linker: p.links,
+		Commands: p.groups, Roles: roles, Keys: p.keyring, Path: interactive, PublicURL: p.cfg.PublicURL.String(),
+		Clocks: p.clocks, Log: p.log}
 	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,

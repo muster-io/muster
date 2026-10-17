@@ -40,6 +40,11 @@ import type {
   AccountLink,
   AccountLinkList,
   BadRequestResponse,
+  BridgeCodeLinkRequest,
+  BridgeCodeLinkStarted,
+  BridgeLinkConfirm,
+  BridgeLinkRequest,
+  BridgeLinkStart,
   ConflictResponse,
   ForbiddenResponse,
   LimitedResponse,
@@ -187,7 +192,7 @@ export const getListLinkableConnectionsUrl = () => {
 }
 
 /**
- * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+ * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List the Connections an account can be linked through
  */
 export const listLinkableConnections = async ( options?: Parameters<typeof apiFetch>[1]): Promise<LinkableConnectionList> => {
@@ -616,6 +621,270 @@ export const useConfirmMattermostLink = <TError = BadRequestResponse | Unauthori
         TContext
       > => {
       return useMutation(getConfirmMattermostLinkMutationOptions(options), queryClient);
+    }
+    export const getStartBridgeLinkUrl = () => {
+
+
+
+
+  return `/api/v1/me/account-links/bridge`
+}
+
+/**
+ * Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+ * @summary Start linking an account through a Bridge with a token
+ */
+export const startBridgeLink = async (bridgeLinkRequest: BridgeLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<BridgeLinkStart> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<BridgeLinkStart>(getStartBridgeLinkUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(bridgeLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getStartBridgeLinkMutationKey = () => ['startBridgeLink'] as const;
+
+export const getStartBridgeLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBridgeLink>>, TError,StartBridgeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startBridgeLink>>, TError,StartBridgeLinkMutationVariables, TContext> => {
+
+const mutationKey = getStartBridgeLinkMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startBridgeLink>>, StartBridgeLinkMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startBridgeLink(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartBridgeLinkMutationResult = NonNullable<Awaited<ReturnType<typeof startBridgeLink>>>
+    export type StartBridgeLinkMutationBody = BridgeLinkRequest
+    export type StartBridgeLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type StartBridgeLinkMutationVariables = {data: BridgeLinkRequest}
+
+    /**
+ * @summary Start linking an account through a Bridge with a token
+ */
+export const useStartBridgeLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBridgeLink>>, TError,StartBridgeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof startBridgeLink>>,
+        TError,
+        StartBridgeLinkMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartBridgeLinkMutationOptions(options), queryClient);
+    }
+    export const getStartBridgeCodeLinkUrl = () => {
+
+
+
+
+  return `/api/v1/me/account-links/bridge/codes`
+}
+
+/**
+ * Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+ * @summary Start linking an account through a Bridge with a code
+ */
+export const startBridgeCodeLink = async (bridgeCodeLinkRequest: BridgeCodeLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<BridgeCodeLinkStarted> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<BridgeCodeLinkStarted>(getStartBridgeCodeLinkUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(bridgeCodeLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getStartBridgeCodeLinkMutationKey = () => ['startBridgeCodeLink'] as const;
+
+export const getStartBridgeCodeLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBridgeCodeLink>>, TError,StartBridgeCodeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startBridgeCodeLink>>, TError,StartBridgeCodeLinkMutationVariables, TContext> => {
+
+const mutationKey = getStartBridgeCodeLinkMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startBridgeCodeLink>>, StartBridgeCodeLinkMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startBridgeCodeLink(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartBridgeCodeLinkMutationResult = NonNullable<Awaited<ReturnType<typeof startBridgeCodeLink>>>
+    export type StartBridgeCodeLinkMutationBody = BridgeCodeLinkRequest
+    export type StartBridgeCodeLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
+    export type StartBridgeCodeLinkMutationVariables = {data: BridgeCodeLinkRequest}
+
+    /**
+ * @summary Start linking an account through a Bridge with a code
+ */
+export const useStartBridgeCodeLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startBridgeCodeLink>>, TError,StartBridgeCodeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof startBridgeCodeLink>>,
+        TError,
+        StartBridgeCodeLinkMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartBridgeCodeLinkMutationOptions(options), queryClient);
+    }
+    export const getConfirmBridgeLinkUrl = () => {
+
+
+
+
+  return `/api/v1/me/account-links/bridge/confirmation`
+}
+
+/**
+ * At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+ * @summary Confirm a Bridge link with the code
+ */
+export const confirmBridgeLink = async (bridgeLinkConfirm: BridgeLinkConfirm, options?: Parameters<typeof apiFetch>[1]): Promise<AccountLink> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<AccountLink>(getConfirmBridgeLinkUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(bridgeLinkConfirm)
+  }
+);}
+
+
+
+
+
+export const getConfirmBridgeLinkMutationKey = () => ['confirmBridgeLink'] as const;
+
+export const getConfirmBridgeLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmBridgeLink>>, TError,ConfirmBridgeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmBridgeLink>>, TError,ConfirmBridgeLinkMutationVariables, TContext> => {
+
+const mutationKey = getConfirmBridgeLinkMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmBridgeLink>>, ConfirmBridgeLinkMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmBridgeLink(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmBridgeLinkMutationResult = NonNullable<Awaited<ReturnType<typeof confirmBridgeLink>>>
+    export type ConfirmBridgeLinkMutationBody = BridgeLinkConfirm
+    export type ConfirmBridgeLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type ConfirmBridgeLinkMutationVariables = {data: BridgeLinkConfirm}
+
+    /**
+ * @summary Confirm a Bridge link with the code
+ */
+export const useConfirmBridgeLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmBridgeLink>>, TError,ConfirmBridgeLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof confirmBridgeLink>>,
+        TError,
+        ConfirmBridgeLinkMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmBridgeLinkMutationOptions(options), queryClient);
     }
     export const getListUserAccountLinksUrl = (userId: string,) => {
 

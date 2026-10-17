@@ -91,8 +91,9 @@ type Event struct {
 }
 
 // Answer is an answer Muster made with answerEvent, as GET /_fake/answers lists it: the bot, the event and its type,
-// the message the event is about, the person behind it, the text, and where the person sees it — ephemeral or popup
-// for a press when the messenger can answer privately, otherwise thread, in the Thread of the message.
+// the message the event is about, empty for an account_link, the person behind it, the text, and where the person sees
+// it — ephemeral or popup for a press when the messenger can answer privately, direct for an account_link, otherwise
+// thread, in the Thread of the message.
 type Answer struct {
 	Bot       int    `json:"bot"`
 	EventID   string `json:"event_id"`
@@ -285,9 +286,10 @@ func (f *Fake) pollEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // answerEvent answers answerEvent: a repeated Idempotency-Key gets its first answer, replayed; otherwise the answer is
-// recorded for an event of the bot that a person caused, a press or a Thread message, and shown privately for a press
-// when capabilities.private_answers allows it — ephemeral before popup — and in the Thread of its message otherwise.
-// An event the bot does not know, and a message_deleted event, are gone.
+// recorded for an event of the bot that a person caused, a press, a Thread message or an account_link, and shown
+// privately for a press when capabilities.private_answers allows it — ephemeral before popup — in the direct chat with
+// the bot for an account_link, and in the Thread of its message otherwise. An event the bot does not know, and a
+// message_deleted event, are gone.
 func (f *Fake) answerEvent(w http.ResponseWriter, r *http.Request) {
 	key, ok := idempotencyKey(w, r)
 	if !ok {
@@ -314,6 +316,9 @@ func (f *Fake) answerEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shown := gen.AnswerShownShownAsThread
+	if ev.typ == TypeAccountLink {
+		shown = gen.AnswerShownShownAsDirect
+	}
 	if ev.typ == TypePress && f.config.Capabilities.PrivateAnswers != nil {
 		switch private := *f.config.Capabilities.PrivateAnswers; {
 		case slices.Contains(private, gen.CapabilitiesPrivateAnswersEphemeral):

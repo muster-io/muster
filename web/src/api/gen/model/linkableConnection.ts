@@ -17,14 +17,19 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { LinkableConnectionLinkMethodsItem } from './linkableConnectionLinkMethodsItem';
+import type { LinkHandleKind } from './linkHandleKind';
 import type { Messenger } from './messenger';
 import type { PublicId } from './publicId';
 
 /**
- * A Connection an account can be linked through, as the profile sees it; no other Connection field is shown.
+ * A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
  */
 export interface LinkableConnection {
   id: PublicId;
   name: string;
   messenger: Messenger;
+  /** Set on Bridge Connections only, from the Connection's last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`. */
+  link_methods?: LinkableConnectionLinkMethodsItem[];
+  handle_kind?: LinkHandleKind | null;
 }

@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
@@ -32,8 +33,9 @@ const (
 )
 
 var (
-	deepLink = regexp.MustCompile(`^https://t\.me/muster_dev_bot\?start=([A-Za-z0-9_-]{43})$`)
-	linkCode = regexp.MustCompile(`^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$`)
+	deepLink    = regexp.MustCompile(`^https://t\.me/muster_dev_bot\?start=([A-Za-z0-9_-]{43})$`)
+	linkCode    = regexp.MustCompile(`^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$`)
+	bridgeToken = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
 
 // linksEnv is the reminderEnv of S-068 without Account links inserted by hand: every link is made the way people make
@@ -302,8 +304,9 @@ func retryAfter(t *testing.T, a answer) int {
 // (C-18.FR-1, FR-2, FR-7, C-14.FR-8); a used, unknown, expired and another Connection's token refused with one answer
 // (C-18.AC-1); the Mattermost code and its five attempts (C-18.FR-3, AC-2, FR-11); the limits of code requests per
 // target account and per User; a new link replacing the User's earlier one and an account linked to another User
-// refused in both messengers (C-18.FR-4, FR-5); the Connections to link through (C-18.FR-10); tokens refused where only
-// the web session may act, Admins listing and removing links, and 405 for a method a path does not have (C-18.FR-6,
+// refused in both messengers (C-18.FR-4, FR-5); the Connections to link through, the demo Bridge Connection with its
+// link methods among them (C-18.FR-10, C-22.FR-15); tokens refused where only the web session may act, the Bridge
+// operations too, Admins listing and removing links, and 405 for a method a path does not have (C-18.FR-6,
 // AC-4, C-03.AC-14); presses run as the linked User in both messengers with the last use set (C-18.FR-8, AC-3,
 // C-10.FR-11); the Reminder buttons (C-18.AC-5, C-17.FR-10); a Viewer's and a disabled User's presses in both
 // messengers (C-18.AC-6); Alice named alice_t in Telegram and Alice Smith in Mattermost (C-18.AC-7, C-12.FR-12);
@@ -470,10 +473,11 @@ func TestAccountLinks(t *testing.T) {
 		t.Error("a refused request sent a code")
 	}
 
-	// C-18.FR-10: the Connections to link through, with only id, name and messenger, for a Viewer; not for a Service
-	// account.
+	// C-18.FR-10, C-22.FR-15: the Connections to link through, with only id, name and messenger — and the link methods
+	// and the lookup kind on Bridge rows only — for a Viewer; not for a Service account.
 	conns := dana.session.json(http.MethodGet, "/api/v1/me/account-links/connections", "", http.StatusOK)["items"].([]any)
 	var names []string
+	var bridgeConn string
 	for _, x := range conns {
 		c := x.(map[string]any)
 		keys := slices.Sorted(func(yield func(string) bool) {
@@ -483,13 +487,18 @@ func TestAccountLinks(t *testing.T) {
 				}
 			}
 		})
-		if !slices.Equal(keys, []string{"id", "messenger", "name"}) {
-			t.Errorf("connection keys %v", keys)
+		want := []string{"id", "messenger", "name"}
+		if c["messenger"] == "bridge" {
+			want = []string{"handle_kind", "id", "link_methods", "messenger", "name"}
+			bridgeConn, _ = c["id"].(string)
+		}
+		if !slices.Equal(keys, want) {
+			t.Errorf("connection keys %v of %v", keys, c["messenger"])
 		}
 		names = append(names, fmt.Sprint(c["messenger"], " ", c["name"]))
 	}
 	if !slices.Contains(names, "mattermost mm") || !slices.Contains(names, "telegram "+devmode.TelegramConnectionName) ||
-		!slices.IsSorted(names) {
+		!slices.Contains(names, "bridge "+devmode.BridgeConnectionName) || !slices.IsSorted(names) {
 		t.Errorf("linkable connections %v", names)
 	}
 	sa := e.api.json(http.MethodPost, "/api/v1/service-accounts", `{"name":"pager","role":"viewer"}`,
@@ -522,6 +531,11 @@ func TestAccountLinks(t *testing.T) {
 		{alice.pat, http.MethodPost, "/api/v1/me/account-links/mattermost", `{"connection_id":"` + e.mmConn +
 			`","username":"alice"}`},
 		{alice.pat, http.MethodPost, "/api/v1/me/account-links/mattermost/confirmation", `{"request_id":"` + rid +
+			`","code":"22222222"}`},
+		{alice.pat, http.MethodPost, "/api/v1/me/account-links/bridge", `{"connection_id":"` + bridgeConn + `"}`},
+		{alice.pat, http.MethodPost, "/api/v1/me/account-links/bridge/codes", `{"connection_id":"` + bridgeConn +
+			`","handle":"alice"}`},
+		{alice.pat, http.MethodPost, "/api/v1/me/account-links/bridge/confirmation", `{"request_id":"` + rid +
 			`","code":"22222222"}`},
 		{alice.pat, http.MethodDelete, "/api/v1/me/account-links/" + aliceLink, ""},
 		{e.api, http.MethodDelete, "/api/v1/users/" + adminID + "/account-links/" + aliceLink, ""},
@@ -738,6 +752,312 @@ func TestAccountLinks(t *testing.T) {
 		}
 	}
 	if len(e.secrets) < 12 {
+		t.Errorf("only %d secrets were checked", len(e.secrets))
+	}
+}
+
+// bridgeLinksEnv is the brd environment with the people and Audit log checks of linksEnv: accounts linked through the
+// demo Connection "Dev Bridge" of the fake bridge's first bot and through "Lab Bridge" of its second.
+type bridgeLinksEnv struct {
+	*linksEnv
+	b   *brd
+	lab string
+}
+
+// check runs the check of the Connection conn, which reads its info again, and expects it to pass.
+func (e *bridgeLinksEnv) check(conn string) {
+	e.t.Helper()
+	if c := e.api.json(http.MethodPost, "/api/v1/connections/"+conn+"/checks", "", http.StatusOK); c["ok"] != true {
+		e.t.Fatalf("the check of %s: %v", conn, c)
+	}
+}
+
+// linkable is what p sees of the Bridge Connections to link through: by name, the link methods and the lookup kind.
+func (e *bridgeLinksEnv) linkable(p linker) map[string]string {
+	e.t.Helper()
+	out := map[string]string{}
+	for _, x := range p.session.json(http.MethodGet, "/api/v1/me/account-links/connections", "",
+		http.StatusOK)["items"].([]any) {
+		if c := x.(map[string]any); c["messenger"] == "bridge" {
+			out[c["name"].(string)] = fmt.Sprint(c["link_methods"], " ", c["handle_kind"])
+		}
+	}
+	return out
+}
+
+// startBridge starts a link of p through the Bridge Connection conn by token and returns the token, whose link the
+// link_url_template of the fake carries.
+func (e *bridgeLinksEnv) startBridge(p linker, conn string) string {
+	e.t.Helper()
+	m := p.session.json(http.MethodPost, "/api/v1/me/account-links/bridge", `{"connection_id":"`+conn+`"}`,
+		http.StatusCreated)
+	token, _ := m["token"].(string)
+	if !bridgeToken.MatchString(token) || m["link_url"] != e.h.Fakes.Bridge+"/bot?start="+token ||
+		m["expires_at"] == nil {
+		e.t.Fatalf("a started bridge link %v", m)
+	}
+	e.secrets = append(e.secrets, token)
+	return token
+}
+
+// bridgeAnswers are the answers Muster made through the fake bridge.
+func (e *bridgeLinksEnv) bridgeAnswers() []fakebridge.Answer {
+	e.t.Helper()
+	var out []fakebridge.Answer
+	decode(e.t, call(e.t, http.MethodGet, e.b.fb+"/answers", ""), &out)
+	return out
+}
+
+// sendToken has the person userID of the fake messenger send token to the fake's bot, and returns Muster's answer
+// once it is there.
+func (e *bridgeLinksEnv) sendToken(bot int, userID, token string) fakebridge.Answer {
+	e.t.Helper()
+	before := len(e.bridgeAnswers())
+	e.fake(http.MethodPost, e.b.fb+"/link", fmt.Sprintf(`{"user_id":%q,"token":%q,"bot":%d}`, userID, token, bot))
+	var got []fakebridge.Answer
+	eventually(e.t, "the answer to the token of "+userID, func() bool {
+		got = e.bridgeAnswers()
+		return len(got) > before
+	})
+	a := got[before]
+	if a.Bot != bot || a.EventType != fakebridge.TypeAccountLink || a.UserID != userID || a.ShownAs != "direct" {
+		e.t.Errorf("the answer %+v", a)
+	}
+	return a
+}
+
+func (e *bridgeLinksEnv) requestCode(p linker, conn, handle string) answer {
+	e.t.Helper()
+	return p.session.do(http.MethodPost, "/api/v1/me/account-links/bridge/codes",
+		fmt.Sprintf(`{"connection_id":%q,"handle":%q}`, conn, handle))
+}
+
+func (e *bridgeLinksEnv) confirmCode(p linker, request, code string) answer {
+	e.t.Helper()
+	return p.session.do(http.MethodPost, "/api/v1/me/account-links/bridge/confirmation", `{"request_id":"`+request+
+		`","code":"`+code+`"}`)
+}
+
+func (e *bridgeLinksEnv) bridgeDMs() []fakebridge.DirectMessage {
+	e.t.Helper()
+	var out []fakebridge.DirectMessage
+	decode(e.t, call(e.t, http.MethodGet, e.b.fb+"/direct-messages", ""), &out)
+	return out
+}
+
+// codeFor requests a code for p through the Connection Lab Bridge, the fake's second bot, to the account with handle,
+// and returns the request id and the code from the bot's direct message to userID.
+func (e *bridgeLinksEnv) codeFor(p linker, handle, userID string) (string, string) {
+	e.t.Helper()
+	before := len(e.bridgeDMs())
+	a := e.requestCode(p, e.lab, handle)
+	var s struct {
+		RequestID string  `json:"request_id"`
+		Attempts  int     `json:"attempts_remaining"`
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if a.status != http.StatusAccepted {
+		e.t.Fatalf("a bridge code for %s = %d %s", handle, a.status, a.body)
+	}
+	decode(e.t, a, &s)
+	if s.Attempts != 5 || s.ExpiresAt == nil {
+		e.t.Errorf("the started code request %s", a.body)
+	}
+	dms := e.bridgeDMs()
+	if len(dms) != before+1 {
+		e.t.Fatalf("%d direct messages after %d", len(dms), before)
+	}
+	dm := dms[len(dms)-1]
+	text, code, _ := strings.Cut(dm.Body, "\n\n")
+	if dm.Bot != 2 || dm.UserExternalID != userID || dm.Key != "dm-"+s.RequestID || text != textCodeRequest ||
+		!linkCode.MatchString(code) {
+		e.t.Fatalf("the code message %+v", dm)
+	}
+	e.secrets = append(e.secrets, code)
+	return s.RequestID, code
+}
+
+// TestBridgeAccountLinks is the Verification of S-076 against `muster dev` and the fake bridge, with two Bridge
+// Connections to it — "Dev Bridge" of its first bot and "Lab Bridge" of its second — and no link row inserted by hand:
+// the link methods and the lookup kind each Connection offers from its info (C-22.FR-15, AC-19); a token sent to the
+// bot links the sender's account with the name the bridge reported, and is answered in the direct chat (C-22.AC-18,
+// FR-13); the same token again, a token of the other Connection, an expired and an unknown token link nothing and get
+// the same answer, recorded with their reasons; each Connection needs its own link; the code by direct message with an unknown address, a person the bot cannot write to, five wrong codes, the right
+// code without a confirming message, and the limit for one account (C-22.AC-19); an account linked to another User
+// (C-18.FR-5); no code without a user lookup, and no link without a link_url_template; the Mention of Alice by a marker and her entry, Bob without a link for the
+// Connection as text, and the footer naming Alice by her link's name although her link has no username (C-22.AC-20,
+// FR-16); and no token or code in the log.
+func TestBridgeAccountLinks(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	b := newBRD(t, h, r)
+	t.Cleanup(func() {
+		restore(t, http.MethodPut, b.fb+"/config", `{"user_lookup":"login","link_url_template":null,"dm_blocked":[]}`)
+	})
+	e := &bridgeLinksEnv{linksEnv: &linksEnv{timersEnv: &timersEnv{tgd: &tgd{mm: b.mm}}}, b: b}
+	e.lab = e.api.json(http.MethodPost, "/api/v1/connections", `{"type":"bridge","name":"Lab Bridge","base_url":"`+
+		h.Fakes.Bridge+`","bot_token":"`+fakebridge.SecondToken+`","event_delivery":"poll","proxy":{"enabled":false},
+		"limiter":{"limit":10,"per_seconds":1}}`, http.StatusCreated)["id"].(string)
+	alice := e.person("Alice A.", "alice", "responder")
+	bob := e.person("Bob B.", "bob", "responder")
+	b.configure(`{"user_lookup":"none","link_url_template":"` + h.Fakes.Bridge + `/bot?start={token}"}`)
+	e.check(b.conn)
+	e.check(e.lab)
+	if got := e.linkable(alice); got["Dev Bridge"] != "[token] <nil>" || got["Lab Bridge"] != "[token] <nil>" {
+		t.Errorf("linkable without a user lookup %v", got)
+	}
+
+	// C-22.AC-18, FR-13: a token sent to the bot of Dev Bridge links Alice's account with the name the bridge reported.
+	tok := e.startBridge(alice, b.conn)
+	if a := e.sendToken(1, fakebridge.AliceID, tok); a.Text != "Linked to Muster user Alice A. (alice)" {
+		t.Errorf("the answer to the token %q", a.Text)
+	}
+	l := linkOf(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK), "bridge")
+	if l["external_id"] != fakebridge.AliceID || l["display_name"] != "Alice Smith" || l["username"] != nil ||
+		l["connection"].(map[string]any)["name"] != devmode.BridgeConnectionName {
+		t.Errorf("alice's bridge link %v", l)
+	}
+	if d, _, transport := e.lastAudit("account_link.link"); d["messenger"] != "bridge" ||
+		d["external_id"] != fakebridge.AliceID || d["display_name"] != "Alice Smith" || d["connection"] != b.conn ||
+		transport != "bridge" {
+		t.Errorf("the link entry %v through %s", d, transport)
+	}
+	if a := e.sendToken(1, fakebridge.BobID, tok); a.Text != textLinkInvalid {
+		t.Errorf("a used token: %q", a.Text)
+	}
+	e.wantRejection("token_used", "bridge", fakebridge.BobID)
+
+	// A token of Lab Bridge sent to the bot of Dev Bridge links nothing; Lab Bridge needs a link of its own.
+	tok = e.startBridge(alice, e.lab)
+	if a := e.sendToken(1, fakebridge.AliceID, tok); a.Text != textLinkInvalid {
+		t.Errorf("a token at the other Connection's bot: %q", a.Text)
+	}
+	e.wantRejection("wrong_connection", "bridge", fakebridge.AliceID)
+	if a := e.sendToken(2, fakebridge.AliceID, tok); a.Text != "Linked to Muster user Alice A. (alice)" {
+		t.Errorf("the token at its own bot: %q", a.Text)
+	}
+	if got := links(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)); !slices.Equal(
+		got, []string{"bridge Dev Bridge u-alice <nil>", "bridge Lab Bridge u-alice <nil>"}) {
+		t.Errorf("alice's links %v", got)
+	}
+	tok = e.startBridge(alice, e.lab)
+	advance(t, r, 601)
+	if a := e.sendToken(2, fakebridge.AliceID, tok); a.Text != textLinkInvalid {
+		t.Errorf("an expired token: %q", a.Text)
+	}
+	e.wantRejection("token_expired", "bridge", fakebridge.AliceID)
+	unknown := make([]byte, 32)
+	_, _ = rand.Read(unknown)
+	e.secrets = append(e.secrets, base64.RawURLEncoding.EncodeToString(unknown))
+	if a := e.sendToken(2, fakebridge.VeraID, base64.RawURLEncoding.EncodeToString(unknown)); a.Text != textLinkInvalid {
+		t.Errorf("an unknown token: %q", a.Text)
+	}
+	e.wantRejection("token_unknown", "bridge", fakebridge.VeraID)
+
+	// C-22.AC-19: a code by direct message through Lab Bridge, whose bridge looks people up by email.
+	b.configure(`{"user_lookup":"email"}`)
+	e.check(e.lab)
+	if got := e.linkable(bob); got["Lab Bridge"] != "[token code] email" {
+		t.Errorf("linkable with a lookup by email %v", got)
+	}
+	if got := fieldError(t, e.requestCode(bob, e.lab, "nobody@example.org")); got != "handle_not_found /handle" {
+		t.Errorf("an unknown address: %s", got)
+	}
+	b.configure(`{"dm_blocked":["u-bob"]}`)
+	if got := fieldError(t, e.requestCode(bob, e.lab, "bob@example.org")); got != "direct_message_refused /handle" {
+		t.Errorf("a person the bot cannot write to: %s", got)
+	}
+	b.configure(`{"dm_blocked":[]}`)
+	rid, code := e.codeFor(bob, "bob@example.org", fakebridge.BobID)
+	wrong := "22222222"
+	if code == wrong {
+		wrong = "33333333"
+	}
+	for i := range 5 {
+		a := e.confirmCode(bob, rid, wrong)
+		if got := fieldError(t, a); got != "link_code_invalid /code" || attemptsRemaining(t, a) != 4-i {
+			t.Errorf("wrong code %d: %s, %d left", i+1, got, attemptsRemaining(t, a))
+		}
+	}
+	if a := e.confirmCode(bob, rid, code); fieldError(t, a) != "link_code_invalid /code" || attemptsRemaining(t, a) != 0 {
+		t.Errorf("the right code after five wrong ones: %s", a.body)
+	}
+	e.wantRejection("wrong_code", "bridge", fakebridge.BobID)
+	rid, code = e.codeFor(bob, "BOB@example.org", fakebridge.BobID)
+	dms := len(e.bridgeDMs())
+	l = bob.session.json(http.MethodPost, "/api/v1/me/account-links/bridge/confirmation", `{"request_id":"`+rid+
+		`","code":"`+strings.ToLower(code)+`"}`, http.StatusCreated)
+	if l["messenger"] != "bridge" || l["external_id"] != fakebridge.BobID || l["display_name"] != "Bob Brown" ||
+		l["username"] != "bob@example.org" || l["connection"].(map[string]any)["name"] != "Lab Bridge" {
+		t.Errorf("bob's bridge link %v", l)
+	}
+	if n := len(e.bridgeDMs()); n != dms {
+		t.Errorf("%d direct messages after the confirmation, %d before", n, dms)
+	}
+	if d, _, transport := e.lastAudit("account_link.link"); d["external_id"] != fakebridge.BobID || transport != "ui" {
+		t.Errorf("the link entry %v through %s", d, transport)
+	}
+	// The refused direct message and the two codes sent count toward the three codes an hour for one account.
+	if n := retryAfter(t, e.requestCode(bob, e.lab, "bob@example.org")); n < 1 || n > 3600 {
+		t.Errorf("the fourth request for bob's account: Retry-After %d", n)
+	}
+	// C-18.FR-5: an account linked to another User.
+	if a := e.sendToken(2, fakebridge.BobID, e.startBridge(alice, e.lab)); a.Text != textLinkConflict {
+		t.Errorf("bob's account for alice: %q", a.Text)
+	}
+	e.wantRejection("conflict", "bridge", fakebridge.BobID)
+	b.configure(`{"user_lookup":"none"}`)
+	e.check(e.lab)
+	if a := e.requestCode(bob, e.lab, "bob@example.org"); a.status != http.StatusConflict ||
+		codeOf(t, a) != "code_not_offered" {
+		t.Errorf("a code without a user lookup = %d %s", a.status, a.body)
+	}
+	if got := e.linkable(bob); got["Lab Bridge"] != "[token] <nil>" {
+		t.Errorf("linkable without a user lookup again %v", got)
+	}
+	// Without a link_url_template the token comes without a link.
+	b.configure(`{"link_url_template":null}`)
+	e.check(e.lab)
+	if m := alice.session.json(http.MethodPost, "/api/v1/me/account-links/bridge", `{"connection_id":"`+e.lab+`"}`,
+		http.StatusCreated); m["link_url"] != nil {
+		t.Errorf("a link without a link_url_template %v", m["link_url"])
+	} else {
+		e.secrets = append(e.secrets, m["token"].(string))
+	}
+
+	// C-22.AC-20, FR-16: a Destination of Dev Bridge that mentions Alice and Bob for new Alert Groups.
+	mentions := map[string]any{}
+	for _, kind := range []string{"new_alert_group", "new_alerts", "reopen", "ack_timeout", "snooze_ended",
+		"rise_to_urgent"} {
+		mentions[kind] = map[string]any{"everyone": "none", "user_ids": []string{}, "groups": []string{}}
+	}
+	mentions["new_alert_group"] = map[string]any{"everyone": "none", "user_ids": []string{alice.id, bob.id},
+		"groups": []string{}}
+	dest := e.api.json(http.MethodPost, "/api/v1/destinations", fmt.Sprintf(`{"type":"bridge","name":"alerts",
+		"connection_id":%q,"channel_id":%q,"mentions":%s,"limiter":{"limit":30,"per_seconds":60}}`, b.conn,
+		fakebridge.ChannelAlerts, mustJSON(mentions)), http.StatusCreated)["destination"].(map[string]any)["id"].(string)
+	b.route("links", "links", []string{dest}, nil)
+	g := b.start("ml", "Mention", "links", "links")
+	env := b.waitPosted("Mention", 1)[0].Envelope
+	first, _, _ := strings.Cut(env.Body, "\n")
+	if mustJSON(env.Mentions) != `[{"display_name":"Alice Smith","external_id":"u-alice","ref":"m1"}]` ||
+		first != "[@Alice Smith](muster-mention:m1) Bob B." || !env.Notify {
+		t.Errorf("the Root message: mentions %s, first line %q, notify %v", mustJSON(env.Mentions), first, env.Notify)
+	}
+	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/acknowledge", "", http.StatusOK)
+	eventually(t, "the footer naming alice", func() bool {
+		edits := b.posted("Mention")[0].Edits
+		return len(edits) > 0 && strings.HasSuffix(edits[len(edits)-1].Body, "Acknowledged by Alice Smith")
+	})
+
+	// Secrets (lint 5): no link token or code reaches the log.
+	out := r.Output()
+	for _, s := range e.secrets {
+		if s != "" && strings.Contains(out, s) {
+			t.Error("a link token or code reached the log")
+		}
+	}
+	if len(e.secrets) < 8 {
 		t.Errorf("only %d secrets were checked", len(e.secrets))
 	}
 }

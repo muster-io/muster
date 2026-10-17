@@ -265,9 +265,9 @@ func (s *claimStore) recorded(connectionID int64, eventID string) bool {
 }
 
 // eventsEnv is an Events over a claimStore, with the real and the business clock at now and the log in a buffer; its
-// presses are verified with keys and bound by bindings, its accounts linked by links, its Commands run by commands and
-// its answers made on path, which takes every token at once, through the Connection's client, nil until a test sets
-// one.
+// presses are verified with keys and bound by bindings, its accounts looked up by links and linked by linker, its
+// Commands run by commands and its answers made on path, which takes every token at once, through the Connection's
+// client, nil until a test sets one.
 type eventsEnv struct {
 	events   *Events
 	store    *claimStore
@@ -277,6 +277,7 @@ type eventsEnv struct {
 	keys     *pressKeys
 	bindings *pressBindings
 	links    *pressLinks
+	linker   *fakeLinker
 	commands *pressCommands
 	path     *answerPath
 }
@@ -302,10 +303,11 @@ func (b *syncBuffer) String() string {
 func newEventsEnv(now time.Time) *eventsEnv {
 	e := &eventsEnv{store: newClaimStore(), real: clock.NewManual(now), log: &syncBuffer{},
 		conn: Conn{ID: pressConnID, PublicID: "CN0000000000B3", Version: 1}, keys: newPressKeys(),
-		bindings: newPressBindings(), links: &pressLinks{users: pressUsers}, commands: &pressCommands{},
-		path: newTestPath(now)}
-	e.events = &Events{Store: e.store, Bindings: e.bindings, Links: e.links, Commands: e.commands, Roles: pressRoles,
-		Keys: e.keys, Path: e.path, PublicURL: "http://localhost:8080/",
+		bindings: newPressBindings(), links: &pressLinks{users: pressUsers}, linker: &fakeLinker{},
+		commands: &pressCommands{}, path: newTestPath(now)}
+	e.events = &Events{Store: e.store, Bindings: e.bindings, Links: e.links, Linker: e.linker, Commands: e.commands,
+		Roles: pressRoles,
+		Keys:  e.keys, Path: e.path, PublicURL: "http://localhost:8080/",
 		Clocks: clock.Clocks{Business: clock.NewManual(now), Real: e.real}, Log: logging.New(e.log, logging.LevelInfo)}
 	return e
 }
@@ -320,9 +322,9 @@ func (e *eventsEnv) event(t *testing.T, typ string, mutate ...func(map[string]an
 }
 
 // TestEventsHandleEveryType covers C-22.FR-11: an event of each type of the protocol is handled and its id recorded,
-// whatever the Connection's info declares, which Events never reads; an account_link event is acknowledged and changes
-// nothing; an event handled before is acknowledged again without handling. The press and the Text command, on a
-// message the Connection did not post, are the lines logged, and the message_deleted event reaches RootDeleted once.
+// whatever the Connection's info declares, which Events never reads; an event handled before is acknowledged again
+// without handling. The press and the Text command, on a message the Connection did not post, are the lines logged,
+// the account_link event reaches the Linker once, and the message_deleted event reaches RootDeleted once.
 func TestEventsHandleEveryType(t *testing.T) {
 	e := newEventsEnv(eventTime)
 	for i, typ := range []string{TypePress, TypeThreadMessage, TypeAccountLink, TypeMessageDeleted} {
@@ -344,6 +346,9 @@ func TestEventsHandleEveryType(t *testing.T) {
 	}
 	if d := e.bindings.deletions(); !slices.Equal(d, []string{"3/m9"}) {
 		t.Errorf("RootDeleted for %v", d)
+	}
+	if got := e.linker.linked(); len(got) != 1 || got[0].token != strings.Repeat("A", 43) {
+		t.Errorf("linked %+v", got)
 	}
 }
 

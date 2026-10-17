@@ -84,8 +84,11 @@ func (s *Service) connection(ctx context.Context, publicID, messenger string) (d
 }
 
 func messengerName(messenger string) string {
-	if messenger == MessengerTelegram {
+	switch messenger {
+	case MessengerTelegram:
 		return "Telegram"
+	case MessengerBridge:
+		return "Bridge"
 	}
 	return "Mattermost"
 }

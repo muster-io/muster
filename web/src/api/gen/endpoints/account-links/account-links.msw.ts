@@ -28,21 +28,26 @@ import type {
 import type {
   AccountLink,
   AccountLinkList,
+  BridgeCodeLinkStarted,
+  BridgeLinkStart,
   LinkableConnectionList,
   MattermostLinkStarted,
   TelegramLinkStart
 } from '../../model';
 
 import {
+  getConfirmBridgeLinkResponseMock,
   getConfirmMattermostLinkResponseMock,
   getListLinkableConnectionsResponseMock,
   getListMyAccountLinksResponseMock,
   getListUserAccountLinksResponseMock,
+  getStartBridgeCodeLinkResponseMock,
+  getStartBridgeLinkResponseMock,
   getStartMattermostLinkResponseMock,
   getStartTelegramLinkResponseMock
 } from './account-links.faker';
 
-export { getListMyAccountLinksResponseMock, getListLinkableConnectionsResponseMock, getStartTelegramLinkResponseMock, getStartMattermostLinkResponseMock, getConfirmMattermostLinkResponseMock, getListUserAccountLinksResponseMock } from './account-links.faker';
+export { getListMyAccountLinksResponseMock, getListLinkableConnectionsResponseMock, getStartTelegramLinkResponseMock, getStartMattermostLinkResponseMock, getConfirmMattermostLinkResponseMock, getStartBridgeLinkResponseMock, getStartBridgeCodeLinkResponseMock, getConfirmBridgeLinkResponseMock, getListUserAccountLinksResponseMock } from './account-links.faker';
 
 
 export const getListMyAccountLinksMockHandler = (overrideResponse?: AccountLinkList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AccountLinkList> | AccountLinkList), options?: RequestHandlerOptions) => {
@@ -115,6 +120,42 @@ export const getConfirmMattermostLinkMockHandler = (overrideResponse?: AccountLi
   }, options)
 }
 
+export const getStartBridgeLinkMockHandler = (overrideResponse?: BridgeLinkStart | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<BridgeLinkStart> | BridgeLinkStart), options?: RequestHandlerOptions) => {
+  return http.post('*/me/account-links/bridge', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getStartBridgeLinkResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getStartBridgeCodeLinkMockHandler = (overrideResponse?: BridgeCodeLinkStarted | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<BridgeCodeLinkStarted> | BridgeCodeLinkStarted), options?: RequestHandlerOptions) => {
+  return http.post('*/me/account-links/bridge/codes', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getStartBridgeCodeLinkResponseMock(),
+      { status: 202
+      })
+  }, options)
+}
+
+export const getConfirmBridgeLinkMockHandler = (overrideResponse?: AccountLink | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<AccountLink> | AccountLink), options?: RequestHandlerOptions) => {
+  return http.post('*/me/account-links/bridge/confirmation', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getConfirmBridgeLinkResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
 export const getListUserAccountLinksMockHandler = (overrideResponse?: AccountLinkList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AccountLinkList> | AccountLinkList), options?: RequestHandlerOptions) => {
   return http.get('*/users/:userId/account-links', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
 
@@ -143,6 +184,9 @@ export const getAccountLinksMock = () => [
   getStartTelegramLinkMockHandler(),
   getStartMattermostLinkMockHandler(),
   getConfirmMattermostLinkMockHandler(),
+  getStartBridgeLinkMockHandler(),
+  getStartBridgeCodeLinkMockHandler(),
+  getConfirmBridgeLinkMockHandler(),
   getListUserAccountLinksMockHandler(),
   getDeleteUserAccountLinkMockHandler()
 ]

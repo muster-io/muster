@@ -6,8 +6,9 @@
 // the caller (ADR-0015), with the token registered for redaction; the classification of every answer by the problem's
 // class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
 // check (check.go); the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
-// envelope.go); and the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once
-// per id and answered through answerEvent (events.go, poller.go, push.go, presses.go). The models are generated from
+// envelope.go); the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once per
+// id and answered through answerEvent (events.go, poller.go, push.go, presses.go, commands.go); and the Account links
+// by a token sent to the bot or a code sent by direct message (links.go). The models are generated from
 // api/bridge.yaml into internal/bridge/gen.
 package bridge
 
@@ -370,6 +371,48 @@ func (c *Client) AnswerEvent(ctx context.Context, class outbound.Class, eventID,
 		gen.AnswerInput{EventId: eventID, Text: cutText(text, MaxAnswerLength)}, &out)
 	if r.OK() && !out.ShownAs.Valid() {
 		return gen.AnswerShown{}, notExpected(r.Status, "POST answers")
+	}
+	return out, r
+}
+
+// MaxDirectMessageLength is the longest body of a direct message, in characters (api/bridge.yaml).
+const MaxDirectMessageLength = 2000
+
+// FindUsers calls findUsers (C-22.FR-15) in class for the account with handle: the one person the bridge found, and
+// false for none. A successful answer without a list of at most one person within the protocol's bounds is invalid.
+// The handle travels in the query, which the texts of a failure leave out.
+func (c *Client) FindUsers(ctx context.Context, class outbound.Class, handle string) (gen.Person, bool, Result) {
+	var out struct {
+		Items *[]json.RawMessage `json:"items"`
+	}
+	_, r := c.do(ctx, class, http.MethodGet, "users?"+url.Values{"handle": {handle}}.Encode(), nil, nil, &out)
+	if !r.OK() {
+		return gen.Person{}, false, r
+	}
+	if out.Items == nil || len(*out.Items) > 1 {
+		return gen.Person{}, false, notExpected(r.Status, "GET users")
+	}
+	if len(*out.Items) == 0 {
+		return gen.Person{}, false, r
+	}
+	raw := (*out.Items)[0]
+	var p gen.Person
+	if json.Unmarshal(raw, &p) != nil || checkPerson(raw, p) != nil {
+		return gen.Person{}, false, notExpected(r.Status, "GET users")
+	}
+	return p, true, r
+}
+
+// SendDirectMessage calls sendDirectMessage (C-22.FR-15) in class with the Idempotency-Key key: body, CommonMark cut
+// to MaxDirectMessageLength characters, to the account externalID, in the direct chat the bridge opens if needed. A
+// successful answer without a message_id is invalid.
+func (c *Client) SendDirectMessage(ctx context.Context, class outbound.Class, key, externalID, body string) (
+	gen.DirectMessageSent, Result) {
+	var out gen.DirectMessageSent
+	_, r := c.do(ctx, class, http.MethodPost, "direct-messages", idempotency(key),
+		gen.DirectMessageInput{UserExternalId: externalID, Body: cutText(body, MaxDirectMessageLength)}, &out)
+	if r.OK() && out.MessageId == "" {
+		return gen.DirectMessageSent{}, notExpected(r.Status, "POST direct-messages")
 	}
 	return out, r
 }

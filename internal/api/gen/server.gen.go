@@ -1154,6 +1154,33 @@ func (e LifecycleEvent) Valid() bool {
 	}
 }
 
+// Defines values for LinkHandleKind.
+const (
+	LinkHandleKindEmail       LinkHandleKind = "email"
+	LinkHandleKindLessThannil LinkHandleKind = "<nil>"
+	LinkHandleKindLogin       LinkHandleKind = "login"
+	LinkHandleKindUserId      LinkHandleKind = "user_id"
+	LinkHandleKindUsername    LinkHandleKind = "username"
+)
+
+// Valid indicates whether the value is a known member of the LinkHandleKind enum.
+func (e LinkHandleKind) Valid() bool {
+	switch e {
+	case LinkHandleKindEmail:
+		return true
+	case LinkHandleKindLessThannil:
+		return true
+	case LinkHandleKindLogin:
+		return true
+	case LinkHandleKindUserId:
+		return true
+	case LinkHandleKindUsername:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LinkRuleScopeType.
 const (
 	LinkRuleScopeTypeAlertGroup LinkRuleScopeType = "alert_group"
@@ -1166,6 +1193,24 @@ func (e LinkRuleScopeType) Valid() bool {
 	case LinkRuleScopeTypeAlertGroup:
 		return true
 	case LinkRuleScopeTypeLabelValue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LinkableConnectionLinkMethods.
+const (
+	LinkableConnectionLinkMethodsCode  LinkableConnectionLinkMethods = "code"
+	LinkableConnectionLinkMethodsToken LinkableConnectionLinkMethods = "token"
+)
+
+// Valid indicates whether the value is a known member of the LinkableConnectionLinkMethods enum.
+func (e LinkableConnectionLinkMethods) Valid() bool {
+	switch e {
+	case LinkableConnectionLinkMethodsCode:
+		return true
+	case LinkableConnectionLinkMethodsToken:
 		return true
 	default:
 		return false
@@ -1375,6 +1420,7 @@ func (e MentionSettingEveryone) Valid() bool {
 
 // Defines values for Messenger.
 const (
+	MessengerBridge     Messenger = "bridge"
 	MessengerMattermost Messenger = "mattermost"
 	MessengerTelegram   Messenger = "telegram"
 )
@@ -1382,6 +1428,8 @@ const (
 // Valid indicates whether the value is a known member of the Messenger enum.
 func (e Messenger) Valid() bool {
 	switch e {
+	case MessengerBridge:
+		return true
 	case MessengerMattermost:
 		return true
 	case MessengerTelegram:
@@ -3097,16 +3145,21 @@ func (e ListIntegrationAlertsParamsSort) Valid() bool {
 
 // AccountLink defines model for AccountLink.
 type AccountLink struct {
-	// Connection The Connection the link was made through; Mattermost links belong to it.
+	// Connection The Connection the link was made through; Mattermost and Bridge links belong to it.
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
-	ExternalId string     `json:"external_id"`
+
+	// DisplayName Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show.
+	DisplayName *string `json:"display_name,omitempty"`
+	ExternalId  string  `json:"external_id"`
 
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId                     `json:"id"`
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Messenger  Messenger                    `json:"messenger"`
-	Username   nullable.Nullable[string]    `json:"username,omitempty"`
+
+	// Username The account's username; for a Bridge link, the handle the bridge reported.
+	Username nullable.Nullable[string] `json:"username,omitempty"`
 }
 
 // AccountLinkList defines model for AccountLinkList.
@@ -3536,6 +3589,24 @@ type BridgeCapabilitiesPrivateAnswers string
 // BridgeCapabilitiesThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
 type BridgeCapabilitiesThreadMessages string
 
+// BridgeCodeLinkRequest defines model for BridgeCodeLinkRequest.
+type BridgeCodeLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Handle The handle of the account to link, of the kind the Connection's `handle_kind` names.
+	Handle string `json:"handle"`
+}
+
+// BridgeCodeLinkStarted defines model for BridgeCodeLinkStarted.
+type BridgeCodeLinkStarted struct {
+	AttemptsRemaining int       `json:"attempts_remaining"`
+	ExpiresAt         time.Time `json:"expires_at"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
 // BridgeConnection defines model for BridgeConnection.
 type BridgeConnection struct {
 	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
@@ -3747,6 +3818,32 @@ type BridgeLimits struct {
 
 	// SendPerSecondPerChannel A hint for the Destination limiter; `rate_limited` stays the truth.
 	SendPerSecondPerChannel *float32 `json:"send_per_second_per_channel,omitempty"`
+}
+
+// BridgeLinkConfirm defines model for BridgeLinkConfirm.
+type BridgeLinkConfirm struct {
+	// Code The code the bot sent as a direct message.
+	Code *string `json:"code,omitempty"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
+// BridgeLinkRequest defines model for BridgeLinkRequest.
+type BridgeLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+}
+
+// BridgeLinkStart defines model for BridgeLinkStart.
+type BridgeLinkStart struct {
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// LinkUrl The bridge's `link_url_template` with the token, which opens a chat with the bot and hands it the token; null without a template.
+	LinkUrl nullable.Nullable[string] `json:"link_url"`
+
+	// Token Send it to the bot in a direct message. Single use and bound to the User and the Connection.
+	Token string `json:"token"`
 }
 
 // BridgeMessageDeletedEvent defines model for BridgeMessageDeletedEvent.
@@ -4443,6 +4540,9 @@ type Limiter struct {
 	PerSeconds int `json:"per_seconds"`
 }
 
+// LinkHandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
+type LinkHandleKind string
+
 // LinkRule defines model for LinkRule.
 type LinkRule struct {
 	// Builtin The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).
@@ -4488,13 +4588,22 @@ type LinkRuleScope struct {
 // LinkRuleScopeType defines model for LinkRuleScope.Type.
 type LinkRuleScopeType string
 
-// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown.
+// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
 type LinkableConnection struct {
+	// HandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
+	HandleKind nullable.Nullable[LinkHandleKind] `json:"handle_kind,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
-	Id        PublicId  `json:"id"`
-	Messenger Messenger `json:"messenger"`
-	Name      string    `json:"name"`
+	Id PublicId `json:"id"`
+
+	// LinkMethods Set on Bridge Connections only, from the Connection's last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.
+	LinkMethods *[]LinkableConnectionLinkMethods `json:"link_methods,omitempty"`
+	Messenger   Messenger                        `json:"messenger"`
+	Name        string                           `json:"name"`
 }
+
+// LinkableConnectionLinkMethods defines model for LinkableConnection.LinkMethods.
+type LinkableConnectionLinkMethods string
 
 // LinkableConnectionList defines model for LinkableConnectionList.
 type LinkableConnectionList struct {
@@ -5270,7 +5379,7 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
-	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
 	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
@@ -7540,6 +7649,15 @@ type UpdateLookupTableJSONRequestBody = LookupTableBase
 // UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
 type UpdateMeJSONRequestBody = MeUpdate
 
+// StartBridgeLinkJSONRequestBody defines body for StartBridgeLink for application/json ContentType.
+type StartBridgeLinkJSONRequestBody = BridgeLinkRequest
+
+// StartBridgeCodeLinkJSONRequestBody defines body for StartBridgeCodeLink for application/json ContentType.
+type StartBridgeCodeLinkJSONRequestBody = BridgeCodeLinkRequest
+
+// ConfirmBridgeLinkJSONRequestBody defines body for ConfirmBridgeLink for application/json ContentType.
+type ConfirmBridgeLinkJSONRequestBody = BridgeLinkConfirm
+
 // StartMattermostLinkJSONRequestBody defines body for StartMattermostLink for application/json ContentType.
 type StartMattermostLinkJSONRequestBody = MattermostLinkRequest
 
@@ -9489,6 +9607,15 @@ type ServerInterface interface {
 	// ListMyAccountLinks List own Account links
 	// (GET /me/account-links)
 	ListMyAccountLinks(w http.ResponseWriter, r *http.Request)
+	// StartBridgeLink Start linking an account through a Bridge with a token
+	// (POST /me/account-links/bridge)
+	StartBridgeLink(w http.ResponseWriter, r *http.Request)
+	// StartBridgeCodeLink Start linking an account through a Bridge with a code
+	// (POST /me/account-links/bridge/codes)
+	StartBridgeCodeLink(w http.ResponseWriter, r *http.Request)
+	// ConfirmBridgeLink Confirm a Bridge link with the code
+	// (POST /me/account-links/bridge/confirmation)
+	ConfirmBridgeLink(w http.ResponseWriter, r *http.Request)
 	// ListLinkableConnections List the Connections an account can be linked through
 	// (GET /me/account-links/connections)
 	ListLinkableConnections(w http.ResponseWriter, r *http.Request)
@@ -12936,6 +13063,48 @@ func (siw *ServerInterfaceWrapper) ListMyAccountLinks(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// StartBridgeLink operation middleware
+func (siw *ServerInterfaceWrapper) StartBridgeLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartBridgeLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartBridgeCodeLink operation middleware
+func (siw *ServerInterfaceWrapper) StartBridgeCodeLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartBridgeCodeLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmBridgeLink operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmBridgeLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmBridgeLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListLinkableConnections operation middleware
 func (siw *ServerInterfaceWrapper) ListLinkableConnections(w http.ResponseWriter, r *http.Request) {
 
@@ -15242,6 +15411,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/telegram", wrapper.StartTelegramLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/mattermost", wrapper.StartMattermostLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/mattermost/confirmation", wrapper.ConfirmMattermostLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge", wrapper.StartBridgeLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge/codes", wrapper.StartBridgeCodeLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge/confirmation", wrapper.ConfirmBridgeLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/account-links", wrapper.ListUserAccountLinks)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/account-links/{account_link_id}", wrapper.DeleteUserAccountLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/system-status", wrapper.GetSystemStatus)
@@ -23324,6 +23496,388 @@ func (response ListMyAccountLinks429ApplicationProblemPlusJSONResponse) VisitLis
 	return err
 }
 
+type StartBridgeLinkRequestObject struct {
+	Body *StartBridgeLinkJSONRequestBody
+}
+
+type StartBridgeLinkResponseObject interface {
+	VisitStartBridgeLinkResponse(w http.ResponseWriter) error
+}
+
+type StartBridgeLink201JSONResponse BridgeLinkStart
+
+func (response StartBridgeLink201JSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeLink400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeLink400ApplicationProblemPlusJSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeLink401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeLink401ApplicationProblemPlusJSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeLink403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeLink403ApplicationProblemPlusJSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeLink422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeLink422ApplicationProblemPlusJSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeLink429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeLink429ApplicationProblemPlusJSONResponse) VisitStartBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLinkRequestObject struct {
+	Body *StartBridgeCodeLinkJSONRequestBody
+}
+
+type StartBridgeCodeLinkResponseObject interface {
+	VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error
+}
+
+type StartBridgeCodeLink202JSONResponse BridgeCodeLinkStarted
+
+func (response StartBridgeCodeLink202JSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink400ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink401ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink403ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink409ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink422ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink429ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartBridgeCodeLink503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response StartBridgeCodeLink503ApplicationProblemPlusJSONResponse) VisitStartBridgeCodeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLinkRequestObject struct {
+	Body *ConfirmBridgeLinkJSONRequestBody
+}
+
+type ConfirmBridgeLinkResponseObject interface {
+	VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error
+}
+
+type ConfirmBridgeLink201JSONResponse AccountLink
+
+func (response ConfirmBridgeLink201JSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink400ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink401ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink403ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink404ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink409ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink422ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmBridgeLink429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmBridgeLink429ApplicationProblemPlusJSONResponse) VisitConfirmBridgeLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListLinkableConnectionsRequestObject struct {
 }
 
@@ -31108,6 +31662,15 @@ type StrictServerInterface interface {
 	// ListMyAccountLinks List own Account links
 	// (GET /me/account-links)
 	ListMyAccountLinks(ctx context.Context, request ListMyAccountLinksRequestObject) (ListMyAccountLinksResponseObject, error)
+	// StartBridgeLink Start linking an account through a Bridge with a token
+	// (POST /me/account-links/bridge)
+	StartBridgeLink(ctx context.Context, request StartBridgeLinkRequestObject) (StartBridgeLinkResponseObject, error)
+	// StartBridgeCodeLink Start linking an account through a Bridge with a code
+	// (POST /me/account-links/bridge/codes)
+	StartBridgeCodeLink(ctx context.Context, request StartBridgeCodeLinkRequestObject) (StartBridgeCodeLinkResponseObject, error)
+	// ConfirmBridgeLink Confirm a Bridge link with the code
+	// (POST /me/account-links/bridge/confirmation)
+	ConfirmBridgeLink(ctx context.Context, request ConfirmBridgeLinkRequestObject) (ConfirmBridgeLinkResponseObject, error)
 	// ListLinkableConnections List the Connections an account can be linked through
 	// (GET /me/account-links/connections)
 	ListLinkableConnections(ctx context.Context, request ListLinkableConnectionsRequestObject) (ListLinkableConnectionsResponseObject, error)
@@ -33472,6 +34035,99 @@ func (sh *strictHandler) ListMyAccountLinks(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyAccountLinksResponseObject); ok {
 		if err := validResponse.VisitListMyAccountLinksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartBridgeLink operation middleware
+func (sh *strictHandler) StartBridgeLink(w http.ResponseWriter, r *http.Request) {
+	var request StartBridgeLinkRequestObject
+
+	var body StartBridgeLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartBridgeLink(ctx, request.(StartBridgeLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartBridgeLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartBridgeLinkResponseObject); ok {
+		if err := validResponse.VisitStartBridgeLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartBridgeCodeLink operation middleware
+func (sh *strictHandler) StartBridgeCodeLink(w http.ResponseWriter, r *http.Request) {
+	var request StartBridgeCodeLinkRequestObject
+
+	var body StartBridgeCodeLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartBridgeCodeLink(ctx, request.(StartBridgeCodeLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartBridgeCodeLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartBridgeCodeLinkResponseObject); ok {
+		if err := validResponse.VisitStartBridgeCodeLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmBridgeLink operation middleware
+func (sh *strictHandler) ConfirmBridgeLink(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmBridgeLinkRequestObject
+
+	var body ConfirmBridgeLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmBridgeLink(ctx, request.(ConfirmBridgeLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmBridgeLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmBridgeLinkResponseObject); ok {
+		if err := validResponse.VisitConfirmBridgeLinkResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

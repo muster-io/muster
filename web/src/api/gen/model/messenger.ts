@@ -24,4 +24,5 @@ export type Messenger = typeof Messenger[keyof typeof Messenger];
 export const Messenger = {
   telegram: 'telegram',
   mattermost: 'mattermost',
+  bridge: 'bridge',
 } as const;

@@ -6,12 +6,14 @@
 // validated per Destination type, Telegram and Bridges taking nobody and chosen Users only (C-22.FR-3), and the
 // resolution of a Loud message's symbolic Mentions into targets: the Destination's setting for a kind, the Owner the
 // lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
-// Destination's identity space, otherwise by the Muster display name, which mentions nobody; the footer of a message
-// names users the same way. Storing the settings is the Destination's, and rendering a target in a messenger's syntax
-// is its adapter's.
+// Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16) —
+// otherwise by the Muster display name, which mentions nobody; the footer of a message names users the same way, a
+// Bridge link by its display name. Storing the settings is the Destination's, and rendering a target in a messenger's
+// syntax is its adapter's.
 package mentions
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +21,8 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 
@@ -256,15 +260,16 @@ type Target struct {
 	User     *User  `json:"user,omitempty"`
 }
 
-// User is a User as a Mention names them: public_id, display name, login, and the username and the messenger's user
-// id of their Account link in the Destination's identity space, empty without one; Telegram mentions a user by that
-// id (C-12.FR-8).
+// User is a User as a Mention names them: public_id, display name, login, and the username, the messenger's user id
+// and the display name of their Account link in the Destination's identity space, empty without one; Telegram mentions
+// a user by that id (C-12.FR-8), a Bridge by that id and the link's display name (C-22.FR-16).
 type User struct {
-	PublicID   string `json:"id"`
-	Name       string `json:"name"`
-	Login      string `json:"login"`
-	Username   string `json:"username,omitempty"`
-	ExternalID string `json:"external_id,omitempty"`
+	PublicID    string `json:"id"`
+	Name        string `json:"name"`
+	Login       string `json:"login"`
+	Username    string `json:"username,omitempty"`
+	ExternalID  string `json:"external_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // Display is how the User is shown: the messenger username of their Account link, otherwise the display name as
@@ -276,15 +281,16 @@ func (u User) Display() string {
 	return u.Name
 }
 
-// IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost links of
-// its Connection; an outgoing webhook has none, and a Bridge none until its Account links exist (S-076), so that a
-// User is named by their display name.
+// IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost or Bridge
+// links of its Connection (C-22.FR-15); an outgoing webhook has none, so that a User is named by their display name.
 func IdentitySpace(destinationType string, connection *int64) string {
 	switch {
 	case destinationType == TypeTelegram:
 		return "telegram"
 	case destinationType == TypeMattermost && connection != nil:
 		return "mattermost:" + strconv.FormatInt(*connection, 10)
+	case destinationType == TypeBridge && connection != nil:
+		return "bridge:" + strconv.FormatInt(*connection, 10)
 	}
 	return ""
 }
@@ -334,7 +340,7 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 		}
 		for _, u := range rows {
 			users[u.PublicID] = User{PublicID: u.PublicID, Name: u.Name, Login: u.Login, Username: u.Username,
-				ExternalID: u.ExternalID}
+				ExternalID: u.ExternalID, DisplayName: u.DisplayName}
 			byID[u.ID] = u.PublicID
 		}
 	}
@@ -450,19 +456,35 @@ func (s *Service) owners(ctx context.Context, q Queries, org int64, r Request) (
 	return owner, previous, nil
 }
 
-// FooterNames are the usernames, by identity space, of the user the footer of the Alert Group groupID names — its
-// Owner, who snoozed it or who resolved it — read through db, or the main pool for a nil one (C-12.FR-12).
+// FooterNames are the names, by identity space, of the user the footer of the Alert Group groupID names — its Owner,
+// who snoozed it or who resolved it — read through db, or the main pool for a nil one (C-12.FR-12): the username of a
+// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16), each on one line, a
+// link whose name is blank left out.
 func (s *Service) FooterNames(ctx context.Context, db DBTX, groupID int64) (map[string]string, error) {
 	rows, err := s.q(db).ListFooterUsernames(ctx, dbgen.ListFooterUsernamesParams{OrgID: s.orgID, ID: groupID})
 	if err != nil {
 		return nil, fmt.Errorf("read the usernames of the footer of alert group %d: %w", groupID, err)
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	out := make(map[string]string, len(rows))
+	var out map[string]string
 	for _, r := range rows {
-		out[r.IdentitySpace] = r.Username
+		name := oneLine(r.Username)
+		if r.Messenger == TypeBridge {
+			name = cmp.Or(oneLine(r.DisplayName), name)
+		}
+		if name == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(rows))
+		}
+		out[r.IdentitySpace] = name
 	}
 	return out, nil
+}
+
+// oneLine is s on one line: every run of white space and control characters a single space, trimmed, as a Bridge
+// envelope writes the names of its Mentions.
+func oneLine(s string) string {
+	return strings.Join(strings.FieldsFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }),
+		" ")
 }

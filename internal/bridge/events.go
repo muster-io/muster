@@ -219,13 +219,15 @@ type Connections interface {
 }
 
 // handled is what the handling of an event leads to once its claim committed: the line to log, when there is one; the
-// text to answer the person behind the event with, empty for none; and what failed without failing the event, such
-// as a Command, logged with the line.
+// text to answer the person behind the event with, empty for none; what failed without failing the event, such as a
+// Command, logged with the line; and after, when set, what runs once the answer was made or failed, with its error,
+// such as the log of an Account link.
 type handled struct {
 	line   logging.Event
 	fields []logging.Field
 	answer string
 	err    error
+	after  func(ctx context.Context, answerErr error)
 }
 
 // Events is the one handler of Bridge events for both event delivery modes (C-22.FR-11, ADR-0017): the poller and the
@@ -240,6 +242,8 @@ type Events struct {
 	Bindings Bindings
 	// Links map the account behind an event to its User.
 	Links Links
+	// Linker links the accounts of account_link events (C-22.FR-15).
+	Linker Linker
 	// Commands run the Commands of presses and Text commands through the dispatcher.
 	Commands Commands
 	// Roles are the Permissions of each Role, which a linked User acts with.
@@ -324,10 +328,13 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 	if !ran {
 		return nil
 	}
+	var answerErr error
 	if h.answer != "" {
-		if err := e.answer(ctx, c, ev.ID, h.answer); err != nil {
-			h.err = errors.Join(h.err, err)
-		}
+		answerErr = e.answer(ctx, c, ev.ID, h.answer)
+		h.err = errors.Join(h.err, answerErr)
+	}
+	if h.after != nil {
+		h.after(ctx, answerErr)
 	}
 	if h.line.Name() != "" {
 		fields := h.fields
@@ -344,8 +351,8 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 // MaxAge by the real clock is dropped, unanswered; a recent one runs its Command (presses.go). A Thread message that is
 // a Text command runs its Command, and any other is ignored (commands.go). A message_deleted event starts the deleted
 // Root message flow at once when it names the current Root message of an open delivery, and changes nothing
-// otherwise; a failed start fails the event (C-22.FR-10). An account_link event is acknowledged and changes nothing
-// until Account links through a Bridge exist.
+// otherwise; a failed start fails the event (C-22.FR-10). An account_link event links the sender's account through
+// the Linker, whatever its age (links.go).
 func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err := ctx.Err(); err != nil {
 		return handled{}, err
@@ -360,6 +367,8 @@ func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error
 		return e.press(ctx, c, ev)
 	case TypeThreadMessage:
 		return e.thread(ctx, c, ev)
+	case TypeAccountLink:
+		return e.link(ctx, c, ev)
 	case TypeMessageDeleted:
 		if err := e.Bindings.RootDeleted(ctx, c.ID, ev.MessageID); err != nil {
 			return handled{}, err

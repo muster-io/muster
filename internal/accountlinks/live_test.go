@@ -12,12 +12,14 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/accountlinks"
@@ -27,7 +29,9 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 func TestMain(m *testing.M) {
@@ -371,6 +375,132 @@ func TestLiveLinks(t *testing.T) {
 	})
 }
 
+// TestLivePruneBatches is account_link.request_prune_after on PostgreSQL: each run deletes exactly its batch of the
+// Organization's requests that expired a day before, the lowest ids first, also planned as a nested loop over the table
+// it deletes from, where a batch chosen in a subquery ran once per row and deleted more than the batch; a request that
+// another transaction holds is skipped and taken at the next run; requests that have not expired, and those of another
+// Organization, stay.
+func TestLivePruneBatches(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+		d, err := db.Open(ctx, conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+		if err := d.Migrate(ctx, logger); err != nil {
+			t.Fatal(err)
+		}
+		if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+			t.Fatal(err)
+		}
+		org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var other int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO organizations (public_id, name, time_zone, severity_label,
+			severity_mapping, severity_styles, critical_is_urgent, instance_labels, retention_stored_snapshots_days,
+			retention_alert_details_days, retention_alert_group_summaries_days, retention_audit_log_days,
+			totp_required, oidc_token_grace_seconds, created_at, updated_at)
+			SELECT 'RG0000000000ZZ', 'Other', time_zone, severity_label, severity_mapping, severity_styles,
+				critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+				retention_alert_group_summaries_days, retention_audit_log_days, totp_required,
+				oidc_token_grace_seconds, created_at, updated_at
+			FROM organizations WHERE id = $1
+			RETURNING id`, org.ID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		type owner struct{ user, conn int64 }
+		owners := map[int64]owner{}
+		for _, o := range []int64{org.ID, other} {
+			var w owner
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+				telegram_bot_api_base_url, telegram_update_mode, bot_token_ciphertext, bot_token_key_id,
+				bot_token_updated_at, bot_username, limiter_limit, limiter_per_seconds, created_at, updated_at)
+				VALUES ($1, 'CNAAAAAAAAAAP1', 'telegram', 'tg', 'https://api.telegram.org', 'long_polling', '\x00', 'k1',
+				$2, 'muster_dev_bot', 10, 1, $2, $2) RETURNING id`, o, t0).Scan(&w.conn); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+				created_at, updated_at) VALUES ($1, 'SRAAAAAAAAAAP1', 'pat', 'Pat', 'responder', 'local', 'active', $2,
+				$2) RETURNING id`, o, t0).Scan(&w.user); err != nil {
+				t.Fatal(err)
+			}
+			owners[o] = w
+		}
+		next := 0
+		add := func(o int64, n int, expires time.Time) {
+			t.Helper()
+			if _, err := d.Pool.Exec(ctx, `INSERT INTO account_link_requests (org_id, public_id, user_id, messenger,
+				connection_id, secret_hash, created_at, expires_at)
+				SELECT $1::bigint, 'AR' || lpad(i::text, 12, '0'), $2::bigint, 'telegram', $3::bigint,
+					sha256(convert_to(i::text, 'UTF8')), $4::timestamptz, $5::timestamptz
+				FROM generate_series($6::int, $6::int + $7::int - 1) i`, o, owners[o].user, owners[o].conn,
+				t0.Add(-10*time.Minute), expires, next+1, n); err != nil {
+				t.Fatal(err)
+			}
+			next += n
+		}
+		fresh := t0.Add(48 * time.Hour)
+		add(org.ID, 4, t0)
+		add(other, 3, t0)
+		add(org.ID, 2, fresh)
+		add(org.ID, 3, t0)
+		now := t0.Add(accountlinks.RequestPruneAfter + time.Hour)
+		count := func(o int64, expired bool) int {
+			t.Helper()
+			var n int
+			if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM account_link_requests WHERE org_id = $1 AND
+				(expires_at < $2) = $3`, o, t0.Add(time.Hour), expired).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		want := func(step string, pruned int64, err error, wantPruned int64, expiredLeft int) {
+			t.Helper()
+			if err != nil || pruned != wantPruned || count(org.ID, true) != expiredLeft || count(org.ID, false) != 2 ||
+				count(other, true) != 3 {
+				t.Errorf("%s: pruned %d, %v; %d expired and %d fresh left, %d of the other Organization", step, pruned,
+					err, count(org.ID, true), count(org.ID, false), count(other, true))
+			}
+		}
+		var pruned int64
+		loops := dbtest.LockRowsLoops(t, d.Pool.Config().ConnString(), func(ctx context.Context, c *pgx.Conn) {
+			pruned, err = accountlinks.NewPruner(c).Requests(ctx, org.ID, now, 3)
+		})
+		want("a nested loop", pruned, err, 3, 4)
+		if loops != 1 {
+			t.Errorf("the prune chose its batch %d times in one run", loops)
+		}
+		tx, err := d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+		var held int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM account_link_requests WHERE org_id = $1 AND expires_at < $2
+			ORDER BY id LIMIT 1 FOR UPDATE`, org.ID, t0.Add(time.Hour)).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("a held request", pruned, err, 3, 1)
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("the held request released", pruned, err, 1, 0)
+		pruned, err = accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, now, 3)
+		want("nothing left", pruned, err, 0, 0)
+		if pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, other, now, 2); err != nil || pruned != 2 ||
+			count(other, true) != 1 || count(org.ID, false) != 2 {
+			t.Errorf("the other Organization pruned %d, %v", pruned, err)
+		}
+	})
+}
+
 // TestLiveConcurrentCodeRequests is C-18.FR-3 under concurrency on PostgreSQL: of ten simultaneous code requests of
 // one User exactly five are stored and the rest refused, and of five simultaneous requests of five other Users for one account
 // exactly three, since both limits of account_link.mattermost_code_requests are counted in the transaction that stores
@@ -630,6 +760,294 @@ func TestLiveConcurrentLinks(t *testing.T) {
 			details->>'messenger' = 'telegram'`) != rounds || count(`SELECT count(*) FROM account_link_requests
 			WHERE messenger = 'telegram' AND consumed_at IS NULL AND voided_at IS NULL`) != rounds {
 			t.Errorf("replies %q", replies)
+		}
+	})
+}
+
+// liveBridgeBot is the Bridge bot of TestLiveBridgeLinks: it offers a code by email, finds anyone by their address and
+// keeps the direct messages.
+type liveBridgeBot struct {
+	mu   sync.Mutex
+	sent []string
+}
+
+func (b *liveBridgeBot) Session(ctx context.Context, _ string, f func(context.Context, accountlinks.BridgeBot) error) error {
+	return f(ctx, b)
+}
+
+func (b *liveBridgeBot) Offer() accountlinks.BridgeOffer {
+	return accountlinks.BridgeOffer{Read: true, UserLookup: accountlinks.LookupEmail, BotCanStart: true}
+}
+
+func (b *liveBridgeBot) FindUser(_ context.Context, handle string) (accountlinks.BridgeAccount, error) {
+	local, _, _ := strings.Cut(handle, "@")
+	return accountlinks.BridgeAccount{ExternalID: "u-" + local, DisplayName: strings.ToUpper(local[:1]) + local[1:] +
+		" Brown", Handle: handle}, nil
+}
+
+func (b *liveBridgeBot) SendDirectMessage(_ context.Context, _, _, text string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sent = append(b.sent, text)
+	return nil
+}
+
+// TestLiveBridgeLinks runs the queries of Bridge links on PostgreSQL (C-22.FR-15): the link methods from the stored
+// info; a token found by its hash among the Bridge tokens alone and consumed once when two events carry it at once; a
+// Telegram token and one of another Connection link nothing; the link's display name and handle; a code with its
+// target's display name; both limits of account_link.bridge_code_requests under concurrency; the identity space of
+// each Connection; unlinking with the display name in the Audit log; and the pruning of Bridge requests.
+func TestLiveBridgeLinks(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+		d, err := db.Open(ctx, conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		if err := d.Migrate(ctx, logger); err != nil {
+			t.Fatal(err)
+		}
+		if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+			t.Fatal(err)
+		}
+		org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Pool.Exec(ctx, `CREATE TABLE audit_log_p202610 PARTITION OF audit_log
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		const info = `{"protocol_version": "1", "user_lookup": "email", "capabilities": {"direct_messages":
+			{"bot_can_start": true}}, "link_url_template": "https://chat.example.org/bot?start={token}"}`
+		conns := map[string]int64{}
+		for _, c := range []struct {
+			id, typ, name string
+			info          *string
+		}{{"CNAAAAAAAAAAT1", "telegram", "tg", nil}, {"CNAAAAAAAAAAB1", "bridge", "Dev Bridge", new(info)},
+			{"CNAAAAAAAAAAB2", "bridge", "br", nil}} {
+			var id int64
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+				telegram_bot_api_base_url, telegram_update_mode, bridge_base_url, bridge_event_delivery, bridge_info,
+				bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, bot_username, limiter_limit,
+				limiter_per_seconds, created_at, updated_at) VALUES ($1, $2, $3, $4,
+				CASE WHEN $3 = 'telegram' THEN 'https://api.telegram.org' END,
+				CASE WHEN $3 = 'telegram' THEN 'long_polling' END, CASE WHEN $3 = 'bridge' THEN 'https://br.example.org' END,
+				CASE WHEN $3 = 'bridge' THEN 'poll' END, $6::jsonb, '\x00', 'k1', $5, 'muster_dev_bot', 10, 1, $5, $5)
+				RETURNING id`, org.ID, c.id, c.typ, c.name, t0, c.info).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			conns[c.id] = id
+		}
+		users := map[string]int64{}
+		pid := func(login string) string { return "SRAAAAAAAAAAF" + strings.ToUpper(login[:1]) }
+		for _, login := range []string{"alice", "bob", "carol", "dave", "erin", "frank", "gina", "hank"} {
+			var id int64
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+				created_at, updated_at) VALUES ($1, $2, $3, $3, 'responder', 'local', 'active', $4, $4) RETURNING id`,
+				org.ID, pid(login), login, t0).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			users[login] = id
+		}
+		business := clock.NewManual(t0)
+		bot := &liveBridgeBot{}
+		svc := accountlinks.New(accountlinks.Config{OrgID: org.ID, Store: accountlinks.NewStore(d.Pool),
+			Audit: audit.NewWriter(logger, business), Business: business, Log: logger, Bridge: bot})
+		as := func(login string) accountlinks.Requester {
+			return accountlinks.Requester{UserID: users[login], UserPublicID: pid(login),
+				Actor: audit.User(users[login], pid(login)), Transport: audit.TransportUI,
+				Address: netip.MustParseAddr("192.0.2.1")}
+		}
+		count := func(q string, args ...any) int {
+			var n int
+			if err := d.Pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		// The Connections with the link methods of their stored info.
+		cs, err := svc.Connections(ctx)
+		if err != nil || len(cs) != 3 || cs[0].Name != "br" || !slices.Equal(cs[0].LinkMethods, []string{"token"}) ||
+			cs[0].HandleKind != "" || cs[1].Name != "Dev Bridge" ||
+			!slices.Equal(cs[1].LinkMethods, []string{"token", "code"}) || cs[1].HandleKind != "email" ||
+			cs[2].Messenger != "telegram" || cs[2].LinkMethods != nil {
+			t.Fatalf("Connections = %+v, %v", cs, err)
+		}
+		// A token: its link from the stored template, and two events with it at once link once.
+		st, err := svc.StartBridge(ctx, as("alice"), "CNAAAAAAAAAAB1")
+		if err != nil || st.LinkURL == nil || *st.LinkURL != "https://chat.example.org/bot?start="+st.Token {
+			t.Fatalf("StartBridge = %+v, %v", st, err)
+		}
+		b1 := accountlinks.BridgeConnection{ID: conns["CNAAAAAAAAAAB1"], PublicID: "CNAAAAAAAAAAB1"}
+		b2 := accountlinks.BridgeConnection{ID: conns["CNAAAAAAAAAAB2"], PublicID: "CNAAAAAAAAAAB2"}
+		answers := make([]string, 2)
+		var wg sync.WaitGroup
+		for i, ext := range []string{"u-alice", "u-mallory"} {
+			wg.Go(func() {
+				out, err := svc.LinkBridge(ctx, b1, st.Token, accountlinks.BridgeAccount{ExternalID: ext,
+					DisplayName: "Alice Smith", Handle: "alice@example.org"})
+				if err != nil {
+					t.Error(err)
+				}
+				out.Log(ctx, nil)
+				answers[i] = out.Answer
+			})
+		}
+		wg.Wait()
+		slices.Sort(answers)
+		if answers[0] != "Linked to Muster user alice (alice)" ||
+			answers[1] != "This link is invalid or expired. Start again from your Muster profile." ||
+			count(`SELECT count(*) FROM account_links WHERE messenger = 'bridge' AND identity_space = $1 AND
+				display_name = 'Alice Smith' AND username = 'alice@example.org'`,
+				accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"])) != 1 {
+			t.Fatalf("two events with one token: %q", answers)
+		}
+		// A Telegram token and a token of another Connection link nothing.
+		tg, err := svc.StartTelegram(ctx, as("bob"), "CNAAAAAAAAAAT1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, tgTok, _ := strings.Cut(tg.DeepLink, "?start=")
+		other, err := svc.StartBridge(ctx, as("bob"), "CNAAAAAAAAAAB1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			conn  accountlinks.BridgeConnection
+			token string
+		}{{b1, tgTok}, {b2, other.Token}} {
+			out, err := svc.LinkBridge(ctx, c.conn, c.token, accountlinks.BridgeAccount{ExternalID: "u-bob",
+				DisplayName: "Bob"})
+			if err != nil || out.Answer != "This link is invalid or expired. Start again from your Muster profile." {
+				t.Errorf("LinkBridge(%s) = %+v, %v", c.conn.PublicID, out, err)
+			}
+		}
+		if count(`SELECT count(*) FROM audit_log WHERE action = 'account_link.link_rejected' AND
+			details->>'messenger' = 'bridge' AND details->>'reason' IN ('token_used', 'token_unknown',
+			'wrong_connection')`) != 3 || count(`SELECT count(*) FROM account_link_requests WHERE messenger = 'bridge'
+			AND method = 'token' AND consumed_at IS NULL`) != 1 {
+			t.Error("the rejected tokens")
+		}
+		// A code: the link takes the target's display name and handle; the second Connection is another space.
+		started, err := svc.StartBridgeCode(ctx, as("bob"), "CNAAAAAAAAAAB1", "bob@example.org")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count(`SELECT count(*) FROM account_link_requests WHERE public_id = $1 AND method = 'code' AND
+			target_external_id = 'u-bob' AND target_username = 'bob@example.org' AND target_display_name = 'Bob Brown'`,
+			started.RequestPublicID) != 1 {
+			t.Error("the stored code request")
+		}
+		l, err := svc.ConfirmBridge(ctx, as("bob"), started.RequestPublicID, codeRe.FindString(bot.sent[0]))
+		if err != nil || l.ExternalID != "u-bob" || *l.DisplayName != "Bob Brown" || *l.Username != "bob@example.org" {
+			t.Fatalf("ConfirmBridge = %+v, %v", l, err)
+		}
+		mine, err := svc.List(ctx, users["bob"])
+		if err != nil || len(mine) != 1 || *mine[0].DisplayName != "Bob Brown" {
+			t.Errorf("List = %+v, %v", mine, err)
+		}
+		// The footer of an Alert Group bob acknowledged names him in the identity space of the Connection by the display
+		// name of his link on one line, also without a username, and by its username without a display name or with a
+		// blank one (C-22.FR-16).
+		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+		var group int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+			group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+			integration_ids, status, severity_level, urgent, owner_user_id, acknowledged_at, created_at,
+			last_changed_at)
+			SELECT $1, 'AGAAAAAAAAAAF1', 1, r.id, '{alertname}', '{}', sha256('footer'::bytea), 'Latency', '{}', '{}',
+				'{}', 'acknowledged', 'critical', false, $2, $3, $3, $3
+			FROM routes r WHERE r.org_id = $1 AND r.is_default RETURNING id`, org.ID, users["bob"], t0).Scan(
+			&group); err != nil {
+			t.Fatal(err)
+		}
+		space := accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"])
+		for _, step := range []struct {
+			set, want string
+		}{
+			{"", "Bob Brown"},
+			{"username = NULL", "Bob Brown"},
+			{"display_name = NULL, username = 'bob@example.org'", "bob@example.org"},
+			{"display_name = E'Bob\\n  Brown\\r\\n'", "Bob Brown"},
+			{"display_name = E' \\n'", "bob@example.org"},
+			{"display_name = 'Bob Brown'", "Bob Brown"},
+		} {
+			if step.set != "" {
+				if _, err := d.Pool.Exec(ctx, `UPDATE account_links SET `+step.set+` WHERE org_id = $1 AND
+					user_id = $2 AND messenger = 'bridge'`, org.ID, users["bob"]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			names, err := mentions.New(org.ID, d.Pool).FooterNames(ctx, nil, group)
+			if err != nil || len(names) != 1 || names[space] != step.want {
+				t.Errorf("footer names with %q = %v, %v", step.set, names, err)
+			}
+		}
+		if u, err := svc.Lookup(ctx, accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"]), "u-bob"); err != nil ||
+			u.ID != users["bob"] {
+			t.Errorf("Lookup = %+v, %v", u, err)
+		}
+		if _, err := svc.Lookup(ctx, accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB2"]), "u-bob"); !errors.Is(err,
+			accountlinks.ErrNotLinked) {
+			t.Errorf("another Connection's space = %v", err)
+		}
+		// Ten code requests of one User at once store five; five Users' requests for one account store three.
+		race := func(n int, start func(i int) error) (stored, limited int) {
+			t.Helper()
+			errs := make([]error, n)
+			var wg sync.WaitGroup
+			for i := range n {
+				wg.Go(func() { errs[i] = start(i) })
+			}
+			wg.Wait()
+			for _, err := range errs {
+				var rl *accountlinks.RateLimitedError
+				switch {
+				case err == nil:
+					stored++
+				case errors.As(err, &rl):
+					limited++
+				default:
+					t.Fatalf("a concurrent request = %v", err)
+				}
+			}
+			return stored, limited
+		}
+		if stored, limited := race(10, func(i int) error {
+			_, err := svc.StartBridgeCode(ctx, as("carol"), "CNAAAAAAAAAAB1", "t"+strconv.Itoa(i)+"@example.org")
+			return err
+		}); stored != 5 || limited != 5 {
+			t.Errorf("one User's concurrent requests: %d stored, %d limited", stored, limited)
+		}
+		if stored, limited := race(5, func(i int) error {
+			login := []string{"dave", "erin", "frank", "gina", "hank"}[i]
+			_, err := svc.StartBridgeCode(ctx, as(login), "CNAAAAAAAAAAB1", "dana@example.org")
+			return err
+		}); stored != 3 || limited != 2 {
+			t.Errorf("concurrent requests for one account: %d stored, %d limited", stored, limited)
+		}
+		// Unlinking records the display name; Bridge requests are pruned as any other.
+		if err := svc.Unlink(ctx, as("bob"), l.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if count(`SELECT count(*) FROM audit_log WHERE action = 'account_link.unlink' AND
+			details->>'display_name' = 'Bob Brown' AND details->>'messenger' = 'bridge'`) != 1 {
+			t.Error("the unlink of a Bridge link")
+		}
+		bridgeReqs := count(`SELECT count(*) FROM account_link_requests WHERE messenger = 'bridge'`)
+		pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, t0.Add(48*time.Hour), 1000)
+		if err != nil || bridgeReqs != 11 || pruned != 12 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
+			t.Errorf("pruned %d with %d Bridge requests and bob's Telegram one, %v", pruned, bridgeReqs, err)
+		}
+		if strings.Contains(log.String(), st.Token) || strings.Contains(log.String(), other.Token) {
+			t.Error("a token in the log")
 		}
 	})
 }
