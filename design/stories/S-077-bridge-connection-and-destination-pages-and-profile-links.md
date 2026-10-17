@@ -46,6 +46,9 @@ files_touched:
   - web/e2e/bridge-connection.spec.ts
   - web/e2e/bridge-destination.spec.ts
   - web/e2e/account-links.spec.ts
+  - internal/destinations/test.go
+  - internal/destinations/write_test.go
+  - internal/api/destinations.go
 acceptance:
   - "[C-22.FR-1, C-22.FR-2, C-22.AC-21] Connections → New → Bridge saves a Connection with a name, the base URL, the token, the event delivery mode, the proxy and the limiter; the push secret field and the callback address with its hint appear only in push mode; \"Check\" shows the steps with latency and path and, on success, the bridge's name and version, the messenger, the protocol version and what it offers (`bridge-connection.spec.ts`)."
   - "[C-22.FR-2] A failing step shows the translated text of its code with the bridge's English message as the detail where it says more: `token_invalid`, `protocol_version_unknown` with \"The bridge speaks protocol version 2; this Muster speaks 1.\", `protocol_mismatch`, and `event_delivery_not_offered` with the missing mode (`bridge-connection-fields.test.tsx`); the steps read \"Bridge info\" and \"Event delivery\"."
