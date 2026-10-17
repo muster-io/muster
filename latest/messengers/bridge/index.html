@@ -588,6 +588,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#edit-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edit windows
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#test-messages-and-previews" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1758,6 +1769,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#edit-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edit windows
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#test-messages-and-previews" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1962,6 +1984,44 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   the key, the retry may have posted a second message: the Timeline records a <strong>possible duplicate</strong>.</li>
 <li><strong>The token never shows</strong> in a log line, an error, the Timeline or a metric; a test shows it as <code>[redacted]</code>.</li>
 </ul>
+<h2 id="edit-windows">Edit windows<a class="headerlink" href="#edit-windows" title="Permanent link">&para;</a></h2>
+<p>Some messengers let a bot edit a message only for a while after posting it. A bridge for such a messenger declares
+how long in its info, as <code>limits.edit_max_age_seconds</code>, and Muster stops editing its Root messages in time. A bridge
+that declares no limit (<code>null</code>) has none: Muster edits each Root message for as long as its Alert Group changes.</p>
+<ul>
+<li><strong>When Muster stops editing.</strong> Muster makes no edit of a Root message once it is as old as the bridge's limit less
+  60 seconds, counted from its Publication on Muster's clock, so that a last edit does not race the messenger's: with
+  a limit of 600 seconds, the last edit is made within 9 minutes. Muster reads the limit from the Connection's copy of
+  the info, as for every call. When the messenger refuses an edit earlier than declared, the bridge answers <code>gone</code> with
+  the <code>reason</code> <code>edit_window_closed</code>: this is not a deletion, and Muster treats the Root message as past its window at
+  once. A Root message that Muster posts again after it was deleted has a window of its own.</li>
+<li><strong>Alerts reach only the Thread.</strong> Past the window, a change that keeps the status of the Alert Group — new Alerts,
+  Alerts that resolve, the counters — no longer changes the Root message, which keeps the state of its last edit; the
+  Thread replies that such a change makes are sent as usual.</li>
+<li><strong>A change of status posts a new Root message.</strong> When the status changes past the window — Acknowledge, Resolve,
+  Snooze, a Reopen — Muster posts a new Root message with the current state, Quietly, to the same channel, and replies
+  under the old one: "This message is no longer updated. The current one: {link}", with a link to the new message when
+  the bridge returned one and to the Alert Group page otherwise. Later Thread replies go under the new Root message,
+  which has a window of its own. This reply is sent once: when the bridge refuses it, the failure is recorded with the
+  delivery event and the reply is not sent again.</li>
+<li><strong>A new Root message is not left behind.</strong> When the answer to the post of a new Root message is lost, Muster posts
+  it again with the same key, even if the status has changed back meanwhile, so that a message the bridge may have
+  taken is never left with a stale status and live buttons: a bridge that took the first post answers with that
+  message instead of posting a second one. When the Destination left the Route meanwhile, the post carries the final
+  text; when the bridge answers with the earlier post, which shows an older state, Muster then gives that message the
+  final edit.</li>
+<li><strong>The old message keeps working.</strong> A press on the buttons of an older Root message, or a Text command in its
+  Thread, acts on the Alert Group as on the current one.</li>
+<li><strong>The final edit is a Thread reply.</strong> When the Destination leaves the Route or is deleted, each open Root message
+  gets a final edit, "No longer updated here; current state in Muster: {link}"; past the window, Muster sends the same
+  text as a Thread reply instead.</li>
+<li><strong>Storm summaries are never posted again.</strong> Past its window, a Storm summary keeps the state of its last edit.</li>
+<li><strong>What the delivery shows.</strong> <code>GET /api/v1/alert-groups/AG…/deliveries</code> shows <code>past_edit_window</code> as <code>true</code> for a
+  Destination whose Root message is past its window, while the delivery stays <code>delivered</code>, or <code>pending</code> while a new
+  Root message is due. Each new Root message posted past the window is the delivery event
+  <code>republished_past_edit_window</code> in the Alert Group's Timeline, with the error of the reply under the old message when
+  it failed, and the log line <code>bridge_republished_past_edit_window</code>, with the ids of the old and the new message.</li>
+</ul>
 <h2 id="test-messages-and-previews">Test messages and previews<a class="headerlink" href="#test-messages-and-previews" title="Permanent link">&para;</a></h2>
 <p>A <strong>test message</strong> checks how a Destination looks without touching any Alert Group:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/tests<span class="w"> </span><span class="se">\</span>
@@ -1980,7 +2040,8 @@ bot was removed from the channel — with the bridge's text as the reason, or wh
 answer for the whole Transient budget: 10 attempts within 30 minutes. A bridge that asks Muster to wait does not make
 a Destination Broken unless it asks for more than 15 minutes; an answer the bridge calls <code>invalid</code> ends that one
 delivery as Not delivered and leaves the Destination healthy. When the bridge answers that a Root message is gone,
-Muster publishes the Alert Group again, once.</p>
+Muster publishes the Alert Group again, once; an edit refused as <code>gone</code> with the <code>reason</code> <code>edit_window_closed</code> is not a
+deletion, but the end of the message's <a href="#edit-windows">edit window</a>.</p>
 <p>While a Destination is Broken, Muster tries again every 5 minutes: with the oldest waiting delivery, or, when nothing
 waits, with the Destination check, which posts nothing. The first success ends the Broken state, and so does a
 successful check or test message. See <a href="../../operations/runbooks/MusterDestinationBroken/">MusterDestinationBroken</a>.

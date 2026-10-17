@@ -1604,6 +1604,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_republished_past_edit_window" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_republished_past_edit_window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#clock_skew" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2858,6 +2869,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_republished_past_edit_window" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_republished_past_edit_window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#clock_skew" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3870,6 +3892,9 @@ the event.</p>
 <h3 id="bridge_info_read"><code>bridge_info_read</code><a class="headerlink" href="#bridge_info_read" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>protocol_version</code>, <code>features</code> · C-22</p>
 <p>Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.</p>
+<h3 id="bridge_republished_past_edit_window"><code>bridge_republished_past_edit_window</code><a class="headerlink" href="#bridge_republished_past_edit_window" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>destination</code>, <code>group</code>, <code>old_message_id</code>, <code>new_message_id</code> · C-22</p>
+<p>The status of an Alert Group changed while its Bridge Root message was past the bridge's edit window, so Muster posted a new Root message Quietly and replied under the old one with a link to it: destination is the public_id of the Destination, group the public_id of the Alert Group, old_message_id and new_message_id the bridge's ids of the old and the new Root message. Later Thread replies go under the new one; the old one keeps working. Logged once the republication was recorded.</p>
 <h3 id="clock_skew"><code>clock_skew</code><a class="headerlink" href="#clock_skew" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>skew_seconds</code>, <code>warning_seconds</code> · C-02</p>
 <p>This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is positive when the replica's clock is ahead. Synchronise the clocks with NTP.</p>
