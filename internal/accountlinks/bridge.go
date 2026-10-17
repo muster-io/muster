@@ -183,19 +183,12 @@ type BridgeConnection struct {
 	PublicID string
 }
 
-// BridgeLinked is how an account_link event ended: Answer, the text to answer the person with, and Log, which logs the
-// link or the rejection once the answer was made or failed.
+// BridgeLinked is how an account_link event ended: Answer, the text to answer the person with, and Log, which logs
+// account_link_linked or account_link_rejected once the answer was made or failed, with answerErr, the error of the
+// answer, if any; the caller strips the token from it, since a bridge may repeat what it was sent.
 type BridgeLinked struct {
 	Answer string
-	log    func(ctx context.Context, answerErr error)
-}
-
-// Log logs account_link_linked or account_link_rejected, with answerErr, the error of the answer, if any; the caller
-// strips the token from it, since a bridge may repeat what it was sent.
-func (b BridgeLinked) Log(ctx context.Context, answerErr error) {
-	if b.log != nil {
-		b.log(ctx, answerErr)
-	}
+	Log    func(ctx context.Context, answerErr error)
 }
 
 // bridgeOutcome is how an account_link event ended in its transaction: the link, or the reason it was rejected, and
@@ -241,7 +234,7 @@ func (s *Service) LinkBridge(ctx context.Context, conn BridgeConnection, token s
 	if err != nil {
 		return BridgeLinked{}, err
 	}
-	return BridgeLinked{Answer: out.answer, log: func(ctx context.Context, answerErr error) {
+	return BridgeLinked{Answer: out.answer, Log: func(ctx context.Context, answerErr error) {
 		if out.reason != "" {
 			s.logRejected(ctx, MessengerBridge, conn.PublicID, out.reason, answerErr)
 			return

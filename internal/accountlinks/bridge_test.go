@@ -364,8 +364,6 @@ func TestLinkBridgeConflict(t *testing.T) {
 		len(e.store.links) != 2 || !strings.Contains(e.log.String(), `"user":"`+bobPID+`","error":"lost"`) {
 		t.Errorf("the kept request: %q, links %+v, log %s", answer, e.store.links, e.log)
 	}
-	var zero BridgeLinked
-	zero.Log(t.Context(), nil)
 }
 
 // TestLinkBridgeFailures: a database failure links nothing and leaves the event to come again.

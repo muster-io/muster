@@ -1073,6 +1073,48 @@ func TestBridgePushConnection(t *testing.T) {
 	}
 }
 
+// TestBridgeConn is the Connection of an Account link by code (C-22.FR-15): a Bridge Connection in either mode, by its
+// public_id in any case, with its client, kept while the Connection is unchanged and built again after it changed; a
+// Connection that is unknown, deleted, malformed or not a Bridge is bridge.ErrNoConnection; a failed read, or a token
+// that cannot be opened, is another error.
+func TestBridgeConn(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	poll := e.createBridge(t, "br-poll", b.srv.URL, connections.EventDeliveryPoll)
+	c, err := e.svc.BridgeConn(ctx, strings.ToLower(poll.PublicID))
+	if err != nil || c.ID != poll.ID || c.PublicID != poll.PublicID || c.Version != poll.Version || c.Client == nil {
+		t.Fatalf("BridgeConn = %+v, %v", c, err)
+	}
+	if again, err := e.svc.BridgeConn(ctx, poll.PublicID); err != nil || again.Client != c.Client {
+		t.Errorf("the client of an unchanged Connection was built again: %v", err)
+	}
+	e.store.rows[poll.ID].row.Version++
+	if moved, err := e.svc.BridgeConn(ctx, poll.PublicID); err != nil || moved.Client == c.Client ||
+		moved.Version != poll.Version+1 {
+		t.Errorf("a changed Connection = %+v, %v", moved, err)
+	}
+	mm := e.create(t, "mm")
+	gone := e.createBridge(t, "gone", b.srv.URL, connections.EventDeliveryPoll)
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{mm.PublicID, gone.PublicID, "CN0000000000ZZ", "not-an-id", ""} {
+		if _, err := e.svc.BridgeConn(ctx, id); !errors.Is(err, bridge.ErrNoConnection) {
+			t.Errorf("%q = %v", id, err)
+		}
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.BridgeConn(ctx, poll.PublicID); err == nil || errors.Is(err, bridge.ErrNoConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	e.store.rows[poll.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[poll.ID].row.Version++
+	if _, err := e.svc.BridgeConn(ctx, poll.PublicID); err == nil || errors.Is(err, bridge.ErrNoConnection) {
+		t.Errorf("a token that cannot be opened = %v", err)
+	}
+}
+
 // TestBridgePollingConnections is the list of the Leader's poller (C-22.FR-11): the Bridge Connections in poll mode
 // that are not deleted, in id order, each with its client, kept while the Connection is unchanged and built again after
 // it changed, and its stored cursor; a Connection whose client cannot be built is listed with the error instead of a
