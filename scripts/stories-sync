@@ -16,7 +16,8 @@ What it does:
 - one issue per capability that has stories, titled `C-NN: <title>`, label `capability`;
 - one issue per story, titled `S-NNN: <title>`, labels `story`, its kind and `operator-attention`
   when set, added as a sub-issue of its capability issue; every `depends_on` entry becomes a
-  "blocked by" link, so a frontend story is blocked by its backend story;
+  "blocked by" link, so a frontend story is blocked by its backend story; a story with the
+  optional key `repository`, whose pull request goes to that repository, names it in its issue;
 - every issue gets the milestone named after the layer (`L1`); the labels and the milestone are
   created when missing;
 - existing issues are found by title prefix, open or closed, and only what differs is changed:
@@ -76,6 +77,8 @@ FRONTMATTER_KEYS = (
     "operator_attention",
     "issue",
 )
+OPTIONAL_KEYS = ("repository",)
+REPOSITORY_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 
 TITLE_RE = re.compile(r"^(S-\d{3}|C-\d{2}):")
 STORY_FILE_RE = re.compile(r"^(S-\d{3})-[a-z0-9-]+\.md$")
@@ -275,6 +278,7 @@ class Story:
     issue: Optional[int]
     rel: str
     digest: str
+    repository: Optional[str] = None
 
 
 def normalize_story_text(text: str) -> str:
@@ -343,7 +347,7 @@ def load_stories(caps: dict[str, Capability]) -> dict[str, Story]:
             errors.append(str(exc))
             continue
         missing = [k for k in FRONTMATTER_KEYS if k not in fm]
-        unknown = [k for k in fm if k not in FRONTMATTER_KEYS]
+        unknown = [k for k in fm if k not in FRONTMATTER_KEYS and k not in OPTIONAL_KEYS]
         if missing or unknown:
             errors.append(f"{name}: missing keys {missing}, unknown keys {unknown}")
             continue
@@ -380,6 +384,9 @@ def load_stories(caps: dict[str, Capability]) -> dict[str, Story]:
         issue = fm["issue"]
         if issue is not None and not (isinstance(issue, int) and not isinstance(issue, bool) and issue > 0):
             errors.append(f"{name}: issue must be null or a positive number")
+        repository = fm.get("repository")
+        if repository is not None and not (isinstance(repository, str) and REPOSITORY_RE.fullmatch(repository)):
+            errors.append(f"{name}: repository must look like OWNER/NAME")
         if len(errors) > n_err:
             continue
         stories[fm["id"]] = Story(
@@ -395,6 +402,7 @@ def load_stories(caps: dict[str, Capability]) -> dict[str, Story]:
             issue=issue,
             rel=f"{STORIES_DIR}/{name}",
             digest=digest(normalize_story_text(text)),
+            repository=repository,
         )
     for s in stories.values():
         for d in s.depends_on:
@@ -755,6 +763,11 @@ class Sync:
             f"- **Capability:** {cap.id} · {md(cap.title)} ([PRD]({self.blob(cap.rel)}))",
             f"- **Kind:** `{s.kind}` · **Depends on:** {', '.join(s.depends_on) if s.depends_on else 'nothing'}",
         ]
+        if s.repository:
+            lines.append(
+                f"- **Repository:** [`{s.repository}`](https://github.com/{s.repository}) — the pull request goes"
+                f" there and closes this issue by its full reference, `{self.repo}#…`."
+            )
         if s.operator_attention:
             lines.append("- **Operator attention:** the operator acts or decides during this story; the Notes say why.")
         lines += ["", "### Acceptance", ""]

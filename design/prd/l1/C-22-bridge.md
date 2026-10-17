@@ -5,8 +5,9 @@
 **Goal.** Reach a messenger that Muster has no native support for through a Bridge: a separate service, written by
 anyone for their messenger, that Muster talks to over the Bridge protocol — with the same Root messages, Threads,
 Commands, Account links and Broken handling as Mattermost and Telegram, and with Text commands in the Thread where the
-messenger has no buttons. Muster ships the protocol, a fake bridge, an example bridge and a conformance check, so that
-a bridge can be written and checked without Muster's maintainers.
+messenger has no buttons. Muster ships the protocol, a fake bridge and a conformance check, and the project publishes
+bridge libraries for Go and Python with an example bridge, so that a bridge can be written and checked without
+Muster's maintainers.
 
 Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). The protocol is
 [`api/bridge.yaml`](../../../api/bridge.yaml); operation names such as `postMessage` are its `operationId`s, and
@@ -15,8 +16,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
 
 ## Scenarios
 
-1. A team's messenger has a bot API but no Muster support. An engineer starts from the example bridge, adapts it to
-   that API and checks it with `muster bridge check`; the bridge stays in the team's own repository.
+1. A team's messenger has a bot API but no Muster support. An engineer adds the bridge library for their language — Go
+   or Python — to a small service, writes the calls to that API, and checks the bridge with `muster bridge check`; the
+   bridge stays in the team's own repository.
 2. The Admin creates a Bridge Connection with the bridge's address and token; the check shows the bridge, the
    messenger's name, the protocol version and what the bridge offers.
 3. The Admin creates a Destination for a channel by its id; the check asks the bridge whether the bot can post and edit
@@ -216,24 +218,26 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   token from `--token-file` and a channel from `--channel`: `getInfo`; `checkChannel`; `postMessage`, and the same
   request again with its `Idempotency-Key`, which must return the same `message_id` with `replayed`; `editMessage`;
   `replyInThread` twice, the second with the first's `thread_ref`; `answerEvent`, for an event the bridge reported or,
-  without one, for an unknown event id, which must answer `gone`; events in each mode the bridge offers — polling, and
-  a push to a listener the command opens for the run, with a push secret it generates and prints for the bridge's
-  configuration; `checkChannel` of a channel given by `--forbidden-channel`, which must answer `forbidden`;
-  and the optional operations the bridge declares. It prints one line per step — passed, failed with the reason, or
-  skipped because the bridge does not offer it — and exits `1` when a step failed. Steps that need a person, such as a
-  press, wait for one with a prompt, or are skipped with `--no-interactive`. It is the one sender outside delivery and
-  the interactive path, an exception ADR-0017 allows because it runs outside any installation.
-- **C-22.FR-22** The repository ships an example bridge in Go under the MIT licence, in `examples/bridge/` with its own
-  Go module and `LICENSE`, listed in `NOTICE` and never part of the binary, the image or the chart (ADR-0017, ADR-0001):
-  a small chat server with its own web page — channels, Threads, buttons, direct messages, users found by login — that
-  offers every feature of the protocol, switchable one by one so that a bridge without buttons can be tried, and both
-  event delivery modes. It passes `muster bridge check`. CI builds and tests it and publishes its image
-  `ghcr.io/muster-io/muster-example-bridge` for each commit on `master`.
+  without one, for an unknown event id, which must answer `gone`; events in each mode the bridge offers — polling, and a
+  push to a listener the command opens for the run, with a push secret it generates and prints for the bridge's
+  configuration, or one it is given in a file; `checkChannel` of a channel given by `--forbidden-channel`, which must
+  answer `forbidden`; and the optional operations the bridge declares. It prints one line per step — passed, failed with
+  the reason, or skipped because the bridge does not offer it — and exits `1` when a step failed. Steps that need a
+  person, such as a press, wait for one with a prompt, or are skipped with `--no-interactive`. It is the one sender
+  outside delivery and the interactive path, an exception ADR-0017 allows because it runs outside any installation.
+- **C-22.FR-22** The example bridge, in Go under the MIT licence, lives in the repository of the Go bridge library
+  (FR-25) and is built on it — never in Muster's repository, binary, image or chart (ADR-0017): a small chat server with
+  its own web page — channels, Threads, buttons, direct messages, users found by login — that offers every feature of
+  the protocol, switchable one by one so that a bridge without buttons can be tried, and both event delivery modes. It
+  passes `muster bridge check`. Its image `ghcr.io/muster-io/muster-example-bridge` is published for each commit on
+  that repository's `master` and for each of its releases. Muster's end-to-end tests run a released image of it, pinned
+  by digest and updated by Renovate, so that a change of Muster that breaks a released bridge library fails Muster's CI.
 - **C-22.FR-23** The documentation covers: under Messengers, setting up a Bridge — the Connection with its token and
   event delivery mode (polling when the bridge cannot reach Muster, push with its callback address and secret
   otherwise), Destinations by channel id, what the Connection check shows, Text commands, Account links by token and
-  by code, edit windows and republication, and Broken Destinations; and "Write a bridge" — the protocol step by step,
-  what every bridge implements and what is optional, rendering the envelope and its CommonMark, Mention markers,
+  by code, edit windows and republication, and Broken Destinations; and "Write a bridge" — the bridge libraries for Go
+  and Python first, then the protocol step by step for a bridge written without them, what every bridge implements
+  and what is optional, rendering the envelope and its CommonMark, Mention markers,
   idempotency keys, confirming presses within 3 seconds, `thread_ref`, error classes and who decides `gone`, safe
   truncation, both event delivery modes and their signatures, testing with `muster bridge check` and the fake bridge,
   the example bridge, and the licence.
@@ -242,6 +246,20 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   `bridge_republished_past_edit_window` — and extend the metric catalogue: `bridge` joins the `transport` values of
   `muster_commands_total`; requests to bridges are counted in `muster_client_requests_total` by client class like every
   outbound request. Bridges add no Internal alert: their Destinations raise `MusterDestinationBroken`.
+- **C-22.FR-25** Two bridge libraries, each in a repository of its own under the MIT licence and without a CLA, do the
+  protocol's part of a bridge (ADR-0017): `muster-bridge-go` (the Go module `github.com/muster-io/muster-bridge-go`,
+  package `bridge`) and `muster-bridge-python` (the PyPI package `muster-bridge`, module `muster_bridge`, for Python 3.11
+  or newer, asynchronous, an ASGI application). A bridge author writes the calls to their messenger — posting, editing,
+  replying in a Thread, checking a channel and answering a person, and where the messenger offers them finding a
+  person, sending a direct message and deleting — and reports presses, Thread messages, deleted messages and direct
+  messages to the library. The library serves every operation of `api/bridge.yaml` with its validation and limits,
+  checks the token of each bot, keeps idempotency keys per token and replays their results, builds `info` from the
+  features and limits it is given, answers problems with their classes, queues events for `pollEvents` and pushes them
+  signed, with retries, and turns a direct message that carries an Account link token into an `account_link` event.
+  Each library keeps a copy of `api/bridge.yaml`, generates its types from it and fails its CI when the copy differs
+  from the one on Muster's `master`; its CI runs `muster bridge check` from Muster's development image against a bridge
+  built on it. The libraries are `0.x` until Muster's first release, then `1.x` for protocol version 1; a Go release is
+  a tag, a Python release is published to PyPI.
 
 ## UI
 
@@ -266,7 +284,7 @@ is `api/bridge.yaml`.
 
 ## Acceptance
 
-Checked against the fake bridge, unless an acceptance statement names the example bridge.
+Checked against the fake bridge, unless an acceptance statement names the example bridge or a bridge library.
 
 - **C-22.AC-1** The Connection check against the fake bridge shows its name, the messenger's name, `protocol_version`
   `1` and the features it declares; with the fake answering `protocol_version` `2` the check fails naming the version,
@@ -337,15 +355,19 @@ Checked against the fake bridge, unless an acceptance statement names the exampl
   callback address only in push mode; the Bridge Destination form saves a channel id and shows the channel's name from
   its check; the profile links an account through a Bridge Connection by token and, where offered, by a code with the
   handle field labelled as the bridge declares — all in English and Russian, without horizontal scrolling at 360 px wide.
-- **C-22.AC-22** `muster bridge check` passes every step against the example bridge with all its features and skips the
-  optional ones when they are switched off; against the fake bridge with replays turned off it fails the idempotency step
-  and exits `1`.
-- **C-22.AC-23** On `muster dev` with a Bridge Connection to the example bridge, a new Alert Group appears on the
-  example's web page; pressing Ack there acknowledges it in Muster; with the example's buttons switched off, `ack`
-  written in the Thread acknowledges it. The example has its own MIT `LICENSE` and Go module, and the licence report of
-  the Muster binary does not list it.
+- **C-22.AC-22** `muster bridge check` passes every step against the fake bridge with all its features and skips the
+  optional ones when they are switched off, and does the same against the released image of the example bridge;
+  against the fake bridge with replays turned off it fails the idempotency step and exits `1`.
+- **C-22.AC-23** On `muster dev` with a Bridge Connection to the released image of the example bridge, a new Alert
+  Group appears on the example's web page; pressing Ack there acknowledges it in Muster; with the example's buttons
+  switched off, `ack` written in the Thread acknowledges it.
 - **C-22.AC-24** The documentation site has the Bridge and "Write a bridge" pages and the protocol reference rendered
   from `api/bridge.yaml`, linked from the navigation, and `make docs-check` passes.
+- **C-22.AC-25** In each library's repository, a bridge built on the library — the example bridge in Go, the library's
+  small in-memory example in Python, installed with `pip install` from the built wheel — passes every step of
+  `muster bridge check` run from `ghcr.io/muster-io/muster:edge` with all its features, and skips the optional ones when
+  it offers only `thread_messages`; a copy of `api/bridge.yaml` that differs by one byte from Muster's fails the
+  library's CI.
 
 ## Related ADRs
 
@@ -368,5 +390,9 @@ timers and Account links of the Act stage.
 - **BE** — events by polling and push, presses and answers, Text commands, deleted messages.
 - **BE** — Account links by token and by code, Mentions of linked people.
 - **FE** — the Bridge Connection and Destination pages, Account links in the profile, labels.
-- **BE** — the example bridge and `muster bridge check`.
+- **BE** — `muster bridge check`, checked against the fake bridge.
+- **BE** — the Go bridge library, in its own repository.
+- **BE** — the example bridge on the Go library, in the same repository.
+- **Infra** — Muster's end-to-end test against the example's released image.
 - **Docs** — "Write a bridge" and the protocol reference on the documentation site.
+- **BE** — the Python bridge library, in its own repository.

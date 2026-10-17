@@ -66,14 +66,16 @@ re-implemented under their Alertmanager names from their documented behaviour; n
 MIT-licensed parts
 ==================
 
-Two parts of the repository are licensed under the MIT License instead of the AGPL-3.0-only, so that bridges derived
-from them may stay closed (design/adr/0017-bridge-protocol-for-messengers-without-native-support.md):
+One part of the repository is licensed under the MIT License instead of the AGPL-3.0-only, so that bridges derived
+from it may stay closed (design/adr/0017-bridge-protocol-for-messengers-without-native-support.md):
 
   - api/bridge.yaml  the Bridge protocol specification; its info.license says MIT
-  - examples/bridge/  the example bridge, with its own LICENSE and Go module, never part of the Muster binary, image
-    or chart
 
   MIT License, Copyright The Muster Authors.
+
+The bridge libraries for Go and Python and the example bridge are MIT-licensed too. They live in repositories of their
+own, https://github.com/muster-io/muster-bridge-go and https://github.com/muster-io/muster-bridge-python, and are not
+part of this repository or of the Muster binary, image or chart.
 
 
 JSONPath

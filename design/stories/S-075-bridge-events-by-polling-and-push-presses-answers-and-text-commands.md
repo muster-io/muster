@@ -92,7 +92,7 @@ issue: 233
 
 - `account_link` events, the token and the code, and Mentions of linked people (S-076); until then link rows are set
   up directly in the checks.
-- The pages (S-077); the example bridge and `muster bridge check` (S-078).
+- The pages (S-077); `muster bridge check` (S-078); the example bridge (S-085).
 - Interim states until later stories: the Timeline and the Audit log of the SPA show the Transport `bridge` with the
   label of `system` until S-077 adds its own; an `account_link` event is acknowledged and changes nothing until S-076.
 

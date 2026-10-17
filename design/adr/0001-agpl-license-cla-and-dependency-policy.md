@@ -8,6 +8,9 @@
 - Amended: 2026-10-14 — the Bridge protocol specification (`api/bridge.yaml`) and the example bridge are licensed MIT,
   so that bridges derived from them may stay closed; the example is its own Go module, never part of the shipped
   artifacts, and is listed in `NOTICE` ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
+- Amended: 2026-10-17 — the example bridge moves out of this repository: it lives, with the bridge libraries for Go and
+  Python, in repositories of their own under MIT without a CLA, and `NOTICE` names only `api/bridge.yaml` as an MIT
+  part of this repository ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
 
 ## Context
 

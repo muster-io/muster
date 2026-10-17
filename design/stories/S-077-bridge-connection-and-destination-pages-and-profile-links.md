@@ -79,7 +79,7 @@ issue: 235
 
 **OUT**
 
-- The backend (S-073, S-080, S-074, S-081, S-075, S-076); the example bridge (S-078); the documentation (S-074, S-081,
+- The backend (S-073, S-080, S-074, S-081, S-075, S-076); the example bridge (S-085); the documentation (S-074, S-081,
   S-076, S-079).
 
 ## Contracts

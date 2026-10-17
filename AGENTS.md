@@ -71,6 +71,11 @@ confirmed provisional value updates `defaults.md` and its `P-NN` in [L1 §5.3](d
 a schema change is a new expand/contract migration plus an update of `schema.md`; a wrong API contract is fixed in
 `api/openapi.yaml`.
 
+A story whose frontmatter names a `repository` — the bridge libraries `muster-io/muster-bridge-go` and
+`muster-io/muster-bridge-python` — is worked in that repository: its branch, `files_touched`, `verify` and pull request
+are there, that repository's own AGENTS.md and licence (MIT, no CLA) apply, and the pull request says
+`Closes muster-io/muster#<issue>`. Its contract and its issue stay here.
+
 Issues are generated from the story files by `scripts/stories-sync`. Edit the files, never the issues, and never edit
 the `issue:` field by hand.
 
@@ -105,7 +110,9 @@ the `issue:` field by hand.
 | `api/`, `web/`, `deploy/`, `docs/`, `test/` | the spec; the SPA; chart, compose and dev database; the docs site; e2e, load and docs checks |
 
 The full table, with every domain package and the list of generated paths, is
-[§2 of the stories README](design/stories/README.md#2-repository-layout).
+[§2 of the stories README](design/stories/README.md#2-repository-layout). The bridge libraries for Go and Python and
+the example bridge are not in this repository: they live in `muster-io/muster-bridge-go` and
+`muster-io/muster-bridge-python` under MIT (ADR-0017).
 
 ## Architecture rules
 
@@ -250,7 +257,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 - No AI attribution: no `Co-Authored-By` trailers for tools, no "Generated with" lines, in commits or pull requests.
 - Pull requests are squash-merged, so the title is the commit message, and release-please writes the changelog from it.
   Nothing is released before L1 is complete: never merge the release pull request. Each commit on `master` is
-  published as the development image `ghcr.io/muster-io/muster:sha-<7 hex digits>` (and `edge` for the newest).
+  published as the development image `ghcr.io/muster-io/muster:sha-<7 hex digits>` (and `edge` for the newest). The
+  bridge libraries' repositories release `0.x` versions before that, as their stories say (ADR-0017).
 - The pull request body has `Closes #<issue>`, `Story: S-NNN`, a table with every `acceptance` statement and its
   evidence (test name, command with output, Playwright trace or screenshot), the output of `verify`, and every change
   to the story file with its reason.

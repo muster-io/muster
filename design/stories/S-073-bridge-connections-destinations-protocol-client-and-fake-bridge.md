@@ -93,8 +93,9 @@ issue: 231
 - Bridge delivery — envelopes, posts, edits, Thread replies, idempotency, test messages, the Broken probe — and the
   Messengers → Bridge page (S-074); edit windows (S-081).
 - Events by polling and push, presses, answers, Text commands and deleted messages (S-075).
-- Account links and Mentions of linked people (S-076); the pages and labels (S-077); the example bridge and
-  `muster bridge check` (S-078); "Write a bridge" and the protocol reference on the site (S-079).
+- Account links and Mentions of linked people (S-076); the pages and labels (S-077); `muster bridge check` (S-078);
+  the bridge libraries and the example bridge, in repositories of their own (S-083, S-085, S-084); "Write a bridge"
+  and the protocol reference on the site (S-079).
 - Interim states until later stories: the profile offers no Bridge Connection for linking (S-076 lifts the filter);
   the SPA lists a Bridge Connection by its name only, without the messenger's name or the bridge's host, and its
   Connection page has no form and no check (S-077); `muster doctor` skips Bridge Connections (S-080).
