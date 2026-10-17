@@ -130,7 +130,8 @@ async function newCode(userId: string, before: number): Promise<string> {
 
 /** The direct messages the first bot of the fake bridge, the one of "Dev Bridge", sent to a person. */
 async function bridgeDms(userId: string): Promise<BridgeDm[]> {
-  const all = await fbr<BridgeDm[]>("GET", "/direct-messages");
+  // The fake answers null while its bots have sent none.
+  const all = (await fbr<BridgeDm[] | null>("GET", "/direct-messages")) ?? [];
   return all.filter((d) => d.bot === 1 && d.user_external_id === userId);
 }
 
@@ -522,7 +523,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
     await expect
       .poll(
         async () => {
-          root = (await fbr<BridgeMessage[]>("GET", "/messages")).find(
+          root = ((await fbr<BridgeMessage[] | null>("GET", "/messages")) ?? []).find(
             (m) =>
               m.bot === 2 &&
               m.channel_id === "ch-alerts" &&

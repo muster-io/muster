@@ -86,7 +86,7 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   await expect(page).toHaveURL(/\/connections\/CN[0-9A-Z]+$/);
   connectionId = new URL(page.url()).pathname.split("/").pop() ?? "";
   await expect(page.getByRole("heading", { name: "br", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Bridge", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bridge", exact: true, level: 2 })).toBeVisible();
   await expect(page.getByTestId("secret-connection-bot-token-status")).toHaveText(/^Set, changed /);
   await expect(page.getByText(BRIDGE_SECOND_TOKEN)).toHaveCount(0);
 
@@ -95,7 +95,7 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   await expect(page.getByTestId("connection-check-summary")).toHaveText("The check passed.");
   await expect(steps(page)).toHaveText([
     /^Bridge info: ok · \d+ ms · direct$/,
-    /^Event delivery: ok · direct$/,
+    /^Event delivery: ok · \d+ ms · direct$/,
   ]);
   const info = page.getByTestId("bridge-info");
   await expect(info.getByTestId("bridge-info-bridge")).toHaveText(
@@ -198,18 +198,18 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.goto("/connections/new");
   await expect(page.getByRole("radio", { name: "Мост", exact: true })).toBeVisible();
   await page.getByRole("radio", { name: "Мост", exact: true }).check();
-  await expect(page.getByRole("heading", { name: "Мост", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Мост", exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Опрос" })).toBeChecked();
   await expectNoHorizontalScroll(page);
 
   await page.goto(`/connections/${connectionId}`);
-  await expect(page.getByRole("heading", { name: "Мост", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Мост", exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Опрос" })).toBeChecked();
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText("Проверка прошла.");
   await expect(steps(page)).toHaveText([
     /^Сведения о мосте: успешно · \d+ мс · напрямую$/,
-    /^Доставка событий: успешно · напрямую$/,
+    /^Доставка событий: успешно · \d+ мс · напрямую$/,
   ]);
   await expect(page.getByTestId("bridge-info-protocol")).toHaveText("Версия протокола 1");
   await expect(page.getByTestId("bridge-info-messenger")).toHaveText("Мессенджер: Fake chat");
