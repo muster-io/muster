@@ -106,13 +106,14 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
 
 ## What Muster posts
 
-- **The envelope.** Every message carries its status with a colour and an emoji, the title `#N` and the Alert Group's
-  title, the link "Open in Muster" to the Alert Group page, and its text in CommonMark: the labels, the summary, one
-  line per Alert, the links, the notices and the footer. Alert data are escaped, so a label value cannot format the
-  message, link anywhere or mention anyone. A Loud message asks the bridge to notify; a Quiet one does not.
+- **The envelope.** Every Root message carries its status with a colour and an emoji, the title `#N` and the Alert
+  Group's title, the link "Open in Muster" to the Alert Group page, and its text in CommonMark: the labels, the
+  summary, one line per Alert, the links, the notices and the footer. A Thread reply carries its text in CommonMark.
+  Alert data are escaped, so a label value cannot format the message, link anywhere or mention anyone. A Loud message
+  asks the bridge to notify; a Quiet one does not.
 - **The length.** The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
-  long Root message drops its Alert lines first, then the label sections, but always keeps its link to Muster, its
-  notices and its footer. The bridge may still shorten what it renders, and says so.
+  long Root message drops its Alert lines first, then the label sections, but always keeps its title, its status, its
+  footer, its buttons and its link to Muster. The bridge may still shorten what it renders, and says so.
 - **Buttons.** When the bridge offers buttons, a Root message carries the buttons of its status — Ack, Resolve and one
   per Snooze duration, for example — with a style hint for each, at most as many as the bridge allows; the Snooze
   buttons of the longest durations go first. Without buttons, a bridge that forwards the messages of a Thread gets a
