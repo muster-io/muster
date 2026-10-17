@@ -988,10 +988,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   - *Publication*: `publication_started_at` is the marker recorded before the API call (a retry after it publishes
     again and records a possible duplicate; for a Bridge, whose Publications carry an idempotency key, it is kept
     across the retries of one Publication that may have reached the bridge, and the outcome decides the possible
-    duplicate: none when the bridge replays the Publication, which then dates `published_at`), `published_at` (set by
-    the call that published the current Root message and cleared with it when the message is forgotten for a
-    republication; it, not `message_id`, tells a published Root message — an outgoing webhook in template mode may
-    publish with no id to extract; migration 0006), `publications`, `possible_duplicate`,
+    duplicate: none when the bridge replays the Publication, which then dates `published_at`; one whose final edit
+    comes due meanwhile is not withheld but made again carrying it, so that a replay names the Root message to edit),
+    `published_at` (set by the call that published the current Root message and cleared with it when the message is
+    forgotten for a republication; it, not `message_id`, tells a published Root message — an outgoing webhook in
+    template mode may publish with no id to extract; migration 0006), `publications`, `possible_duplicate`,
     `republished_after_delete` (a deleted Root message is republished once);
   - *Thread*: `thread_state` (`none`, `waiting_for_copy`, `attached`, `unattached`), `thread_anchor_id` (Telegram's
     automatic copy, or a Bridge's last `thread_ref`, from its post or a reply, which the next reply sends) and the

@@ -45,7 +45,8 @@ import (
 // For an Idempotent adapter (C-22.FR-6) a failed Publication that may have reached the messenger keeps its start for
 // the retry (keepStarted), and an ok one decides the possible duplicate: a retry after a started Publication records
 // one unless its answer was replayed. A replayed Publication is dated from its first attempt and stays pending, so the
-// next call edits it to the latest Desired state.
+// next call edits it to the latest Desired state — or to the final edit, when the retry carried it because the
+// Destination left meanwhile; a final edit posted as a Publication that was not replayed is the final message itself.
 
 // outcomeQueries are the queries of the outcome rules, the late Publication, the possible duplicate and the deleted
 // Root message.
@@ -159,8 +160,8 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	id := a.row.ID
 	switch out.Kind {
 	case OutcomeOK:
-		if a.row.DesiredRetire {
-			return w.retired(ctx, q, org, a, now, true, logs)
+		if a.row.DesiredRetire && !a.replayed(out) {
+			return w.retired(ctx, q, org, a, now, true, a.duplicate(out), logs)
 		}
 		return w.delivered(ctx, q, org, a, c, out, now, logs)
 	case OutcomeRetryAfter:
@@ -192,7 +193,7 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	case OutcomeGone:
 		switch {
 		case a.row.DesiredRetire:
-			return w.retired(ctx, q, org, a, now, false, logs)
+			return w.retired(ctx, q, org, a, now, false, false, logs)
 		case a.publication:
 			return w.notDelivered(ctx, q, org, a, out, now, logs)
 		}
@@ -208,9 +209,17 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 }
 
 // retired records the final edit of a delivery, made or found gone: the row is retired, with the final_edit delivery
-// event when the edit was made, and a Broken Destination that a probe reached is healthy again.
-func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, now time.Time, edited bool,
+// event when the edit was made, and a Broken Destination that a probe reached is healthy again. A final edit posted
+// as a Publication that may show twice records the possible duplicate (duplicate), as delivered does.
+func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, now time.Time, edited, duplicate bool,
 	logs *after) (bool, error) {
+	if duplicate {
+		// Before the row is retired, while the lease is still held.
+		if err := q.MarkPossibleDuplicate(ctx, dbgen.MarkPossibleDuplicateParams{OrgID: org, ID: a.row.ID,
+			Owner: w.Lease.Owner, Now: now}); err != nil {
+			return false, fmt.Errorf("mark the possible duplicate: %w", err)
+		}
+	}
 	_, err := q.RecordRetired(ctx, dbgen.RecordRetiredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner, Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -220,6 +229,11 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 	}
 	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
 		return false, err
+	}
+	if duplicate {
+		if err := duplicateRecorded(ctx, q, org, a.row, now, logs); err != nil {
+			return false, err
+		}
 	}
 	if err := released(ctx, q, org, a.row.ActualButtonKeyID.String, ""); err != nil {
 		return false, err
@@ -252,7 +266,7 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		}
 	}
 	key := buttonKeyOf(a.message)
-	duplicate := a.idempotent && a.publication && a.started && !out.Replayed
+	duplicate := a.duplicate(out)
 	r, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
 		MessageUrl: nonEmpty(out.MessageURL), ThreadRef: nonEmpty(out.ThreadRef), Published: a.publication,

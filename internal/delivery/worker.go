@@ -282,6 +282,12 @@ type attempt struct {
 // idempotency key, posted by an earlier attempt (C-22.FR-6).
 func (a attempt) replayed(out Outcome) bool { return a.publication && out.Replayed }
 
+// duplicate reports whether the ok outcome out of the attempt records a possible duplicate (C-22.FR-6): a retry of a
+// started Publication to an Idempotent adapter that was not replayed, so the messenger did not know its key.
+func (a attempt) duplicate(out Outcome) bool {
+	return a.idempotent && a.publication && a.started && !out.Replayed
+}
+
 // keepStarted reports whether the outcome out keeps the start of the attempt's Publication for its retry (C-22.FR-6):
 // for an Idempotent adapter, a Publication that may have reached the messenger — started before this attempt, or a
 // request without an answer — so that the retry is replayed, or records a possible duplicate when it is not. A failure
@@ -344,7 +350,10 @@ func (w *Worker) deliver(ctx context.Context, org, id int64) {
 // are due plus TokenMargin; otherwise the tokens are taken, the lease is renewed for the call and, before a
 // Publication, a possible duplicate and the start of the Publication are recorded and its notes added. For an
 // Idempotent adapter the start of an earlier attempt is kept and no possible duplicate is recorded here: the outcome
-// decides it (C-22.FR-6). ok says whether to call; logs are the lines to log now that it committed.
+// decides it (C-22.FR-6). A final edit due before its Root message was published withholds the delivery, except after
+// a started Publication of an Idempotent adapter, which may have reached the messenger: the Publication is made again
+// with its key, Quiet and without notes, carrying the final edit, so that a replay names the Root message the final
+// edit is then made to. ok says whether to call; logs are the lines to log now that it committed.
 func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, after, error) {
 	var a attempt
 	var logs after
@@ -361,7 +370,8 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			return fmt.Errorf("read the delivery: %w", err)
 		}
 		now := w.Lease.Clocks.Business.Now().UTC()
-		if row.DesiredRetire && unpublished(row) {
+		_, idempotent := w.idempotent(row.DestinationType)
+		if row.DesiredRetire && unpublished(row) && !(idempotent && row.PublicationStartedAt.Valid) {
 			// Its Destination left before its Root message was ever published there.
 			if err := q.WithholdLeased(ctx, dbgen.WithholdLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Now: now}); err != nil {
@@ -409,7 +419,6 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 		if row.DesiredRetire {
 			msg = messages.FinalEdit(msg, w.link(row.AlertGroupPublicID))
 		}
-		_, idempotent := w.idempotent(d.Type)
 		a = attempt{row: row, destination: d, publication: unpublished(row), message: msg, at: now,
 			idempotent: idempotent, started: row.PublicationStartedAt.Valid}
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
@@ -425,6 +434,10 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			if err := q.StartPublication(ctx, dbgen.StartPublicationParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Keep: a.idempotent, Now: now}); err != nil {
 				return fmt.Errorf("record the start of the publication: %w", err)
+			}
+			if row.DesiredRetire {
+				ok = true
+				return nil
 			}
 			if a.message, a.late, err = publicationNotes(ctx, q, org, row, a.message); err != nil {
 				return err
@@ -483,13 +496,15 @@ func publicationLoudness(loud pgtype.Bool, summary bool) (groups.Loudness, []gro
 // call makes the adapter call of a prepared delivery outside any transaction and records its outcome; a markup the
 // messenger rejects is sent again without markup in the same attempt. A Publication to an Idempotent adapter carries
 // the key of its number, the same for every retry of it; a replayed one observes no latency, as its message shows the
-// state of an earlier attempt.
+// state of an earlier attempt. A Publication that carries the final edit is Quiet.
 func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	c := Call{Class: outbound.ClassDelivery, Destination: a.destination, Loudness: groups.Quiet}
 	kind := a.kind()
 	if a.publication {
-		c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
-		c.Targets = a.targets
+		if !a.row.DesiredRetire {
+			c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
+			c.Targets = a.targets
+		}
 		if idem, ok := w.idempotent(a.destination.Type); ok {
 			c.Key = idem.PublicationKey(a.destination, a.row.ID, a.row.Publications+1)
 		}
