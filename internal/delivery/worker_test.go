@@ -748,7 +748,7 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 		default:
 			d.publishedAt = at(arg.Now)
 		}
-		d.publications++
+		d.publications, d.restarted = d.publications+1, nil
 		d.responseValues, d.threadOpened = map[string]string{}, false
 		_ = json.Unmarshal(arg.ResponseValues, &d.responseValues)
 	}

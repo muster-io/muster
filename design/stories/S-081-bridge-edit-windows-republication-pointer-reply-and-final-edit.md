@@ -80,9 +80,9 @@ issue: 239
   `pending` as any other. The SPA's fixture `delivery()`, typed `AlertGroupDelivery`, in
   `alert-group-deliveries.test.tsx` gains `past_edit_window: false`, since the type check of `make lint` includes the
   tests; the text of the flag on the page is S-077's.
-- **Schema** (migration `0010_bridge_edit_windows`, expand only, `schema.md`): `deliveries` gains `actual_status`,
-  `past_edit_window` (boolean, default false), `republication_started_at` and `superseded_message_ids` (`text[]`,
-  default empty), with a partial GIN
+- **Schema** (migration `0010_bridge_edit_windows`, expand only, `schema.md`): `deliveries` gains `actual_status`
+  (`text`, nullable, with a CHECK), `past_edit_window` (boolean, default false), `republication_started_at`
+  (`timestamptz`, nullable) and `superseded_message_ids` (`text[]`, default empty), with a partial GIN
   index on `superseded_message_ids` where it is not empty, so that S-075 finds the delivery of an older Root message
   without scanning the Connection's deliveries; the `kind` CHECK of `delivery_events` gains
   `republished_past_edit_window`. `delivery_events` is partitioned: the new CHECK is added to the parent `NOT VALID`
@@ -219,6 +219,10 @@ None.
   `.input.body`, as `/_fake/messages` lists it; the Contracts record the details above where the rules were silent;
   after review, the schema gains `republication_started_at`, and the details record the start of a republication, the
   fresh Transient budget of a delivery marked delivered without a call, and the pointer reply's RetryAfter.
+- Accepted edge case: a Thread reply that finds the old Root message deleted while the answer to a republication is
+  lost, on an Alert Group already resolved or republished once after a deletion, ends the delivery
+  `deleted_in_messenger` and may leave the new Root message with a stale status; it needs a person to delete the old
+  message during the retry.
 
 ## Coverage
 

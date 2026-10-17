@@ -802,6 +802,30 @@ func TestRepublicationStartCleared(t *testing.T) {
 	}
 }
 
+// TestPublicationClearsRepublicationStart is C-22.FR-9: a start of a republication left on a delivery whose Root
+// message an older replica found deleted, and reset without knowing the column, is cleared by the Publication that
+// follows, so that the next change of status within the window is an edit of the new Root message.
+func TestPublicationClearsRepublicationStart(t *testing.T) {
+	e, _ := windowedBridge(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	stale := business0.Add(-time.Hour)
+	e.only(t).restarted = &stale
+	e.rec.Script(deliverytest.MethodPublish, publishedAs("m1", "t-1"))
+	e.round(t)
+	d := e.only(t)
+	if d.state != "delivered" || d.restarted != nil || *d.messageID != "m1" || d.publications != 1 {
+		t.Fatalf("after the Publication %+v", d)
+	}
+	e.rec.Reset()
+	e.business.Set(business0.Add(time.Minute))
+	e.acknowledged(t, 2)
+	e.round(t)
+	if calls := e.rec.Calls(); callMethods(calls) != "update" || calls[0].MessageID != "m1" || d.publications != 1 ||
+		d.state != "delivered" {
+		t.Errorf("after the acknowledgement %s, %+v", callMethods(calls), d)
+	}
+}
+
 // TestPointerRetryAfter is C-11.FR-8 with C-22.FR-9: a pointer reply answered with RetryAfter is not retried, but holds
 // the limiter it names until the time asked, as any RetryAfter does.
 func TestPointerRetryAfter(t *testing.T) {

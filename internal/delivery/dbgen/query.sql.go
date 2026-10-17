@@ -3128,6 +3128,7 @@ SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::b
                           END,
     possible_duplicate  = d.possible_duplicate OR $11::boolean,
     publications        = d.publications + CASE WHEN $9::boolean THEN 1 ELSE 0 END,
+    republication_started_at = CASE WHEN $9::boolean THEN NULL ELSE d.republication_started_at END,
     response_values     = CASE
                               WHEN $9::boolean THEN coalesce($12::jsonb, '{}'::jsonb)
                               ELSE d.response_values
@@ -3210,7 +3211,9 @@ type RecordDeliveredRow struct {
 // the start of its first attempt, when the message was really posted, and stays pending without an actual version,
 // its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
 // to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
-// The status the message shows (@actual_status) is unknown after a replay.
+// The status the message shows (@actual_status) is unknown after a replay. A Publication clears the start of a
+// republication past a bridge's edit window, which only a published Root message has: one left by the deleted Root
+// message flow of an older replica would otherwise republish the new Root message.
 func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (RecordDeliveredRow, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
 		arg.Replayed,
@@ -3277,8 +3280,9 @@ type RecordDeliveryRetryRow struct {
 // budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
 // did not take a Publication, so its start is cleared, unless @keep_started: for an adapter whose messenger keeps
 // idempotency keys, a Publication that may have reached it — started before this attempt, or a request without an
-// answer — keeps the start of its first attempt for the retry (C-22.FR-6); so does a republication past a bridge's edit
-// window, whose start no other attempt has (C-22.FR-9). No row when the lease went to another replica.
+// answer — keeps the start of its first attempt for the retry (C-22.FR-6). The start of a republication past a bridge's
+// edit window is kept by @keep_started alone (C-22.FR-9): unlike publication_started_at, it is not kept for a published
+// row, since only the attempts of a republication set it. No row when the lease went to another replica.
 func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRetryParams) (RecordDeliveryRetryRow, error) {
 	row := q.db.QueryRow(ctx, recordDeliveryRetry,
 		arg.At,

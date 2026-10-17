@@ -3780,8 +3780,9 @@ func (l *live) ackTimeoutNoticeFallback(t *testing.T) {
 		template_error_template = NULL, template_error_since = NULL WHERE id = $1`, l.routeID)
 }
 
-// editWindowStarts is C-11.FR-8, C-22.FR-6 and FR-9 on PostgreSQL: a Root message past its window that takes no call
-// starts the Transient budget of an earlier failed edit afresh; a republication whose answer was lost keeps its start
+// editWindowStarts is C-11.FR-8, C-22.FR-6 and FR-9 on PostgreSQL: a Publication clears a stale start of a
+// republication; a Root message past its window that takes no call starts the Transient budget of an earlier failed
+// edit afresh; a republication whose answer was lost keeps its start
 // in republication_started_at; its retry, replayed, is dated from that start, and, not replayed, records a possible
 // duplicate; either clears the start and keeps the old message's id.
 func (l *live) editWindowStarts(t *testing.T) {
@@ -3795,7 +3796,14 @@ func (l *live) editWindowStarts(t *testing.T) {
 		l.rec.Script(deliverytest.MethodPublish, publishedAs("w1", "t-w1"))
 		l.fire(t, "ew"+name, name+"/a")
 		gid := l.group(t, name)
+		// A start that the deleted Root message flow of an older replica left is cleared by the Publication.
+		l.exec(t, `UPDATE deliveries SET republication_started_at = $2 WHERE org_id = $1`, l.orgID,
+			l.business.Now().Add(-time.Hour))
 		l.round(t, l.a)
+		if l.count(t, `SELECT count(*) FROM deliveries WHERE message_id = 'w1' AND republication_started_at IS NULL`) !=
+			1 {
+			t.Fatalf("the Publication kept a stale start of a republication: %s", methods(l.rec.Calls()))
+		}
 		published := l.business.Now()
 
 		l.business.Advance(time.Minute)
@@ -3848,6 +3856,7 @@ func (l *live) editWindowStarts(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("replayed %v: published_at %s after the start, possible_duplicate %v",
 			replayed, at.Sub(start), duplicate))
 	}
-	t.Logf("past the window: no call, budget reset; lost republication answer kept its start; %s",
+	t.Logf("stale start cleared by the Publication; past the window: no call, budget reset; lost republication "+
+		"answer kept its start; %s",
 		strings.Join(lines, "; "))
 }

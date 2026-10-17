@@ -147,10 +147,12 @@ that declares no limit (`null`) has none: Muster edits each Root message for as 
   the bridge returned one and to the Alert Group page otherwise. Later Thread replies go under the new Root message,
   which has a window of its own. This reply is sent once: when the bridge refuses it, the failure is recorded with the
   delivery event and the reply is not sent again.
-- **A new Root message is not left behind.** Its post is not repeated either: when the answer is lost, Muster posts
-  again with the same key even if the status has changed back meanwhile, so that the message the bridge may have
-  posted is never left with a stale status and live buttons. When the Destination left the Route meanwhile, that post
-  carries the final text and is the last message.
+- **A new Root message is not left behind.** When the answer to the post of a new Root message is lost, Muster posts
+  it again with the same key, even if the status has changed back meanwhile, so that a message the bridge may have
+  taken is never left with a stale status and live buttons: a bridge that took the first post answers with that
+  message instead of posting a second one. When the Destination left the Route meanwhile, the post carries the final
+  text; when the bridge answers with the earlier post, which shows an older state, Muster then gives that message the
+  final edit.
 - **The old message keeps working.** A press on the buttons of an older Root message, or a Text command in its
   Thread, acts on the Alert Group as on the current one.
 - **The final edit is a Thread reply.** When the Destination leaves the Route or is deleted, each open Root message

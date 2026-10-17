@@ -245,7 +245,9 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- the start of its first attempt, when the message was really posted, and stays pending without an actual version,
 -- its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
 -- to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
--- The status the message shows (@actual_status) is unknown after a replay.
+-- The status the message shows (@actual_status) is unknown after a replay. A Publication clears the start of a
+-- republication past a bridge's edit window, which only a published Root message has: one left by the deleted Root
+-- message flow of an older replica would otherwise republish the new Root message.
 -- name: RecordDelivered :one
 UPDATE deliveries d
 SET actual_version      = CASE WHEN @replayed::boolean THEN d.actual_version ELSE @version::bigint END,
@@ -262,6 +264,7 @@ SET actual_version      = CASE WHEN @replayed::boolean THEN d.actual_version ELS
                           END,
     possible_duplicate  = d.possible_duplicate OR @possible_duplicate::boolean,
     publications        = d.publications + CASE WHEN @published::boolean THEN 1 ELSE 0 END,
+    republication_started_at = CASE WHEN @published::boolean THEN NULL ELSE d.republication_started_at END,
     response_values     = CASE
                               WHEN @published::boolean THEN coalesce(sqlc.narg('response_values')::jsonb, '{}'::jsonb)
                               ELSE d.response_values
@@ -365,8 +368,9 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
 -- did not take a Publication, so its start is cleared, unless @keep_started: for an adapter whose messenger keeps
 -- idempotency keys, a Publication that may have reached it — started before this attempt, or a request without an
--- answer — keeps the start of its first attempt for the retry (C-22.FR-6); so does a republication past a bridge's edit
--- window, whose start no other attempt has (C-22.FR-9). No row when the lease went to another replica.
+-- answer — keeps the start of its first attempt for the retry (C-22.FR-6). The start of a republication past a bridge's
+-- edit window is kept by @keep_started alone (C-22.FR-9): unlike publication_started_at, it is not kept for a published
+-- row, since only the attempts of a republication set it. No row when the lease went to another replica.
 -- name: RecordDeliveryRetry :one
 UPDATE deliveries
 SET next_attempt_at          = @at,
