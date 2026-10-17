@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package accountlinks holds the Account links of C-18: which messenger account, in which identity space, acts as
-// which User. A Telegram account lives in the one identity space telegram, a Mattermost account in the space of its
-// Connection. Every link starts in the User's web session and the secret travels from there to the messenger account
-// (ADR-0013): a Telegram deep link whose token the bot receives with `/start`, or a Mattermost code the bot sends as a
-// direct message and the User types into the profile. The package links, replaces and unlinks, records the Audit log,
-// sends the account-links hint to the link's User, and looks links up for the button presses of the messengers. It
-// never calls a messenger itself: the bots of the messenger packages do, on the interactive path.
+// Package accountlinks holds the Account links of C-18 and C-22.FR-15: which messenger account, in which identity
+// space, acts as which User. A Telegram account lives in the one identity space telegram, a Mattermost or a Bridge
+// account in the space of its Connection. Every link starts in the User's web session and the secret travels from there
+// to the messenger account (ADR-0013): a Telegram deep link whose token the bot receives with `/start`, a token the
+// person sends to a bridge's bot, or a code that a Mattermost or a bridge's bot sends as a direct message and the User
+// types into the profile. The package links, replaces and unlinks, records the Audit log, sends the account-links hint
+// to the link's User, and looks links up for the button presses of the messengers. It never calls a messenger itself:
+// the bots of the messenger packages do, on the interactive path.
 package accountlinks
 
 import (
@@ -66,6 +67,7 @@ const (
 const (
 	MessengerTelegram   = "telegram"
 	MessengerMattermost = "mattermost"
+	MessengerBridge     = "bridge"
 )
 
 // HintType is the live-update hint of a User whose Account link appeared, changed or disappeared; it names the link.
@@ -135,7 +137,8 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
-// RateLimitedError refuses a code request beyond account_link.mattermost_code_requests until RetryAfter passed.
+// RateLimitedError refuses a code request beyond account_link.mattermost_code_requests or
+// account_link.bridge_code_requests until RetryAfter passed.
 type RateLimitedError struct {
 	RetryAfter time.Duration
 }
@@ -199,6 +202,13 @@ type Queries interface {
 	ConsumeLinkRequest(ctx context.Context, arg dbgen.ConsumeLinkRequestParams) (int64, error)
 	RecordWrongCode(ctx context.Context, arg dbgen.RecordWrongCodeParams) (int64, error)
 	VoidPendingMattermostRequests(ctx context.Context, arg dbgen.VoidPendingMattermostRequestsParams) (int64, error)
+	GetBridgeTokenRequestByHash(ctx context.Context, arg dbgen.GetBridgeTokenRequestByHashParams) (
+		dbgen.GetBridgeTokenRequestByHashRow, error)
+	VoidPendingBridgeCodeRequests(ctx context.Context, arg dbgen.VoidPendingBridgeCodeRequestsParams) (int64, error)
+	CountUserBridgeCodeRequests(ctx context.Context, arg dbgen.CountUserBridgeCodeRequestsParams) (
+		dbgen.CountUserBridgeCodeRequestsRow, error)
+	CountTargetBridgeCodeRequests(ctx context.Context, arg dbgen.CountTargetBridgeCodeRequestsParams) (
+		dbgen.CountTargetBridgeCodeRequestsRow, error)
 	VoidLinkRequest(ctx context.Context, arg dbgen.VoidLinkRequestParams) error
 	LockCodeTarget(ctx context.Context, arg dbgen.LockCodeTargetParams) error
 	CountUserCodeRequests(ctx context.Context, arg dbgen.CountUserCodeRequestsParams) (
@@ -268,9 +278,10 @@ type Config struct {
 	// Business is the business clock: link times, expiries and the request limits.
 	Business clock.Clock
 	Log      *logging.Logger
-	// Telegram and Mattermost are the bots that call the messengers on the interactive path.
+	// Telegram, Mattermost and Bridge are the bots that call the messengers on the interactive path.
 	Telegram   TelegramBots
 	Mattermost MattermostBots
+	Bridge     BridgeBots
 	// Random is where tokens and codes come from; nil is crypto/rand.
 	Random io.Reader
 }
@@ -298,7 +309,8 @@ type Requester struct {
 	Address      netip.Addr
 }
 
-// Link is an Account link as the profile lists it (C-18.FR-10).
+// Link is an Account link as the profile lists it (C-18.FR-10). DisplayName is the account's name as a bridge
+// reported it, nil for a Telegram or a Mattermost link.
 type Link struct {
 	PublicID           string
 	Messenger          string
@@ -306,18 +318,24 @@ type Link struct {
 	ConnectionName     string
 	ExternalID         string
 	Username           *string
+	DisplayName        *string
 	LastUsedAt         *time.Time
 	CreatedAt          time.Time
 }
 
 // LinkableConnection is a Connection a link can be made through, as the profile sees it: no other field is shown.
+// LinkMethods and HandleKind are a Bridge Connection's, from its stored info (C-22.FR-15): the ways a link can be
+// made, and the kind of handle a code needs, empty when no code is offered; both are empty for other messengers.
 type LinkableConnection struct {
-	PublicID  string
-	Name      string
-	Messenger string
+	PublicID    string
+	Name        string
+	Messenger   string
+	LinkMethods []string
+	HandleKind  string
 }
 
-// Connections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
+// Connections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), each Bridge Connection
+// with how its accounts can be linked as its stored info says.
 func (s *Service) Connections(ctx context.Context) ([]LinkableConnection, error) {
 	rows, err := s.cfg.Store.ListLinkableConnections(ctx, s.cfg.OrgID)
 	if err != nil {
@@ -326,6 +344,10 @@ func (s *Service) Connections(ctx context.Context) ([]LinkableConnection, error)
 	out := make([]LinkableConnection, len(rows))
 	for i, r := range rows {
 		out[i] = LinkableConnection{PublicID: r.PublicID, Name: r.Name, Messenger: r.Type}
+		if r.Type == MessengerBridge {
+			o := BridgeOffer{Read: r.InfoRead, UserLookup: r.UserLookup, BotCanStart: r.BotCanStart}
+			out[i].LinkMethods, out[i].HandleKind = o.Methods(), o.HandleKind()
+		}
 	}
 	return out, nil
 }
@@ -341,7 +363,7 @@ func (s *Service) List(ctx context.Context, userID int64) ([]Link, error) {
 	for i, r := range rows {
 		out[i] = Link{PublicID: r.PublicID, Messenger: r.Messenger, ConnectionPublicID: r.ConnectionPublicID,
 			ConnectionName: r.ConnectionName, ExternalID: r.ExternalID, Username: textPtr(r.Username),
-			LastUsedAt: timePtr(r.LastUsedAt), CreatedAt: r.CreatedAt}
+			DisplayName: textPtr(r.DisplayName), LastUsedAt: timePtr(r.LastUsedAt), CreatedAt: r.CreatedAt}
 	}
 	return out, nil
 }
@@ -405,7 +427,7 @@ func (s *Service) unlink(ctx context.Context, r Requester, ownerID int64, ownerP
 		if _, err := q.DeleteAccountLink(ctx, dbgen.DeleteAccountLinkParams{OrgID: s.cfg.OrgID, ID: l.ID}); err != nil {
 			return fmt.Errorf("delete the account link %s: %w", l.PublicID, err)
 		}
-		v := viewOf(l.Messenger, l.ConnectionPublicID, l.ExternalID, textPtr(l.Username))
+		v := viewOf(l.Messenger, l.ConnectionPublicID, l.ExternalID, textPtr(l.Username), textPtr(l.DisplayName))
 		if err := s.record(ctx, q, r.Actor, r.Transport, r.Address, ActionUnlink, linkResource(l.PublicID, v),
 			removed(v), details(v, "", "", ownerPublicID)); err != nil {
 			return err
@@ -440,7 +462,7 @@ func (s *Service) removeUserLinks(ctx context.Context, q Queries, userID int64, 
 		return nil, fmt.Errorf("delete the account links of %s: %w", u.PublicID, err)
 	}
 	for _, l := range rows {
-		v := viewOf(l.Messenger, l.ConnectionPublicID, l.ExternalID, textPtr(l.Username))
+		v := viewOf(l.Messenger, l.ConnectionPublicID, l.ExternalID, textPtr(l.Username), textPtr(l.DisplayName))
 		if err := s.record(ctx, q, actor, t, addr, ActionUnlink, linkResource(l.PublicID, v), removed(v),
 			details(v, ReasonUserDeleted, "", u.PublicID)); err != nil {
 			return nil, err
@@ -463,13 +485,14 @@ func (s *Service) removeUserLinks(ctx context.Context, q Queries, userID int64, 
 	}, nil
 }
 
-// account is a messenger account to link through a Connection.
+// account is a messenger account to link through a Connection; displayName is a Bridge account's name.
 type account struct {
-	messenger string
-	conn      connRef
-	space     string
-	external  string
-	username  *string
+	messenger   string
+	conn        connRef
+	space       string
+	external    string
+	username    *string
+	displayName *string
 }
 
 // connRef names a Connection.
@@ -537,7 +560,8 @@ func (s *Service) insertLink(ctx context.Context, q Queries, u dbgen.LockLinkUse
 		if _, err := q.DeleteAccountLink(ctx, dbgen.DeleteAccountLinkParams{OrgID: s.cfg.OrgID, ID: prev.ID}); err != nil {
 			return Link{}, nil, fmt.Errorf("delete the replaced account link %s: %w", prev.PublicID, err)
 		}
-		v := viewOf(prev.Messenger, prev.ConnectionPublicID, prev.ExternalID, textPtr(prev.Username))
+		v := viewOf(prev.Messenger, prev.ConnectionPublicID, prev.ExternalID, textPtr(prev.Username),
+			textPtr(prev.DisplayName))
 		if err := s.record(ctx, q, actor, t, addr, ActionUnlink, linkResource(prev.PublicID, v), removed(v),
 			details(v, ReasonReplaced, "", u.PublicID)); err != nil {
 			return Link{}, nil, err
@@ -547,14 +571,14 @@ func (s *Service) insertLink(ctx context.Context, q Queries, u dbgen.LockLinkUse
 	now := s.now()
 	l := Link{PublicID: publicid.New(publicid.AccountLink), Messenger: a.messenger,
 		ConnectionPublicID: a.conn.publicID, ConnectionName: a.conn.name, ExternalID: a.external, Username: a.username,
-		CreatedAt: now}
+		DisplayName: a.displayName, CreatedAt: now}
 	_, err := q.InsertAccountLink(ctx, dbgen.InsertAccountLinkParams{OrgID: s.cfg.OrgID, PublicID: l.PublicID,
 		UserID: u.ID, Messenger: a.messenger, ConnectionID: a.conn.id, ExternalID: a.external,
-		Username: optText(a.username), CreatedAt: now})
+		Username: optText(a.username), DisplayName: optText(a.displayName), CreatedAt: now})
 	if err != nil {
 		return Link{}, nil, fmt.Errorf("insert the account link: %w", err)
 	}
-	v := viewOf(a.messenger, a.conn.publicID, a.external, a.username)
+	v := a.view()
 	if err := s.record(ctx, q, actor, t, addr, ActionLink, linkResource(l.PublicID, v), audit.Created(v),
 		details(v, "", replaced, u.PublicID)); err != nil {
 		return Link{}, nil, err
@@ -562,22 +586,23 @@ func (s *Service) insertLink(ctx context.Context, q Queries, u dbgen.LockLinkUse
 	return l, old, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
 }
 
-// relink keeps the link prev of the User u whose account a is linked again: the username and the Connection become
-// a's, and the link is recorded as account_link.link with what changed, replacing nothing.
+// relink keeps the link prev of the User u whose account a is linked again: the username, the display name and the
+// Connection become a's, and the link is recorded as account_link.link with what changed, replacing nothing.
 func (s *Service) relink(ctx context.Context, q Queries, u dbgen.LockLinkUserRow, a account,
 	prev dbgen.GetUserLinkInSpaceRow, actor audit.Actor, t audit.Transport, addr netip.Addr) (Link, *view, error) {
 	if err := q.UpdateAccountLink(ctx, dbgen.UpdateAccountLinkParams{Username: optText(a.username),
-		ConnectionID: a.conn.id, OrgID: s.cfg.OrgID, ID: prev.ID}); err != nil {
+		DisplayName: optText(a.displayName), ConnectionID: a.conn.id, OrgID: s.cfg.OrgID, ID: prev.ID}); err != nil {
 		return Link{}, nil, fmt.Errorf("update the account link %s: %w", prev.PublicID, err)
 	}
-	before := viewOf(prev.Messenger, prev.ConnectionPublicID, prev.ExternalID, textPtr(prev.Username))
-	v := viewOf(a.messenger, a.conn.publicID, a.external, a.username)
+	before := viewOf(prev.Messenger, prev.ConnectionPublicID, prev.ExternalID, textPtr(prev.Username),
+		textPtr(prev.DisplayName))
+	v := a.view()
 	if err := s.record(ctx, q, actor, t, addr, ActionLink, linkResource(prev.PublicID, v), audit.Diff(before, v),
 		details(v, "", "", u.PublicID)); err != nil {
 		return Link{}, nil, err
 	}
 	l := Link{PublicID: prev.PublicID, Messenger: a.messenger, ConnectionPublicID: a.conn.publicID,
-		ConnectionName: a.conn.name, ExternalID: a.external, Username: a.username,
+		ConnectionName: a.conn.name, ExternalID: a.external, Username: a.username, DisplayName: a.displayName,
 		LastUsedAt: timePtr(prev.LastUsedAt), CreatedAt: prev.CreatedAt.UTC()}
 	return l, nil, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
 }
@@ -614,7 +639,7 @@ func (s *Service) logUnlinked(ctx context.Context, messenger, connection, userPu
 // or the request is known.
 func (s *Service) reject(ctx context.Context, q Queries, actor audit.Actor, t audit.Transport, addr netip.Addr,
 	a account, reason, userPublicID string) error {
-	v := viewOf(a.messenger, a.conn.publicID, a.external, a.username)
+	v := a.view()
 	return s.record(ctx, q, actor, t, addr, ActionLinkRejected,
 		audit.Resource{Type: resourceConnection, PublicID: a.conn.publicID, Name: a.conn.name}, nil,
 		details(v, reason, "", userPublicID))
@@ -634,16 +659,23 @@ func (s *Service) hint(userPublicID, linkPublicID string) db.Hint {
 
 func (s *Service) now() time.Time { return s.cfg.Business.Now().UTC() }
 
-// view is what the Audit log diff of a link shows.
+// view is what the Audit log diff of a link shows; a Bridge link shows its display name too.
 type view struct {
-	Messenger  string  `json:"messenger,omitempty"`
-	Connection string  `json:"connection,omitempty"`
-	ExternalID string  `json:"external_id,omitempty"`
-	Username   *string `json:"username,omitempty"`
+	Messenger   string  `json:"messenger,omitempty"`
+	Connection  string  `json:"connection,omitempty"`
+	ExternalID  string  `json:"external_id,omitempty"`
+	Username    *string `json:"username,omitempty"`
+	DisplayName *string `json:"display_name,omitempty"`
 }
 
-func viewOf(messenger, connection, external string, username *string) view {
-	return view{Messenger: messenger, Connection: connection, ExternalID: external, Username: username}
+func viewOf(messenger, connection, external string, username, displayName *string) view {
+	return view{Messenger: messenger, Connection: connection, ExternalID: external, Username: username,
+		DisplayName: displayName}
+}
+
+// view is the view of the account a.
+func (a account) view() view {
+	return viewOf(a.messenger, a.conn.publicID, a.external, a.username, a.displayName)
 }
 
 // removed is the diff of a link that went: each value with nothing after it.
@@ -670,6 +702,9 @@ func details(v view, reason, replaced, userPublicID string) map[string]any {
 	d := map[string]any{"messenger": v.Messenger, "connection": v.Connection, "external_id": v.ExternalID}
 	if v.Username != nil {
 		d["username"] = *v.Username
+	}
+	if v.DisplayName != nil {
+		d["display_name"] = *v.DisplayName
 	}
 	for k, val := range map[string]string{"reason": reason, "replaced": replaced, "user": userPublicID} {
 		if val != "" {

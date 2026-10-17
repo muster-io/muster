@@ -2,6 +2,7 @@
   "accountLink.code": "You requested a link to Muster. Do not share this code.\n\n{code}",
   "accountLink.conflict": "This account is linked to another user. Its owner or an admin can unlink it.",
   "accountLink.invalid": "This link is invalid or expired. Start again from your Muster profile.",
+  "accountLink.linkedBridge": "Linked to Muster user {name} ({login})",
   "accountLink.linkedMattermost": "Linked to Muster user {name}",
   "accountLink.linkedTelegram": "Linked to Muster user {name} ({login})",
   "alerts.fullList": "Full list in Muster",

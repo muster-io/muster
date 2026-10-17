@@ -32,6 +32,39 @@ func (q *Queries) ConsumeLinkRequest(ctx context.Context, arg ConsumeLinkRequest
 	return result.RowsAffected(), nil
 }
 
+const countTargetBridgeCodeRequests = `-- name: CountTargetBridgeCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
+  AND messenger = 'bridge' AND method = 'code' AND created_at > $1::timestamptz
+`
+
+type CountTargetBridgeCodeRequestsParams struct {
+	Since            time.Time
+	OrgID            int64
+	ConnectionID     int64
+	TargetExternalID pgtype.Text
+}
+
+type CountTargetBridgeCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountTargetBridgeCodeRequests counts the Bridge code requests for one account of a Connection made after since, by
+// any User, with the oldest of them.
+func (q *Queries) CountTargetBridgeCodeRequests(ctx context.Context, arg CountTargetBridgeCodeRequestsParams) (CountTargetBridgeCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countTargetBridgeCodeRequests,
+		arg.Since,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.TargetExternalID,
+	)
+	var i CountTargetBridgeCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
 const countTargetCodeRequests = `-- name: CountTargetCodeRequests :one
 SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
 FROM account_link_requests
@@ -61,6 +94,32 @@ func (q *Queries) CountTargetCodeRequests(ctx context.Context, arg CountTargetCo
 		arg.TargetExternalID,
 	)
 	var i CountTargetCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
+const countUserBridgeCodeRequests = `-- name: CountUserBridgeCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND user_id = $3 AND messenger = 'bridge' AND method = 'code'
+  AND created_at > $1::timestamptz
+`
+
+type CountUserBridgeCodeRequestsParams struct {
+	Since  time.Time
+	OrgID  int64
+	UserID int64
+}
+
+type CountUserBridgeCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountUserBridgeCodeRequests counts the Bridge code requests of a User made after since, with the oldest of them.
+func (q *Queries) CountUserBridgeCodeRequests(ctx context.Context, arg CountUserBridgeCodeRequestsParams) (CountUserBridgeCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countUserBridgeCodeRequests, arg.Since, arg.OrgID, arg.UserID)
+	var i CountUserBridgeCodeRequestsRow
 	err := row.Scan(&i.Requests, &i.Oldest)
 	return i, err
 }
@@ -112,9 +171,9 @@ const deleteUserAccountLinks = `-- name: DeleteUserAccountLinks :many
 WITH deleted AS (
     DELETE FROM account_links
     WHERE org_id = $1 AND user_id = $2
-    RETURNING id, public_id, messenger, connection_id, external_id, username
+    RETURNING id, public_id, messenger, connection_id, external_id, username, display_name
 )
-SELECT d.public_id, d.messenger, d.external_id, d.username, c.public_id AS connection_public_id,
+SELECT d.public_id, d.messenger, d.external_id, d.username, d.display_name, c.public_id AS connection_public_id,
        c.name AS connection_name
 FROM deleted d
 JOIN connections c ON c.org_id = $1 AND c.id = d.connection_id
@@ -131,6 +190,7 @@ type DeleteUserAccountLinksRow struct {
 	Messenger          string
 	ExternalID         string
 	Username           pgtype.Text
+	DisplayName        pgtype.Text
 	ConnectionPublicID string
 	ConnectionName     string
 }
@@ -150,6 +210,7 @@ func (q *Queries) DeleteUserAccountLinks(ctx context.Context, arg DeleteUserAcco
 			&i.Messenger,
 			&i.ExternalID,
 			&i.Username,
+			&i.DisplayName,
 			&i.ConnectionPublicID,
 			&i.ConnectionName,
 		); err != nil {
@@ -191,7 +252,7 @@ func (q *Queries) GetAccountLinkBySpace(ctx context.Context, arg GetAccountLinkB
 }
 
 const getAccountLinkOfUser = `-- name: GetAccountLinkOfUser :one
-SELECT al.id, al.public_id, al.messenger, al.external_id, al.username,
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.display_name,
        c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
@@ -211,6 +272,7 @@ type GetAccountLinkOfUserRow struct {
 	Messenger          string
 	ExternalID         string
 	Username           pgtype.Text
+	DisplayName        pgtype.Text
 	ConnectionPublicID string
 	ConnectionName     string
 }
@@ -225,14 +287,60 @@ func (q *Queries) GetAccountLinkOfUser(ctx context.Context, arg GetAccountLinkOf
 		&i.Messenger,
 		&i.ExternalID,
 		&i.Username,
+		&i.DisplayName,
 		&i.ConnectionPublicID,
 		&i.ConnectionName,
 	)
 	return i, err
 }
 
+const getBridgeTokenRequestByHash = `-- name: GetBridgeTokenRequestByHash :one
+SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
+       u.public_id AS user_public_id, c.public_id AS connection_public_id
+FROM account_link_requests r
+JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = $1 AND r.messenger = 'bridge' AND r.method = 'token' AND r.secret_hash = $2
+FOR UPDATE OF r
+`
+
+type GetBridgeTokenRequestByHashParams struct {
+	OrgID      int64
+	SecretHash []byte
+}
+
+type GetBridgeTokenRequestByHashRow struct {
+	ID                 int64
+	UserID             int64
+	ConnectionID       int64
+	ExpiresAt          time.Time
+	ConsumedAt         pgtype.Timestamptz
+	VoidedAt           pgtype.Timestamptz
+	UserPublicID       string
+	ConnectionPublicID string
+}
+
+// GetBridgeTokenRequestByHash locks the Bridge token request of a token, which an account_link event names by its hash
+// alone, with its User and the Connection it is bound to.
+func (q *Queries) GetBridgeTokenRequestByHash(ctx context.Context, arg GetBridgeTokenRequestByHashParams) (GetBridgeTokenRequestByHashRow, error) {
+	row := q.db.QueryRow(ctx, getBridgeTokenRequestByHash, arg.OrgID, arg.SecretHash)
+	var i GetBridgeTokenRequestByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ConnectionID,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.VoidedAt,
+		&i.UserPublicID,
+		&i.ConnectionPublicID,
+	)
+	return i, err
+}
+
 const getLinkConnection = `-- name: GetLinkConnection :one
-SELECT id, public_id, type, name, bot_user_id, bot_username
+SELECT id, public_id, type, name, bot_user_id, bot_username,
+       coalesce(bridge_info->>'link_url_template', '')::text AS link_url_template
 FROM connections
 WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
 `
@@ -243,15 +351,17 @@ type GetLinkConnectionParams struct {
 }
 
 type GetLinkConnectionRow struct {
-	ID          int64
-	PublicID    string
-	Type        string
-	Name        string
-	BotUserID   pgtype.Text
-	BotUsername pgtype.Text
+	ID              int64
+	PublicID        string
+	Type            string
+	Name            string
+	BotUserID       pgtype.Text
+	BotUsername     pgtype.Text
+	LinkUrlTemplate string
 }
 
-// GetLinkConnection reads a Connection that is not deleted, for starting a link through it.
+// GetLinkConnection reads a Connection that is not deleted, for starting a link through it, with the
+// link_url_template of a Bridge Connection's stored info, empty without one.
 func (q *Queries) GetLinkConnection(ctx context.Context, arg GetLinkConnectionParams) (GetLinkConnectionRow, error) {
 	row := q.db.QueryRow(ctx, getLinkConnection, arg.OrgID, arg.PublicID)
 	var i GetLinkConnectionRow
@@ -262,13 +372,15 @@ func (q *Queries) GetLinkConnection(ctx context.Context, arg GetLinkConnectionPa
 		&i.Name,
 		&i.BotUserID,
 		&i.BotUsername,
+		&i.LinkUrlTemplate,
 	)
 	return i, err
 }
 
 const getLinkRequest = `-- name: GetLinkRequest :one
-SELECT r.id, r.user_id, r.messenger, r.connection_id, r.target_external_id, r.target_username,
-       c.public_id AS connection_public_id, c.name AS connection_name
+SELECT r.id, r.user_id, r.messenger, r.connection_id, r.method, r.target_external_id, r.target_username,
+       r.target_display_name, c.public_id AS connection_public_id, c.name AS connection_name,
+       (c.deleted_at IS NOT NULL)::boolean AS connection_deleted
 FROM account_link_requests r
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = $1 AND r.public_id = $2
@@ -284,13 +396,16 @@ type GetLinkRequestRow struct {
 	UserID             int64
 	Messenger          string
 	ConnectionID       int64
+	Method             pgtype.Text
 	TargetExternalID   pgtype.Text
 	TargetUsername     pgtype.Text
+	TargetDisplayName  pgtype.Text
 	ConnectionPublicID string
 	ConnectionName     string
+	ConnectionDeleted  bool
 }
 
-// GetLinkRequest reads a link request by its public_id, with its Connection.
+// GetLinkRequest reads a link request by its public_id, with its Connection and whether that is deleted.
 func (q *Queries) GetLinkRequest(ctx context.Context, arg GetLinkRequestParams) (GetLinkRequestRow, error) {
 	row := q.db.QueryRow(ctx, getLinkRequest, arg.OrgID, arg.PublicID)
 	var i GetLinkRequestRow
@@ -299,10 +414,13 @@ func (q *Queries) GetLinkRequest(ctx context.Context, arg GetLinkRequestParams) 
 		&i.UserID,
 		&i.Messenger,
 		&i.ConnectionID,
+		&i.Method,
 		&i.TargetExternalID,
 		&i.TargetUsername,
+		&i.TargetDisplayName,
 		&i.ConnectionPublicID,
 		&i.ConnectionName,
+		&i.ConnectionDeleted,
 	)
 	return i, err
 }
@@ -377,8 +495,8 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDPa
 }
 
 const getUserLinkInSpace = `-- name: GetUserLinkInSpace :one
-SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.created_at, al.last_used_at,
-       c.public_id AS connection_public_id, c.name AS connection_name
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.display_name, al.created_at,
+       al.last_used_at, c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
 WHERE al.org_id = $1 AND al.user_id = $2 AND al.identity_space = $3
@@ -397,6 +515,7 @@ type GetUserLinkInSpaceRow struct {
 	Messenger          string
 	ExternalID         string
 	Username           pgtype.Text
+	DisplayName        pgtype.Text
 	CreatedAt          time.Time
 	LastUsedAt         pgtype.Timestamptz
 	ConnectionPublicID string
@@ -414,6 +533,7 @@ func (q *Queries) GetUserLinkInSpace(ctx context.Context, arg GetUserLinkInSpace
 		&i.Messenger,
 		&i.ExternalID,
 		&i.Username,
+		&i.DisplayName,
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.ConnectionPublicID,
@@ -423,8 +543,10 @@ func (q *Queries) GetUserLinkInSpace(ctx context.Context, arg GetUserLinkInSpace
 }
 
 const insertAccountLink = `-- name: InsertAccountLink :one
-INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username, display_name,
+                           created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9::timestamptz)
 RETURNING id
 `
 
@@ -436,6 +558,7 @@ type InsertAccountLinkParams struct {
 	ConnectionID int64
 	ExternalID   string
 	Username     pgtype.Text
+	DisplayName  pgtype.Text
 	CreatedAt    time.Time
 }
 
@@ -448,6 +571,7 @@ func (q *Queries) InsertAccountLink(ctx context.Context, arg InsertAccountLinkPa
 		arg.ConnectionID,
 		arg.ExternalID,
 		arg.Username,
+		arg.DisplayName,
 		arg.CreatedAt,
 	)
 	var id int64
@@ -456,24 +580,26 @@ func (q *Queries) InsertAccountLink(ctx context.Context, arg InsertAccountLinkPa
 }
 
 const insertLinkRequest = `-- name: InsertLinkRequest :one
-INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, secret_hash,
-                                   target_external_id, target_username, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7,
-        $8, $9::timestamptz, $10::timestamptz)
+INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, method, secret_hash,
+                                   target_external_id, target_username, target_display_name, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11::timestamptz, $12::timestamptz)
 RETURNING id
 `
 
 type InsertLinkRequestParams struct {
-	OrgID            int64
-	PublicID         string
-	UserID           int64
-	Messenger        string
-	ConnectionID     int64
-	SecretHash       []byte
-	TargetExternalID pgtype.Text
-	TargetUsername   pgtype.Text
-	CreatedAt        time.Time
-	ExpiresAt        time.Time
+	OrgID             int64
+	PublicID          string
+	UserID            int64
+	Messenger         string
+	ConnectionID      int64
+	Method            pgtype.Text
+	SecretHash        []byte
+	TargetExternalID  pgtype.Text
+	TargetUsername    pgtype.Text
+	TargetDisplayName pgtype.Text
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
 }
 
 func (q *Queries) InsertLinkRequest(ctx context.Context, arg InsertLinkRequestParams) (int64, error) {
@@ -483,9 +609,11 @@ func (q *Queries) InsertLinkRequest(ctx context.Context, arg InsertLinkRequestPa
 		arg.UserID,
 		arg.Messenger,
 		arg.ConnectionID,
+		arg.Method,
 		arg.SecretHash,
 		arg.TargetExternalID,
 		arg.TargetUsername,
+		arg.TargetDisplayName,
 		arg.CreatedAt,
 		arg.ExpiresAt,
 	)
@@ -495,7 +623,7 @@ func (q *Queries) InsertLinkRequest(ctx context.Context, arg InsertLinkRequestPa
 }
 
 const listAccountLinksOfUser = `-- name: ListAccountLinksOfUser :many
-SELECT al.public_id, al.messenger, al.external_id, al.username, al.last_used_at, al.created_at,
+SELECT al.public_id, al.messenger, al.external_id, al.username, al.display_name, al.last_used_at, al.created_at,
        c.public_id AS connection_public_id, c.name AS connection_name
 FROM account_links al
 JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
@@ -513,6 +641,7 @@ type ListAccountLinksOfUserRow struct {
 	Messenger          string
 	ExternalID         string
 	Username           pgtype.Text
+	DisplayName        pgtype.Text
 	LastUsedAt         pgtype.Timestamptz
 	CreatedAt          time.Time
 	ConnectionPublicID string
@@ -534,6 +663,7 @@ func (q *Queries) ListAccountLinksOfUser(ctx context.Context, arg ListAccountLin
 			&i.Messenger,
 			&i.ExternalID,
 			&i.Username,
+			&i.DisplayName,
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.ConnectionPublicID,
@@ -550,21 +680,27 @@ func (q *Queries) ListAccountLinksOfUser(ctx context.Context, arg ListAccountLin
 }
 
 const listLinkableConnections = `-- name: ListLinkableConnections :many
-SELECT public_id, name, type
+SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
+       coalesce(bridge_info->>'user_lookup', '')::text AS user_lookup,
+       coalesce((bridge_info->'capabilities'->'direct_messages'->>'bot_can_start')::boolean, false)::boolean
+           AS bot_can_start
 FROM connections
-WHERE org_id = $1 AND deleted_at IS NULL AND type <> 'bridge'
+WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY type, lower(name), id
 `
 
 type ListLinkableConnectionsRow struct {
-	PublicID string
-	Name     string
-	Type     string
+	PublicID    string
+	Name        string
+	Type        string
+	InfoRead    bool
+	UserLookup  string
+	BotCanStart bool
 }
 
-// ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
-// Bridge Connections are not linkable until their Account links exist (S-076): LinkableConnection.messenger has no
-// bridge.
+// ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
+// a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
+// its bot can start a direct chat.
 func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]ListLinkableConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, listLinkableConnections, orgID)
 	if err != nil {
@@ -574,7 +710,14 @@ func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]L
 	items := []ListLinkableConnectionsRow{}
 	for rows.Next() {
 		var i ListLinkableConnectionsRow
-		if err := rows.Scan(&i.PublicID, &i.Name, &i.Type); err != nil {
+		if err := rows.Scan(
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.InfoRead,
+			&i.UserLookup,
+			&i.BotCanStart,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -597,8 +740,8 @@ type LockCodeTargetParams struct {
 	TargetExternalID string
 }
 
-// LockCodeTarget takes, until the transaction ends, the lock of the Mattermost code requests for one account of a
-// Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
+// LockCodeTarget takes, until the transaction ends, the lock of the Mattermost or Bridge code requests for one account
+// of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
 // concurrent requests serialize. A collision of the hash only serializes two accounts.
 func (q *Queries) LockCodeTarget(ctx context.Context, arg LockCodeTargetParams) error {
 	_, err := q.db.Exec(ctx, lockCodeTarget,
@@ -712,8 +855,9 @@ type LookupAccountLinkRow struct {
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Account links (C-18): the messenger accounts linked to Users, one per identity space and User, and the link
-// requests started from the web session — a hashed Telegram deep-link token or a hashed Mattermost code.
+// Account links (C-18, C-22.FR-15): the messenger accounts linked to Users, one per identity space and User, and the
+// link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, or a hashed
+// Bridge token or code.
 // LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
 // their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
 func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkParams) (LookupAccountLinkRow, error) {
@@ -815,22 +959,24 @@ func (q *Queries) TouchAccountLink(ctx context.Context, arg TouchAccountLinkPara
 
 const updateAccountLink = `-- name: UpdateAccountLink :exec
 UPDATE account_links
-SET username = $1, connection_id = $2
-WHERE org_id = $3 AND id = $4
+SET username = $1, display_name = $2, connection_id = $3
+WHERE org_id = $4 AND id = $5
 `
 
 type UpdateAccountLinkParams struct {
 	Username     pgtype.Text
+	DisplayName  pgtype.Text
 	ConnectionID int64
 	OrgID        int64
 	ID           int64
 }
 
-// UpdateAccountLink keeps a link whose account is linked again by its User, with the username and the Connection of
-// the new link.
+// UpdateAccountLink keeps a link whose account is linked again by its User, with the username, the display name and
+// the Connection of the new link.
 func (q *Queries) UpdateAccountLink(ctx context.Context, arg UpdateAccountLinkParams) error {
 	_, err := q.db.Exec(ctx, updateAccountLink,
 		arg.Username,
+		arg.DisplayName,
 		arg.ConnectionID,
 		arg.OrgID,
 		arg.ID,
@@ -853,6 +999,35 @@ type VoidLinkRequestParams struct {
 func (q *Queries) VoidLinkRequest(ctx context.Context, arg VoidLinkRequestParams) error {
 	_, err := q.db.Exec(ctx, voidLinkRequest, arg.Now, arg.OrgID, arg.ID)
 	return err
+}
+
+const voidPendingBridgeCodeRequests = `-- name: VoidPendingBridgeCodeRequests :execrows
+UPDATE account_link_requests
+SET voided_at = $1::timestamptz
+WHERE org_id = $2 AND user_id = $3 AND connection_id = $4 AND messenger = 'bridge'
+  AND method = 'code' AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type VoidPendingBridgeCodeRequestsParams struct {
+	Now          time.Time
+	OrgID        int64
+	UserID       int64
+	ConnectionID int64
+}
+
+// VoidPendingBridgeCodeRequests voids the pending Bridge code requests of a User for a Connection, which a new one
+// replaces.
+func (q *Queries) VoidPendingBridgeCodeRequests(ctx context.Context, arg VoidPendingBridgeCodeRequestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, voidPendingBridgeCodeRequests,
+		arg.Now,
+		arg.OrgID,
+		arg.UserID,
+		arg.ConnectionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const voidPendingMattermostRequests = `-- name: VoidPendingMattermostRequests :execrows

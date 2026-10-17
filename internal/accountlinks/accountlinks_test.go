@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,12 +35,16 @@ var (
 	errBoom = errors.New("boom")
 )
 
-// The fixtures: Users, a Telegram and a Mattermost Connection, a deleted one and a second Telegram one.
+// The fixtures: Users, a Telegram and a Mattermost Connection, a deleted one and a second Telegram one; a Bridge
+// Connection whose info offers a code by email, a second one whose info Muster has not read, and a deleted one.
 const (
 	aliceID, bobID, carolID, daveID     = 1, 2, 3, 4
 	alicePID, bobPID, carolPID, davePID = "SRAAAAAAAAAAA1", "SRAAAAAAAAAAA2", "SRAAAAAAAAAAA3", "SRAAAAAAAAAAA4"
 	tgID, mmID, goneID, tg2ID           = 11, 12, 13, 14
 	tgPID, mmPID, gonePID, tg2PID       = "CNAAAAAAAAAAA1", "CNAAAAAAAAAAA2", "CNAAAAAAAAAAA3", "CNAAAAAAAAAAA4"
+	brID, br2ID, brGoneID               = 15, 16, 17
+	brPID, br2PID, brGonePID            = "CNAAAAAAAAAAA5", "CNAAAAAAAAAAA6", "CNAAAAAAAAAAA7"
+	linkTemplate                        = "https://chat.example.org/bots/muster?start={token}"
 )
 
 type fUser struct {
@@ -55,21 +60,32 @@ type fConn struct {
 	deleted                bool
 }
 
+// fInfo is what the stored info of a Bridge Connection says of its links.
+type fInfo struct {
+	lookup      string
+	botCanStart bool
+	template    string
+}
+
 type fLink struct {
-	id        int64
-	publicID  string
-	userID    int64
-	messenger string
-	connID    int64
-	external  string
-	username  *string
-	createdAt time.Time
-	lastUsed  *time.Time
+	id          int64
+	publicID    string
+	userID      int64
+	messenger   string
+	connID      int64
+	external    string
+	username    *string
+	displayName *string
+	createdAt   time.Time
+	lastUsed    *time.Time
 }
 
 func (l fLink) space() string {
-	if l.messenger == MessengerTelegram {
+	switch l.messenger {
+	case MessengerTelegram:
 		return SpaceTelegram
+	case MessengerBridge:
+		return SpaceBridge(l.connID)
 	}
 	return SpaceMattermost(l.connID)
 }
@@ -80,8 +96,10 @@ type fReq struct {
 	userID                 int64
 	messenger              string
 	connID                 int64
+	method                 pgtype.Text
 	hash                   []byte
 	target, targetUsername pgtype.Text
+	targetDisplayName      pgtype.Text
 	attempts               int64
 	created, expires       time.Time
 	consumed, voided       *time.Time
@@ -92,6 +110,8 @@ type fReq struct {
 type fakeStore struct {
 	users []fUser
 	conns []fConn
+	// infos are the stored infos of the Bridge Connections, by id; none is an info never read.
+	infos map[int64]fInfo
 	links []fLink
 	reqs  []fReq
 	audit []adb.InsertAuditEntryParams
@@ -118,7 +138,11 @@ func newStore() *fakeStore {
 		{mmID, mmPID, MessengerMattermost, "mm", "bot-id", "", false},
 		{goneID, gonePID, MessengerTelegram, "gone", "", "gone_bot", true},
 		{tg2ID, tg2PID, MessengerTelegram, "Second", "", "", false},
+		{brID, brPID, MessengerBridge, "Dev Bridge", "", "", false},
+		{br2ID, br2PID, MessengerBridge, "br", "", "", false},
+		{brGoneID, brGonePID, MessengerBridge, "gone bridge", "", "", true},
 	}
+	s.infos = map[int64]fInfo{brID: {lookup: LookupEmail, botCanStart: true, template: linkTemplate}}
 	return s
 }
 
@@ -204,7 +228,8 @@ func (s *fakeStore) GetLinkConnection(_ context.Context, a dbgen.GetLinkConnecti
 	for _, c := range s.conns {
 		if a.OrgID == org && c.publicID == a.PublicID && !c.deleted {
 			return dbgen.GetLinkConnectionRow{ID: c.id, PublicID: c.publicID, Type: c.typ, Name: c.name,
-				BotUserID: text(c.botUserID), BotUsername: text(c.botUsername)}, nil
+				BotUserID: text(c.botUserID), BotUsername: text(c.botUsername),
+				LinkUrlTemplate: s.infos[c.id].template}, nil
 		}
 	}
 	return dbgen.GetLinkConnectionRow{}, pgx.ErrNoRows
@@ -218,7 +243,9 @@ func (s *fakeStore) ListLinkableConnections(_ context.Context, orgID int64) ([]d
 	out := []dbgen.ListLinkableConnectionsRow{}
 	for _, c := range s.conns {
 		if orgID == org && !c.deleted {
-			out = append(out, dbgen.ListLinkableConnectionsRow{PublicID: c.publicID, Name: c.name, Type: c.typ})
+			i, read := s.infos[c.id]
+			out = append(out, dbgen.ListLinkableConnectionsRow{PublicID: c.publicID, Name: c.name, Type: c.typ,
+				InfoRead: read, UserLookup: i.lookup, BotCanStart: i.botCanStart})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListLinkableConnectionsRow) int {
@@ -262,8 +289,8 @@ func (s *fakeStore) ListAccountLinksOfUser(_ context.Context, a dbgen.ListAccoun
 		if a.OrgID == org && l.userID == a.UserID {
 			c := s.conn(l.connID)
 			r := dbgen.ListAccountLinksOfUserRow{PublicID: l.publicID, Messenger: l.messenger, ExternalID: l.external,
-				Username: ptrText(l.username), CreatedAt: l.createdAt, ConnectionPublicID: c.publicID,
-				ConnectionName: c.name}
+				Username: ptrText(l.username), DisplayName: ptrText(l.displayName), CreatedAt: l.createdAt,
+				ConnectionPublicID: c.publicID, ConnectionName: c.name}
 			if l.lastUsed != nil {
 				r.LastUsedAt = pgtype.Timestamptz{Time: *l.lastUsed, Valid: true}
 			}
@@ -282,8 +309,8 @@ func (s *fakeStore) GetAccountLinkOfUser(_ context.Context, a dbgen.GetAccountLi
 		if a.OrgID == org && l.userID == a.UserID && l.publicID == a.PublicID {
 			c := s.conn(l.connID)
 			return dbgen.GetAccountLinkOfUserRow{ID: l.id, PublicID: l.publicID, Messenger: l.messenger,
-				ExternalID: l.external, Username: ptrText(l.username), ConnectionPublicID: c.publicID,
-				ConnectionName: c.name}, nil
+				ExternalID: l.external, Username: ptrText(l.username), DisplayName: ptrText(l.displayName),
+				ConnectionPublicID: c.publicID, ConnectionName: c.name}, nil
 		}
 	}
 	return dbgen.GetAccountLinkOfUserRow{}, pgx.ErrNoRows
@@ -311,8 +338,9 @@ func (s *fakeStore) GetUserLinkInSpace(_ context.Context, a dbgen.GetUserLinkInS
 		if a.OrgID == org && l.userID == a.UserID && l.space() == a.IdentitySpace {
 			c := s.conn(l.connID)
 			return dbgen.GetUserLinkInSpaceRow{ID: l.id, PublicID: l.publicID, Messenger: l.messenger,
-				ExternalID: l.external, Username: ptrText(l.username), CreatedAt: l.createdAt,
-				LastUsedAt: ts(l.lastUsed), ConnectionPublicID: c.publicID, ConnectionName: c.name}, nil
+				ExternalID: l.external, Username: ptrText(l.username), DisplayName: ptrText(l.displayName),
+				CreatedAt: l.createdAt, LastUsedAt: ts(l.lastUsed), ConnectionPublicID: c.publicID,
+				ConnectionName: c.name}, nil
 		}
 	}
 	return dbgen.GetUserLinkInSpaceRow{}, pgx.ErrNoRows
@@ -332,7 +360,8 @@ func (s *fakeStore) InsertAccountLink(_ context.Context, a dbgen.InsertAccountLi
 		return 0, err
 	}
 	l := fLink{id: s.id(), publicID: a.PublicID, userID: a.UserID, messenger: a.Messenger, connID: a.ConnectionID,
-		external: a.ExternalID, username: textPtr(a.Username), createdAt: a.CreatedAt}
+		external: a.ExternalID, username: textPtr(a.Username), displayName: textPtr(a.DisplayName),
+		createdAt: a.CreatedAt}
 	if a.OrgID != org {
 		return 0, errors.New("another organization")
 	}
@@ -355,6 +384,7 @@ func (s *fakeStore) UpdateAccountLink(_ context.Context, a dbgen.UpdateAccountLi
 	for i, l := range s.links {
 		if a.OrgID == org && l.id == a.ID {
 			s.links[i].username, s.links[i].connID = textPtr(a.Username), a.ConnectionID
+			s.links[i].displayName = textPtr(a.DisplayName)
 		}
 	}
 	return nil
@@ -365,8 +395,8 @@ func (s *fakeStore) InsertLinkRequest(_ context.Context, a dbgen.InsertLinkReque
 		return 0, err
 	}
 	r := fReq{id: s.id(), publicID: a.PublicID, userID: a.UserID, messenger: a.Messenger, connID: a.ConnectionID,
-		hash: a.SecretHash, target: a.TargetExternalID, targetUsername: a.TargetUsername, created: a.CreatedAt,
-		expires: a.ExpiresAt}
+		method: a.Method, hash: a.SecretHash, target: a.TargetExternalID, targetUsername: a.TargetUsername,
+		targetDisplayName: a.TargetDisplayName, created: a.CreatedAt, expires: a.ExpiresAt}
 	s.reqs = append(s.reqs, r)
 	return r.id, nil
 }
@@ -403,8 +433,9 @@ func (s *fakeStore) GetLinkRequest(_ context.Context, a dbgen.GetLinkRequestPara
 		if a.OrgID == org && r.publicID == a.PublicID {
 			c := s.conn(r.connID)
 			return dbgen.GetLinkRequestRow{ID: r.id, UserID: r.userID, Messenger: r.messenger, ConnectionID: r.connID,
-				TargetExternalID: r.target, TargetUsername: r.targetUsername, ConnectionPublicID: c.publicID,
-				ConnectionName: c.name}, nil
+				Method: r.method, TargetExternalID: r.target, TargetUsername: r.targetUsername,
+				TargetDisplayName: r.targetDisplayName, ConnectionPublicID: c.publicID, ConnectionName: c.name,
+				ConnectionDeleted: c.deleted}, nil
 		}
 	}
 	return dbgen.GetLinkRequestRow{}, pgx.ErrNoRows
@@ -481,11 +512,13 @@ func (s *fakeStore) VoidLinkRequest(_ context.Context, a dbgen.VoidLinkRequestPa
 	return nil
 }
 
-func (s *fakeStore) count(match func(fReq) bool, since time.Time) (int64, time.Time) {
+// count counts the code requests of messenger made after since that match, with the oldest of them.
+func (s *fakeStore) count(messenger string, match func(fReq) bool, since time.Time) (int64, time.Time) {
 	var n int64
 	oldest := since
 	for _, r := range s.reqs {
-		if r.messenger == MessengerMattermost && r.created.After(since) && match(r) {
+		code := messenger == MessengerMattermost || r.method.String == MethodCode
+		if r.messenger == messenger && code && r.created.After(since) && match(r) {
 			if n == 0 || r.created.Before(oldest) {
 				oldest = r.created
 			}
@@ -520,7 +553,8 @@ func (s *fakeStore) CountUserCodeRequests(_ context.Context, a dbgen.CountUserCo
 		return dbgen.CountUserCodeRequestsRow{}, err
 	}
 	s.mark("user")
-	n, oldest := s.count(func(r fReq) bool { return a.OrgID == org && r.userID == a.UserID }, a.Since)
+	n, oldest := s.count(MessengerMattermost, func(r fReq) bool { return a.OrgID == org && r.userID == a.UserID },
+		a.Since)
 	return dbgen.CountUserCodeRequestsRow{Requests: n, Oldest: oldest}, nil
 }
 
@@ -530,7 +564,7 @@ func (s *fakeStore) CountTargetCodeRequests(_ context.Context, a dbgen.CountTarg
 		return dbgen.CountTargetCodeRequestsRow{}, err
 	}
 	s.mark("target")
-	n, oldest := s.count(func(r fReq) bool {
+	n, oldest := s.count(MessengerMattermost, func(r fReq) bool {
 		return a.OrgID == org && r.connID == a.ConnectionID && r.target == a.TargetExternalID
 	}, a.Since)
 	return dbgen.CountTargetCodeRequestsRow{Requests: n, Oldest: oldest}, nil
@@ -546,8 +580,8 @@ func (s *fakeStore) DeleteUserAccountLinks(_ context.Context, a dbgen.DeleteUser
 		if a.OrgID == org && l.userID == a.UserID {
 			c := s.conn(l.connID)
 			out = append(out, dbgen.DeleteUserAccountLinksRow{PublicID: l.publicID, Messenger: l.messenger,
-				ExternalID: l.external, Username: ptrText(l.username), ConnectionPublicID: c.publicID,
-				ConnectionName: c.name})
+				ExternalID: l.external, Username: ptrText(l.username), DisplayName: ptrText(l.displayName),
+				ConnectionPublicID: c.publicID, ConnectionName: c.name})
 		}
 	}
 	s.links = slices.DeleteFunc(s.links, func(l fLink) bool { return a.OrgID == org && l.userID == a.UserID })
@@ -635,15 +669,16 @@ type env struct {
 	log   *bytes.Buffer
 	tg    *fakeTG
 	mm    *fakeMM
+	br    *fakeBR
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{store: newStore(), clock: clock.NewManual(t0), log: &bytes.Buffer{}, tg: &fakeTG{username: "fallback_bot"},
-		mm: newFakeMM()}
+		mm: newFakeMM(), br: newFakeBR()}
 	logger := logging.New(e.log, logging.LevelInfo)
 	e.s = New(Config{OrgID: org, Store: e.store, Audit: audit.NewWriter(logger, e.clock), Business: e.clock,
-		Log: logger, Telegram: e.tg, Mattermost: e.mm, Random: &counter{}})
+		Log: logger, Telegram: e.tg, Mattermost: e.mm, Bridge: e.br, Random: &counter{}})
 	return e
 }
 
@@ -724,21 +759,27 @@ func TestLookup(t *testing.T) {
 	}
 }
 
-// TestLists is C-18.FR-6 and FR-10: a User's links with their Connection, username and last use; an Admin's list of
-// another User, unknown and deleted Users included; the Connections to link through, by messenger and name.
+// TestLists is C-18.FR-6, FR-10 and C-22.FR-15: a User's links with their Connection, username, display name and last
+// use; an Admin's list of another User, unknown and deleted Users included; the Connections to link through, by
+// messenger and name, each Bridge Connection with the link methods and the kind of handle its stored info offers —
+// only the token, and no kind, while Muster has not read its info.
 func TestLists(t *testing.T) {
 	e := newEnv(t)
 	used := t0.Add(time.Minute)
 	l := e.addLink(bobID, MessengerMattermost, mmID, "u-bob", ptr("bob"))
 	e.store.links[0].lastUsed = &used
 	e.addLink(bobID, MessengerTelegram, tgID, "7002", nil)
+	b := e.addLink(bobID, MessengerBridge, brID, "u-bob", nil)
+	e.store.links[2].displayName = ptr("Bob Brown")
 	links, err := e.s.List(t.Context(), bobID)
-	if err != nil || len(links) != 2 || links[0].PublicID != l.publicID || links[0].ConnectionName != "mm" ||
+	if err != nil || len(links) != 3 || links[0].PublicID != l.publicID || links[0].ConnectionName != "mm" ||
 		links[0].ConnectionPublicID != mmPID || *links[0].Username != "bob" || !links[0].LastUsedAt.Equal(used) ||
-		links[1].Username != nil || links[1].LastUsedAt != nil || links[1].Messenger != MessengerTelegram {
+		links[0].DisplayName != nil || links[1].Username != nil || links[1].LastUsedAt != nil ||
+		links[1].Messenger != MessengerTelegram || links[2].PublicID != b.publicID || links[2].Username != nil ||
+		links[2].DisplayName == nil || *links[2].DisplayName != "Bob Brown" || links[2].Messenger != MessengerBridge {
 		t.Fatalf("List = %+v, %v", links, err)
 	}
-	if got, err := e.s.ListOfUser(t.Context(), strings.ToLower(bobPID)); err != nil || len(got) != 2 {
+	if got, err := e.s.ListOfUser(t.Context(), strings.ToLower(bobPID)); err != nil || len(got) != 3 {
 		t.Errorf("ListOfUser = %+v, %v", got, err)
 	}
 	if got, err := e.s.ListOfUser(t.Context(), davePID); err != nil || len(got) != 0 {
@@ -750,8 +791,14 @@ func TestLists(t *testing.T) {
 		}
 	}
 	conns, err := e.s.Connections(t.Context())
-	if err != nil || !slices.Equal(conns, []LinkableConnection{{mmPID, "mm", MessengerMattermost},
-		{tgPID, "Dev Telegram", MessengerTelegram}, {tg2PID, "Second", MessengerTelegram}}) {
+	if want := []LinkableConnection{
+		{PublicID: br2PID, Name: "br", Messenger: MessengerBridge, LinkMethods: []string{MethodToken}},
+		{PublicID: brPID, Name: "Dev Bridge", Messenger: MessengerBridge, LinkMethods: []string{MethodToken, MethodCode},
+			HandleKind: LookupEmail},
+		{PublicID: mmPID, Name: "mm", Messenger: MessengerMattermost},
+		{PublicID: tgPID, Name: "Dev Telegram", Messenger: MessengerTelegram},
+		{PublicID: tg2PID, Name: "Second", Messenger: MessengerTelegram},
+	}; err != nil || !reflect.DeepEqual(conns, want) {
 		t.Errorf("Connections = %+v, %v", conns, err)
 	}
 	for name, call := range map[string]func() error{

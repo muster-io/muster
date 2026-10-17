@@ -534,24 +534,167 @@ func TestIntegrationAccountLinksIdentitySpace(t *testing.T) {
 	})
 }
 
+// TestIntegrationBridgeLinkRequests runs 0012 over Telegram and Mattermost link requests: before it a Bridge request is
+// refused; after up the earlier requests and new ones without a method are accepted, a Bridge request needs a method,
+// a Bridge code its target, a Bridge request a Bridge Connection, and a Bridge token's hash is unique among Bridge
+// tokens while a code's is not; the CHECKs are validated. Down deletes the Bridge requests and restores the old CHECK,
+// validated; up again works.
+func TestIntegrationBridgeLinkRequests(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 11)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000A1', 'bob', 'bob', 'responder', 'local', 'active', '2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
+			telegram_bot_api_base_url, telegram_update_mode, bridge_base_url, bridge_event_delivery,
+			bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, c.public_id, c.type, c.name, c.server, c.bot_api, c.mode, c.base, c.delivery, '2026-10-05', 1, 1,
+			'2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('CN0000000000M1', 'mattermost', 'mm', 'http://mm', NULL, NULL, NULL, NULL),
+				('CN0000000000T1', 'telegram', 'tg', NULL, 'http://tg', 'long_polling', NULL, NULL),
+				('CN0000000000B1', 'bridge', 'br', NULL, NULL, NULL, 'http://br', 'poll'))
+				AS c (public_id, type, name, server, bot_api, mode, base, delivery)`)
+		n := 0
+		request := func(t *testing.T, messenger, conn, method, target string, hash byte) error {
+			t.Helper()
+			n++
+			cols, vals := "", ""
+			if method != "" {
+				cols, vals = ", method", ", '"+method+"'"
+			}
+			var tgt any
+			if target != "" {
+				tgt = target
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO account_link_requests (org_id, public_id, user_id,
+				messenger, connection_id, secret_hash, target_external_id, created_at, expires_at`+cols+`)
+				SELECT u.org_id, $1, u.id, $2, c.id, $3, $4, '2026-10-05', '2026-10-05 00:10'`+vals+`
+				FROM users u, connections c WHERE u.login = 'bob' AND c.public_id = $5`,
+				fmt.Sprintf("AR%012d", n), messenger, bytes.Repeat([]byte{hash}, 32), tgt, conn)
+			return err
+		}
+		checks := func(t *testing.T) string {
+			t.Helper()
+			rows, err := e.d.Pool.Query(t.Context(), `SELECT conname, convalidated FROM pg_constraint
+				WHERE conrelid = 'account_link_requests'::regclass AND contype = 'c'
+				  AND conname NOT IN ('account_link_requests_public_id_check', 'account_link_requests_secret_hash_check',
+				                      'account_link_requests_attempts_check')
+				ORDER BY 1`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var name string
+				var valid bool
+				if err := rows.Scan(&name, &valid); err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, fmt.Sprintf("%s:%v", strings.TrimPrefix(name, "account_link_requests_"), valid))
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			return strings.Join(out, " ")
+		}
+		indexes := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'account_link_requests'
+				AND indexname IN ('account_link_requests_bridge_token_key', 'account_link_requests_bridge_target_idx')`)
+		}
+		for _, r := range []struct {
+			messenger, conn, target string
+			hash                    byte
+		}{{"telegram", "CN0000000000T1", "", 1}, {"mattermost", "CN0000000000M1", "u-bob", 2}} {
+			if err := request(t, r.messenger, r.conn, "", r.target, r.hash); err != nil {
+				t.Fatal(err)
+			}
+		}
+		const old = "messenger_check:true target_check:true"
+		if got := checks(t); got != old || indexes(t) != 0 {
+			t.Fatalf("before 0012: %s", got)
+		}
+		if err := request(t, "bridge", "CN0000000000B1", "", "", 3); err == nil {
+			t.Error("before 0012: a Bridge request was accepted")
+		}
+
+		e.step(t, 1)
+		const v2 = "bridge_method_check:true bridge_target_check:true messenger_check:true method_check:true " +
+			"target_check:true"
+		if got := checks(t); got != v2 || indexes(t) != 2 {
+			t.Errorf("after up: %s, %d indexes", got, indexes(t))
+		}
+		for _, tt := range []struct {
+			name                         string
+			messenger, conn, method, tgt string
+			hash                         byte
+			ok                           bool
+		}{
+			{"a Telegram request without a method", "telegram", "CN0000000000T1", "", "", 4, true},
+			{"a Mattermost request without a method", "mattermost", "CN0000000000M1", "", "u-vera", 5, true},
+			{"a Bridge token", "bridge", "CN0000000000B1", "token", "", 6, true},
+			{"a Bridge code", "bridge", "CN0000000000B1", "code", "u-bob", 7, true},
+			{"a second Bridge code with the same hash", "bridge", "CN0000000000B1", "code", "u-bob", 7, true},
+			{"a Bridge token whose hash a Telegram token has", "bridge", "CN0000000000B1", "token", "", 1, true},
+			{"a Bridge request without a method", "bridge", "CN0000000000B1", "", "", 8, false},
+			{"a Bridge code without a target", "bridge", "CN0000000000B1", "code", "", 9, false},
+			{"an unknown method", "bridge", "CN0000000000B1", "deep_link", "", 10, false},
+			{"a Bridge request through a Mattermost Connection", "bridge", "CN0000000000M1", "token", "", 11, false},
+			{"a second Bridge token with the same hash", "bridge", "CN0000000000B1", "token", "", 6, false},
+		} {
+			if err := request(t, tt.messenger, tt.conn, tt.method, tt.tgt, tt.hash); (err == nil) != tt.ok {
+				t.Errorf("after up, %s: %v, want accepted %v", tt.name, err, tt.ok)
+			}
+		}
+		e.exec(t, `UPDATE account_link_requests SET target_display_name = 'Bob Brown' WHERE method = 'code'`)
+
+		e.step(t, -1)
+		if got := checks(t); got != old || indexes(t) != 0 {
+			t.Errorf("after down: %s, %d indexes", got, indexes(t))
+		}
+		if got := e.count(t, `SELECT count(*) FROM account_link_requests`); got != 4 {
+			t.Errorf("after down: %d requests, want the 4 of Telegram and Mattermost", got)
+		}
+		if e.count(t, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'account_link_requests'
+			AND column_name IN ('method', 'target_display_name')`) != 0 {
+			t.Error("after down: method or target_display_name is left")
+		}
+		if err := request(t, "bridge", "CN0000000000B1", "", "", 12); err == nil {
+			t.Error("after down: a Bridge request was accepted")
+		}
+
+		e.step(t, 1)
+		if got := checks(t); got != v2 || indexes(t) != 2 {
+			t.Errorf("after up again: %s, %d indexes", got, indexes(t))
+		}
+		if err := request(t, "bridge", "CN0000000000B1", "token", "", 13); err != nil {
+			t.Errorf("after up again: %v", err)
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 12 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (11)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (12)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":11`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":12`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":11`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":12`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -567,10 +710,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (11)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (12)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":11`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":12`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
