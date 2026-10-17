@@ -35,7 +35,6 @@ files_touched:
   - internal/mentions/query.sql
   - internal/api/accountlinks.go
   - internal/api/accountlinks_test.go
-  - internal/api/problem.go
   - internal/api/server.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
@@ -252,7 +251,7 @@ None.
   token of a Telegram Connection sent to a bridge's bot links nothing.
 - The operation names follow those of Telegram and Mattermost (`start…Link`, `confirm…Link`); the paths are those of
   the C-22 API surface.
-- `files_touched` lists 42 files, past the guide of 30 to 40: the schema version that `internal/db`'s tests pin, the
+- `files_touched` lists 41 files, past the guide of 30 to 40: the schema version that `internal/db`'s tests pin, the
   fakes of the store in `accountlinks_test.go`, the `account_link` branch of `bridge/events.go`, the delivery calls that
   carry Mentions, the Connection that a code's session reads and the fake's config and events all change with it. The
   token, the code and the Mentions share the migration, the fake and the end-to-end harness, so the story is not split.

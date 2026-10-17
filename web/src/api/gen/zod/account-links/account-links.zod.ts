@@ -31,20 +31,21 @@ export const listMyAccountLinksResponseItemsItemConnectionIdRegExp = new RegExp(
 export const ListMyAccountLinksResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().regex(listMyAccountLinksResponseItemsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
-  "messenger": zod.enum(['telegram', 'mattermost']),
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge']),
   "connection": zod.object({
   "id": zod.string().regex(listMyAccountLinksResponseItemsItemConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
-}).optional().describe('The Connection the link was made through; Mattermost links belong to it.'),
+}).optional().describe('The Connection the link was made through; Mattermost and Bridge links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish(),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
+  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))
 })
 
 /**
- * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+ * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List the Connections an account can be linked through
  */
 export const listLinkableConnectionsResponseItemsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -54,8 +55,10 @@ export const ListLinkableConnectionsResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().regex(listLinkableConnectionsResponseItemsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "messenger": zod.enum(['telegram', 'mattermost'])
-}).describe('A Connection an account can be linked through, as the profile sees it; no other Connection field is shown.'))
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge']),
+  "link_methods": zod.array(zod.enum(['token', 'code'])).optional().describe('Set on Bridge Connections only, from the Connection\'s last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.'),
+  "handle_kind": zod.union([zod.literal('email'),zod.literal('login'),zod.literal('username'),zod.literal('user_id'),zod.literal(null)]).nullish().describe('Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection\'s last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.')
+}).describe('A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.'))
 })
 
 /**
@@ -126,13 +129,87 @@ export const confirmMattermostLinkResponseConnectionIdRegExp = new RegExp('^[A-H
 
 export const ConfirmMattermostLinkResponse = zod.object({
   "id": zod.string().regex(confirmMattermostLinkResponseIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
-  "messenger": zod.enum(['telegram', 'mattermost']),
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge']),
   "connection": zod.object({
   "id": zod.string().regex(confirmMattermostLinkResponseConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
-}).optional().describe('The Connection the link was made through; Mattermost links belong to it.'),
+}).optional().describe('The Connection the link was made through; Mattermost and Bridge links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish(),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
+  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
+  "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
+  "created_at": zod.iso.datetime({"offset":true})
+})
+
+/**
+ * Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+ * @summary Start linking an account through a Bridge with a token
+ */
+export const startBridgeLinkBodyConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const StartBridgeLinkBody = zod.object({
+  "connection_id": zod.string().regex(startBridgeLinkBodyConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')
+})
+
+export const startBridgeLinkResponseTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+
+
+export const StartBridgeLinkResponse = zod.object({
+  "token": zod.string().regex(startBridgeLinkResponseTokenRegExp).describe('Send it to the bot in a direct message. Single use and bound to the User and the Connection.'),
+  "link_url": zod.url().nullable().describe('The bridge\'s `link_url_template` with the token, which opens a chat with the bot and hands it the token; null without a template.'),
+  "expires_at": zod.iso.datetime({"offset":true})
+})
+
+/**
+ * Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+ * @summary Start linking an account through a Bridge with a code
+ */
+export const startBridgeCodeLinkBodyConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const startBridgeCodeLinkBodyHandleMax = 320;
+
+
+
+export const StartBridgeCodeLinkBody = zod.object({
+  "connection_id": zod.string().regex(startBridgeCodeLinkBodyConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "handle": zod.string().min(1).max(startBridgeCodeLinkBodyHandleMax).describe('The handle of the account to link, of the kind the Connection\'s `handle_kind` names.')
+})
+
+export const startBridgeCodeLinkResponseRequestIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const StartBridgeCodeLinkResponse = zod.object({
+  "request_id": zod.string().regex(startBridgeCodeLinkResponseRequestIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "expires_at": zod.iso.datetime({"offset":true}),
+  "attempts_remaining": zod.int()
+})
+
+/**
+ * At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+ * @summary Confirm a Bridge link with the code
+ */
+export const confirmBridgeLinkBodyRequestIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ConfirmBridgeLinkBody = zod.object({
+  "request_id": zod.string().regex(confirmBridgeLinkBodyRequestIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "code": zod.string().describe('The code the bot sent as a direct message.')
+})
+
+export const confirmBridgeLinkResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const confirmBridgeLinkResponseConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ConfirmBridgeLinkResponse = zod.object({
+  "id": zod.string().regex(confirmBridgeLinkResponseIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge']),
+  "connection": zod.object({
+  "id": zod.string().regex(confirmBridgeLinkResponseConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string()
+}).optional().describe('The Connection the link was made through; Mattermost and Bridge links belong to it.'),
+  "external_id": zod.string(),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
+  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -154,13 +231,14 @@ export const listUserAccountLinksResponseItemsItemConnectionIdRegExp = new RegEx
 export const ListUserAccountLinksResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().regex(listUserAccountLinksResponseItemsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
-  "messenger": zod.enum(['telegram', 'mattermost']),
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge']),
   "connection": zod.object({
   "id": zod.string().regex(listUserAccountLinksResponseItemsItemConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
-}).optional().describe('The Connection the link was made through; Mattermost links belong to it.'),
+}).optional().describe('The Connection the link was made through; Mattermost and Bridge links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish(),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
+  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))

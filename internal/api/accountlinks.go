@@ -16,8 +16,11 @@ import (
 const (
 	// codeAccountLinkedElsewhere refuses linking a messenger account linked to another User (C-18.FR-5).
 	codeAccountLinkedElsewhere = "account_linked_elsewhere"
-	// codeLinkCodeRequestsExceeded refuses a Mattermost link code beyond account_link.mattermost_code_requests.
+	// codeLinkCodeRequestsExceeded refuses a Mattermost or Bridge link code beyond
+	// account_link.mattermost_code_requests or account_link.bridge_code_requests.
 	codeLinkCodeRequestsExceeded = "link_code_requests_exceeded"
+	// codeCodeNotOffered refuses a Bridge link code through a Connection whose info offers none (C-22.FR-15).
+	codeCodeNotOffered = "code_not_offered"
 )
 
 // AccountLinks is what the API needs of internal/accountlinks.
@@ -33,6 +36,12 @@ type AccountLinks interface {
 		accountlinks.MattermostStarted, error)
 	ConfirmMattermost(ctx context.Context, r accountlinks.Requester, requestPublicID, code string) (
 		accountlinks.Link, error)
+	StartBridge(ctx context.Context, r accountlinks.Requester, connectionPublicID string) (accountlinks.BridgeStart,
+		error)
+	StartBridgeCode(ctx context.Context, r accountlinks.Requester, connectionPublicID, handle string) (
+		accountlinks.BridgeCodeStarted, error)
+	ConfirmBridge(ctx context.Context, r accountlinks.Requester, requestPublicID, code string) (accountlinks.Link,
+		error)
 }
 
 // linkRequester is who asks through the API: the signed-in User — the owner of a Personal access token — whose own
@@ -72,6 +81,9 @@ func linkProblem(err error) error {
 	case errors.Is(err, accountlinks.ErrLinkedElsewhere):
 		return problem(http.StatusConflict, typeConflict, codeAccountLinkedElsewhere,
 			"This account is linked to another user. Its owner or an admin can unlink it.")
+	case errors.Is(err, accountlinks.ErrCodeNotOffered):
+		return problem(http.StatusConflict, typeConflict, codeCodeNotOffered,
+			"This Bridge Connection offers no link code; send the token to the bot instead.")
 	}
 	return err
 }
@@ -92,7 +104,8 @@ func (s *Server) ListMyAccountLinks(ctx context.Context, _ gen.ListMyAccountLink
 }
 
 // ListLinkableConnections is listLinkableConnections: the Connections that are not deleted with only their id, name
-// and messenger, for any signed-in User (C-18.FR-10).
+// and messenger, for any signed-in User (C-18.FR-10); a Bridge Connection also has its link methods and the kind of
+// handle a code needs, null when it offers none (C-22.FR-15), and no other Connection has either member.
 func (s *Server) ListLinkableConnections(ctx context.Context, _ gen.ListLinkableConnectionsRequestObject) (
 	gen.ListLinkableConnectionsResponseObject, error) {
 	conns, err := s.accountLinks.Connections(ctx)
@@ -102,6 +115,19 @@ func (s *Server) ListLinkableConnections(ctx context.Context, _ gen.ListLinkable
 	out := gen.LinkableConnectionList{Items: make([]gen.LinkableConnection, len(conns))}
 	for i, c := range conns {
 		out.Items[i] = gen.LinkableConnection{Id: c.PublicID, Name: c.Name, Messenger: gen.Messenger(c.Messenger)}
+		if c.Messenger != accountlinks.MessengerBridge {
+			continue
+		}
+		methods := make([]gen.LinkableConnectionLinkMethods, len(c.LinkMethods))
+		for j, m := range c.LinkMethods {
+			methods[j] = gen.LinkableConnectionLinkMethods(m)
+		}
+		out.Items[i].LinkMethods = &methods
+		if c.HandleKind != "" {
+			out.Items[i].HandleKind.Set(gen.LinkHandleKind(c.HandleKind))
+		} else {
+			out.Items[i].HandleKind.SetNull()
+		}
 	}
 	return gen.ListLinkableConnections200JSONResponse(out), nil
 }
@@ -178,6 +204,71 @@ func (s *Server) ConfirmMattermostLink(ctx context.Context, req gen.ConfirmMatte
 	return gen.ConfirmMattermostLink201JSONResponse(accountLinkOf(l)), nil
 }
 
+// StartBridgeLink is startBridgeLink: the token of a new link of the caller through a Bridge Connection, to send to
+// its bot, and the link that hands it over when the bridge has one (C-22.FR-15).
+func (s *Server) StartBridgeLink(ctx context.Context, req gen.StartBridgeLinkRequestObject) (
+	gen.StartBridgeLinkResponseObject, error) {
+	r, err := linkRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	start, err := s.accountLinks.StartBridge(ctx, r, req.Body.ConnectionId)
+	if err != nil {
+		return nil, linkProblem(err)
+	}
+	out := gen.BridgeLinkStart{Token: start.Token, ExpiresAt: start.ExpiresAt.UTC()}
+	if start.LinkURL != nil {
+		out.LinkUrl.Set(*start.LinkURL)
+	} else {
+		out.LinkUrl.SetNull()
+	}
+	return gen.StartBridgeLink201JSONResponse(out), nil
+}
+
+// StartBridgeCodeLink is startBridgeCodeLink: the bot of a Bridge Connection sends a code to the account the caller
+// names by its handle (C-22.FR-15).
+func (s *Server) StartBridgeCodeLink(ctx context.Context, req gen.StartBridgeCodeLinkRequestObject) (
+	gen.StartBridgeCodeLinkResponseObject, error) {
+	r, err := linkRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	started, err := s.accountLinks.StartBridgeCode(ctx, r, req.Body.ConnectionId, req.Body.Handle)
+	if err != nil {
+		return nil, linkProblem(err)
+	}
+	return gen.StartBridgeCodeLink202JSONResponse(gen.BridgeCodeLinkStarted{RequestId: started.RequestPublicID,
+		ExpiresAt: started.ExpiresAt.UTC(), AttemptsRemaining: started.AttemptsRemaining}), nil
+}
+
+// ConfirmBridgeLink is confirmBridgeLink: the code from the bot's direct message links the caller's account of the
+// Bridge Connection (C-22.FR-15, AC-19).
+func (s *Server) ConfirmBridgeLink(ctx context.Context, req gen.ConfirmBridgeLinkRequestObject) (
+	gen.ConfirmBridgeLinkResponseObject, error) {
+	r, err := linkRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	code := ""
+	if req.Body.Code != nil {
+		code = *req.Body.Code
+	}
+	l, err := s.accountLinks.ConfirmBridge(ctx, r, req.Body.RequestId, code)
+	if err != nil {
+		return nil, linkProblem(err)
+	}
+	return gen.ConfirmBridgeLink201JSONResponse(accountLinkOf(l)), nil
+}
+
 // ListUserAccountLinks is listUserAccountLinks: the links of a User, for users:read (C-18.FR-6).
 func (s *Server) ListUserAccountLinks(ctx context.Context, req gen.ListUserAccountLinksRequestObject) (
 	gen.ListUserAccountLinksResponseObject, error) {
@@ -219,7 +310,7 @@ func accountLinkListOf(links []accountlinks.Link) gen.AccountLinkList {
 func accountLinkOf(l accountlinks.Link) gen.AccountLink {
 	out := gen.AccountLink{Id: l.PublicID, Messenger: gen.Messenger(l.Messenger), ExternalId: l.ExternalID,
 		CreatedAt: l.CreatedAt.UTC(), LastUsedAt: nullableTime(l.LastUsedAt),
-		Connection: &gen.EntityRef{Id: l.ConnectionPublicID, Name: l.ConnectionName}}
+		Connection: &gen.EntityRef{Id: l.ConnectionPublicID, Name: l.ConnectionName}, DisplayName: l.DisplayName}
 	if l.Username != nil {
 		out.Username.Set(*l.Username)
 	} else {

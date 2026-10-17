@@ -145,7 +145,8 @@ func TestWithoutSecret(t *testing.T) {
 		t.Errorf("= %v", got)
 	}
 	other := errors.New("other")
-	if withoutSecret(other, linkToken) != other || withoutSecret(nil, linkToken) != nil || withoutSecret(err, "") != err {
+	if !errors.Is(withoutSecret(other, linkToken), other) || withoutSecret(nil, linkToken) != nil ||
+		!errors.Is(withoutSecret(err, ""), err) {
 		t.Error("an error without the secret changed")
 	}
 }
@@ -422,11 +423,11 @@ func TestLinkBotCalls(t *testing.T) {
 		return answerJSON(status, "application/problem+json", `{"title":"t","detail":"`+detail+`","class":"`+class+`"}`,
 			header...)
 	}
-	run := func(t *testing.T, e *linkBotsEnv, f func(ctx context.Context, b accountlinks.BridgeBot) error) (error,
-		delivery.Outcome) {
+	run := func(t *testing.T, e *linkBotsEnv, f func(ctx context.Context, b accountlinks.BridgeBot) error) (
+		delivery.Outcome, error) {
 		t.Helper()
 		err := e.bots.Session(t.Context(), "CN0000000000B7", f)
-		return err, e.path.outcomes[len(e.path.outcomes)-1]
+		return e.path.outcomes[len(e.path.outcomes)-1], err
 	}
 	find := func(ctx context.Context, b accountlinks.BridgeBot) error {
 		_, err := b.FindUser(ctx, "bob@example.org")
@@ -462,7 +463,7 @@ func TestLinkBotCalls(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newLinkBotsEnv(t)
 			e.answer(c.find, c.send)
-			err, last := run(t, e, c.f)
+			last, err := run(t, e, c.f)
 			switch {
 			case c.want != nil && !errors.Is(err, c.want):
 				t.Errorf("= %v, want %v", err, c.want)
@@ -479,7 +480,7 @@ func TestLinkBotCalls(t *testing.T) {
 	}
 	e := newLinkBotsEnv(t)
 	e.answer(nil, problem(429, "rate_limited", "slow", "Retry-After", "30"))
-	err, last := run(t, e, send)
+	last, err := run(t, e, send)
 	var le *delivery.LimitedError
 	if !errors.As(err, &le) || le.RetryAfter != 30*time.Second || last.Kind != delivery.OutcomeRetryAfter ||
 		last.Scope != delivery.ScopeConnection {

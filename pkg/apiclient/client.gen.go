@@ -1156,6 +1156,33 @@ func (e LifecycleEvent) Valid() bool {
 	}
 }
 
+// Defines values for LinkHandleKind.
+const (
+	LinkHandleKindEmail       LinkHandleKind = "email"
+	LinkHandleKindLessThannil LinkHandleKind = "<nil>"
+	LinkHandleKindLogin       LinkHandleKind = "login"
+	LinkHandleKindUserId      LinkHandleKind = "user_id"
+	LinkHandleKindUsername    LinkHandleKind = "username"
+)
+
+// Valid indicates whether the value is a known member of the LinkHandleKind enum.
+func (e LinkHandleKind) Valid() bool {
+	switch e {
+	case LinkHandleKindEmail:
+		return true
+	case LinkHandleKindLessThannil:
+		return true
+	case LinkHandleKindLogin:
+		return true
+	case LinkHandleKindUserId:
+		return true
+	case LinkHandleKindUsername:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LinkRuleScopeType.
 const (
 	LinkRuleScopeTypeAlertGroup LinkRuleScopeType = "alert_group"
@@ -1168,6 +1195,24 @@ func (e LinkRuleScopeType) Valid() bool {
 	case LinkRuleScopeTypeAlertGroup:
 		return true
 	case LinkRuleScopeTypeLabelValue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for LinkableConnectionLinkMethods.
+const (
+	LinkableConnectionLinkMethodsCode  LinkableConnectionLinkMethods = "code"
+	LinkableConnectionLinkMethodsToken LinkableConnectionLinkMethods = "token"
+)
+
+// Valid indicates whether the value is a known member of the LinkableConnectionLinkMethods enum.
+func (e LinkableConnectionLinkMethods) Valid() bool {
+	switch e {
+	case LinkableConnectionLinkMethodsCode:
+		return true
+	case LinkableConnectionLinkMethodsToken:
 		return true
 	default:
 		return false
@@ -1377,6 +1422,7 @@ func (e MentionSettingEveryone) Valid() bool {
 
 // Defines values for Messenger.
 const (
+	MessengerBridge     Messenger = "bridge"
 	MessengerMattermost Messenger = "mattermost"
 	MessengerTelegram   Messenger = "telegram"
 )
@@ -1384,6 +1430,8 @@ const (
 // Valid indicates whether the value is a known member of the Messenger enum.
 func (e Messenger) Valid() bool {
 	switch e {
+	case MessengerBridge:
+		return true
 	case MessengerMattermost:
 		return true
 	case MessengerTelegram:
@@ -3099,16 +3147,21 @@ func (e ListIntegrationAlertsParamsSort) Valid() bool {
 
 // AccountLink defines model for AccountLink.
 type AccountLink struct {
-	// Connection The Connection the link was made through; Mattermost links belong to it.
+	// Connection The Connection the link was made through; Mattermost and Bridge links belong to it.
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
-	ExternalId string     `json:"external_id"`
+
+	// DisplayName Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show.
+	DisplayName *string `json:"display_name,omitempty"`
+	ExternalId  string  `json:"external_id"`
 
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId                     `json:"id"`
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Messenger  Messenger                    `json:"messenger"`
-	Username   nullable.Nullable[string]    `json:"username,omitempty"`
+
+	// Username The account's username; for a Bridge link, the handle the bridge reported.
+	Username nullable.Nullable[string] `json:"username,omitempty"`
 }
 
 // AccountLinkList defines model for AccountLinkList.
@@ -3538,6 +3591,24 @@ type BridgeCapabilitiesPrivateAnswers string
 // BridgeCapabilitiesThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
 type BridgeCapabilitiesThreadMessages string
 
+// BridgeCodeLinkRequest defines model for BridgeCodeLinkRequest.
+type BridgeCodeLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Handle The handle of the account to link, of the kind the Connection's `handle_kind` names.
+	Handle string `json:"handle"`
+}
+
+// BridgeCodeLinkStarted defines model for BridgeCodeLinkStarted.
+type BridgeCodeLinkStarted struct {
+	AttemptsRemaining int       `json:"attempts_remaining"`
+	ExpiresAt         time.Time `json:"expires_at"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
 // BridgeConnection defines model for BridgeConnection.
 type BridgeConnection struct {
 	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
@@ -3749,6 +3820,32 @@ type BridgeLimits struct {
 
 	// SendPerSecondPerChannel A hint for the Destination limiter; `rate_limited` stays the truth.
 	SendPerSecondPerChannel *float32 `json:"send_per_second_per_channel,omitempty"`
+}
+
+// BridgeLinkConfirm defines model for BridgeLinkConfirm.
+type BridgeLinkConfirm struct {
+	// Code The code the bot sent as a direct message.
+	Code *string `json:"code,omitempty"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
+// BridgeLinkRequest defines model for BridgeLinkRequest.
+type BridgeLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+}
+
+// BridgeLinkStart defines model for BridgeLinkStart.
+type BridgeLinkStart struct {
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// LinkUrl The bridge's `link_url_template` with the token, which opens a chat with the bot and hands it the token; null without a template.
+	LinkUrl nullable.Nullable[string] `json:"link_url"`
+
+	// Token Send it to the bot in a direct message. Single use and bound to the User and the Connection.
+	Token string `json:"token"`
 }
 
 // BridgeMessageDeletedEvent defines model for BridgeMessageDeletedEvent.
@@ -4445,6 +4542,9 @@ type Limiter struct {
 	PerSeconds int `json:"per_seconds"`
 }
 
+// LinkHandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
+type LinkHandleKind string
+
 // LinkRule defines model for LinkRule.
 type LinkRule struct {
 	// Builtin The built-in "Explore" rule cannot be deleted (`409` `builtin_immutable`).
@@ -4490,13 +4590,22 @@ type LinkRuleScope struct {
 // LinkRuleScopeType defines model for LinkRuleScope.Type.
 type LinkRuleScopeType string
 
-// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown.
+// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
 type LinkableConnection struct {
+	// HandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
+	HandleKind nullable.Nullable[LinkHandleKind] `json:"handle_kind,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
-	Id        PublicId  `json:"id"`
-	Messenger Messenger `json:"messenger"`
-	Name      string    `json:"name"`
+	Id PublicId `json:"id"`
+
+	// LinkMethods Set on Bridge Connections only, from the Connection's last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.
+	LinkMethods *[]LinkableConnectionLinkMethods `json:"link_methods,omitempty"`
+	Messenger   Messenger                        `json:"messenger"`
+	Name        string                           `json:"name"`
 }
+
+// LinkableConnectionLinkMethods defines model for LinkableConnection.LinkMethods.
+type LinkableConnectionLinkMethods string
 
 // LinkableConnectionList defines model for LinkableConnectionList.
 type LinkableConnectionList struct {
@@ -5272,7 +5381,7 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
-	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
 	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
@@ -7541,6 +7650,15 @@ type UpdateLookupTableJSONRequestBody = LookupTableBase
 
 // UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
 type UpdateMeJSONRequestBody = MeUpdate
+
+// StartBridgeLinkJSONRequestBody defines body for StartBridgeLink for application/json ContentType.
+type StartBridgeLinkJSONRequestBody = BridgeLinkRequest
+
+// StartBridgeCodeLinkJSONRequestBody defines body for StartBridgeCodeLink for application/json ContentType.
+type StartBridgeCodeLinkJSONRequestBody = BridgeCodeLinkRequest
+
+// ConfirmBridgeLinkJSONRequestBody defines body for ConfirmBridgeLink for application/json ContentType.
+type ConfirmBridgeLinkJSONRequestBody = BridgeLinkConfirm
 
 // StartMattermostLinkJSONRequestBody defines body for StartMattermostLink for application/json ContentType.
 type StartMattermostLinkJSONRequestBody = MattermostLinkRequest
@@ -10091,9 +10209,63 @@ type ClientInterface interface {
 	// Corresponds with GET /me/account-links (the `ListMyAccountLinks` operationId).
 	ListMyAccountLinks(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// StartBridgeLinkWithBody Start linking an account through a Bridge with a token
+	//
+	// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+	StartBridgeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartBridgeLink Start linking an account through a Bridge with a token
+	//
+	// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+	StartBridgeLink(ctx context.Context, body StartBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartBridgeCodeLinkWithBody Start linking an account through a Bridge with a code
+	//
+	// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+	StartBridgeCodeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartBridgeCodeLink Start linking an account through a Bridge with a code
+	//
+	// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+	StartBridgeCodeLink(ctx context.Context, body StartBridgeCodeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmBridgeLinkWithBody Confirm a Bridge link with the code
+	//
+	// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+	ConfirmBridgeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmBridgeLink Confirm a Bridge link with the code
+	//
+	// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+	ConfirmBridgeLink(ctx context.Context, body ConfirmBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListLinkableConnections List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 	ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -12598,9 +12770,123 @@ func (c *Client) ListMyAccountLinks(ctx context.Context, reqEditors ...RequestEd
 	return c.Client.Do(req)
 }
 
+// StartBridgeLinkWithBody Start linking an account through a Bridge with a token
+//
+// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+func (c *Client) StartBridgeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartBridgeLinkRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartBridgeLink Start linking an account through a Bridge with a token
+//
+// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+func (c *Client) StartBridgeLink(ctx context.Context, body StartBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartBridgeLinkRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartBridgeCodeLinkWithBody Start linking an account through a Bridge with a code
+//
+// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+func (c *Client) StartBridgeCodeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartBridgeCodeLinkRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartBridgeCodeLink Start linking an account through a Bridge with a code
+//
+// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+func (c *Client) StartBridgeCodeLink(ctx context.Context, body StartBridgeCodeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartBridgeCodeLinkRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ConfirmBridgeLinkWithBody Confirm a Bridge link with the code
+//
+// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+func (c *Client) ConfirmBridgeLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmBridgeLinkRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ConfirmBridgeLink Confirm a Bridge link with the code
+//
+// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+func (c *Client) ConfirmBridgeLink(ctx context.Context, body ConfirmBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmBridgeLinkRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListLinkableConnections List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 func (c *Client) ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -18484,6 +18770,126 @@ func NewListMyAccountLinksRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewStartBridgeLinkRequest calls the generic StartBridgeLink builder with application/json body
+func NewStartBridgeLinkRequest(server string, body StartBridgeLinkJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartBridgeLinkRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewStartBridgeLinkRequestWithBody constructs an http.Request for the StartBridgeLink method, with any body, and a specified content type
+func NewStartBridgeLinkRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/account-links/bridge")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStartBridgeCodeLinkRequest calls the generic StartBridgeCodeLink builder with application/json body
+func NewStartBridgeCodeLinkRequest(server string, body StartBridgeCodeLinkJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartBridgeCodeLinkRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewStartBridgeCodeLinkRequestWithBody constructs an http.Request for the StartBridgeCodeLink method, with any body, and a specified content type
+func NewStartBridgeCodeLinkRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/account-links/bridge/codes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewConfirmBridgeLinkRequest calls the generic ConfirmBridgeLink builder with application/json body
+func NewConfirmBridgeLinkRequest(server string, body ConfirmBridgeLinkJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewConfirmBridgeLinkRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewConfirmBridgeLinkRequestWithBody constructs an http.Request for the ConfirmBridgeLink method, with any body, and a specified content type
+func NewConfirmBridgeLinkRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/account-links/bridge/confirmation")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListLinkableConnectionsRequest constructs an http.Request for the ListLinkableConnections method
 func NewListLinkableConnectionsRequest(server string) (*http.Request, error) {
 	var err error
@@ -22466,9 +22872,63 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /me/account-links (the `ListMyAccountLinks` operationId).
 	ListMyAccountLinksWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListMyAccountLinksResponse, error)
 
+	// StartBridgeLinkWithBodyWithResponse Start linking an account through a Bridge with a token
+	//
+	// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+	StartBridgeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartBridgeLinkResponse, error)
+
+	// StartBridgeLinkWithResponse Start linking an account through a Bridge with a token
+	//
+	// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+	StartBridgeLinkWithResponse(ctx context.Context, body StartBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartBridgeLinkResponse, error)
+
+	// StartBridgeCodeLinkWithBodyWithResponse Start linking an account through a Bridge with a code
+	//
+	// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+	StartBridgeCodeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartBridgeCodeLinkResponse, error)
+
+	// StartBridgeCodeLinkWithResponse Start linking an account through a Bridge with a code
+	//
+	// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+	StartBridgeCodeLinkWithResponse(ctx context.Context, body StartBridgeCodeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartBridgeCodeLinkResponse, error)
+
+	// ConfirmBridgeLinkWithBodyWithResponse Confirm a Bridge link with the code
+	//
+	// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+	ConfirmBridgeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmBridgeLinkResponse, error)
+
+	// ConfirmBridgeLinkWithResponse Confirm a Bridge link with the code
+	//
+	// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+	ConfirmBridgeLinkWithResponse(ctx context.Context, body ConfirmBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmBridgeLinkResponse, error)
+
 	// ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -29467,6 +29927,290 @@ func (r ListMyAccountLinksResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListMyAccountLinksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// StartBridgeLinkResponse429Headers the declared response headers of an HTTP 429 response for StartBridgeLink
+type StartBridgeLinkResponse429Headers struct {
+	RetryAfter *int
+}
+
+type StartBridgeLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BridgeLinkStart
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *StartBridgeLinkResponse429Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r StartBridgeLinkResponse) GetJSON201() *BridgeLinkStart {
+	return r.JSON201
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r StartBridgeLinkResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r StartBridgeLinkResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r StartBridgeLinkResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r StartBridgeLinkResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r StartBridgeLinkResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r StartBridgeLinkResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartBridgeLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartBridgeLinkResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartBridgeLinkResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// StartBridgeCodeLinkResponse429Headers the declared response headers of an HTTP 429 response for StartBridgeCodeLink
+type StartBridgeCodeLinkResponse429Headers struct {
+	RetryAfter *int
+}
+
+// StartBridgeCodeLinkResponse503Headers the declared response headers of an HTTP 503 response for StartBridgeCodeLink
+type StartBridgeCodeLinkResponse503Headers struct {
+	RetryAfter *int
+}
+
+type StartBridgeCodeLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *BridgeCodeLinkStarted
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *StartBridgeCodeLinkResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *StartBridgeCodeLinkResponse503Headers
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r StartBridgeCodeLinkResponse) GetJSON202() *BridgeCodeLinkStarted {
+	return r.JSON202
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r StartBridgeCodeLinkResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r StartBridgeCodeLinkResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartBridgeCodeLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartBridgeCodeLinkResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartBridgeCodeLinkResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ConfirmBridgeLinkResponse429Headers the declared response headers of an HTTP 429 response for ConfirmBridgeLink
+type ConfirmBridgeLinkResponse429Headers struct {
+	RetryAfter *int
+}
+
+type ConfirmBridgeLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *AccountLink
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ConfirmBridgeLinkResponse429Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r ConfirmBridgeLinkResponse) GetJSON201() *AccountLink {
+	return r.JSON201
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ConfirmBridgeLinkResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r ConfirmBridgeLinkResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ConfirmBridgeLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ConfirmBridgeLinkResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ConfirmBridgeLinkResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -37023,9 +37767,99 @@ func (c *ClientWithResponses) ListMyAccountLinksWithResponse(ctx context.Context
 	return ParseListMyAccountLinksResponse(rsp)
 }
 
+// StartBridgeLinkWithBodyWithResponse Start linking an account through a Bridge with a token
+//
+// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+func (c *ClientWithResponses) StartBridgeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartBridgeLinkResponse, error) {
+	rsp, err := c.StartBridgeLinkWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartBridgeLinkResponse(rsp)
+}
+
+// StartBridgeLinkWithResponse Start linking an account through a Bridge with a token
+//
+// Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When the Connection's last `info` has a `link_url_template`, `link_url` is that template with the token in place of `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the link's `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge (the `StartBridgeLink` operationId).
+func (c *ClientWithResponses) StartBridgeLinkWithResponse(ctx context.Context, body StartBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartBridgeLinkResponse, error) {
+	rsp, err := c.StartBridgeLink(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartBridgeLinkResponse(rsp)
+}
+
+// StartBridgeCodeLinkWithBodyWithResponse Start linking an account through a Bridge with a code
+//
+// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+func (c *ClientWithResponses) StartBridgeCodeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartBridgeCodeLinkResponse, error) {
+	rsp, err := c.StartBridgeCodeLinkWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartBridgeCodeLinkResponse(rsp)
+}
+
+// StartBridgeCodeLinkWithResponse Start linking an account through a Bridge with a code
+//
+// Where the Bridge Connection's `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409` `code_not_offered` when the Connection's `info`, read again first when Muster's copy is older than `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422` `direct_message_refused` at `/handle`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge/codes (the `StartBridgeCodeLink` operationId).
+func (c *ClientWithResponses) StartBridgeCodeLinkWithResponse(ctx context.Context, body StartBridgeCodeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartBridgeCodeLinkResponse, error) {
+	rsp, err := c.StartBridgeCodeLink(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartBridgeCodeLinkResponse(rsp)
+}
+
+// ConfirmBridgeLinkWithBodyWithResponse Confirm a Bridge link with the code
+//
+// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+func (c *ClientWithResponses) ConfirmBridgeLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmBridgeLinkResponse, error) {
+	rsp, err := c.ConfirmBridgeLinkWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmBridgeLinkResponse(rsp)
+}
+
+// ConfirmBridgeLinkWithResponse Confirm a Bridge link with the code
+//
+// At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account's `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no bridge is called. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/bridge/confirmation (the `ConfirmBridgeLink` operationId).
+func (c *ClientWithResponses) ConfirmBridgeLinkWithResponse(ctx context.Context, body ConfirmBridgeLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmBridgeLinkResponse, error) {
+	rsp, err := c.ConfirmBridgeLink(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmBridgeLinkResponse(rsp)
+}
+
 // ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -44043,6 +44877,266 @@ func ParseListMyAccountLinksResponse(rsp *http.Response) (*ListMyAccountLinksRes
 	switch {
 	case rsp.StatusCode == 429:
 		var headers ListMyAccountLinksResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseStartBridgeLinkResponse parses an HTTP response from a StartBridgeLinkWithResponse call
+func ParseStartBridgeLinkResponse(rsp *http.Response) (*StartBridgeLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartBridgeLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BridgeLinkStart
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers StartBridgeLinkResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseStartBridgeCodeLinkResponse parses an HTTP response from a StartBridgeCodeLinkWithResponse call
+func ParseStartBridgeCodeLinkResponse(rsp *http.Response) (*StartBridgeCodeLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartBridgeCodeLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest BridgeCodeLinkStarted
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers StartBridgeCodeLinkResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers StartBridgeCodeLinkResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseConfirmBridgeLinkResponse parses an HTTP response from a ConfirmBridgeLinkWithResponse call
+func ParseConfirmBridgeLinkResponse(rsp *http.Response) (*ConfirmBridgeLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ConfirmBridgeLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest AccountLink
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers ConfirmBridgeLinkResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

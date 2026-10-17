@@ -24,11 +24,16 @@ import type { PublicId } from './publicId';
 export interface AccountLink {
   id: PublicId;
   messenger: Messenger;
-  /** The Connection the link was made through; Mattermost links belong to it. */
+  /** The Connection the link was made through; Mattermost and Bridge links belong to it. */
   connection?: EntityRef;
   external_id: string;
-  /** @nullable */
+  /**
+     * The account's username; for a Bridge link, the handle the bridge reported.
+     * @nullable
+     */
   username?: string | null;
+  /** Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show. */
+  display_name?: string;
   /** @nullable */
   last_used_at?: string | null;
   created_at: string;

@@ -5309,7 +5309,9 @@ paths:
       summary: List the Connections an account can be linked through
       description: The profile's own short list of the Connections that are not deleted, for picking one when linking a
         messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name
-        and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
+        and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it —
+        `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403`
+        (`service_account_not_allowed`).
       x-permission: authenticated
       x-listener: app
       security:
@@ -5491,6 +5493,143 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '503':
           $ref: '#/components/responses/Limited'
+  /me/account-links/bridge:
+    post:
+      operationId: startBridgeLink
+      tags:
+      - Account links
+      summary: Start linking an account through a Bridge with a token
+      description: 'Returns a token to send to the bot of the Bridge Connection in a direct message: 32 random bytes in
+        base64url, single-use, valid for `account_link.bridge_token_ttl` and bound to the User and the Connection. When
+        the Connection''s last `info` has a `link_url_template`, `link_url` is that template with the token in place of
+        `{token}`, kept only when it is an absolute `http` or `https` link; otherwise it is null. The bridge reports the
+        token with an `account_link` event, which completes the link and arrives as an `account-links` hint with the
+        link''s `public_id`. Only the signed-in web session can start a link (not a token). No operation starts a link
+        for another User, whatever the caller''s Role. A `connection_id` that names no Bridge Connection — missing,
+        deleted or of another type — answers `422` `unknown_id` at `/connection_id`. Calls no bridge.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BridgeLinkRequest'
+      responses:
+        '201':
+          description: The token and its link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BridgeLinkStart'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /me/account-links/bridge/codes:
+    post:
+      operationId: startBridgeCodeLink
+      tags:
+      - Account links
+      summary: Start linking an account through a Bridge with a code
+      description: 'Where the Bridge Connection''s `info` declares `direct_messages` with `bot_can_start` and a
+        `user_lookup` other than `none`, the bridge finds the account with the `handle` the caller entered — of the kind
+        `user_lookup` declares — with `findUsers`, and its bot sends a code with `sendDirectMessage`. Code requests are
+        limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`,
+        `account_link.bridge_code_requests`); a request whose direct message failed still counts. Refused with `409`
+        `code_not_offered` when the Connection''s `info`, read again first when Muster''s copy is older than
+        `bridge.info_max_age`, offers no code or has never been read; with `409` `account_linked_elsewhere` when the
+        account is linked to another User; and with `409` without a code when the bridge refuses a call. Runs on the
+        interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with
+        `Retry-After`. No operation starts a link for another User, whatever the caller''s Role. A `connection_id` that
+        names no Bridge Connection answers `422` `unknown_id` at `/connection_id`; a handle the bridge does not find
+        answers `422` `handle_not_found` at `/handle`, and an account the bot cannot write to `422`
+        `direct_message_refused` at `/handle`.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BridgeCodeLinkRequest'
+      responses:
+        '202':
+          description: The code was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BridgeCodeLinkStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
+  /me/account-links/bridge/confirmation:
+    post:
+      operationId: confirmBridgeLink
+      tags:
+      - Account links
+      summary: Confirm a Bridge link with the code
+      description: 'At most 5 attempts (`account_link.bridge_code`); after that the code is void. A wrong code, and a
+        request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at
+        `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none;
+        a request of another User, or one that is not a Bridge code request, is `404`. The link stores the account''s
+        `external_id`, `display_name` and handle as the bridge reported them. No direct message confirms it, and no
+        bridge is called. No operation starts a link for another User, whatever the caller''s Role.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BridgeLinkConfirm'
+      responses:
+        '201':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /users/{user_id}/account-links:
     get:
       operationId: listUserAccountLinks
@@ -7450,8 +7589,9 @@ components:
         attempts_remaining:
           type: integer
           minimum: 0
-          description: Set on the `link_code_invalid` refusal of `confirmMattermostLink`; the attempts left for the code of
-            the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+          description: Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the
+            attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or
+            after the last wrong code).
       x-problem-types:
       - type: validation-failed
         status:
@@ -7537,7 +7677,7 @@ components:
         - code: unknown_id
           description: A field names a resource by its `public_id` that does not exist, that the caller may not see or that
             is of the wrong type, such as a Destination in `destination_ids` or a Mattermost Connection given to
-            `startTelegramLink`.
+            `startTelegramLink` or `startBridgeLink`.
         - code: too_long
           description: The value is longer than allowed.
         - code: too_short
@@ -7577,12 +7717,18 @@ components:
             `token` and for the code `token_invalid`, `/channel_id` for the others (see `DestinationCheckItem`) — with
             the check's message as `detail` and its code as `check_code`.
         - code: link_code_invalid
-          description: The Mattermost link code is wrong, or its request is void, used or expired; never says which. The
-            pointer is `/code` (`confirmMattermostLink`), and `attempts_remaining` says how many codes the request still
-            takes.
+          description: The Mattermost or Bridge link code is wrong, or its request is void, used or expired; never says
+            which. The pointer is `/code` (`confirmMattermostLink`, `confirmBridgeLink`), and `attempts_remaining` says
+            how many codes the request still takes.
         - code: messenger_user_not_found
           description: The Mattermost server has no user with this username; the pointer is `/username`
             (`startMattermostLink`).
+        - code: handle_not_found
+          description: The bridge found no account with this handle, of the kind its `user_lookup` declares; the pointer
+            is `/handle` (`startBridgeCodeLink`).
+        - code: direct_message_refused
+          description: The bridge refused the direct message with the code as `forbidden`, since its bot cannot write to
+            the account. The pointer is `/handle` (`startBridgeCodeLink`); the token sent to the bot still links it.
         - code: webhook_call_failed
           description: Saving a Telegram Connection that enters the webhook update mode, or changes its base URL or bot
             token in it, called `setWebhook`, or one that leaves it called `deleteWebhook`, and the call failed; nothing
@@ -7652,6 +7798,10 @@ components:
           description: Secrets and the Signing secret exist for outgoing webhook Destinations only.
         - code: account_linked_elsewhere
           description: The messenger account is linked to another User.
+        - code: code_not_offered
+          description: The Bridge Connection offers no link code (`startBridgeCodeLink`) — its `info` has the
+            `user_lookup` `none`, no `direct_messages` with `bot_can_start`, or has never been read — so the token sent
+            to the bot is the only way.
         - code: last_admin
           description: The change would leave the Organization without an active Admin; the last active Admin cannot be
             disabled, deleted or given a lower Role.
@@ -7685,9 +7835,10 @@ components:
         in: code
         codes:
         - code: link_code_requests_exceeded
-          description: Too many Mattermost link codes were requested within an hour, by the User or for the target account
-            (`account_link.mattermost_code_requests`, `startMattermostLink`); `retry_after_seconds` says when the next one
-            is allowed.
+          description: Too many Mattermost or Bridge link codes were requested within an hour, by the User or for the
+            target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
+            `account_link.bridge_code_requests`, `startBridgeCodeLink`); `retry_after_seconds` says when the next one is
+            allowed.
       - type: gone
         in: code
         codes:
@@ -13094,6 +13245,7 @@ components:
       enum:
       - telegram
       - mattermost
+      - bridge
     AccountLink:
       type: object
       required:
@@ -13107,7 +13259,7 @@ components:
         messenger:
           $ref: '#/components/schemas/Messenger'
         connection:
-          description: The Connection the link was made through; Mattermost links belong to it.
+          description: The Connection the link was made through; Mattermost and Bridge links belong to it.
           $ref: '#/components/schemas/EntityRef'
         external_id:
           type: string
@@ -13115,6 +13267,11 @@ components:
           type:
           - string
           - 'null'
+          description: The account's username; for a Bridge link, the handle the bridge reported.
+        display_name:
+          type: string
+          description: Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers
+            show.
         last_used_at:
           type:
           - string
@@ -13134,7 +13291,8 @@ components:
             $ref: '#/components/schemas/AccountLink'
     LinkableConnection:
       type: object
-      description: A Connection an account can be linked through, as the profile sees it; no other Connection field is shown.
+      description: A Connection an account can be linked through, as the profile sees it; no other Connection field is
+        shown. A Bridge Connection also says how an account can be linked through it.
       required:
       - id
       - name
@@ -13146,6 +13304,31 @@ components:
           type: string
         messenger:
           $ref: '#/components/schemas/Messenger'
+        link_methods:
+          type: array
+          description: Set on Bridge Connections only, from the Connection's last `info`; `token`, a token sent to the bot,
+            always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with
+            `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.
+          items:
+            type: string
+            enum:
+            - token
+            - code
+        handle_kind:
+          $ref: '#/components/schemas/LinkHandleKind'
+    LinkHandleKind:
+      type:
+      - string
+      - 'null'
+      description: Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the
+        Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code
+        is offered.
+      enum:
+      - email
+      - login
+      - username
+      - user_id
+      - null
     LinkableConnectionList:
       type: object
       required:
@@ -13200,6 +13383,73 @@ components:
           format: date-time
         attempts_remaining:
           type: integer
+    BridgeLinkRequest:
+      type: object
+      required:
+      - connection_id
+      properties:
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+    BridgeLinkStart:
+      type: object
+      required:
+      - token
+      - link_url
+      - expires_at
+      properties:
+        token:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{43}$
+          description: Send it to the bot in a direct message. Single use and bound to the User and the Connection.
+        link_url:
+          type:
+          - string
+          - 'null'
+          format: uri
+          description: The bridge's `link_url_template` with the token, which opens a chat with the bot and hands it the
+            token; null without a template.
+        expires_at:
+          type: string
+          format: date-time
+    BridgeCodeLinkRequest:
+      type: object
+      required:
+      - connection_id
+      - handle
+      properties:
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+        handle:
+          type: string
+          minLength: 1
+          maxLength: 320
+          description: The handle of the account to link, of the kind the Connection's `handle_kind` names.
+    BridgeCodeLinkStarted:
+      type: object
+      required:
+      - request_id
+      - expires_at
+      - attempts_remaining
+      properties:
+        request_id:
+          $ref: '#/components/schemas/PublicId'
+        expires_at:
+          type: string
+          format: date-time
+        attempts_remaining:
+          type: integer
+    BridgeLinkConfirm:
+      type: object
+      required:
+      - request_id
+      - code
+      properties:
+        request_id:
+          $ref: '#/components/schemas/PublicId'
+        code:
+          type: string
+          writeOnly: true
+          description: The code the bot sent as a direct message.
     MattermostLinkConfirm:
       type: object
       required:
