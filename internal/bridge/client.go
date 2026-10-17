@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -183,8 +185,8 @@ func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
 // detail, or its title, when the bridge sent one, otherwise what outbound reports. Code is the check code the protocol
 // names for the failure (token_invalid, protocol_version_unknown, protocol_mismatch), empty otherwise; Network is what
 // failed when the call got no answer (outbound.Network*), and Blocked whether the outbound address policy refused it.
-// Unanswered is a call without an answer whose request may have reached the bridge: a timeout, or a connection lost
-// after the request was sent — not one that failed while connecting, which sent nothing.
+// Unanswered is a call without an answer whose request may have reached the bridge: one written in full before the
+// answer was lost to a timeout or a lost connection — not one that failed while connecting, which sent nothing.
 type Result struct {
 	Status         int
 	Classification Classification
@@ -325,7 +327,8 @@ func notExpected(status int, call string) Result {
 
 // do makes one call of method on path below `<base>/v1/` in the client class, with body as JSON unless it is nil and
 // the extra header, such as Idempotency-Key, and reads a successful answer into out unless it is nil. It returns the
-// outbound result, whose body the caller may read, and how the call ended.
+// outbound result, whose body the caller may read, and how the call ended. Whether the request was written is traced
+// on the request's context: a call without an answer whose request was written may have reached the bridge.
 func (c *Client) do(ctx context.Context, class outbound.Class, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
 	oc, err := c.client(class)
@@ -347,9 +350,15 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 		}
 		h.Set("Content-Type", "application/json")
 	}
+	var wrote atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: func(w httptrace.WroteRequestInfo) {
+		if w.Err == nil {
+			wrote.Store(true)
+		}
+	}})
 	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: "v1/" + path, Header: h, Body: data,
 		Mapping: mapping, ClassifyBody: problemText})
-	r := c.resultOf(res, err)
+	r := c.resultOf(res, err, wrote.Load())
 	if !r.OK() || out == nil {
 		return res, r
 	}
@@ -361,10 +370,10 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 }
 
 // resultOf is the Result of an outbound call: without an answer it is transient — a request that could not be built
-// is invalid and a blocked address forbidden — and an error answer is classified by Classify, with the masked text of
-// its problem. A 407 through the Connection's proxy is the proxy's refusal, not an answer of the bridge (D338): a
-// call without an answer, as the HTTPS CONNECT that a proxy refuses is.
-func (c *Client) resultOf(res outbound.Result, err error) Result {
+// is invalid and a blocked address forbidden — and Unanswered when its request was written (wrote); an error answer
+// is classified by Classify, with the masked text of its problem. A 407 through the Connection's proxy is the proxy's
+// refusal, not an answer of the bridge (D338): a call without an answer, as the HTTPS CONNECT that a proxy refuses is.
+func (c *Client) resultOf(res outbound.Result, err error, wrote bool) Result {
 	r := Result{Status: res.Status}
 	if err == nil {
 		return r
@@ -384,8 +393,7 @@ func (c *Client) resultOf(res outbound.Result, err error) Result {
 			r.Classification = Classification{Class: ClassInvalid}
 		default:
 			r.Classification = Classify(0, 0, false, nil)
-			r.Unanswered = (r.Network == outbound.NetworkTimeout || r.Network == outbound.NetworkConnect) &&
-				!connecting(oe)
+			r.Unanswered = wrote
 		}
 	case res.Status == http.StatusProxyAuthRequired && c.settings.Proxy != nil:
 		r.Status, r.Network, r.Error = 0, outbound.NetworkProxyAuth, MessageProxyRefused
@@ -402,12 +410,6 @@ func (c *Client) resultOf(res outbound.Result, err error) Result {
 		}
 	}
 	return r
-}
-
-// connecting reports whether a call without an answer failed while it connected to the bridge or to its proxy, before
-// its request was sent. outbound keeps only the text of the transport's error, which names the dial.
-func connecting(oe *outbound.Error) bool {
-	return oe != nil && (strings.HasPrefix(oe.Detail, "dial ") || strings.HasPrefix(oe.Detail, "proxyconnect "))
 }
 
 // problemOf is the problem of an error answer, when it is one: application/problem+json that decodes.

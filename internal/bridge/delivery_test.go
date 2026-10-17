@@ -390,7 +390,8 @@ func (f *fired) fire() { f.once.Do(func() { close(f.done) }) }
 // Retry-After for the Destination, or with the scope bot for the Connection, and is Transient without one or with one
 // longer than bridge.retry_after_max; gone is Gone on an edit and on a reply; forbidden is Fatal with the bridge's
 // detail, masked; invalid, an answer that is not the protocol's and a redirect are unknown; a call without an answer is
-// Transient, Unanswered when its request may have reached the bridge, and an address the policy refuses is Fatal.
+// Transient, Unanswered when its request was written and may have reached the bridge — never when it was refused or
+// timed out while connecting, in a TLS handshake or a proxy's CONNECT — and an address the policy refuses is Fatal.
 func TestErrorMapping(t *testing.T) {
 	problem := func(status int, body string, header ...string) http.HandlerFunc {
 		return answerJSON(status, problemJSON, body, header...)
@@ -474,6 +475,7 @@ func TestErrorMapping(t *testing.T) {
 				n          Network
 				base       string
 				proxy      string
+				silent     string
 				kind       delivery.OutcomeKind
 				unanswered bool
 			}{
@@ -493,6 +495,8 @@ func TestErrorMapping(t *testing.T) {
 				}, kind: delivery.OutcomeTransient, unanswered: true},
 				{name: "refused", base: refused, kind: delivery.OutcomeTransient},
 				{name: "proxy down", proxy: strings.TrimPrefix(refused, "http://"), kind: delivery.OutcomeTransient},
+				{name: "timeout in the TLS handshake", silent: "bridge", kind: delivery.OutcomeTransient},
+				{name: "timeout in the proxy's CONNECT", silent: "proxy", kind: delivery.OutcomeTransient},
 				{name: "blocked", n: blocked, kind: delivery.OutcomeFatal},
 			} {
 				t.Run(op+" "+tc.name, func(t *testing.T) {
@@ -510,9 +514,16 @@ func TestErrorMapping(t *testing.T) {
 					if tc.base != "" {
 						base = tc.base
 					}
+					proxy := tc.proxy
+					switch tc.silent {
+					case "bridge":
+						base = "https://" + silent(t, ctx)
+					case "proxy":
+						base, proxy = "https://127.0.0.1:1", silent(t, ctx)
+					}
 					settings := Settings{BaseURL: base, Token: testToken}
-					if tc.proxy != "" {
-						settings.Proxy = &outbound.Proxy{Type: outbound.ProxyHTTP, Address: tc.proxy}
+					if proxy != "" {
+						settings.Proxy = &outbound.Proxy{Type: outbound.ProxyHTTP, Address: proxy}
 					}
 					e.targets.byID[1] = Target{Conn: Conn{ID: 1, Version: 1, Client: newClient(t, n, settings)},
 						ChannelID: "ch-alerts"}
@@ -525,6 +536,39 @@ func TestErrorMapping(t *testing.T) {
 			}
 		}
 	})
+}
+
+// silent listens on loopback and accepts connections that never answer, a TLS handshake or a proxy's CONNECT that
+// hangs: the first connection fires f, as a timeout while connecting. It returns the address.
+func silent(t *testing.T, f *fired) string {
+	t.Helper()
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var conns []net.Conn
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+			f.fire()
+		}
+	}()
+	return ln.Addr().String()
 }
 
 // callOp makes the call of the delivery worker for op — post, edit or reply — of a firing Root message.
