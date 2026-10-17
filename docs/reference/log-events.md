@@ -84,7 +84,7 @@ The Organization has no Admin and the bootstrap variables are not set, so nobody
 
 WARN · fields: `connection`, `event_id`, `type`, `error` · C-22
 
-The handling of a Bridge event failed — the read of a pushed event's Connection or of its push secret, its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed; a failed read of the Connection comes before the event is authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database or the dispatcher refuses it.
+The handling of a Bridge event failed — the read of a pushed event's Connection or of its secrets, its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed; a failed read of the Connection comes before the event is authenticated, so its line has neither event_id nor type. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database refuses it.
 
 ### `bridge_event_rejected`
 

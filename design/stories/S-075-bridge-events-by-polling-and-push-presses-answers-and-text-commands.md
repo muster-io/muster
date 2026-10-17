@@ -126,7 +126,7 @@ issue: 233
     `internal/leader/tasks.go` for the domain, and the table's name joins `metrics.ShortLivedTables`;
   - a partial index `thread_replies_reminder_message_idx` on `thread_replies (destination_id, message_id) WHERE event =
     'reminder' AND message_id IS NOT NULL`, through which the binding of a press finds a sent Reminder by its message
-    id, before the press's data is verified;
+    id alone, whatever the press's data verified as, and the data is then checked against it;
   - `deliveries` gains `superseded_button_key_ids` (`text[]`, default empty) with the partial GIN index
     `deliveries_superseded_keys_idx ... WHERE superseded_button_key_ids <> '{}'`, and the record of a republication
     past the edit window appends to it the key that signed the buttons of the Root message it replaces. Since S-081 a
@@ -150,9 +150,9 @@ issue: 233
   updates; a pushed event that finds no free slot waits for one. A crash after the insert
   and before the answer leaves the person without an answer, as a failed answer does. An event of a type the
   Connection's `info` does not declare is handled like any other; an `account_link` event is acknowledged and changes
-  nothing until S-076. An event whose own handling fails — a read of Muster's data, the claim or the record — is not
-  recorded and comes again; a Command that the dispatcher refuses, or that fails, is a handled event: it is answered
-  and recorded, so that one bad event cannot hold a Connection's poll queue.
+  nothing until S-076. An event whose own handling fails — a read of Muster's data, the claim, the record or the
+  deleted Root message flow — is not recorded and comes again; a Command that the dispatcher refuses, or that fails, is
+  a handled event: it is answered and recorded, so that one bad event cannot hold a Connection's poll queue.
 - **Poller** (`poller.go`, Leader task `bridge_polling`, ADR-0007): one loop per Bridge Connection in poll mode,
   started and stopped as Connections change; `pollEvents` in the background client class with the Connection's proxy
   and a deadline of `bridge.poll_wait` plus 15 s per call, and a client whose call timeout is no shorter, so a long poll
