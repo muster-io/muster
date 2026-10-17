@@ -146,6 +146,8 @@ func TestOrganizationSettings(t *testing.T) {
 		if got.status != http.StatusOK {
 			t.Fatalf("equal periods = %d %s", got.status, got.body)
 		}
+		// The line may reach the harness after the answer.
+		eventually(t, "organization_updated on B", func() bool { return len(logLines(b, "organization_updated")) > 0 })
 		if lines := logLines(b, "organization_updated"); len(lines) != 1 ||
 			lines[0]["fields"] != "/retention/alert_group_summaries_days" {
 			t.Errorf("organization_updated %v", lines)
@@ -391,15 +393,17 @@ func TestOrganizationSettings(t *testing.T) {
 		if got := testClass(apiA, meta); got != "blocked" {
 			t.Errorf("169.254.169.254 with 169.254.0.0/16 allowed = %q", got)
 		}
-		found := false
-		for _, l := range logLines(a, "outbound_blocked") {
-			if l["host"] == "169.254.169.254" && strings.Contains(fmt.Sprint(l["rule"]), "always blocked") {
-				found = true
+		// blocked reports an outbound_blocked line of r for the host by the rule; it may reach the harness after the
+		// answer of the test.
+		blocked := func(r *Replica, host, rule string) func() bool {
+			return func() bool {
+				return slices.ContainsFunc(logLines(r, "outbound_blocked"), func(l map[string]any) bool {
+					return l["host"] == host && strings.Contains(fmt.Sprint(l["rule"]), rule)
+				})
 			}
 		}
-		if !found {
-			t.Errorf("replica A logged no outbound_blocked for 169.254.169.254")
-		}
+		eventually(t, "replica A's outbound_blocked for 169.254.169.254",
+			blocked(a, "169.254.169.254", "always blocked"))
 
 		private := e.api.json(http.MethodPost, "/api/v1/destinations", `{"type":"webhook","name":"private",
 			"mode":"events","events":{"url":"http://10.0.0.1:9/hook","headers":[]},"proxy":{"enabled":false},
@@ -412,15 +416,7 @@ func TestOrganizationSettings(t *testing.T) {
 		if got := testClass(e.api, private); got != "blocked" {
 			t.Errorf("a private address under the strict policy = %q", got)
 		}
-		found = false
-		for _, l := range logLines(b, "outbound_blocked") {
-			if l["host"] == "10.0.0.1" && strings.Contains(fmt.Sprint(l["rule"]), "not a public address") {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("replica B logged no strict refusal of 10.0.0.1")
-		}
+		eventually(t, "replica B's strict refusal of 10.0.0.1", blocked(b, "10.0.0.1", "not a public address"))
 		change("strict")
 		if got := testClass(e.api, wd); got != "blocked" {
 			t.Errorf("strict without loopback = %q", got)
@@ -436,8 +432,11 @@ func TestOrganizationSettings(t *testing.T) {
 		if len(audit.Items) != 6 || len(audit.Items[0].Diff) == 0 {
 			t.Errorf("audit %+v", audit)
 		}
-		if len(logLines(a, "outbound_policy_updated")) != 6 {
-			t.Errorf("replica A logged %d outbound_policy_updated", len(logLines(a, "outbound_policy_updated")))
+		eventually(t, "six outbound_policy_updated on A", func() bool {
+			return len(logLines(a, "outbound_policy_updated")) >= 6
+		})
+		if n := len(logLines(a, "outbound_policy_updated")); n != 6 {
+			t.Errorf("replica A logged %d outbound_policy_updated", n)
 		}
 		// A client that leaves its stream is not an error.
 		s.cancel()
