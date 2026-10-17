@@ -17,7 +17,6 @@ files_touched:
   - web/src/components/destination-form.tsx
   - web/src/components/destination-form.test.tsx
   - web/src/components/destination-check.tsx
-  - web/src/components/destination-health.tsx
   - web/src/components/destination-label.ts
   - web/src/components/destination-label.test.ts
   - web/src/components/destination-preview-panel.tsx
@@ -122,9 +121,9 @@ issue: 235
   direct message. Send it the token instead.") and `code_not_offered` shown at the handle field, `link_code_invalid` at
   the code, and `link_code_requests_exceeded` with the wait from `retry_after_seconds`; the list refreshes on the live
   hint of S-052 when the token is used.
-- **Labels** (`destination-label.ts`, `destination-health.tsx`): the messenger's name from the Connection's `info`,
-  and the type's name "Bridge" («Мост») of S-073 and S-080 while none was read; `chatKey` gains the Bridge case, the
-  Connection's normalized base URL and the channel id, so the duplicate-chat warning of S-070 covers Bridges.
+- **Labels** (`destination-label.ts`): the messenger's name from the Connection's `info`, and the type's name "Bridge"
+  («Мост») of S-073 and S-080 while none was read; `chatKey` gains the Bridge case, the Connection's normalized base URL
+  and the channel id, so the duplicate-chat warning of S-070 covers Bridges.
 - **Delivery state** (`alert-group-deliveries.tsx`): the flag `past_edit_window` of S-081, shown with its text beside
   the delivery's state.
 - **Timeline and Audit log** (`timeline.tsx`, `admin.audit-log.tsx`): the Transport `bridge` with an explicit case in
