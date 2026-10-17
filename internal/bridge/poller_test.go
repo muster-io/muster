@@ -786,6 +786,13 @@ func TestPollerUnbuiltClient(t *testing.T) {
 	read()
 	e.source.set(unbuilt(2))
 	read()
+	if n := len(e.bridge.calls()); n != 0 {
+		t.Fatalf("%d polls without a client", n)
+	}
+	e.source.set(e.polled)
+	p.Wake()
+	eventually(t, "the poll once the client is built", func() bool { return len(e.bridge.calls()) == 1 })
+	// The poller logs the failures of a list before it reads the next one, so the poll proves them all written.
 	var failures []float64
 	for line := range strings.Lines(e.log.String()) {
 		var m map[string]any
@@ -801,12 +808,6 @@ func TestPollerUnbuiltClient(t *testing.T) {
 	if !slices.Equal(failures, []float64{1, 10, 1, 1}) {
 		t.Errorf("logged the failures %v", failures)
 	}
-	if n := len(e.bridge.calls()); n != 0 {
-		t.Fatalf("%d polls without a client", n)
-	}
-	e.source.set(e.polled)
-	p.Wake()
-	eventually(t, "the poll once the client is built", func() bool { return len(e.bridge.calls()) == 1 })
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
