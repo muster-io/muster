@@ -78,8 +78,9 @@ func TestSafeOutput(t *testing.T) {
 
 // TestEscapeCommonMark is C-22.FR-4 and C-22.AC-5: alert data reach a bridge as literal CommonMark text — every
 // punctuation that can start markup inside a line is escaped, and so is the marker of a heading, a list item or a
-// setext underline at the start of a line, after up to three spaces; `@` is neutralized by Value before, so a hostile
-// label value is no Mention, no emphasis, no HTML and no link.
+// setext underline at the start of a line, after any spaces and tabs — a continuation line laid out inside a list item
+// is indented relative to it; `@` is neutralized by Value before, so a hostile label value is no Mention, no emphasis,
+// no HTML and no link.
 func TestEscapeCommonMark(t *testing.T) {
 	hostile := "@all *x* <b>y</b> [z](http://evil)"
 	if got := EscapeCommonMark(Value(hostile)); got != "@\u200ball \\*x\\* \\<b\\>y\\</b\\> \\[z\\](http://evil)" {
@@ -90,7 +91,22 @@ func TestEscapeCommonMark(t *testing.T) {
 		"![i](http://x/i.png) <http://x>": "!\\[i\\](http://x/i.png) \\<http://x\\>",
 		"# heading":                       "\\# heading",
 		"   ## three spaces":              "   \\## three spaces",
-		"    # four spaces is code":       "    # four spaces is code",
+		"    # four spaces":               "    \\# four spaces",
+		"\t# tab":                         "\t\\# tab",
+		"a\n    # head":                   "a\n    \\# head",
+		"a\n\t# head":                     "a\n\t\\# head",
+		"a\n\t- x":                        "a\n\t\\- x",
+		"a\n    - x":                      "a\n    \\- x",
+		"a\n \t + x":                      "a\n \t \\+ x",
+		"a\n    1. x":                     "a\n    1\\. x",
+		"a\n\t1) x":                       "a\n\t1\\) x",
+		"a\n    ===":                      "a\n    \\===",
+		"a\n\t\t---":                      "a\n\t\t\\---",
+		"a\n    * * *":                    "a\n    \\* \\* \\*",
+		"a\n\t___":                        "a\n\t\\_\\_\\_",
+		"a\n    > quote":                  "a\n    \\> quote",
+		"a\n\t```go":                      "a\n\t\\`\\`\\`go",
+		"a\n    ~~~":                      "a\n    \\~\\~\\~",
 		"- item":                          "\\- item",
 		"+ item":                          "\\+ item",
 		"* item":                          "\\* item",

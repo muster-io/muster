@@ -84,9 +84,10 @@ var commonMarkSpecial = strings.NewReplacer(`\`, `\\`, "`", "\\`", "*", `\*`, "_
 	"]", `\]`, "<", `\<`, ">", `\>`, "&", `\&`)
 
 // EscapeCommonMark escapes s for CommonMark with strikethrough, a bridge's envelope body (C-22.FR-4): every
-// punctuation that can start markup inside a line, and the marker a line starts with after up to three spaces — of a
-// heading, a list item or a setext underline — so that alert data stay literal text. It does not neutralize `@`: Value
-// does that first.
+// punctuation that can start markup inside a line, and the marker a line starts with after any spaces and tabs — of a
+// heading, a list item or a setext underline — so that alert data stay literal text. Any indentation, not only up to
+// three spaces: a line of alert data laid out inside a list item is indented relative to it. It does not neutralize
+// `@`: Value does that first.
 func EscapeCommonMark(s string) string {
 	s = commonMarkSpecial.Replace(s)
 	var b strings.Builder
@@ -102,11 +103,11 @@ func EscapeCommonMark(s string) string {
 	return b.String()
 }
 
-// escapeLineStart escapes the block marker that starts a line after up to three spaces: `#`, `-`, `+` or `=`, and
+// escapeLineStart escapes the block marker that starts a line after any spaces and tabs: `#`, `-`, `+` or `=`, and
 // the `.` or `)` after one to nine digits.
 func escapeLineStart(line string) string {
 	i := 0
-	for i < 3 && i < len(line) && line[i] == ' ' {
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 		i++
 	}
 	if i < len(line) && strings.IndexByte("#-+=", line[i]) >= 0 {

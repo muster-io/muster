@@ -1114,6 +1114,21 @@ func TestLayoutCommonMark(t *testing.T) {
 	}
 	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- \\<p1\\> *on* prod \n- ~~p2 *on* prod~~\n- p3 *on* prod \n\n")
 
+	// A later line of alert data, indented by spaces or a tab, stays text inside its list item: no heading, nested list,
+	// ordered list or setext underline forms, from the default line or from a line template.
+	src = source("firing", 4)
+	src.Alerts[0].Labels["pod"] = "a\n    # head"
+	src.Alerts[1].Labels["pod"] = "b\n\t- x"
+	src.Alerts[2].Labels["pod"] = "c\n    1. x"
+	src.Alerts[3].Labels["pod"] = "d\n    ==="
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark),
+		"\n\n- pod: a\n    \\# head\n- ~~pod: b\n\t\\- x~~\n- pod: c\n    1\\. x\n- pod: d\n    \\===\n\n")
+	src.Route.Line = ptr(`{{ .Annotations.description }}`)
+	src.Alerts[0].Annotations["description"] = "x\n\t# y\n  \t1) z"
+	out = r.Root(src, MarkupCommonMark)
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- x\n\t\\# y\n  \t1\\) z\n- ")
+
 	// A root_message template replaces the body; its Mention tokens show as `@` names.
 	src = source("firing", 1)
 	src.CommonLabels["team"] = "web_ops"
