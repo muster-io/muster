@@ -639,18 +639,19 @@ func (e DeliveryErrorClass) Valid() bool {
 
 // Defines values for DeliveryEventKind.
 const (
-	DeliveryEventKindDeletedInMessenger   DeliveryEventKind = "deleted_in_messenger"
-	DeliveryEventKindDeliveredLate        DeliveryEventKind = "delivered_late"
-	DeliveryEventKindDestinationBroken    DeliveryEventKind = "destination_broken"
-	DeliveryEventKindDestinationRecovered DeliveryEventKind = "destination_recovered"
-	DeliveryEventKindFinalEdit            DeliveryEventKind = "final_edit"
-	DeliveryEventKindMarkupRejected       DeliveryEventKind = "markup_rejected"
-	DeliveryEventKindNotDelivered         DeliveryEventKind = "not_delivered"
-	DeliveryEventKindPossibleDuplicate    DeliveryEventKind = "possible_duplicate"
-	DeliveryEventKindPublication          DeliveryEventKind = "publication"
-	DeliveryEventKindRepublished          DeliveryEventKind = "republished"
-	DeliveryEventKindStormSummary         DeliveryEventKind = "storm_summary"
-	DeliveryEventKindThreadNotAttached    DeliveryEventKind = "thread_not_attached"
+	DeliveryEventKindDeletedInMessenger        DeliveryEventKind = "deleted_in_messenger"
+	DeliveryEventKindDeliveredLate             DeliveryEventKind = "delivered_late"
+	DeliveryEventKindDestinationBroken         DeliveryEventKind = "destination_broken"
+	DeliveryEventKindDestinationRecovered      DeliveryEventKind = "destination_recovered"
+	DeliveryEventKindFinalEdit                 DeliveryEventKind = "final_edit"
+	DeliveryEventKindMarkupRejected            DeliveryEventKind = "markup_rejected"
+	DeliveryEventKindNotDelivered              DeliveryEventKind = "not_delivered"
+	DeliveryEventKindPossibleDuplicate         DeliveryEventKind = "possible_duplicate"
+	DeliveryEventKindPublication               DeliveryEventKind = "publication"
+	DeliveryEventKindRepublished               DeliveryEventKind = "republished"
+	DeliveryEventKindRepublishedPastEditWindow DeliveryEventKind = "republished_past_edit_window"
+	DeliveryEventKindStormSummary              DeliveryEventKind = "storm_summary"
+	DeliveryEventKindThreadNotAttached         DeliveryEventKind = "thread_not_attached"
 )
 
 // Valid indicates whether the value is a known member of the DeliveryEventKind enum.
@@ -675,6 +676,8 @@ func (e DeliveryEventKind) Valid() bool {
 	case DeliveryEventKindPublication:
 		return true
 	case DeliveryEventKindRepublished:
+		return true
+	case DeliveryEventKindRepublishedPastEditWindow:
 		return true
 	case DeliveryEventKindStormSummary:
 		return true
@@ -3253,8 +3256,11 @@ type AlertGroupDelivery struct {
 	Error nullable.Nullable[string] `json:"error,omitempty"`
 
 	// MessageUrl Link to the Root message where the messenger provides one.
-	MessageUrl        nullable.Nullable[string] `json:"message_url,omitempty"`
-	PossibleDuplicate bool                      `json:"possible_duplicate"`
+	MessageUrl nullable.Nullable[string] `json:"message_url,omitempty"`
+
+	// PastEditWindow The Root message is past its bridge's edit window (C-22.FR-9) while the delivery is pending or delivered. Muster no longer edits it and posts a new Root message on the next change of status. Always false for other Destination types.
+	PastEditWindow    bool `json:"past_edit_window"`
+	PossibleDuplicate bool `json:"possible_duplicate"`
 
 	// State `waiting_for_broken_destination` — derived, never stored: a `pending` delivery whose Destination is Broken; `withheld` — never posted to this Destination: the Alert Group resolved while a Storm summary stood for it or while the Destination was Broken; `retired` — no longer updated there after its final edit, because the Destination left the Route or was deleted.
 	State             DeliveryState `json:"state"`

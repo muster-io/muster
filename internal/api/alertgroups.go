@@ -682,8 +682,9 @@ func (s *Server) ListAlertGroupDeliveries(ctx context.Context, req gen.ListAlert
 				Health: healthOf(destinations.Health{State: st.Destination.Health, Since: st.Destination.BrokenSince,
 					Reason: st.Destination.BrokenReason})},
 			State: gen.DeliveryState(st.State), ThreadNotAttached: st.ThreadNotAttached,
-			PossibleDuplicate: st.PossibleDuplicate, MessageUrl: nullableString(st.MessageURL),
-			Error: nullableString(st.Error), UpdatedAt: &updated,
+			PossibleDuplicate: st.PossibleDuplicate, PastEditWindow: st.PastEditWindow,
+			MessageUrl: nullableString(st.MessageURL),
+			Error:      nullableString(st.Error), UpdatedAt: &updated,
 		}
 		out.Items = append(out.Items, item)
 	}

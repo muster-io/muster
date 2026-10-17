@@ -86,6 +86,12 @@ INFO · fields: `connection`, `protocol_version`, `features` · C-22
 
 Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.
 
+### `bridge_republished_past_edit_window`
+
+INFO · fields: `destination`, `group`, `old_message_id`, `new_message_id` · C-22
+
+The status of an Alert Group changed while its Bridge Root message was past the bridge's edit window, so Muster posted a new Root message Quietly and replied under the old one with a link to it: destination is the public_id of the Destination, group the public_id of the Alert Group, old_message_id and new_message_id the bridge's ids of the old and the new Root message. Later Thread replies go under the new one; the old one keeps working. Logged once the republication was recorded.
+
 ### `clock_skew`
 
 WARN · fields: `skew_seconds`, `warning_seconds` · C-02

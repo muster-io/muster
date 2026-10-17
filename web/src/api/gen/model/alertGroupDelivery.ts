@@ -25,6 +25,8 @@ export interface AlertGroupDelivery {
   state: DeliveryState;
   thread_not_attached: boolean;
   possible_duplicate: boolean;
+  /** The Root message is past its bridge's edit window (C-22.FR-9) while the delivery is pending or delivered. Muster no longer edits it and posts a new Root message on the next change of status. Always false for other Destination types. */
+  past_edit_window: boolean;
   /**
      * Link to the Root message where the messenger provides one.
      * @nullable

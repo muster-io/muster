@@ -39,7 +39,7 @@ recorded in its Timeline with the kind `delivery`, and none is sent as an outgoi
 | Thread replies that came due while a Destination was Broken | not sent | — | — |
 | Alert Group that resolved while its Destination was Broken, never published there | not published | Timeline and UI only | — |
 | Republication after a deleted Root message | Quiet | new Root message with a note; Thread starts over | — |
-| Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here"; for a Bridge Root message past its edit window, a Thread reply with the same text (C-22.FR-9) | — |
+| Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here"; for a Bridge Root message past its edit window, a Thread reply with the same text (C-22.FR-9); a Bridge Publication whose answer was lost before the Destination left is not withheld but posted again with its key, carrying the final text (C-22.FR-6): a replayed message is edited to it, otherwise the new message is the final one and a possible duplicate is recorded | — |
 | Republication past a bridge's edit window, on a change of status (C-22.FR-9) | Quiet | new Root message; a Thread reply under the old one links to it; the Thread continues under the new one | — |
 
 Telegram makes a Quiet new message with `disable_notification`, which silences the push but does not remove it

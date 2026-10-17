@@ -80,6 +80,9 @@ func TestOutcomeRules(t *testing.T) {
 				events: []string{"not_delivered"}}},
 		{"thread_lost", deliverytest.Failure(delivery.OutcomeThreadLost, "thread closed"),
 			want{state: "pending", err: "thread closed", health: "healthy", next: delivery.TransientFirstStep}},
+		{"edit_window_closed on a publication", deliverytest.Failure(delivery.OutcomeEditWindowClosed, "too old"),
+			want{state: "not_delivered", class: "unknown", err: "too old", health: "healthy",
+				events: []string{"not_delivered"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, d := pending(t)
@@ -102,6 +105,40 @@ func TestOutcomeRules(t *testing.T) {
 				t.Error("the start of a publication the messenger did not take is kept")
 			}
 		})
+	}
+}
+
+// TestEditWindowClosedClasses is C-22.FR-8: an edit refused as edit_window_closed is neither an error nor a delivery —
+// no last_error_class, no muster_delivery_attempts_total outcome, no attempt counted — the Destination test classes it
+// unknown, and the events mode of an outgoing webhook, which never answers it, ends the event as unknown.
+func TestEditWindowClosedClasses(t *testing.T) {
+	if got := delivery.ErrorClass(delivery.OutcomeEditWindowClosed); got != "unknown" {
+		t.Errorf("the destination test classes it %s", got)
+	}
+	e, d, _ := publishedWindowed(t)
+	e.business.Set(business0.Add(time.Minute))
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeEditWindowClosed, "too old"))
+	e.retitled(t, groups.StatusFiring, "b", 2)
+	e.round(t)
+	if d.errorClass != nil || d.lastError != nil || d.attempts != 0 || d.firstFailed != nil || !d.pastEditWindow ||
+		e.db.dests[destMM].health != "healthy" {
+		t.Errorf("delivery %+v", d)
+	}
+	if out := scrape(t); strings.Contains(out, `outcome="edit_window_closed"`) {
+		t.Error("counted in muster_delivery_attempts_total")
+	}
+	if !strings.Contains(e.log.String(), `"outcome":"edit_window_closed"`) {
+		t.Errorf("the attempt is not logged: %s", e.log)
+	}
+
+	ee := newEventsEnv(t, nil)
+	g := ee.group(groups.StatusAcknowledged, "t")
+	ee.enqueue(t, g, webUser, event(1, groups.EventAcknowledged, groups.VariantAny))
+	ee.sender.answers = []delivery.Outcome{{Kind: delivery.OutcomeEditWindowClosed, Error: "too old"}}
+	ee.drain(t)
+	if we := ee.db.webhookEvents[0]; we.state != "not_delivered" || *we.errorClass != "unknown" ||
+		ee.db.dests[destWH].health != "healthy" {
+		t.Errorf("events mode %+v", we)
 	}
 }
 

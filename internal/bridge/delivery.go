@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/delivery"
@@ -42,9 +43,10 @@ type Adapter struct {
 }
 
 var (
-	_ delivery.Adapter    = (*Adapter)(nil)
-	_ delivery.Checker    = (*Adapter)(nil)
-	_ delivery.Idempotent = (*Adapter)(nil)
+	_ delivery.Adapter      = (*Adapter)(nil)
+	_ delivery.Checker      = (*Adapter)(nil)
+	_ delivery.Idempotent   = (*Adapter)(nil)
+	_ delivery.EditWindowed = (*Adapter)(nil)
 )
 
 // LengthLimit is the protocol's floor of limits.max_body_length. Delivery never shortens for a bridge: the adapter
@@ -60,6 +62,33 @@ func (a *Adapter) PublicationKey(d delivery.Destination, deliveryID, publication
 // ReplyKey is the idempotency key of a Thread reply (C-22.FR-6): reply-<Destination public_id>-<thread reply id>.
 func (a *Adapter) ReplyKey(d delivery.Destination, replyID int64) string {
 	return "reply-" + d.PublicID + "-" + strconv.FormatInt(replyID, 10)
+}
+
+// PointerKey is the idempotency key of the pointer reply under Root message number publication, which a republication
+// past the edit window replaced (C-22.FR-9): pointer-<Destination public_id>-<delivery id>-<publication>.
+func (a *Adapter) PointerKey(d delivery.Destination, deliveryID, publication int64) string {
+	return "pointer-" + d.PublicID + "-" + strconv.FormatInt(deliveryID, 10) + "-" + strconv.FormatInt(publication, 10)
+}
+
+// FinalKey is the idempotency key of the final edit of a Root message past its edit window, sent as a Thread reply
+// (C-22.FR-9): final-<Destination public_id>-<delivery id>.
+func (a *Adapter) FinalKey(d delivery.Destination, deliveryID int64) string {
+	return "final-" + d.PublicID + "-" + strconv.FormatInt(deliveryID, 10)
+}
+
+// EditWindow is limits.edit_max_age_seconds of the info of the Connection of c's Destination, read again past
+// bridge.info_max_age (C-22.FR-9): false when the info declares none (null: edits never expire) or cannot be read, so
+// that the bridge's own refusal of an edit as edit_window_closed is what marks a Root message past its window.
+func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duration, bool) {
+	_, i, fail := a.prepare(ctx, c)
+	if fail != nil {
+		return 0, false
+	}
+	n, err := i.Limits.EditMaxAgeSeconds.Get()
+	if err != nil {
+		return 0, false
+	}
+	return time.Duration(n) * time.Second, true
 }
 
 // Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call before its body. Its
@@ -84,7 +113,9 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	return o
 }
 
-// Update replaces the message messageID with the whole envelope of m, Quiet and without Mentions.
+// Update replaces the message messageID with the whole envelope of m, Quiet and without Mentions. An edit refused as
+// gone only because of the message's age, with the reason edit_window_closed, is OutcomeEditWindowClosed, not a
+// deleted Root message (C-22.FR-8).
 func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)
 	if fail != nil {
@@ -92,8 +123,11 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 	}
 	_, r := t.Conn.Client.EditMessage(ctx, c.Class, messageID, content(m, i, nil))
 	o := r.Outcome()
-	if r.OK() {
+	switch {
+	case r.OK():
 		o.MessageID = messageID
+	case r.Classification.Class == ClassGone && r.Classification.Reason == ReasonEditWindowClosed:
+		o.Kind = delivery.OutcomeEditWindowClosed
 	}
 	return o
 }

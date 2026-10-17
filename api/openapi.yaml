@@ -10801,6 +10801,7 @@ components:
       - destination_recovered
       - storm_summary
       - final_edit
+      - republished_past_edit_window
     TimelineDeliveryEntry:
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
@@ -11084,6 +11085,7 @@ components:
       - state
       - thread_not_attached
       - possible_duplicate
+      - past_edit_window
       properties:
         destination:
           $ref: '#/components/schemas/DestinationRef'
@@ -11093,6 +11095,11 @@ components:
           type: boolean
         possible_duplicate:
           type: boolean
+        past_edit_window:
+          type: boolean
+          description: The Root message is past its bridge's edit window (C-22.FR-9) while the delivery is pending or
+            delivered. Muster no longer edits it and posts a new Root message on the next change of status. Always
+            false for other Destination types.
         message_url:
           type:
           - string

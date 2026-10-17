@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/routing"
 )
@@ -744,5 +745,33 @@ func TestGetAlertGroupDetailsRemovedAPI(t *testing.T) {
 	if g.DetailsRemoved == nil || !*g.DetailsRemoved || len(*g.Notices) != 1 ||
 		(*g.Notices)[0].Kind != gen.DetailsRemoved || (*g.Notices)[0].RetentionDays.MustGet() != 90 {
 		t.Errorf("alert group %+v", g)
+	}
+}
+
+// TestAlertGroupDeliveriesPastEditWindowAPI: listAlertGroupDeliveries reports past_edit_window (C-22.FR-9), true for
+// a delivered Bridge Root message past its edit window and false for every other delivery.
+func TestAlertGroupDeliveriesPastEditWindowAPI(t *testing.T) {
+	x, _, fdl := newDestinationsAPI(t)
+	fdl.states[groupID] = append(fdl.states[groupID], delivery.State{
+		Destination: delivery.Ref{PublicID: "DSAAAAAAAAAAA4", Name: "bridged", Type: "bridge", Health: "healthy"},
+		State:       "delivered", PastEditWindow: true, MessageURL: ptr("https://bridge.example.org/m/2"), UpdatedAt: t0})
+	var list gen.AlertGroupDeliveryList
+	decodeInto(t, x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/deliveries", ""), &list)
+	got := map[string]bool{}
+	for _, it := range list.Items {
+		got[it.Destination.Id] = it.PastEditWindow
+	}
+	want := map[string]bool{mattermostID: false, telegramID: false, "DSAAAAAAAAAAA4": true}
+	if len(got) != len(want) {
+		t.Fatalf("items %+v", list.Items)
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("%s past_edit_window = %v, want %v", id, got[id], w)
+		}
+	}
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/deliveries", "")
+	if !strings.Contains(string(a.body), `"past_edit_window":false`) {
+		t.Errorf("the flag is not always present: %s", a.body)
 	}
 }

@@ -112,11 +112,14 @@ const (
 	OutcomeThreadLost OutcomeKind = "thread_lost"
 	// OutcomeTemplateError is a request of an outgoing webhook whose template failed: nothing was sent (C-15.FR-7).
 	OutcomeTemplateError OutcomeKind = "template_error"
+	// OutcomeEditWindowClosed is an edit a bridge refused only because of the Root message's age: `gone` with the
+	// reason `edit_window_closed` (C-22.FR-8, FR-9).
+	OutcomeEditWindowClosed OutcomeKind = "edit_window_closed"
 )
 
 // Outcomes are every outcome an adapter may answer with.
 var Outcomes = []OutcomeKind{OutcomeOK, OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown,
-	OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost, OutcomeTemplateError}
+	OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost, OutcomeTemplateError, OutcomeEditWindowClosed}
 
 // Scope is what a RetryAfter holds: the Destination, or every Destination of its Connection.
 type Scope string
@@ -250,6 +253,18 @@ type Idempotent interface {
 	ReplyKey(d Destination, replyID int64) string
 }
 
+// EditWindowed is an Adapter whose messenger edits a Root message only for a while after its Publication
+// (C-22.FR-9); *bridge.Adapter implements it. EditWindow is that while for the Destination of c, read outside any
+// transaction from the info of its Connection, again past bridge.info_max_age; ok is false when edits never expire or
+// the info cannot be read, and the messenger's own refusal of an edit then marks the Root message past its window.
+// PointerKey is the idempotency key of the Thread reply that points from Root message number publication of the
+// delivery deliveryID to the one that replaced it; FinalKey that of a final edit sent as a Thread reply.
+type EditWindowed interface {
+	EditWindow(ctx context.Context, c Call) (time.Duration, bool)
+	PointerKey(d Destination, deliveryID, publication int64) string
+	FinalKey(d Destination, deliveryID int64) string
+}
+
 // Checker is the Destination check an adapter may offer (C-13.FR-10, C-14.FR-14): whether the bot can still reach and
 // write to its chat, without sending a message. The Broken probe uses it from S-035 on.
 type Checker interface {
@@ -306,7 +321,7 @@ func errorClass(k OutcomeKind) string {
 	switch k {
 	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown, OutcomeTemplateError:
 		return string(k)
-	case OutcomeOK, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost:
+	case OutcomeOK, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost, OutcomeEditWindowClosed:
 	}
 	return ""
 }
@@ -320,7 +335,7 @@ func metricOutcome(k OutcomeKind) string {
 	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown, OutcomeMarkupRejected,
 		OutcomeTemplateError:
 		return string(k)
-	case OutcomeGone, OutcomeThreadLost:
+	case OutcomeGone, OutcomeThreadLost, OutcomeEditWindowClosed:
 	}
 	return ""
 }
@@ -381,6 +396,7 @@ type queries interface {
 	stormQueries
 	membershipQueries
 	rerenderQueries
+	editWindowQueries
 	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
 	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
 		[]dbgen.SetDestinationTemplateErrorRow, error)
@@ -495,12 +511,14 @@ var ErrNotFound = errors.New("no such alert group")
 // derived, never stored (schema.md §4.11).
 const StateWaitingForBroken = "waiting_for_broken_destination"
 
-// State is the delivery state of an Alert Group in one Destination (C-11.FR-16).
+// State is the delivery state of an Alert Group in one Destination (C-11.FR-16). PastEditWindow is a pending or
+// delivered Bridge Root message past its edit window (C-22.FR-9).
 type State struct {
 	Destination       Ref
 	State             string
 	ThreadNotAttached bool
 	PossibleDuplicate bool
+	PastEditWindow    bool
 	MessageURL        *string
 	Error             *string
 	UpdatedAt         time.Time
@@ -540,7 +558,8 @@ func (s *Service) States(ctx context.Context, publicID string) ([]State, error) 
 			Type: r.DestinationType, Health: r.Health, BrokenSince: timeOf(r.BrokenSince),
 			BrokenReason: textOf(r.BrokenReason)},
 			State: r.State, ThreadNotAttached: r.ThreadState == "unattached", PossibleDuplicate: r.PossibleDuplicate,
-			MessageURL: textOf(r.MessageUrl), UpdatedAt: r.UpdatedAt.UTC()}
+			PastEditWindow: r.PastEditWindow && (r.State == "pending" || r.State == "delivered"),
+			MessageURL:     textOf(r.MessageUrl), UpdatedAt: r.UpdatedAt.UTC()}
 		if r.State == "not_delivered" {
 			st.Error = textOf(r.LastError)
 		}

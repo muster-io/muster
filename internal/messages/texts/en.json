@@ -63,6 +63,7 @@
   "reply.noticesMissed_other": "{count} notices were missed while Muster was unavailable.",
   "reply.ownerDeleted": "The owner was deleted — this Alert Group has no owner now.",
   "reply.ownerDisabled": "The owner was disabled — this Alert Group has no owner now.",
+  "reply.pointer": "This message is no longer updated. The current one: {link}",
   "reply.reminder": "Reminder: {user}, are you still on it?",
   "reply.reopened": "Reopened: the alerts fire again.",
   "reply.replaced": "Alerts were replaced because {label} changed.",

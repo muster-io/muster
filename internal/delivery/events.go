@@ -33,6 +33,9 @@ const (
 	EventDestinationRecovered EventKind = "destination_recovered"
 	EventStormSummary         EventKind = "storm_summary"
 	EventFinalEdit            EventKind = "final_edit"
+	// EventRepublishedPastEditWindow is a Bridge Root message past its edit window published again on a change of
+	// status (C-22.FR-9).
+	EventRepublishedPastEditWindow EventKind = "republished_past_edit_window"
 )
 
 // Event is one delivery event: when it happened, its Destination and, when it concerns one, its Alert Group or the

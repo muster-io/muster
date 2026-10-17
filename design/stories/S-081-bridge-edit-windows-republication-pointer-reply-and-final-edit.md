@@ -10,11 +10,17 @@ files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0010_bridge_edit_windows.up.sql
   - internal/db/migrations/0010_bridge_edit_windows.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
   - design/db/schema.md
+  - design/prd/l1/reference.md
   - internal/bridge/delivery.go
   - internal/bridge/delivery_test.go
   - internal/delivery/delivery.go
   - internal/delivery/destinationtest.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/membership_test.go
+  - internal/delivery/live_test.go
   - internal/delivery/webhookevents.go
   - internal/delivery/outcomes.go
   - internal/delivery/outcomes_test.go
@@ -29,7 +35,6 @@ files_touched:
   - internal/api/alertgroups_test.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
-  - internal/fakes/fakebridge/messages.go
   - internal/fakes/fakebridge/fakebridge_test.go
   - internal/logging/events.go
   - docs/messengers/bridge.md
@@ -75,8 +80,9 @@ issue: 239
   `pending` as any other. The SPA's fixture `delivery()`, typed `AlertGroupDelivery`, in
   `alert-group-deliveries.test.tsx` gains `past_edit_window: false`, since the type check of `make lint` includes the
   tests; the text of the flag on the page is S-077's.
-- **Schema** (migration `0010_bridge_edit_windows`, expand only, `schema.md`): `deliveries` gains `actual_status`,
-  `past_edit_window` (boolean, default false) and `superseded_message_ids` (`text[]`, default empty), with a partial GIN
+- **Schema** (migration `0010_bridge_edit_windows`, expand only, `schema.md`): `deliveries` gains `actual_status`
+  (`text`, nullable, with a CHECK), `past_edit_window` (boolean, default false), `republication_started_at`
+  (`timestamptz`, nullable) and `superseded_message_ids` (`text[]`, default empty), with a partial GIN
   index on `superseded_message_ids` where it is not empty, so that S-075 finds the delivery of an older Root message
   without scanning the Connection's deliveries; the `kind` CHECK of `delivery_events` gains
   `republished_past_edit_window`. `delivery_events` is partitioned: the new CHECK is added to the parent `NOT VALID`
@@ -100,15 +106,36 @@ issue: 239
   republication, not a lifecycle event: it has no `thread_replies` row and is not retried, and its failure is recorded
   with the event. A final edit (C-11.FR-14) of a row past its window is sent as a Thread reply with the same text
   (`final-<Destination public_id>-<delivery id>`).
+- **Edit window details** (where the rules above are silent): `actual_status` is the status of the Desired state that a
+  delivered Publication, edit or republication showed (`firing`, `acknowledged`, `snoozed`, `resolved`, `storm`); null —
+  rows from before 0010, or after a replayed answer — counts as a change of status. `past_edit_window` is set lazily, by
+  the first call due past the window, or at once by `edit_window_closed`; the window is read outside any transaction,
+  before tokens are taken, and an `info` that cannot be read gives no window, without a log line, so that the bridge's
+  own refusal decides. A republication counts toward `publications` and dates `published_at` from its outcome; one that
+  fails leaves the flag unset. Its start is kept as a first Publication's is (C-22.FR-6), in `republication_started_at`,
+  as `publication_started_at` stays set once a Root message is published: recorded before the call and kept after an
+  answer that was lost, so that the next call republishes with the same key whatever the status and the window —
+  carrying the final text when the Destination left, which then retires the delivery unless the answer is replayed — and
+  the pointer reply follows; a replayed answer is dated from the start, a retry after a started republication that is
+  not replayed records a possible duplicate, one that never started records none, and Not delivered, a deleted Root
+  message and the final edit clear the start. A delivery marked delivered without a call and an edit refused as
+  `edit_window_closed` start the Transient budget afresh, as a delivered call does. A pointer reply answered with
+  RetryAfter holds the limiter it names, and is not retried. The pointer key carries the count before the republication;
+  the pointer reply is sent after a replayed republication too and is counted as a `thread_reply` attempt. The
+  republication releases the old buttons' key. A Storm summary past its window is never republished.
+  `edit_window_closed` on a Publication, a republication or a final edit as a Thread reply is Not delivered.
+- **Loud/Quiet table** (`reference.md`, `enqueue.go`): the republication is the row `republication_past_edit_window`,
+  Quiet, without Mentions; the row of the final edit gains S-074's Bridge exception, a Publication whose answer was
+  lost before the Destination left, posted again with its key and the final text (C-22.FR-6).
 - **Lock order** (D307; `lockorder_integration_test.go`): a republication locks the delivery row only, as a
   Publication does, never its Alert Group before it; the test gains a republication against an acknowledgement that
   holds the Alert Group and then waits for the delivery in `Enqueue`.
 - **Read model** (`internal/api/alertgroups.go`): `listAlertGroupDeliveries` and the Alert Group page's deliveries carry
   `past_edit_window`.
 - **Texts**: the pointer reply "This message is no longer updated. The current one: {link}" in English and Russian.
-- **Fake bridge** (`messages.go`): `/_fake/config` `limits.edit_max_age_seconds` is declared in `info`; Muster's
-  window runs on the development clock, so the fake never needs to enforce it, and a harness fault with the problem
-  `{"class":"gone","reason":"edit_window_closed"}` refuses an edit earlier than declared (C-22.AC-9).
+- **Fake bridge** (unchanged; `fakebridge_test.go`): `/_fake/config` `limits.edit_max_age_seconds` is declared in
+  `info`; Muster's window runs on the development clock, so the fake never needs to enforce it, and a harness fault
+  with the problem `{"class":"gone","reason":"edit_window_closed"}` refuses an edit earlier than declared (C-22.AC-9).
 - **Log events**: `bridge_republished_past_edit_window` (info: Destination, Alert Group public id, old and new message
   ids).
 - **Page** (`docs/messengers/bridge.md`): the section "Edit windows".
@@ -149,7 +176,7 @@ curl -s -b jar "$API/alert-groups/$G3/deliveries" | jq -c '.items[0] | {state, p
 # a change of status past the window: a new Root message, Quiet, and the pointer reply under the old one
 curl -s "${H[@]}" -X POST $API/alert-groups/$G3/acknowledge > /dev/null; sleep 1
 MSG '[.[] | select(.envelope.title | endswith("Latency"))] | {n: length, s: [.[].envelope.status], notify: .[1].envelope.notify,
-  p: (.[0].replies[-1].body | test("no longer updated. The current one: http://127.0.0.1:18094/m/"))}'
+  p: (.[0].replies[-1].input.body | test("no longer updated. The current one: http://127.0.0.1:18094/m/"))}'
 # {"n":2,"s":["firing","acknowledged"],"notify":false,"p":true}
 curl -s -b jar "$API/alert-groups/$G3/timeline" | jq '[.items[] | select(.kind == "delivery" and .delivery_event == "republished_past_edit_window")] | length'   # 1
 grep -c 'bridge_republished_past_edit_window' dev.log                              # 1
@@ -186,6 +213,16 @@ None.
   `superseded_message_ids`.
 - `past_edit_window` is a flag beside the delivery state, not a state of its own: a delivery past its window is
   delivered, or pending while a republication is due, like any other.
+- Changes to this file in the pull request: `files_touched` gains the migration tests of `internal/db`, `enqueue.go`
+  (the Loud/Quiet row), the membership and live tests that count those rows, and `reference.md`, and loses
+  `internal/fakes/fakebridge/messages.go`, which needed no change; the Verification reads a reply's body at
+  `.input.body`, as `/_fake/messages` lists it; the Contracts record the details above where the rules were silent;
+  after review, the schema gains `republication_started_at`, and the details record the start of a republication, the
+  fresh Transient budget of a delivery marked delivered without a call, and the pointer reply's RetryAfter.
+- Accepted edge case: a Thread reply that finds the old Root message deleted while the answer to a republication is
+  lost, on an Alert Group already resolved or republished once after a deletion, ends the delivery
+  `deleted_in_messenger` and may leave the new Root message with a stale status; it needs a person to delete the old
+  message during the retry.
 
 ## Coverage
 

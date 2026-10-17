@@ -35,6 +35,9 @@ import (
 //   - markup_rejected: the same text is sent again without markup in the same attempt.
 //   - gone: the deleted Root message flow (publication.go); a Publication cannot be gone and is Not delivered; a final
 //     edit that finds its Root message gone retires the delivery all the same.
+//   - edit_window_closed: an edit a bridge refused only because of the Root message's age marks it past its edit
+//     window, due at once, so that the rules of the window decide the Desired state it carried (editwindow.go); no
+//     error class, no attempt counted. Any other call answered so is Not delivered.
 //   - thread_lost: a Thread reply whose Thread the messenger lost (the copy of a Telegram post was deleted, F-008) is
 //     sent again at once without its reply link, as the first reply of an unattached chain (threads.go); one refused
 //     even so is retried after TransientFirstStep. The Destination stays healthy.
@@ -44,9 +47,10 @@ import (
 //
 // For an Idempotent adapter (C-22.FR-6) a failed Publication that may have reached the messenger keeps its start for
 // the retry (keepStarted), and an ok one decides the possible duplicate: a retry after a started Publication records
-// one unless its answer was replayed. A replayed Publication is dated from its first attempt and stays pending, so the
-// next call edits it to the latest Desired state — or to the final edit, when the retry carried it because the
-// Destination left meanwhile; a final edit posted as a Publication that was not replayed is the final message itself.
+// one unless its answer was replayed. A republication past a bridge's edit window does the same (editwindow.go). A
+// replayed Publication is dated from its first attempt and stays pending, so the next call edits it to the latest
+// Desired state — or to the final edit, when the retry carried it because the Destination left meanwhile; a final edit
+// posted as a Publication that was not replayed is the final message itself.
 
 // outcomeQueries are the queries of the outcome rules, the late Publication, the possible duplicate and the deleted
 // Root message.
@@ -160,8 +164,11 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	id := a.row.ID
 	switch out.Kind {
 	case OutcomeOK:
+		if a.republish {
+			return w.republished(ctx, q, org, a, out, now, logs)
+		}
 		if a.row.DesiredRetire && !a.replayed(out) {
-			return w.retired(ctx, q, org, a, now, true, a.duplicate(out), logs)
+			return w.retired(ctx, q, org, a, now, true, a.duplicate(out), nil, logs)
 		}
 		return w.delivered(ctx, q, org, a, c, out, now, logs)
 	case OutcomeRetryAfter:
@@ -193,8 +200,8 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 	case OutcomeGone:
 		switch {
 		case a.row.DesiredRetire:
-			return w.retired(ctx, q, org, a, now, false, false, logs)
-		case a.publication:
+			return w.retired(ctx, q, org, a, now, false, false, nil, logs)
+		case a.publication, a.republish:
 			return w.notDelivered(ctx, q, org, a, out, now, logs)
 		}
 		return true, rootGone(ctx, q, org, rootOf{delivery: id, group: a.group(), storm: a.storm(),
@@ -203,6 +210,11 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 			republished: a.row.RepublishedAfterDelete}, now)
 	case OutcomeThreadLost:
 		return w.retry(ctx, q, org, a, now.Add(TransientFirstStep), false, out, now)
+	case OutcomeEditWindowClosed:
+		if a.publication || a.republish || a.finalReply {
+			return w.notDelivered(ctx, q, org, a, out, now, logs)
+		}
+		return w.editWindowClosed(ctx, q, org, a, now)
 	default:
 		return w.notDelivered(ctx, q, org, a, out, now, logs)
 	}
@@ -210,9 +222,11 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 
 // retired records the final edit of a delivery, made or found gone: the row is retired, with the final_edit delivery
 // event when the edit was made, and a Broken Destination that a probe reached is healthy again. A final edit posted
-// as a Publication that may show twice records the possible duplicate (duplicate), as delivered does.
+// as a Publication that may show twice records the possible duplicate (duplicate), as delivered does. first, when
+// set, records what the final edit came with before its delivery event: the republication past the edit window that
+// posted it.
 func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, now time.Time, edited, duplicate bool,
-	logs *after) (bool, error) {
+	first func() error, logs *after) (bool, error) {
 	if duplicate {
 		// Before the row is retired, while the lease is still held.
 		if err := q.MarkPossibleDuplicate(ctx, dbgen.MarkPossibleDuplicateParams{OrgID: org, ID: a.row.ID,
@@ -237,6 +251,11 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 	}
 	if err := released(ctx, q, org, a.row.ActualButtonKeyID.String, ""); err != nil {
 		return false, err
+	}
+	if first != nil {
+		if err := first(); err != nil {
+			return false, err
+		}
 	}
 	if edited {
 		r := deliveryEvent(DeliveryFinalEdit)
@@ -271,7 +290,7 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
 		MessageUrl: nonEmpty(out.MessageURL), ThreadRef: nonEmpty(out.ThreadRef), Published: a.publication,
 		Replayed: a.replayed(out), PossibleDuplicate: duplicate, ResponseValues: valuesJSON(out.Values),
-		ButtonKeyID: nonEmpty(key), Now: now})
+		ButtonKeyID: nonEmpty(key), ActualStatus: nonEmpty(a.message.Colour), Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
