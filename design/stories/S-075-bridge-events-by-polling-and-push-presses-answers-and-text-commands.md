@@ -123,7 +123,16 @@ issue: 233
     first three), pruned by the Leader's `short_lived_pruning` after `bridge.event_dedup_window` on the business clock
     (S-020's clock table). Its claim, insert and prune queries live in `internal/connections/query.sql`, beside the
     cursor's, since the table belongs to the Connection; the prune joins `short_lived_pruning` as a field of
-    `internal/leader/tasks.go` for the domain, and the table's name joins `metrics.ShortLivedTables`.
+    `internal/leader/tasks.go` for the domain, and the table's name joins `metrics.ShortLivedTables`;
+  - a partial index `thread_replies_reminder_message_idx` on `thread_replies (destination_id, message_id) WHERE event =
+    'reminder' AND message_id IS NOT NULL`, through which the binding of a press finds a sent Reminder by its message
+    id, before the press's data is verified;
+  - `deliveries` gains `superseded_button_key_ids` (`text[]`, default empty) with the partial GIN index
+    `deliveries_superseded_keys_idx ... WHERE superseded_button_key_ids <> '{}'`, and the record of a republication
+    past the edit window appends to it the key that signed the buttons of the Root message it replaces. Since S-081 a
+    republication releases that key from `actual_button_key_id`, while the buttons of the superseded message, which
+    still accept presses (C-22.FR-9), are signed with it (C-20.FR-6); this story records the keys, and a later change
+    makes the Keyring count them.
   Old replicas never write a Bridge row, and every row they write satisfies the widened checks.
 - **Package boundary**: `internal/connections` imports `internal/bridge` since S-073, so `internal/bridge` never imports
   `internal/connections`. The poller, the push handler and the claim reach the Connection — its push secret and mode,
@@ -141,7 +150,9 @@ issue: 233
   updates; a pushed event that finds no free slot waits for one. A crash after the insert
   and before the answer leaves the person without an answer, as a failed answer does. An event of a type the
   Connection's `info` does not declare is handled like any other; an `account_link` event is acknowledged and changes
-  nothing until S-076.
+  nothing until S-076. An event whose own handling fails — a read of Muster's data, the claim or the record — is not
+  recorded and comes again; a Command that the dispatcher refuses, or that fails, is a handled event: it is answered
+  and recorded, so that one bad event cannot hold a Connection's poll queue.
 - **Poller** (`poller.go`, Leader task `bridge_polling`, ADR-0007): one loop per Bridge Connection in poll mode,
   started and stopped as Connections change; `pollEvents` in the background client class with the Connection's proxy
   and a deadline of `bridge.poll_wait` plus 15 s per call, and a client whose call timeout is no shorter, so a long poll
@@ -154,6 +165,7 @@ issue: 233
   its `public_id`, verifies `webhook-signature` (`v1,` HMAC-SHA256 over `id.timestamp.body` with the decoded push
   secret, any of several space-separated signatures) in constant time, checks `webhook-timestamp` against the real
   clock within `bridge.push_tolerance`, requires `webhook-id` to equal the event's `id`, and answers as C-22.FR-11 says;
+  a signed event whose `id` differs from `webhook-id` is answered `400` and changes nothing;
   `bridge_event_rejected` (info: the reason, never the signature or the secret). An event whose handling fails is not
   recorded as seen: in poll mode the cursor stays and the batch is polled again, in push mode the answer is `500` and
   the bridge retries; `bridge_event_failed` (warn: the Connection, the event id and type, the error).
@@ -297,8 +309,12 @@ None.
   in the dispatcher for one transport, and a repeated Command is already harmless.
 - The `account_links` changes come here rather than with Account links (S-076), because the presses and Text commands
   of this story map accounts through them; the changes to `account_link_requests` stay in S-076.
-- S-075 lists 39 files. If it grows past about 40 while it is worked, Text commands — `commands.go`,
-  `delivery.BridgeThreadBinding` and their texts — become a story of their own after it.
+- S-075 lists 49 files. The ten added while it was worked are test and plumbing files the contract needed:
+  `internal/db/db_test.go`, `internal/db/migrate_test.go`, `internal/connections/connections.go`,
+  `connections_test.go` and `live_test.go`, `internal/accountlinks/query.sql`, `internal/delivery/delivery.go`,
+  `internal/messages/message.go`, and `internal/fakes/fakebridge/fakebridge.go` and `messages.go`. Splitting Text
+  commands off would remove only `commands.go`, `commands_test.go`, a binding and some texts and leave the story over
+  40 files, so it was not split.
 
 ## Coverage
 

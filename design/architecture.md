@@ -607,13 +607,22 @@ sequenceDiagram
     alt seen within bridge.event_dedup_window
         EV->>EV: acknowledge without handling
     else new
-        EV->>EV: verify the data with the key it names (must be in the Keyring),<br/>bind it to a current or older Root message or a Thread reply of the Connection
-        alt older than bridge.event_max_age, or a message Muster did not post
+        alt older than bridge.event_max_age
             EV->>EV: drop, unanswered
-        else bound
-            EV->>AL: external_id to User, through the link in the Connection's identity space
-            EV->>GR: Acknowledge, Transport bridge, in its own transaction
-            GR-->>EV: done, or a refusal code
+        else recent
+            EV->>EV: verify the data with the key it names (must be in the Keyring)
+            alt the data of a test message
+                EV->>EV: change nothing
+            else any other data
+                EV->>DB: bind the message to a current or older Root message or a Reminder of the Connection
+                alt a message Muster did not post through the Connection
+                    EV->>EV: ignore, unanswered
+                else bound
+                    EV->>AL: external_id to User, through the link in the Connection's identity space
+                    EV->>GR: Acknowledge, Transport bridge, in its own transaction,<br/>when the data was issued for that message
+                    GR-->>EV: done, or a refusal code
+                end
+            end
         end
         EV->>DB: record the event id and commit the claim
         opt a refusal, a failure, no Account link, a test message or a Text command

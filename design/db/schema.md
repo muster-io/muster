@@ -1052,12 +1052,12 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
   `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
   `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
-  `superseded_button_key_ids` (`text[]`, default empty; migration 0011) lists the keys that signed the buttons of the
-  older Root messages a republication past the edit window replaced, one element per such message that carried
-  buttons, appended by the republication's record; those messages still accept presses, so their keys stay needed
-  while the Alert Group is open. The partial GIN index `deliveries_superseded_keys_idx ...
-  WHERE superseded_button_key_ids <> '{}'` finds the deliveries that still depend on a key; a lookup repeats
-  `superseded_button_key_ids <> '{}'` beside `@>`, as for `superseded_message_ids`.
+  `superseded_button_key_ids` (`text[]`, default empty; migration 0011) records, for each older Root message that a
+  republication past the edit window replaced and that carried buttons, the key that signed those buttons, appended by
+  the republication's record, one element per such message. The Keyring does not count these keys yet: that follows
+  in a later change, which looks them up through the partial GIN index `deliveries_superseded_keys_idx ...
+  WHERE superseded_button_key_ids <> '{}'`; such a lookup repeats `superseded_button_key_ids <> '{}'` beside `@>`, as
+  for `superseded_message_ids`.
 - **`thread_replies`** — follow-ups under a Root message. A `collecting` row is the open batch of new Alerts (at most
   one per delivery), due at the end of the Thread batching window; other replies (notices, Reminders, Takeovers,
   Reopens, Snooze ended, resolution by the system, the release of a disabled or deleted Owner) are `pending` at once. `event_seqs` lists the lifecycle events a
