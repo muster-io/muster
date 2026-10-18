@@ -6,8 +6,12 @@ package bridge
 import (
 	"cmp"
 	"context"
+	"fmt"
+	"mime"
 	"net/http"
+	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -104,3 +108,82 @@ func checkOf(name string, r Result) ChannelCheck {
 
 // checkFailed is the message of a failed request that said nothing.
 const checkFailed = "The check failed."
+
+// The step of the dry probe of a Bridge Connection (C-22.FR-2) and the messages of what answered it.
+const (
+	StepDryProbe = "dry_probe"
+
+	MessageWrongPrefix = "Wrong path prefix: the server answered 404."
+	messageNotBridge   = "The address answered %d with %s, not with a problem of the Bridge protocol."
+	messageOtherStatus = "The bridge answered %d instead of 401 with a problem."
+	noContentType      = "no content type"
+)
+
+// The codes of the dry probe that reached no bridge (ConnectionCheckStep.code); a probe without an answer has the code
+// of delivery.FailureCode.
+const (
+	CodeNotBridge        = "not_bridge"
+	CodeWrongPrefix      = "wrong_path_prefix"
+	CodeUnexpectedStatus = "unexpected_status"
+)
+
+// Probe is the result of a dry probe: whether it passed, its latency on the real clock, and when it failed what
+// answered, in English, with its code, which clients translate.
+type Probe struct {
+	OK      bool
+	Latency time.Duration
+	Message string
+	Code    string
+}
+
+// RunDryProbe makes the dry probe of c through run (C-22.FR-2): `GET <base>/v1/info` without the token, timed on the
+// real clock, on a client that may have none. It passes on a 401 answer with a problem and otherwise names what
+// answered. A rate_limited answer is handed to run as Transient: a request without a token says nothing of the bot's
+// budget, so it never holds the Connection's limiter, least of all when an unsaved base URL answered it. Its error is
+// the runner's own.
+func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (Probe, error) {
+	var res outbound.Result
+	var r Result
+	var latency time.Duration
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		start := realClock.Now()
+		res, r = c.dryProbe(ctx, call.Class)
+		latency = realClock.Now().Sub(start)
+		o := r.Outcome()
+		if o.Kind == delivery.OutcomeRetryAfter {
+			o.Kind, o.Scope, o.RetryAfter = delivery.OutcomeTransient, "", 0
+		}
+		return o
+	}); err != nil {
+		return Probe{}, err
+	}
+	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if err != nil {
+		mediaType = ""
+	}
+	p := probeVerdict(res, r, c.settings.mask(mediaType))
+	p.Latency = latency
+	return p, nil
+}
+
+// probeVerdict says whether the answer to the dry probe is a bridge's, in the order of C-22.FR-2: no answer has the
+// code of delivery.FailureCode, a proxy that refused the credentials — which resultOf turns into a call without an
+// answer when the Connection has a proxy — proxy_refused, 404 wrong_path_prefix, an answer that is not a problem
+// not_bridge with its status and media type, 401 with a problem passes, and another status with a problem
+// unexpected_status.
+func probeVerdict(res outbound.Result, r Result, mediaType string) Probe {
+	switch {
+	case r.Status == 0 && r.Network == outbound.NetworkProxyAuth, r.Status == http.StatusProxyAuthRequired:
+		return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
+	case r.Status == 0:
+		return Probe{Message: cmp.Or(string(r.Error), checkFailed), Code: delivery.FailureCode(r.Blocked, r.Network)}
+	case r.Status == http.StatusNotFound:
+		return Probe{Message: MessageWrongPrefix, Code: CodeWrongPrefix}
+	case problemOf(res) == nil:
+		return Probe{Message: fmt.Sprintf(messageNotBridge, r.Status, cmp.Or(mediaType, noContentType)),
+			Code: CodeNotBridge}
+	case r.Status == http.StatusUnauthorized:
+		return Probe{OK: true}
+	}
+	return Probe{Message: fmt.Sprintf(messageOtherStatus, r.Status), Code: CodeUnexpectedStatus}
+}

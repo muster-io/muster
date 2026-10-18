@@ -3,8 +3,9 @@
 
 // Package mattermost is the REST client of Mattermost Connections (C-13.FR-1): the calls of the Mattermost REST API v4
 // with the bot token as a bearer token, through internal/outbound with the Connection's proxy, in the client class of
-// the caller (ADR-0015); and the Destination check of a Mattermost Destination (C-13.FR-10). Muster uses only the REST
-// API with the bot account. The adapter of S-061 builds on this client.
+// the caller (ADR-0015); the dry probe of a check without a token (C-13.FR-2); and the Destination check of a
+// Mattermost Destination (C-13.FR-10). Muster uses only the REST API with the bot account. The adapter of S-061 builds
+// on this client.
 package mattermost
 
 import (
@@ -12,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"slices"
@@ -41,6 +43,14 @@ const (
 	ViaDirect = "direct"
 	ViaProxy  = "proxy"
 )
+
+// DryProbePath is the path of the dry probe: the system ping, which a Mattermost server answers without a token
+// (F-069).
+const DryProbePath = "/api/v4/system/ping"
+
+// errNoToken refuses a call with the token on a client that has none: the client of a draft whose stored token may not
+// go to its server URL, which makes only the dry probe (C-13.FR-14).
+var errNoToken = errors.New("this client has no bot token: only the dry probe runs without one")
 
 // Network is what a Client needs besides its Connection: the outbound address policy, the logger, the real clock of
 // the outbound metrics and a resolver (nil: the system resolver).
@@ -240,9 +250,41 @@ func (c *Client) get(ctx context.Context, class outbound.Class, path string, out
 	return c.send(ctx, class, http.MethodGet, path, nil, out)
 }
 
+// DryProbe is `GET <server>/api/v4/system/ping` without the token (C-13.FR-2), which a Mattermost server answers to
+// anyone. The Result is the raw answer with its body, which the check names, with the media type of the answer, empty
+// without one; a 429 is Transient, never a RetryAfter.
+func (c *Client) DryProbe(ctx context.Context, class outbound.Class) (Result, string) {
+	oc, err := c.client(class)
+	if err != nil {
+		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
+			Error: outbound.Untrusted(err.Error())}}, ""
+	}
+	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: DryProbePath,
+		Header: http.Header{"Accept": {"application/json"}}, Mapping: mapping})
+	r := resultOf(res, err)
+	r.Body = res.Body
+	// A 429 to a request without a token says nothing of the bot's budget: it must not hold the Connection's limiter,
+	// least of all when an unsaved server URL answered it.
+	if r.Outcome.Kind == delivery.OutcomeRetryAfter {
+		r.Outcome.Kind, r.Outcome.Scope, r.Outcome.RetryAfter = delivery.OutcomeTransient, "", 0
+	}
+	mt, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if err != nil {
+		return r, ""
+	}
+	if c.settings.Token != "" {
+		mt = strings.ReplaceAll(mt, string(c.settings.Token), redacted)
+	}
+	return r, mt
+}
+
 // send makes one call of method on path in the client class, with body as JSON unless it is nil, and reads a
-// successful answer into out unless it is nil.
+// successful answer into out unless it is nil. A client without a token makes no call.
 func (c *Client) send(ctx context.Context, class outbound.Class, method, path string, body, out any) Result {
+	if c.settings.Token == "" {
+		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
+			Error: outbound.Untrusted(errNoToken.Error())}}
+	}
 	oc, err := c.client(class)
 	if err != nil {
 		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(err.Error())}}

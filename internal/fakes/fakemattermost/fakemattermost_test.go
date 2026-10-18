@@ -855,12 +855,40 @@ func TestNotImplemented(t *testing.T) {
 	fx := start(t)
 	wantAppError(t, do(t, http.MethodPost, fx.fake.URL()+"/hooks/abc", `{"text":"x"}`),
 		http.StatusNotImplemented, "fake.not_implemented")
-	wantAppError(t, fx.api(http.MethodGet, "/api/v4/system/ping", ""), http.StatusNotImplemented, "fake.not_implemented")
+	wantAppError(t, fx.api(http.MethodGet, "/api/v4/emoji", ""), http.StatusNotImplemented, "fake.not_implemented")
 	wantAppError(t, fx.api(http.MethodDelete, "/api/v4/posts", ""), http.StatusNotImplemented, "fake.not_implemented")
-	wantAppError(t, do(t, http.MethodGet, fx.fake.URL()+"/api/v4/system/ping", ""),
+	wantAppError(t, do(t, http.MethodGet, fx.fake.URL()+"/api/v4/emoji", ""),
 		http.StatusUnauthorized, "api.context.session_expired.app_error")
 	reqs := fx.fake.Requests()
 	if len(reqs) != 4 || reqs[0].Path != "/hooks/abc" || reqs[0].Status != http.StatusNotImplemented {
+		t.Errorf("recorded %+v", reqs)
+	}
+}
+
+// TestSystemPing: the system ping answers 200 with JSON whose status is OK without a token, as Mattermost 11.2 does
+// (F-069), and with a revoked one; every other call of the API still needs a token, and the ping is recorded.
+func TestSystemPing(t *testing.T) {
+	fx := start(t)
+	r := do(t, http.MethodGet, fx.fake.URL()+"/api/v4/system/ping", "")
+	ping := decode[map[string]string](t, r)
+	if r.status != http.StatusOK || r.header.Get("Content-Type") != "application/json" || ping["status"] != "OK" ||
+		ping["ActiveSearchBackend"] != "database" {
+		t.Errorf("the ping without a token = %s", r)
+	}
+	fx.setConfig(`{"revoked_tokens":["old"]}`)
+	if r := do(t, http.MethodGet, fx.fake.URL()+"/api/v4/system/ping", "", "Authorization", "Bearer old"); r.status !=
+		http.StatusOK {
+		t.Errorf("the ping with a revoked token = %s", r)
+	}
+	wantAppError(t, do(t, http.MethodGet, fx.fake.URL()+"/api/v4/users/me", ""),
+		http.StatusUnauthorized, "api.context.session_expired.app_error")
+	wantAppError(t, do(t, http.MethodPost, fx.fake.URL()+"/api/v4/system/ping", ""),
+		http.StatusUnauthorized, "api.context.session_expired.app_error")
+	reqs := fx.fake.Requests()
+	if len(reqs) != 4 || reqs[0].Method != http.MethodGet || reqs[0].Path != "/api/v4/system/ping" ||
+		reqs[0].Status != http.StatusOK || len(reqs[0].Headers["Authorization"]) != 0 ||
+		!slices.Equal(reqs[1].Headers["Authorization"], []string{"Bearer old"}) ||
+		reqs[2].Status != http.StatusUnauthorized {
 		t.Errorf("recorded %+v", reqs)
 	}
 }

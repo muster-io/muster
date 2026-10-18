@@ -120,10 +120,10 @@ func Interactive(in Path, s delivery.Subject) Runner {
 //  2. get_me — with the token: the bot;
 //  3. get_webhook_info — whether a webhook is set, with its host in the message, and the pending updates.
 //
-// With probe set — the client of an unsaved base URL, which has no token — only the dry probe runs, against it, and
-// steps 2 and 3 are skipped: the token never reaches another address than the saved base URL. A dry probe that fails
-// skips steps 2 and 3 too, so that the token never goes to a server that is not a Bot API; a getMe that fails skips
-// step 3.
+// With probe set — the client of an address the token may not go to, which has no token — only the dry probe runs,
+// against it, and steps 2 and 3 are skipped, on the path of probe: a stored token never reaches another address than
+// its saved base URL (C-13.FR-14). saved may then be nil, for a check without any token. A dry probe that fails skips
+// steps 2 and 3 too, so that the token never goes to a server that is not a Bot API; a getMe that fails skips step 3.
 func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock clock.Clock) (Check, error) {
 	target := saved
 	if probe != nil {
@@ -132,7 +132,7 @@ func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock c
 	var out Check
 	skipRest := func(names ...string) {
 		for _, n := range names {
-			out.Steps = append(out.Steps, Step{Name: n, Skipped: true, Via: saved.Via()})
+			out.Steps = append(out.Steps, Step{Name: n, Skipped: true, Via: target.Via()})
 		}
 	}
 	var r Result

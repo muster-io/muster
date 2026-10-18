@@ -5,10 +5,10 @@
 // as Mattermost 11.2.2 does in the verified facts (F-022 to F-032, F-054 to F-058, F-062 to F-064): a team with three
 // channels and two people, posts, Thread replies, edits, ephemeral posts — refused with 403 unless the bot is a system
 // admin — the system roles with their permissions, direct messages, notifications, button presses sent to the
-// integration URL with the ephemeral_text of their answers, and the rate limit. Every other call is recorded and
-// answered 501. The control endpoints under /_fake/ list what happened and change the fixtures: posts, notifications,
-// ephemeral posts, presses, the server log, channel members, archived channels, the server configuration, and the
-// direct messages of the bots, which the posts leave out.
+// integration URL with the ephemeral_text of their answers, the rate limit, and the system ping, which answers without
+// a token (F-069). Every other call is recorded and answered 501. The control endpoints under /_fake/ list what
+// happened and change the fixtures: posts, notifications, ephemeral posts, presses, the server log, channel members,
+// archived channels, the server configuration, and the direct messages of the bots, which the posts leave out.
 //
 // The server has two bot users: SecondBotToken is the second bot, every other accepted token the first. The bot of the
 // request's token is the one the API acts as: it reads itself and its channels, posts, edits, sends ephemeral posts,
@@ -260,6 +260,7 @@ func New() *Fake {
 	}
 	f.Server = fakeserver.New("Mattermost", http.HandlerFunc(f.serve))
 
+	f.api.HandleFunc("GET "+publicPath, handleSystemPing)
 	f.api.HandleFunc("GET /api/v4/users/me", f.handleMe)
 	f.api.HandleFunc("GET /api/v4/users/username/{username}", f.handleUserByName)
 	f.api.HandleFunc("GET /api/v4/users/me/teams", f.handleMyTeams)
@@ -442,13 +443,17 @@ func (f *Fake) handleArchive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// serve answers the API: the rate limit first, then the token, then the call.
+// publicPath is the one path of the API that Mattermost answers without a token: the system ping (F-069).
+const publicPath = "/api/v4/system/ping"
+
+// serve answers the API: the rate limit first, then the token, which the system ping does not need, then the call.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/v4/") {
 		if !f.rateLimit(w, r) {
 			return
 		}
-		if !f.authorized(r) {
+		public := r.Method == http.MethodGet && r.URL.Path == publicPath
+		if !public && !f.authorized(r) {
 			writeAppError(w, http.StatusUnauthorized, "api.context.session_expired.app_error",
 				"Invalid or expired session, please login again.")
 			return
@@ -526,6 +531,11 @@ type appError struct {
 
 func writeAppError(w http.ResponseWriter, status int, id, msg string) {
 	fakeserver.WriteJSON(w, status, appError{ID: id, Message: msg, RequestID: newID(), StatusCode: status})
+}
+
+// handleSystemPing answers the system ping as Mattermost 11.2 does without a token (F-069).
+func handleSystemPing(w http.ResponseWriter, _ *http.Request) {
+	fakeserver.WriteJSON(w, http.StatusOK, map[string]string{"ActiveSearchBackend": "database", "status": "OK"})
 }
 
 func notImplemented(w http.ResponseWriter, _ *http.Request) {

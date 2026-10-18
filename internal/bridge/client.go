@@ -5,12 +5,12 @@
 // Connection's token as a bearer token, through internal/outbound with the Connection's proxy, in the client class of
 // the caller (ADR-0015), with the token registered for redaction; the classification of every answer by the problem's
 // class or the protocol's status mapping (classify.go); `info` with Muster's copy of it (info.go); the Destination
-// check (check.go); the Bridge delivery, which posts, edits and replies to messages as envelopes (delivery.go,
-// envelope.go); the events of the Connections, polled by the Leader or pushed to the ingest listener, handled once per
-// id and answered through answerEvent (events.go, poller.go, push.go, presses.go, commands.go); the Account links by a
-// token sent to the bot or a code sent by direct message (links.go); and the conformance check `muster bridge check`,
-// which runs the protocol against a bridge outside any installation and also deletes its message (conformance.go). The
-// models are generated from api/bridge.yaml into internal/bridge/gen.
+// check and the dry probe of a check without a token (check.go); the Bridge delivery, which posts, edits and replies to
+// messages as envelopes (delivery.go, envelope.go); the events of the Connections, polled by the Leader or pushed to
+// the ingest listener, handled once per id and answered through answerEvent (events.go, poller.go, push.go, presses.go,
+// commands.go); the Account links by a token sent to the bot or a code sent by direct message (links.go); and the
+// conformance check `muster bridge check`, which runs the protocol against a bridge outside any installation and also
+// deletes its message (conformance.go). The models are generated from api/bridge.yaml into internal/bridge/gen.
 package bridge
 
 import (
@@ -73,6 +73,10 @@ const MessageProxyRefused = "The proxy refused the connection (407)"
 
 // maxID is the longest message_id and thread_ref of the protocol, in characters.
 const maxID = 512
+
+// errNoToken refuses a call with the token on a client that has none: the client of a draft whose stored token may not
+// go to its base URL, which makes only the dry probe (C-13.FR-14).
+var errNoToken = errors.New("this client has no bot token: only the dry probe runs without one")
 
 // ErrBaseURL is a base URL that breaks the rules of C-22.FR-1.
 var ErrBaseURL = errors.New("the base URL is not an absolute http or https URL without user information, query or " +
@@ -462,9 +466,14 @@ func (c *Client) do(ctx context.Context, class outbound.Class, method, path stri
 	return c.call(ctx, clientKey{class: class}, method, path, header, body, out)
 }
 
-// call is do through the outbound client k; a query of path is left out of the texts of its failures.
+// call is do through the outbound client k; a query of path is left out of the texts of its failures. A client without
+// a token makes no call.
 func (c *Client) call(ctx context.Context, k clientKey, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
+	if c.settings.Token == "" {
+		return outbound.Result{}, Result{Classification: Classification{Class: ClassInvalid},
+			Error: outbound.Untrusted(errNoToken.Error())}
+	}
 	name, _, _ := strings.Cut(path, "?")
 	oc, err := c.client(k)
 	if err != nil {
@@ -502,6 +511,20 @@ func (c *Client) call(ctx context.Context, k clientKey, method, path string, hea
 			Error: outbound.Untrusted(method + " " + name + ": the answer is not the expected JSON")}
 	}
 	return res, r
+}
+
+// dryProbe is `GET <base>/v1/info` without the token (C-22.FR-2), which a bridge answers 401 with a problem. It returns
+// the outbound result, whose answer the check names, and how the call ended.
+func (c *Client) dryProbe(ctx context.Context, class outbound.Class) (outbound.Result, Result) {
+	oc, err := c.client(clientKey{class: class})
+	if err != nil {
+		return outbound.Result{}, Result{Classification: Classification{Class: ClassInvalid},
+			Error: outbound.Untrusted(err.Error())}
+	}
+	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: "v1/info",
+		Header: http.Header{"Accept": {"application/json, " + problemType}}, Mapping: mapping,
+		ClassifyBody: problemText})
+	return res, c.resultOf(res, err, false)
 }
 
 // resultOf is the Result of an outbound call: without an answer it is transient — a request that could not be built
