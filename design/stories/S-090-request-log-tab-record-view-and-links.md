@@ -29,7 +29,7 @@ files_touched:
   - mkdocs.yml
 acceptance:
   - "[C-23.FR-6, C-23.AC-6] The page of every Connection type and of an outgoing webhook Destination has the tab \"Request log\" («Журнал запросов»), opened by `?tab=request-log`: a list, newest first, of the time in the user's time zone, a direction arrow with its accessible name (\"Sent\" / \"Received\"), the operation, the status or the error code, and the latency, loaded page by page with \"Load more\"; filters by direction, status class and operation change the list and the URL; an empty list says \"No requests in the last 7 days.\" (`request-log.test.tsx`, `request-log.spec.ts`)."
-  - "[C-23.FR-6, C-23.AC-6] A record opens in a dialog with the request — method, URL, headers, body — and the answer — status, headers, body — each body formatted when it is JSON that reads back the same apart from spacing and escapes and shown as it is otherwise, a truncated body marked \"Cut at 16 KB of {size} KB\" and an inbound body that was not kept \"Not kept: {size} KB, too large or not read to the end\", the kind of check, the latency, the path and the attempt, links to the Destination, the Alert Group and \"Requests of this check\", and copy buttons for the URL, the headers and each body; `[redacted]` values are shown as they are; nothing in a header or body is rendered as HTML or Markdown (`request-record.test.tsx`)."
+  - "[C-23.FR-6, C-23.AC-6] A record opens in a dialog with the request — method, URL, headers, body — and the answer — status, headers, body — each body formatted when it is JSON, with the printable escapes in its strings shown as characters, and shown as it is otherwise, a truncated body marked \"Cut at 16 KB of {size} KB\" and an inbound body that was not kept \"Not kept: {size} KB, too large or not read to the end\", the kind of check, the latency, the path and the attempt, links to the Destination, the Alert Group and \"Requests of this check\", and copy buttons for the URL, the headers and each body; `[redacted]` values are shown as they are; nothing in a header or body is rendered as HTML or Markdown (`request-record.test.tsx`)."
   - "[C-23.FR-6, C-23.AC-1] In the delivery section of the Alert Group page, each Destination's row has \"Requests\", which opens the records of that Destination for that Alert Group in the same dialog list; the page shows no horizontal scrolling at 360 px wide with it, nor the open dialog, whose list shows each request's status and latency, in either language (`alert-group-deliveries.test.tsx`, `request-log.spec.ts`)."
   - "[C-23.FR-6] The Connection check panel — also before saving — and the Destination's check and test panels show \"Requests of this check\" once a result names its `request_log_run`, which opens the records of that run (`connection-check.test.tsx`, `destination-test-panel.test.tsx`, `request-log.spec.ts`)."
   - "[C-23.FR-6] The documentation page Operations → Request log says what is recorded and what is not, the bounds, the masking and where the tab and the links are, and `make docs-check` passes."
@@ -74,22 +74,23 @@ issue: 268
   filters while they are open. The schema of the search parameters, which both routes validate before their pages
   load, lives in `request-log-search.ts`, apart from the list, as the repository keeps route search schemas out of
   component modules. Times use the user's time zone (NFR-9), with seconds.
-- **Record** (`request-record.tsx`): reads `getRequestRecord` when opened; the request and the answer side by side
-  from 1024 px and one under the other below; headers as a two-column list; bodies in a scrollable `pre`, a JSON body
-  formatted — `JSON.stringify(…, null, 2)` after `JSON.parse` succeeds — when it reads back the same apart from its
-  spacing and escapes: what `readableBody` of `rendered-request.tsx` accepts, and also a body whose strings escape
-  characters that can be shown (`\uXXXX` other than `"` and `\`, a surrogate pair as one character, and `\/`), as a
-  messenger may for every character beyond ASCII, while `\\` stays a backslash; the raw text when the body is no JSON
-  or when writing it again would change more, such as a number beyond the precision of JavaScript or `1.0`; a cut body
+- **Record** (`request-record.tsx`): reads `getRequestRecord` when opened; the request and the answer side by side from
+  1024 px and one under the other below; headers as a two-column list; bodies in a scrollable `pre`, a JSON body — one
+  that `JSON.parse` accepts, a check only — re-indented token by token with two spaces: numbers, keys and their order
+  exactly as received, so that a number beyond the precision of JavaScript, `1.0` or a key given twice are shown as they
+  came, an empty object or array as `{}` or `[]`; in its strings the escapes of characters that can be shown (`\uXXXX`
+  other than `"` and `\`, a surrogate pair as one character, and `\/`) are written as the characters, as a messenger may
+  escape every character beyond ASCII, while `\\` stays a backslash and hidden characters (controls, format characters
+  such as the joiner of an emoji sequence, lone surrogates) stay escaped; any other body is shown as it is; a cut body
   says "Cut at 16 KB of {size} KB", and an inbound body that was not kept whole, stored empty with its size, says "Not
-  kept: {size} KB, too large or not read to the end", the size rounded up to one decimal; the facts: direction,
-  latency, path, attempt, kind of check, error class, what failed, the error text; the copy buttons copy the raw text
-  and say "Copied", through the clipboard API and, on a plain-http installation, through the browser's copy command on
-  a hidden field with `copyText` of `integration-token-dialog.tsx`, exported for it (that file's only change). A
-  record of a Connection listed through a messenger Destination without `connections:read` (`403`) says that opening
-  it needs the permission to read Connections. "Requests of this check" in a record leads to its owner's tab filtered
-  by the run (`?tab=request-log&run=…`), and is left out where the list already shows that run, and for a Connection's
-  run without `connections:read`. No body, header or URL is ever set as HTML.
+  kept: {size} KB, too large or not read to the end", the size rounded up to one decimal; the facts: direction, latency,
+  path, attempt, kind of check, error class, what failed, the error text; the copy buttons copy the raw text and say
+  "Copied", keeping the focus on the button, through the clipboard API and, on a plain-http installation, through the
+  browser's copy command on a hidden field with `copyText` of `integration-token-dialog.tsx`, exported for it (that
+  file's only change). A record of a Connection listed through a messenger Destination without `connections:read`
+  (`403`) says that opening it needs the permission to read Connections. "Requests of this check" in a record leads to
+  its owner's tab filtered by the run (`?tab=request-log&run=…`), and is left out where the list already shows that run,
+  and for a Connection's run without `connections:read`. No body, header or URL is ever set as HTML.
 - **Tabs** (`connections.$connectionId.tsx`, `destinations.$destinationId.tsx`): the tabs "Settings" and "Request log"
   ("Sections of the page") above the page's form once the page has loaded, as `StatusTabs` draws tabs, shown to
   everyone with `connections:read` or `destinations:read`; the form stays mounted behind the Request log, so that its
