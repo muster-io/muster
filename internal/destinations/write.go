@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/telegram"
@@ -630,13 +631,23 @@ func unknownConnection() *FieldError {
 	return &FieldError{Pointer: pointerConnection, Code: CodeUnknownID, Detail: "No such Mattermost Connection."}
 }
 
+// idOf is the id p points to, 0 for nil.
+func idOf(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 func unknownTelegramConnection() *FieldError {
 	return &FieldError{Pointer: pointerConnection, Code: CodeUnknownID, Detail: "No such Telegram Connection."}
 }
 
 // check runs the Destination check of in for the Destination destinationID, nil before it exists, and refuses a failing
-// one with a *CheckFailedError: one item per failing check at the field it concerns.
+// one with a *CheckFailedError: one item per failing check at the field it concerns. Its requests are recorded as
+// destination_check under a check run of their own (C-23.FR-2).
 func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (ChannelChecked, error) {
+	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	m := in.Mattermost
 	res, err := s.writer.Mattermost.CheckChannel(ctx, ChannelCheck{Connection: m.Connection, Destination: destinationID,
 		TeamID: m.TeamID, ChannelID: m.ChannelID})
@@ -823,22 +834,26 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return d, nil
 }
 
-// CheckResult is the result of checkDestination: whether every check passed, each check, and the health after it.
+// CheckResult is the result of checkDestination: whether every check passed, each check, the health after it, and the
+// check run its requests share in the Request log (C-23.FR-5).
 type CheckResult struct {
 	OK     bool
 	Items  []CheckItem
 	Health Health
+	Run    string
 }
 
 // Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
 // C-22.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing check of a
 // Broken Destination ends its Broken state. A Bridge Destination's check keeps no channel name it reads: a save does.
-// A type without a Destination check here is a *FieldError check_not_supported.
+// A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
+// destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
 	d, err := s.Get(ctx, publicID)
 	if err != nil {
 		return CheckResult{}, err
 	}
+	ctx, run := outbound.StartCheck(ctx, outbound.CheckDestination, d.ID)
 	var out CheckResult
 	switch {
 	case d.Type == TypeMattermost && d.Connection != nil:
@@ -886,6 +901,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 		return CheckResult{}, &FieldError{Pointer: pointerCheckNotAllowed, Code: CodeCheckNotSupported,
 			Detail: "This type of Destination has no Destination check."}
 	}
+	out.Run = run
 	if out.OK && d.Health.State == healthBroken {
 		if err := s.healthy(ctx, d.ID); err != nil {
 			return CheckResult{}, err
@@ -976,8 +992,10 @@ func (s *Service) validateTelegram(ctx context.Context, in *Input) error {
 
 // checkTelegram runs the Destination check of the Telegram channel of in for the Destination destinationID, nil before
 // it exists, and refuses a failing one with a *CheckFailedError: the failing step at /channel_id, or at
-// /connection_id when the bot token was refused.
+// /connection_id when the bot token was refused. Its requests are recorded as destination_check under a check run of
+// their own (C-23.FR-2).
 func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *int64) (TelegramChannelChecked, error) {
+	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	t := in.Telegram
 	res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: t.Connection,
 		Destination: destinationID, ChannelID: t.ChannelID})
@@ -1178,8 +1196,10 @@ func (s *Service) validateBridge(ctx context.Context, in *Input) error {
 
 // checkBridge runs the Destination check of the Bridge channel of in for the Destination destinationID, nil before it
 // exists, and refuses a failing one with a *CheckFailedError: its item channel at /channel_id, or at /connection_id
-// when the bridge refused the token.
+// when the bridge refused the token. Its requests are recorded as destination_check under a check run of their own
+// (C-23.FR-2).
 func (s *Service) checkBridge(ctx context.Context, in Input, destinationID *int64) (BridgeChannelChecked, error) {
+	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	b := in.Bridge
 	res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: b.Connection,
 		Destination: destinationID, ChannelID: b.ChannelID})

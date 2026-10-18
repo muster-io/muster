@@ -6,6 +6,7 @@ package delivery_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/outbound"
 )
+
+var runRe = regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`)
 
 // callMethods are the methods of the calls, comma-separated.
 func callMethods(calls []deliverytest.Call) string {
@@ -212,7 +215,8 @@ func TestRecoveryCurrentState(t *testing.T) {
 // TestProbeCheck is C-11.FR-9 and AC-11 through the recorder: with the Destination Broken and nothing waiting, the
 // probe after delivery.broken_probe_interval runs the adapter's Destination check in the delivery client class; a
 // failing check keeps it Broken with that error as the reason; a passing one makes it healthy, resolves
-// MusterDestinationBroken and records destination_recovered, with no Alert Group activity.
+// MusterDestinationBroken and records destination_recovered, with no Alert Group activity. Each probe's requests are
+// recorded as probe with the Destination, under a run of its own (C-23.FR-2).
 func TestProbeCheck(t *testing.T) {
 	e := newEnv(t)
 	e.breakDest(destMM, "HTTP 403")
@@ -242,6 +246,12 @@ func TestProbeCheck(t *testing.T) {
 	e.round(t)
 	if ds.health != "healthy" || ds.brokenReason != nil || ds.nextProbe != nil || len(e.rec.Calls()) != 2 {
 		t.Errorf("after the passing check %+v", ds)
+	}
+	first, second := e.rec.Calls()[0].Links, e.rec.Calls()[1].Links
+	if first.Destination != destMM || first.AlertGroup != 0 || first.Check != outbound.CheckProbe ||
+		!runRe.MatchString(first.Run) || second.Check != outbound.CheckProbe || second.Run == first.Run ||
+		!runRe.MatchString(second.Run) {
+		t.Errorf("the links of two probes %+v, %+v", first, second)
 	}
 	if got := e.raised("resolved"); !slices.Equal(got, []string{"MusterDestinationBroken/DSAAAAAAAAAA11"}) ||
 		!slices.Equal(e.eventKinds(), []string{"destination_recovered"}) || e.db.events[0].AlertGroupID.Valid ||
@@ -304,7 +314,8 @@ func TestProbeWithoutCheck(t *testing.T) {
 
 // TestProbeAttemptsOldest is C-11.FR-9: with deliveries waiting, the probe attempts the oldest one through the worker's
 // path; a failure keeps the Destination Broken with the new reason, and no new event or Internal alert; one leased by
-// another replica waits for the next probe.
+// another replica waits for the next probe. The attempts of a probe keep the kind probe and its run beside their
+// Destination and Alert Group (C-23.FR-2).
 func TestProbeAttemptsOldest(t *testing.T) {
 	e, d := pending(t)
 	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "HTTP 403"))
@@ -333,6 +344,19 @@ func TestProbeAttemptsOldest(t *testing.T) {
 	}
 	if !slices.Contains(e.eventKinds(), "publication") || !slices.Contains(e.eventKinds(), "destination_recovered") {
 		t.Errorf("events %v", e.eventKinds())
+	}
+	calls := e.rec.Calls()
+	if l := calls[0].Links; l != (outbound.Links{Destination: destMM, AlertGroup: d.group}) {
+		t.Errorf("the delivery before the probes %+v", l)
+	}
+	for i, c := range calls[1:] {
+		if l := c.Links; l.Destination != destMM || l.AlertGroup != d.group || l.Check != outbound.CheckProbe ||
+			!runRe.MatchString(l.Run) {
+			t.Errorf("probe %d: links %+v", i+1, l)
+		}
+	}
+	if calls[1].Links.Run == calls[2].Links.Run {
+		t.Errorf("two probes share the run %s", calls[1].Links.Run)
 	}
 }
 

@@ -204,7 +204,7 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 		return nil, err
 	}
 	out := gen.CheckDestination200JSONResponse{Ok: res.OK, Health: healthOf(res.Health),
-		Checks: make([]gen.DestinationCheckItem, 0, len(res.Items))}
+		Checks: make([]gen.DestinationCheckItem, 0, len(res.Items)), RequestLogRun: requestLogRunOf(res.Run)}
 	for _, it := range res.Items {
 		item := gen.DestinationCheckItem{Name: gen.DestinationCheckItemName(it.Name), Ok: it.OK}
 		if it.Message != "" {
@@ -251,7 +251,7 @@ func (s *Server) TestDestination(ctx context.Context, req gen.TestDestinationReq
 		return nil, err
 	}
 	out := gen.TestDestination200JSONResponse{Health: healthOf(res.Health),
-		Steps: make([]gen.TestStep, 0, len(res.Steps))}
+		Steps: make([]gen.TestStep, 0, len(res.Steps)), RequestLogRun: requestLogRunOf(res.Run)}
 	for _, st := range res.Steps {
 		out.Steps = append(out.Steps, testStepOf(st))
 	}

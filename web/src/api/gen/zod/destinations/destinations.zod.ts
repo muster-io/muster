@@ -2234,6 +2234,9 @@ export const CheckDestinationParams = zod.object({
   "destination_id": zod.string().regex(checkDestinationPathDestinationIdRegExp).describe('Destination `public_id`.')
 })
 
+export const checkDestinationResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
 export const CheckDestinationResponse = zod.object({
   "ok": zod.boolean(),
   "checks": zod.array(zod.object({
@@ -2246,7 +2249,8 @@ export const CheckDestinationResponse = zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
   "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
-})
+}),
+  "request_log_run": zod.string().regex(checkDestinationResponseRequestLogRunRegExp).optional().describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
 })
 
 /**
@@ -2268,6 +2272,7 @@ export const TestDestinationBody = zod.object({
 })
 
 
+export const testDestinationResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const TestDestinationResponse = zod.object({
@@ -2294,7 +2299,8 @@ export const TestDestinationResponse = zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
   "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
-}).describe('Health after the test; a successful test of a Broken Destination makes it healthy.')
+}).describe('Health after the test; a successful test of a Broken Destination makes it healthy.'),
+  "request_log_run": zod.string().regex(testDestinationResponseRequestLogRunRegExp).optional().describe('The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
 })
 
 /**

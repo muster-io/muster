@@ -309,6 +309,7 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	if res.Bridge {
 		out.Info = bridgeInfoOf(res.Info)
 	}
+	out.RequestLogRun = requestLogRunOf(res.Run)
 	return out
 }
 

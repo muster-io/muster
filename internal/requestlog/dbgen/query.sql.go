@@ -263,12 +263,12 @@ const insertRecord = `-- name: InsertRecord :exec
 INSERT INTO request_log (org_id, public_id, at, direction, operation, method, url, request_headers, request_body,
     request_body_bytes, request_body_truncated, status, response_headers, response_body, response_body_bytes,
     response_body_truncated, latency_ms, via, attempt, error_class, error_code, error, connection_id, destination_id,
-    alert_group_id)
+    alert_group_id, check_kind, check_run)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17, $18, $19,
     $20, $21, $22, $23,
-    $24, $25)
+    $24, $25, $26, $27)
 `
 
 type InsertRecordParams struct {
@@ -297,14 +297,16 @@ type InsertRecordParams struct {
 	ConnectionID          pgtype.Int8
 	DestinationID         pgtype.Int8
 	AlertGroupID          pgtype.Int8
+	CheckKind             pgtype.Text
+	CheckRun              pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // The Request log (C-23): one row per request, masked before it is written. A record's owner is its Connection, else
-// its outgoing webhook Destination, else nobody (the checks before saving of new Connections, from S-089); reads show
-// only the records newer than request_log.max_age among the newest request_log.max_records of their owner, and the
-// pruning deletes the rest.
+// its outgoing webhook Destination, else nobody (the checks before saving of new Connections); reads show only the
+// records newer than request_log.max_age among the newest request_log.max_records of their owner, and the pruning
+// deletes the rest.
 func (q *Queries) InsertRecord(ctx context.Context, arg InsertRecordParams) error {
 	_, err := q.db.Exec(ctx, insertRecord,
 		arg.OrgID,
@@ -332,6 +334,8 @@ func (q *Queries) InsertRecord(ctx context.Context, arg InsertRecordParams) erro
 		arg.ConnectionID,
 		arg.DestinationID,
 		arg.AlertGroupID,
+		arg.CheckKind,
+		arg.CheckRun,
 	)
 	return err
 }
@@ -364,9 +368,9 @@ func (q *Queries) ListConnectionIDs(ctx context.Context, orgID int64) ([]int64, 
 const listConnectionRecords = `-- name: ListConnectionRecords :many
 WITH bounded AS MATERIALIZED (
     SELECT b.id FROM request_log b
-    WHERE b.org_id = $1 AND b.connection_id = $12::bigint AND b.at >= $13::timestamptz
+    WHERE b.org_id = $1 AND b.connection_id = $13::bigint AND b.at >= $14::timestamptz
     ORDER BY b.at DESC, b.id DESC
-    LIMIT $14
+    LIMIT $15
 )
 SELECT r.id, r.public_id, r.at, r.direction, r.operation, r.check_kind, r.check_run, r.method, r.url, r.status,
        r.latency_ms, r.via, r.attempt, r.error_class, r.error_code, r.request_body_truncated,
@@ -386,10 +390,11 @@ WHERE ($2::bigint IS NULL OR r.destination_id = $2::bigint)
        OR (r.status >= $5::integer AND r.status < $6::integer))
   AND ($7::text IS NULL OR r.operation = $7::text)
   AND ($8::text IS NULL OR g.public_id = $8::text)
-  AND ($9::timestamptz IS NULL
-       OR (r.at, r.id) < ($9::timestamptz, $10::bigint))
+  AND ($9::text IS NULL OR r.check_run = $9::text)
+  AND ($10::timestamptz IS NULL
+       OR (r.at, r.id) < ($10::timestamptz, $11::bigint))
 ORDER BY r.at DESC, r.id DESC
-LIMIT $11
+LIMIT $12
 `
 
 type ListConnectionRecordsParams struct {
@@ -401,6 +406,7 @@ type ListConnectionRecordsParams struct {
 	StatusTo      pgtype.Int4
 	Operation     pgtype.Text
 	AlertGroup    pgtype.Text
+	CheckRun      pgtype.Text
 	AfterAt       pgtype.Timestamptz
 	AfterID       pgtype.Int8
 	PageSize      int32
@@ -439,8 +445,9 @@ type ListConnectionRecordsRow struct {
 }
 
 // ListConnectionRecords lists, newest first, the records among the newest @max_records of the Connection that are not
-// older than @not_before, after the cursor and filtered — by @destination_id for the view of a messenger Destination.
-// The bounded set is chosen once, in a materialized CTE, so the filters scan at most @max_records rows.
+// older than @not_before, after the cursor and filtered — by @destination_id for the view of a messenger Destination,
+// and by a check run. The bounded set is chosen once, in a materialized CTE, so the filters scan at most @max_records
+// rows.
 func (q *Queries) ListConnectionRecords(ctx context.Context, arg ListConnectionRecordsParams) ([]ListConnectionRecordsRow, error) {
 	rows, err := q.db.Query(ctx, listConnectionRecords,
 		arg.OrgID,
@@ -451,6 +458,7 @@ func (q *Queries) ListConnectionRecords(ctx context.Context, arg ListConnectionR
 		arg.StatusTo,
 		arg.Operation,
 		arg.AlertGroup,
+		arg.CheckRun,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.PageSize,
@@ -506,10 +514,10 @@ func (q *Queries) ListConnectionRecords(ctx context.Context, arg ListConnectionR
 const listDestinationRecords = `-- name: ListDestinationRecords :many
 WITH bounded AS MATERIALIZED (
     SELECT b.id FROM request_log b
-    WHERE b.org_id = $1 AND b.destination_id = $11::bigint AND b.connection_id IS NULL
-      AND b.at >= $12::timestamptz
+    WHERE b.org_id = $1 AND b.destination_id = $12::bigint AND b.connection_id IS NULL
+      AND b.at >= $13::timestamptz
     ORDER BY b.at DESC, b.id DESC
-    LIMIT $13
+    LIMIT $14
 )
 SELECT r.id, r.public_id, r.at, r.direction, r.operation, r.check_kind, r.check_run, r.method, r.url, r.status,
        r.latency_ms, r.via, r.attempt, r.error_class, r.error_code, r.request_body_truncated,
@@ -528,10 +536,11 @@ WHERE ($2::text IS NULL OR r.direction = $2::text)
        OR (r.status >= $4::integer AND r.status < $5::integer))
   AND ($6::text IS NULL OR r.operation = $6::text)
   AND ($7::text IS NULL OR g.public_id = $7::text)
-  AND ($8::timestamptz IS NULL
-       OR (r.at, r.id) < ($8::timestamptz, $9::bigint))
+  AND ($8::text IS NULL OR r.check_run = $8::text)
+  AND ($9::timestamptz IS NULL
+       OR (r.at, r.id) < ($9::timestamptz, $10::bigint))
 ORDER BY r.at DESC, r.id DESC
-LIMIT $10
+LIMIT $11
 `
 
 type ListDestinationRecordsParams struct {
@@ -542,6 +551,7 @@ type ListDestinationRecordsParams struct {
 	StatusTo      pgtype.Int4
 	Operation     pgtype.Text
 	AlertGroup    pgtype.Text
+	CheckRun      pgtype.Text
 	AfterAt       pgtype.Timestamptz
 	AfterID       pgtype.Int8
 	PageSize      int32
@@ -580,7 +590,7 @@ type ListDestinationRecordsRow struct {
 }
 
 // ListDestinationRecords lists the records of an outgoing webhook Destination as ListConnectionRecords lists those of a
-// Connection.
+// Connection, filtered by a check run too.
 func (q *Queries) ListDestinationRecords(ctx context.Context, arg ListDestinationRecordsParams) ([]ListDestinationRecordsRow, error) {
 	rows, err := q.db.Query(ctx, listDestinationRecords,
 		arg.OrgID,
@@ -590,6 +600,7 @@ func (q *Queries) ListDestinationRecords(ctx context.Context, arg ListDestinatio
 		arg.StatusTo,
 		arg.Operation,
 		arg.AlertGroup,
+		arg.CheckRun,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.PageSize,
@@ -604,6 +615,155 @@ func (q *Queries) ListDestinationRecords(ctx context.Context, arg ListDestinatio
 	items := []ListDestinationRecordsRow{}
 	for rows.Next() {
 		var i ListDestinationRecordsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.At,
+			&i.Direction,
+			&i.Operation,
+			&i.CheckKind,
+			&i.CheckRun,
+			&i.Method,
+			&i.Url,
+			&i.Status,
+			&i.LatencyMs,
+			&i.Via,
+			&i.Attempt,
+			&i.ErrorClass,
+			&i.ErrorCode,
+			&i.RequestBodyTruncated,
+			&i.ResponseBodyTruncated,
+			&i.ConnectionPublicID,
+			&i.DestinationPublicID,
+			&i.DestinationName,
+			&i.DestinationType,
+			&i.DestinationHealth,
+			&i.DestinationBrokenSince,
+			&i.DestinationBrokenReason,
+			&i.AlertGroupPublicID,
+			&i.AlertGroupNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunRecords = `-- name: ListRunRecords :many
+SELECT r.id, r.public_id, r.at, r.direction, r.operation, r.check_kind, r.check_run, r.method, r.url, r.status,
+       r.latency_ms, r.via, r.attempt, r.error_class, r.error_code, r.request_body_truncated,
+       r.response_body_truncated, c.public_id AS connection_public_id, d.public_id AS destination_public_id,
+       d.name AS destination_name, d.type AS destination_type, d.health AS destination_health,
+       d.broken_since AS destination_broken_since, d.broken_reason AS destination_broken_reason,
+       g.public_id AS alert_group_public_id, g.number AS alert_group_number
+FROM request_log r
+LEFT JOIN connections c ON c.org_id = $1 AND c.id = r.connection_id
+LEFT JOIN destinations d ON d.org_id = $1 AND d.id = r.destination_id
+LEFT JOIN alert_groups g ON g.org_id = $1 AND g.id = r.alert_group_id
+WHERE r.org_id = $1 AND r.check_run = $2::text AND r.at >= $3::timestamptz
+  AND (r.connection_id IS NOT NULL AND c.deleted_at IS NULL
+       OR r.connection_id IS NULL AND r.destination_id IS NULL)
+  AND ($4::text IS NULL OR r.direction = $4::text)
+  AND (NOT $5::boolean OR r.status IS NULL)
+  AND ($6::integer IS NULL
+       OR (r.status >= $6::integer AND r.status < $7::integer))
+  AND ($8::text IS NULL OR r.operation = $8::text)
+  AND ($9::text IS NULL OR g.public_id = $9::text)
+  AND ($10::timestamptz IS NULL
+       OR (r.at, r.id) < ($10::timestamptz, $11::bigint))
+  AND CASE WHEN r.connection_id IS NOT NULL THEN (
+          SELECT count(*) FROM (
+              SELECT 1 FROM request_log n
+              WHERE n.org_id = $1 AND n.connection_id = r.connection_id AND (n.at, n.id) > (r.at, r.id)
+              LIMIT $12::integer) newer)
+      ELSE (
+          SELECT count(*) FROM (
+              SELECT 1 FROM request_log n
+              WHERE n.org_id = $1 AND n.connection_id IS NULL AND n.destination_id IS NULL
+                AND (n.at, n.id) > (r.at, r.id)
+              LIMIT $12::integer) newer)
+      END < $12::integer
+ORDER BY r.at DESC, r.id DESC
+LIMIT $13
+`
+
+type ListRunRecordsParams struct {
+	OrgID      int64
+	CheckRun   string
+	NotBefore  time.Time
+	Direction  pgtype.Text
+	NoAnswer   bool
+	StatusFrom pgtype.Int4
+	StatusTo   pgtype.Int4
+	Operation  pgtype.Text
+	AlertGroup pgtype.Text
+	AfterAt    pgtype.Timestamptz
+	AfterID    pgtype.Int8
+	MaxRecords int32
+	PageSize   int32
+}
+
+type ListRunRecordsRow struct {
+	ID                      int64
+	PublicID                string
+	At                      time.Time
+	Direction               string
+	Operation               string
+	CheckKind               pgtype.Text
+	CheckRun                pgtype.Text
+	Method                  string
+	Url                     string
+	Status                  pgtype.Int4
+	LatencyMs               int32
+	Via                     string
+	Attempt                 int32
+	ErrorClass              pgtype.Text
+	ErrorCode               pgtype.Text
+	RequestBodyTruncated    bool
+	ResponseBodyTruncated   bool
+	ConnectionPublicID      pgtype.Text
+	DestinationPublicID     pgtype.Text
+	DestinationName         pgtype.Text
+	DestinationType         pgtype.Text
+	DestinationHealth       pgtype.Text
+	DestinationBrokenSince  pgtype.Timestamptz
+	DestinationBrokenReason pgtype.Text
+	AlertGroupPublicID      pgtype.Text
+	AlertGroupNumber        pgtype.Int8
+}
+
+// ListRunRecords lists, newest first, the records of the check run @check_run that connections:read reads — those of
+// a Connection that is not deleted and those without an owner — that are not older than @not_before and are among the
+// newest @max_records of their owner, after the cursor and filtered. A run has a handful of records, found through the
+// age bound and the run; each is held to its owner's count bound by counting at most @max_records newer records of
+// that owner, as getRequestRecord does. The records of an outgoing webhook's runs are listed by its Destination.
+func (q *Queries) ListRunRecords(ctx context.Context, arg ListRunRecordsParams) ([]ListRunRecordsRow, error) {
+	rows, err := q.db.Query(ctx, listRunRecords,
+		arg.OrgID,
+		arg.CheckRun,
+		arg.NotBefore,
+		arg.Direction,
+		arg.NoAnswer,
+		arg.StatusFrom,
+		arg.StatusTo,
+		arg.Operation,
+		arg.AlertGroup,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.MaxRecords,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRunRecordsRow{}
+	for rows.Next() {
+		var i ListRunRecordsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicID,

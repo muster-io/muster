@@ -8,12 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // fakeSamples are the sources of tests: the example, and Alert Groups by public_id.
@@ -46,10 +48,11 @@ type fakeTester struct {
 	items []delivery.PreviewItem
 	err   error
 	ins   []delivery.TestInput
+	links []outbound.Links
 }
 
-func (f *fakeTester) Test(_ context.Context, in delivery.TestInput) ([]delivery.TestStep, error) {
-	f.ins = append(f.ins, in)
+func (f *fakeTester) Test(ctx context.Context, in delivery.TestInput) ([]delivery.TestStep, error) {
+	f.ins, f.links = append(f.ins, in), append(f.links, outbound.LinksOf(ctx))
 	return f.steps, f.err
 }
 
@@ -84,12 +87,17 @@ func newTestEnv(t *testing.T) *testEnv {
 
 // TestDestinationTest is C-16.FR-1, FR-5 and AC-1 at the service: the example source reaches the Tester of the type,
 // with the Destination and the person; the result keeps every step and the health; the test is recorded once as
-// destination.tested with the source and each step's class, and logged.
+// destination.tested with the source and each step's class, and logged; its requests run under the kind test with the
+// Destination and a run of their own, which the result names (C-23.FR-2, FR-5).
 func TestDestinationTest(t *testing.T) {
 	e := newTestEnv(t)
 	res, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA1", Source{Kind: SourceExample})
 	if err != nil || len(res.Steps) != 2 || res.Health.State != "healthy" || len(*e.healed) != 0 {
 		t.Fatalf("test %+v %v", res, err)
+	}
+	if !regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`).MatchString(res.Run) ||
+		e.tester.links[0] != (outbound.Links{Destination: 1, Check: "test", Run: res.Run}) {
+		t.Errorf("run %q, links %+v", res.Run, e.tester.links)
 	}
 	in := e.tester.ins[0]
 	if in.Destination.ID != 1 || in.Destination.Type != TypeMattermost || in.Source.Title != "example" ||
@@ -111,9 +119,10 @@ func TestDestinationTest(t *testing.T) {
 		t.Errorf("log %s", e.log)
 	}
 	// A recent Alert Group of a Route of the Destination.
-	if _, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA1", Source{Kind: SourceAlertGroup,
-		AlertGroupID: " AGAAAAAAAAAA21 "}); err != nil || e.tester.ins[1].Source.Number != 21 {
-		t.Fatalf("alert group %v", err)
+	again, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA1", Source{Kind: SourceAlertGroup,
+		AlertGroupID: " AGAAAAAAAAAA21 "})
+	if err != nil || e.tester.ins[1].Source.Number != 21 || again.Run == res.Run || e.tester.links[1].Run != again.Run {
+		t.Fatalf("alert group %v, run %q", err, again.Run)
 	}
 	_ = json.Unmarshal(e.w.audit[1].Details, &details)
 	if src := details["source"].(map[string]any); src["alert_group_id"] != "AGAAAAAAAAAA21" {

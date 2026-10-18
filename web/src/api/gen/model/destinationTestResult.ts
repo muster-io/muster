@@ -18,6 +18,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DestinationHealth } from './destinationHealth';
+import type { PublicId } from './publicId';
 import type { TestStep } from './testStep';
 
 export interface DestinationTestResult {
@@ -25,4 +26,6 @@ export interface DestinationTestResult {
   steps: TestStep[];
   /** Health after the test; a successful test of a Broken Destination makes it healthy. */
   health: DestinationHealth;
+  /** The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them. */
+  request_log_run?: PublicId;
 }

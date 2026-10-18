@@ -500,3 +500,126 @@ func TestIntegrationBodies(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationRunList covers the read of a check run alone (C-23.FR-4, FR-5) on the database: it lists the run's
+// records of a Connection and of nobody within their owner's newest request_log.max_records, newest first and paged,
+// not those of an outgoing webhook, which its Destination lists, nor those of a deleted Connection; beside an owner the
+// run narrows its list; past request_log.max_age a run lists nothing. The kinds of checks and tests and the inbound
+// records are stored as the table's checks allow.
+func TestIntegrationRunList(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := newLiveEnv(t, s)
+		const r1, r2, r3, r4, r5, r6, r7 = "CR0000000000R1", "CR0000000000R2", "CR0000000000R3", "CR0000000000R4",
+			"CR0000000000R5", "CR0000000000R6", "CR0000000000R7"
+		var deleted int64
+		e.scan(t, &deleted, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at, deleted_at)
+			VALUES ($1, 'CN0000000000M3', 'mattermost', 'gone', 'http://mm', '\x00', 'k1', '2026-10-05', 1, 1,
+			'2026-10-05', '2026-10-05', '2026-10-06')
+			RETURNING id`, e.org)
+		run := func(oldest, newest, n int, older, newer string, kind string) func(i int) outbound.Links {
+			return func(i int) outbound.Links {
+				switch {
+				case i < oldest:
+					return outbound.Links{Check: kind, Run: older}
+				case i >= n-newest:
+					return outbound.Links{Check: kind, Run: newer}
+				}
+				return outbound.Links{}
+			}
+		}
+		e.write(t, e.w, outbound.Owner{Connection: e.conn, PublicID: e.connPub},
+			run(20, 3, 510, r1, r2, outbound.CheckConnection), 510, time.Second)
+		e.write(t, e.w, outbound.Owner{Draft: true}, run(10, 2, 505, r3, r4, outbound.CheckDraft), 505, time.Second)
+		e.write(t, e.w, outbound.Owner{Destination: e.webhook, PublicID: e.hookPub}, func(int) outbound.Links {
+			return outbound.Links{Destination: e.webhook, Check: outbound.CheckTest, Run: r5}
+		}, 3, time.Second)
+		e.write(t, e.w, outbound.Owner{Connection: deleted, PublicID: "CN0000000000M3"}, func(int) outbound.Links {
+			return outbound.Links{Check: outbound.CheckConnection, Run: r6}
+		}, 2, time.Second)
+		e.write(t, e.w2, outbound.Owner{Connection: e.conn2, PublicID: e.conn2Pub}, func(int) outbound.Links {
+			return outbound.Links{Check: outbound.CheckConnection, Run: r2}
+		}, 2, time.Second)
+
+		for _, tt := range []struct {
+			f    Filter
+			want int
+		}{
+			{Filter{Run: r1}, 10},
+			{Filter{Run: r2}, 3},
+			{Filter{Run: r3}, 5},
+			{Filter{Run: r4}, 2},
+			{Filter{Run: r5}, 0},
+			{Filter{Destination: e.hookPub, Run: r5}, 3},
+			{Filter{Run: r6}, 0},
+			{Filter{Connection: e.connPub, Run: r2}, 3},
+			{Filter{Connection: e.connPub, Run: r3}, 0},
+			{Filter{Run: r1, Operation: "patchPost"}, 1},
+		} {
+			got := e.all(t, tt.f, 3)
+			newestFirst(t, fmt.Sprintf("%+v", tt.f), got)
+			if len(got) != tt.want {
+				t.Errorf("%+v: %d records, want %d", tt.f, len(got), tt.want)
+			}
+			for _, s := range got {
+				if s.CheckRun == nil || *s.CheckRun != tt.f.Run || s.CheckKind == nil {
+					t.Errorf("%+v: a record of run %v, kind %v", tt.f, s.CheckRun, s.CheckKind)
+				}
+			}
+		}
+		within := e.oldest(t, fmt.Sprintf("connection_id = %d", e.conn))[10:20]
+		got := e.all(t, Filter{Run: r1}, 4)
+		for i, s := range got {
+			if s.PublicID != within[len(within)-1-i] || *s.CheckKind != "connection_check" || *s.Connection != e.connPub {
+				t.Errorf("record %d of run R1: %+v, want %s", i, s, within[len(within)-1-i])
+			}
+		}
+		if draft := e.all(t, Filter{Run: r4}, 10); len(draft) == 2 &&
+			(draft[0].Connection != nil || draft[0].Destination != nil || *draft[0].CheckKind != "draft_check") {
+			t.Errorf("a check before saving: %+v", draft[0])
+		}
+
+		var group int64
+		e.scan(t, &group, `SELECT id FROM alert_groups WHERE public_id = $1`, e.group)
+		for _, kind := range []string{outbound.CheckConnection, outbound.CheckDraft, outbound.CheckDestination,
+			outbound.CheckTest, outbound.CheckProbe} {
+			e.write(t, e.w, outbound.Owner{Draft: true}, func(int) outbound.Links {
+				return outbound.Links{Check: kind, Run: r7}
+			}, 1, time.Second)
+		}
+		e.write(t, e.w, outbound.Owner{Destination: e.webhook, PublicID: e.hookPub}, func(int) outbound.Links {
+			return outbound.Links{Destination: e.webhook, AlertGroup: group, Check: outbound.CheckProbe, Run: r7}
+		}, 1, time.Second)
+		if got := e.all(t, Filter{Run: r7}, 10); len(got) != 5 {
+			t.Errorf("the five kinds: %d records", len(got))
+		}
+		probe := e.all(t, Filter{Destination: e.hookPub, Run: r7}, 10)
+		if len(probe) != 1 || *probe[0].CheckKind != "probe" || probe[0].AlertGroup == nil ||
+			probe[0].AlertGroup.Number != 7 {
+			t.Errorf("a probe's delivery attempt: %+v", probe)
+		}
+		e.w.RecordInbound(ctx, InboundRecord{Links: Links{Connection: e.conn, ConnectionID: e.connPub},
+			Operation: OperationPush, Method: http.MethodPost, URL: "/api/v1/callbacks/bridge/" + e.connPub,
+			Request: Body{Size: 10}, Status: http.StatusUnauthorized, Response: Body{Size: captureMax + 1}})
+		in := e.all(t, Filter{Connection: e.connPub, Direction: DirectionInbound}, 10)
+		if len(in) != 1 {
+			t.Fatalf("inbound records: %+v (log %s)", in, e.log)
+		}
+		rec, err := e.r.Get(ctx, in[0].PublicID)
+		if err != nil || rec.Operation != "push" || *rec.Status != 401 || rec.Via != "direct" || rec.Attempt != 1 ||
+			rec.RequestBody != "" || !rec.RequestBodyTruncated || rec.RequestBodyBytes != 10 ||
+			*rec.ResponseBody != "" || !rec.ResponseBodyTruncated || rec.ResponseBodyBytes != captureMax+1 ||
+			rec.CheckKind != nil || rec.ErrorClass != nil || len(rec.ResponseHeaders) != 0 {
+			t.Errorf("an inbound record whose bodies were not kept: %+v, %v", rec, err)
+		}
+
+		e.business.Set(t0.Add(MaxAge + 2*time.Hour))
+		for _, f := range []Filter{{Run: r2}, {Run: r4}, {Connection: e.connPub, Run: r2}} {
+			if got := e.all(t, f, 10); len(got) != 0 {
+				t.Errorf("%+v past request_log.max_age: %d records", f, len(got))
+			}
+		}
+	})
+}

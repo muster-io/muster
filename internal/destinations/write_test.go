@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -238,11 +239,12 @@ func (w *saveWriter) DB() dbgen.DBTX { return nil }
 // fakeChecker stands for the Connections: the Destination check of a channel, by its id.
 type fakeChecker struct {
 	calls []ChannelCheck
+	links []outbound.Links
 	err   error
 }
 
-func (c *fakeChecker) CheckChannel(_ context.Context, in ChannelCheck) (ChannelChecked, error) {
-	c.calls = append(c.calls, in)
+func (c *fakeChecker) CheckChannel(ctx context.Context, in ChannelCheck) (ChannelChecked, error) {
+	c.calls, c.links = append(c.calls, in), append(c.links, outbound.LinksOf(ctx))
 	if c.err != nil {
 		return ChannelChecked{}, c.err
 	}
@@ -271,13 +273,14 @@ func (c *fakeChecker) CheckChannel(_ context.Context, in ChannelCheck) (ChannelC
 // CNAAAAAAAAAAA2, by its channel.
 type fakeTelegram struct {
 	calls []TelegramChannelCheck
+	links []outbound.Links
 	err   error
 	title string
 }
 
-func (c *fakeTelegram) CheckTelegramChannel(_ context.Context, in TelegramChannelCheck) (TelegramChannelChecked,
+func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChannelCheck) (TelegramChannelChecked,
 	error) {
-	c.calls = append(c.calls, in)
+	c.calls, c.links = append(c.calls, in), append(c.links, outbound.LinksOf(ctx))
 	if c.err != nil {
 		return TelegramChannelChecked{}, c.err
 	}
@@ -322,12 +325,13 @@ func (c *fakeTelegram) CheckTelegramChannel(_ context.Context, in TelegramChanne
 // refused, and any other channel passes with the name name, "alerts" when it is empty.
 type fakeBridge struct {
 	calls []BridgeChannelCheck
+	links []outbound.Links
 	err   error
 	name  string
 }
 
-func (c *fakeBridge) CheckBridgeChannel(_ context.Context, in BridgeChannelCheck) (BridgeChannelChecked, error) {
-	c.calls = append(c.calls, in)
+func (c *fakeBridge) CheckBridgeChannel(ctx context.Context, in BridgeChannelCheck) (BridgeChannelChecked, error) {
+	c.calls, c.links = append(c.calls, in), append(c.links, outbound.LinksOf(ctx))
 	if c.err != nil {
 		return BridgeChannelChecked{}, c.err
 	}
@@ -650,6 +654,67 @@ func TestCheckDestination(t *testing.T) {
 	if _, err := s.Check(ctx, "DSAAAAAAAAAAA1"); err != nil {
 		t.Errorf("without the hook = %v", err)
 	}
+}
+
+// TestDestinationCheckRuns covers the kind and run of the Destination checks (C-23.FR-2, FR-5): checkDestination and
+// the check of a save of each messenger type run under destination_check with the Destination, none before it exists,
+// each under a run of its own, and checkDestination names its run.
+func TestDestinationCheckRuns(t *testing.T) {
+	s, store, w, checker, _ := newSaver(t)
+	tg, br := s.writer.Telegram.(*fakeTelegram), s.writer.Bridge.(*fakeBridge)
+	withBridge(store, w)
+	w.versions["DSAAAAAAAAAAA2"] = 1
+	ctx := t.Context()
+	runRe := regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`)
+	runs := map[string]bool{}
+	last := func(name string, links []outbound.Links, destination int64, run string) {
+		t.Helper()
+		if len(links) == 0 {
+			t.Fatalf("%s: no check", name)
+		}
+		l := links[len(links)-1]
+		if l.Destination != destination || l.AlertGroup != 0 || l.Check != "destination_check" ||
+			!runRe.MatchString(l.Run) || runs[l.Run] || run != "" && l.Run != run {
+			t.Errorf("%s: links %+v, run %q", name, l, run)
+		}
+		runs[l.Run] = true
+	}
+	for _, tc := range []struct {
+		id          string
+		links       *[]outbound.Links
+		destination int64
+	}{{"DSAAAAAAAAAAA1", &checker.links, 1}, {"DSAAAAAAAAAAA2", &tg.links, 2}, {"DSAAAAAAAAAAA4", &br.links, 4}} {
+		res, err := s.Check(ctx, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last("checkDestination "+tc.id, *tc.links, tc.destination, res.Run)
+	}
+	if _, err := s.Create(ctx, saver, mattermostInput("new", "ch-alerts")); err != nil {
+		t.Fatal(err)
+	}
+	last("a new Mattermost Destination", checker.links, 0, "")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, mattermostInput("ops", "ch-nobot")); !errors.As(err,
+		new(*CheckFailedError)) {
+		t.Errorf("refused = %v", err)
+	}
+	last("a refused save of a Mattermost Destination", checker.links, 1, "")
+	if _, err := s.Create(ctx, saver, telegramInput("new", "@muster_alerts")); err != nil {
+		t.Fatal(err)
+	}
+	last("a new Telegram Destination", tg.links, 0, "")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil {
+		t.Fatal(err)
+	}
+	last("a save of a Telegram Destination", tg.links, 2, "")
+	if _, err := s.Create(ctx, saver, bridgeInput("new", "ch-alerts")); err != nil {
+		t.Fatal(err)
+	}
+	last("a new Bridge Destination", br.links, 0, "")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts", "ch-alerts-prod")); err != nil {
+		t.Fatal(err)
+	}
+	last("a save of a Bridge Destination", br.links, 4, "")
 }
 
 func assertField(t *testing.T, name string, f func() error, pointer, code string) {

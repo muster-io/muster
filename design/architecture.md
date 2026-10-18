@@ -238,6 +238,7 @@ flowchart TB
     interactive --> adapters
     adapters --> outbound
     outbound -- "each attempt, masked" --> requestlog
+    mmCb & tgUp & brEv -- "each request, masked" --> requestlog
     requestlog --> db
 ```
 
@@ -277,13 +278,20 @@ flowchart TB
   flow for `message_deleted`, and answers the person through the interactive path before it acknowledges the event
   ([C-22].FR-10 to FR-14, [flow c'](#c-bridge-press-through-polling-or-push)).
 - **Request log** keeps, for troubleshooting, the recent HTTP requests of the Connections and the outgoing webhook
-  Destinations, each attempt with its answer ([C-23]). The outbound HTTP package hands each attempt of a client that has
-  an owner to the Request log after its outcome is known, masked of the Secrets of the client and of the request and of
-  the credential headers; the Request log masks what the shape of a value tells is a secret — signed action ids, the
-  tokens of `/start` and of `account_link` events — cuts each body to `request_log.body_max`, and inserts one row on
-  the main pool, outside any transaction of the caller, never failing or delaying the request beyond that write. The
-  delivery worker links each attempt to its Destination and Alert Group. The API lists and reads the records within
-  `request_log.max_records` per owner and `request_log.max_age`, and the Leader prunes the rest every minute.
+  Destinations, each attempt with its answer, and the requests that reach a Connection's callbacks on the ingest
+  listener — Mattermost presses, Telegram updates in the webhook mode, pushed Bridge events — with Muster's answer,
+  refused ones included ([C-23]). The outbound HTTP package hands each attempt of a client that has an owner to the
+  Request log after its outcome is known, masked of the Secrets of the client and of the request and of the credential
+  headers; one middleware around the three callbacks hands over each request whose handler named its Connection, after
+  the answer was sent, its credential headers masked. The Request log masks what the shape of a value tells is a
+  secret — signed action ids, the tokens of `/start` and of `account_link` events — cuts each body to
+  `request_log.body_max`, and inserts one row on the main pool, outside any transaction of the caller, never failing
+  or delaying the request beyond that write. The delivery worker links each attempt to its Destination and Alert Group,
+  the Mattermost callback a press to its Destination and Alert Group, and each run of a check or a test — the
+  Connection check, the check before saving, the Destination check, the Destination test, a Broken probe — gives its
+  requests its kind and a check run that its result names. The API lists and reads the records within
+  `request_log.max_records` per owner and `request_log.max_age`, by owner or by check run, and the Leader prunes the
+  rest every minute.
 
 ### 3.2 Access, configuration and secrets
 
@@ -1460,7 +1468,8 @@ erDiagram
     RequestRecord {
         id id PK
         timestamp at "business clock"
-        string direction "outbound; inbound from S-089"
+        string direction "outbound or inbound"
+        string check_run "the run of a check or a test, or null"
         string operation "as the protocol names it"
         int status "null without an answer"
         string bodies "masked, cut to request_log.body_max"

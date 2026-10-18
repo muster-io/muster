@@ -65,6 +65,7 @@ type Queries interface {
 		[]dbgen.ListConnectionRecordsRow, error)
 	ListDestinationRecords(ctx context.Context, arg dbgen.ListDestinationRecordsParams) (
 		[]dbgen.ListDestinationRecordsRow, error)
+	ListRunRecords(ctx context.Context, arg dbgen.ListRunRecordsParams) ([]dbgen.ListRunRecordsRow, error)
 	GetRecord(ctx context.Context, arg dbgen.GetRecordParams) (dbgen.GetRecordRow, error)
 	CountNewerOfConnection(ctx context.Context, arg dbgen.CountNewerOfConnectionParams) (int64, error)
 	CountNewerOfDestination(ctx context.Context, arg dbgen.CountNewerOfDestinationParams) (int64, error)
@@ -169,7 +170,7 @@ func (w *Writer) RecordInbound(ctx context.Context, r InboundRecord) {
 	w.insert(ctx, DirectionInbound, r.Operation, r.Links.ConnectionID, p)
 }
 
-// paramsOf is the row of r: masked, cut, and linked to its owner, its Destination and its Alert Group.
+// paramsOf is the row of r: masked, cut, and linked to its owner, its Destination, its Alert Group and its check run.
 func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecordParams {
 	body, size, cut := textOf(r.RequestBody)
 	p := dbgen.InsertRecordParams{
@@ -179,6 +180,7 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 		RequestBodyTruncated: cut, LatencyMs: clamp32(r.Latency.Milliseconds()), Via: cmp.Or(r.Via, outbound.ViaDirect),
 		Attempt: clamp32(int64(max(r.Attempt, 1))), ConnectionID: id(r.Owner.Connection),
 		DestinationID: id(cmp.Or(r.Owner.Destination, r.Links.Destination)), AlertGroupID: id(r.Links.AlertGroup),
+		CheckKind: text(r.Links.Check), CheckRun: text(r.Links.Run),
 	}
 	if r.Status != 0 {
 		body, size, cut := textOf(r.ResponseBody)
@@ -224,8 +226,9 @@ func clamp32(v int64) int32 { return int32(min(max(v, 0), math.MaxInt32)) }
 // ErrNotFound is a record, a Connection or a Destination that does not exist, is deleted or is past a bound.
 var ErrNotFound = errors.New("no such request record, connection or destination")
 
-// ErrOneOfRequired is a list that names neither a Connection nor a Destination, or both.
-var ErrOneOfRequired = errors.New("exactly one of a connection and a destination is needed")
+// ErrOneOfRequired is a list that names neither a Connection, a Destination nor a check run, or both a Connection and a
+// Destination.
+var ErrOneOfRequired = errors.New("exactly one of a connection and a destination, or a check run, is needed")
 
 // The status classes of Filter.StatusClass.
 const (
@@ -237,11 +240,14 @@ const (
 )
 
 // Filter is what a list shows: the records of exactly one owner, a Connection or a Destination by public_id — all
-// those of an outgoing webhook, and those of its Connection that name a messenger Destination — of a direction,
-// status class, operation and Alert Group when set, after a position, at most Limit of them (1 to MaxRecords).
+// those of an outgoing webhook, and those of its Connection that name a messenger Destination — or, with Run alone, of
+// a check run by public_id, those whose owner is a Connection or nobody; Run beside an owner narrows its list. Then
+// those of a direction, status class, operation and Alert Group when set, after a position, at most Limit of them (1
+// to MaxRecords).
 type Filter struct {
 	Connection  string
 	Destination string
+	Run         string
 	Direction   string
 	StatusClass string
 	Operation   string
@@ -339,10 +345,11 @@ func NewReader(orgID int64, db dbgen.DBTX, business clock.Clock) *Reader {
 }
 
 // List lists the records f names, newest first, within the bounds (C-23.FR-5): ErrOneOfRequired unless it names
-// exactly one owner, ErrNotFound for an owner that does not exist or is deleted. An Alert Group that is no public_id
-// matches nothing.
+// exactly one owner or a check run alone, ErrNotFound for an owner that does not exist or is deleted. A check run or an
+// Alert Group that is no public_id of its kind matches nothing.
 func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
-	if (f.Connection == "") == (f.Destination == "") {
+	byRun := f.Connection == "" && f.Destination == ""
+	if f.Connection != "" && f.Destination != "" || byRun && f.Run == "" {
 		return Page{}, ErrOneOfRequired
 	}
 	limit := min(max(f.Limit, 1), MaxRecords)
@@ -363,11 +370,21 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 		p.AfterAt = pgtype.Timestamptz{Time: f.After.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: f.After.ID, Valid: true}
 	}
-	hook, err := r.owner(ctx, f, &p)
-	if err != nil {
-		return Page{}, err
+	var hook int64
+	if !byRun {
+		var err error
+		if hook, err = r.owner(ctx, f, &p); err != nil {
+			return Page{}, err
+		}
 	}
 	page := Page{Records: []Summary{}}
+	if f.Run != "" {
+		run, err := publicid.Parse(publicid.CheckRun, f.Run)
+		if errors.Is(err, publicid.ErrInvalid) {
+			return page, nil
+		}
+		p.CheckRun = text(run)
+	}
 	if f.AlertGroup != "" {
 		g, err := publicid.Parse(publicid.AlertGroup, f.AlertGroup)
 		if errors.Is(err, publicid.ErrInvalid) {
@@ -375,7 +392,7 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 		}
 		p.AlertGroup = text(g)
 	}
-	rows, err := r.rows(ctx, hook, p)
+	rows, err := r.rows(ctx, byRun, hook, p)
 	if err != nil {
 		return Page{}, fmt.Errorf("list the request log: %w", err)
 	}
@@ -416,16 +433,29 @@ func (r *Reader) owner(ctx context.Context, f Filter, p *dbgen.ListConnectionRec
 	return d.ID, nil
 }
 
-// rows reads the bounded set p names, or that of the outgoing webhook hook.
-func (r *Reader) rows(ctx context.Context, hook int64, p dbgen.ListConnectionRecordsParams) (
+// rows reads the bounded set p names, that of the outgoing webhook hook, or, byRun, the records of p's check run that
+// connections:read reads.
+func (r *Reader) rows(ctx context.Context, byRun bool, hook int64, p dbgen.ListConnectionRecordsParams) (
 	[]dbgen.ListConnectionRecordsRow, error) {
-	if hook == 0 {
+	switch {
+	case byRun:
+		rows, err := r.q.ListRunRecords(ctx, dbgen.ListRunRecordsParams{OrgID: r.orgID, CheckRun: p.CheckRun.String,
+			NotBefore: p.NotBefore, Direction: p.Direction, NoAnswer: p.NoAnswer, StatusFrom: p.StatusFrom,
+			StatusTo: p.StatusTo, Operation: p.Operation, AlertGroup: p.AlertGroup, AfterAt: p.AfterAt,
+			AfterID: p.AfterID, MaxRecords: p.MaxRecords, PageSize: p.PageSize})
+		out := make([]dbgen.ListConnectionRecordsRow, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, dbgen.ListConnectionRecordsRow(row))
+		}
+		return out, err
+	case hook == 0:
 		return r.q.ListConnectionRecords(ctx, p)
 	}
 	rows, err := r.q.ListDestinationRecords(ctx, dbgen.ListDestinationRecordsParams{OrgID: r.orgID,
 		DestinationID: hook, NotBefore: p.NotBefore, MaxRecords: p.MaxRecords, Direction: p.Direction,
 		NoAnswer: p.NoAnswer, StatusFrom: p.StatusFrom, StatusTo: p.StatusTo, Operation: p.Operation,
-		AlertGroup: p.AlertGroup, AfterAt: p.AfterAt, AfterID: p.AfterID, PageSize: p.PageSize})
+		AlertGroup: p.AlertGroup, CheckRun: p.CheckRun, AfterAt: p.AfterAt, AfterID: p.AfterID,
+		PageSize: p.PageSize})
 	out := make([]dbgen.ListConnectionRecordsRow, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, dbgen.ListConnectionRecordsRow(row))

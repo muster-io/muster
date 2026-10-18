@@ -376,9 +376,9 @@ func TestInboundWriteFails(t *testing.T) {
 }
 
 // TestRecordInbound covers the row of an inbound record (C-23.FR-2): the direction inbound, the path direct, the
-// attempt 1, no error, the Connection and the links, Muster's answer as its status — 200 when the handler wrote none —
-// the business time; a body Inbound did not keep whole is stored empty, truncated, with its size, a whole one is cut
-// at request_log.body_max; a method longer than the column is cut; a nil Writer records nothing.
+// attempt 1, no error, no check kind or run, the Connection and the links, Muster's answer as its status — 200 when the
+// handler wrote none — the business time; a body Inbound did not keep whole is stored empty, truncated, with its size,
+// a whole one is cut at request_log.body_max; a method longer than the column is cut; a nil Writer records nothing.
 func TestRecordInbound(t *testing.T) {
 	records := func() uint64 { return metrics.RequestLogRecords.With("inbound").Get() }
 	q := &fakeQueries{}
@@ -404,7 +404,7 @@ func TestRecordInbound(t *testing.T) {
 		string(p.RequestHeaders) != `{"Content-Type":["application/json"]}` || p.RequestBody != `{"a":1}` ||
 		p.RequestBodyBytes != 7 || p.RequestBodyTruncated || string(p.ResponseHeaders) != `{"Content-Type":["application/json"]}` ||
 		p.ResponseBody != (pgtype.Text{String: "{}", Valid: true}) || p.ResponseBodyBytes != 2 ||
-		p.ResponseBodyTruncated || p.LatencyMs != 12 {
+		p.ResponseBodyTruncated || p.LatencyMs != 12 || p.CheckKind.Valid || p.CheckRun.Valid {
 		t.Errorf("a press: %+v", p)
 	}
 

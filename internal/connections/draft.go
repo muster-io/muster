@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/telegram"
 )
@@ -37,36 +38,47 @@ type Draft struct {
 }
 
 // draftRoute is where and how the check of a draft calls: its address as a save normalizes it, its proxy and the
-// proxy's password, the bot token, empty when only the dry probe may run, and what limits its requests.
+// proxy's password, the bot token, empty when only the dry probe may run, what limits its requests and whose Request
+// log they go to.
 type draftRoute struct {
 	in       Input
 	proxy    proxyconf.Config
 	password logging.Secret
 	token    logging.Secret
 	subject  delivery.Subject
+	owner    outbound.Owner
 }
 
 // CheckDraft runs the check of a draft Connection d on the interactive path without saving it (C-13.FR-14), with the
-// steps and the codes of Check. It validates d as a save would — the address of its type, the connection_id, the
-// proxy — and then decides the token: a bot token typed in d goes to the address of d; without one, the stored token
-// of the Connection d edits is used only when d's address, normalized as a save normalizes it, and d's proxy route
-// are the saved ones; otherwise only the dry probe of the type runs and the other steps are skipped. A stored proxy
-// password is used only with the saved route and no password in d. The clients are built for the check and never
-// kept. A draft of a saved Connection takes its limiter tokens from that Connection, one of a new Connection takes
-// none; no limiter token within the budget is a *delivery.LimitedError. It stores nothing: no bot, no info, no Audit
-// log entry, no hint and no log event.
+// steps and the codes of Check. It validates d as a save would — the address of its type, the connection_id, the proxy
+// — and then decides the token: a bot token typed in d goes to the address of d; without one, the stored token of the
+// Connection d edits is used only when d's address, normalized as a save normalizes it, and d's proxy route are the
+// saved ones; otherwise only the dry probe of the type runs and the other steps are skipped. A stored proxy password is
+// used only with the saved route and no password in d. The clients are built for the check and never kept; their
+// requests, the dry probe's included, are recorded as draft_check under the Connection the draft names, or without an
+// owner, under one check run that the result names (C-23.FR-1, FR-5). A draft of a saved Connection takes its limiter
+// tokens from that Connection, one of a new Connection takes none; no limiter token within the budget is a
+// *delivery.LimitedError. It stores nothing: no bot, no info, no Audit log entry, no hint and no log event.
 func (s *Service) CheckDraft(ctx context.Context, d Draft) (CheckResult, error) {
 	r, err := s.draftRoute(ctx, d)
 	if err != nil {
 		return CheckResult{}, err
 	}
+	ctx, run := outbound.StartCheck(ctx, outbound.CheckDraft, 0)
+	var res CheckResult
 	switch r.in.Type {
 	case TypeTelegram:
-		return s.checkTelegramDraft(ctx, r)
+		res, err = s.checkTelegramDraft(ctx, r)
 	case TypeBridge:
-		return s.checkBridgeDraft(ctx, r)
+		res, err = s.checkBridgeDraft(ctx, r)
+	default:
+		res, err = s.checkMattermostDraft(ctx, r)
 	}
-	return s.checkMattermostDraft(ctx, r)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	res.Run = run
+	return res, nil
 }
 
 // draftRoute validates d in the order of a save — the type and the address, the bot token, the connection_id, the
@@ -104,7 +116,8 @@ func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 		}
 		row = &r
 	}
-	out := draftRoute{in: in, proxy: saved, subject: delivery.Subject{NoLimiter: true}}
+	out := draftRoute{in: in, proxy: saved, subject: delivery.Subject{NoLimiter: true},
+		owner: outbound.Owner{Draft: true}}
 	password := keyring.Keep
 	if d.Proxy != nil {
 		p, err := proxy(*d.Proxy, saved)
@@ -138,6 +151,7 @@ func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 	if row != nil {
 		id := row.ID
 		out.subject = delivery.Subject{Connection: &id}
+		out.owner = outbound.Owner{Connection: row.ID, PublicID: row.PublicID}
 	}
 	return out, nil
 }
@@ -194,7 +208,7 @@ func draftRunner(in Interactive, subject delivery.Subject) func(ctx context.Cont
 // roles, as Check makes them; without one the dry probe, and the step token skipped.
 func (s *Service) checkMattermostDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
 	c, err := mattermost.NewClient(s.cfg.Network, mattermost.Settings{ServerURL: r.in.ServerURL, Token: r.token,
-		Proxy: r.proxy.Outbound(r.password)})
+		Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -222,7 +236,7 @@ func (s *Service) checkMattermostDraft(ctx context.Context, r draftRoute) (Check
 // getWebhookInfo with a token, the dry probe alone without one.
 func (s *Service) checkTelegramDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
 	c, err := telegram.NewClient(telegram.Network(s.cfg.Network), telegram.Settings{BaseURL: r.in.BotAPIBaseURL,
-		Token: r.token, Proxy: r.proxy.Outbound(r.password)})
+		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -241,7 +255,7 @@ func (s *Service) checkTelegramDraft(ctx context.Context, r draftRoute) (CheckRe
 // stored nor kept, and event_delivery; without one the dry probe, and both steps skipped.
 func (s *Service) checkBridgeDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
 	c, err := bridge.NewClient(bridge.Network(s.cfg.Network), bridge.Settings{BaseURL: r.in.BridgeBaseURL,
-		Token: r.token, Proxy: r.proxy.Outbound(r.password)})
+		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
 	if err != nil {
 		return CheckResult{}, err
 	}

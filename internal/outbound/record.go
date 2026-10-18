@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/publicid"
 )
 
 // Recorder keeps the record of each attempt of a client that has one and an owner (C-23.FR-1): the Request log. It
@@ -22,27 +23,54 @@ type Recorder interface {
 }
 
 // Owner is whose Request log a client's requests go to, by internal id: a Connection or an outgoing webhook
-// Destination. PublicID names it in the log line of a record that could not be written.
+// Destination; or, with Draft, nobody: the client of a check before saving of a new Connection, whose records are read
+// by their check run and bounded per Organization (C-23.FR-4, FR-5). PublicID names it in the log line of a record that
+// could not be written.
 type Owner struct {
 	Connection  int64
 	Destination int64
+	Draft       bool
 	PublicID    string
 }
 
-// set reports whether the owner names a Connection or a Destination.
-func (o Owner) set() bool { return o.Connection != 0 || o.Destination != 0 }
+// set reports whether the owner names a Connection, a Destination or a draft.
+func (o Owner) set() bool { return o.Connection != 0 || o.Destination != 0 || o.Draft }
 
-// Links are what a request concerns besides its owner: the Destination and the Alert Group of a delivery, 0 for none.
+// The kinds of checks and tests whose requests a record marks (C-23.FR-2).
+const (
+	CheckConnection  = "connection_check"
+	CheckDraft       = "draft_check"
+	CheckDestination = "destination_check"
+	CheckTest        = "test"
+	CheckProbe       = "probe"
+)
+
+// Links are what a request concerns besides its owner: the Destination and the Alert Group of a delivery, 0 for none,
+// and for a request of a check or a test its kind and its check run, the public_id its requests share.
 type Links struct {
 	Destination int64
 	AlertGroup  int64
+	Check       string
+	Run         string
 }
 
 type linksKey struct{}
 
-// WithLinks is ctx with the links of the requests made under it.
+// WithLinks is ctx with the links of the requests made under it. Links that name no check keep the check and run of
+// ctx, so that the requests of a check or a test keep them under the links a delivery attempt within it sets.
 func WithLinks(ctx context.Context, l Links) context.Context {
+	if l.Check == "" {
+		outer := LinksOf(ctx)
+		l.Check, l.Run = outer.Check, outer.Run
+	}
 	return context.WithValue(ctx, linksKey{}, l)
+}
+
+// StartCheck is ctx under a new check run of kind, about the Destination destination, 0 for none, and the run: the
+// public_id with the prefix CR that the records of every request made under ctx share (C-23.FR-2, FR-5).
+func StartCheck(ctx context.Context, kind string, destination int64) (context.Context, string) {
+	run := publicid.New(publicid.CheckRun)
+	return WithLinks(ctx, Links{Destination: destination, Check: kind, Run: run}), run
 }
 
 // LinksOf are the links WithLinks put in ctx, none without.

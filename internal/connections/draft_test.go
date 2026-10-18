@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/connections"
@@ -28,6 +32,8 @@ import (
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 )
 
@@ -685,5 +691,108 @@ func TestCheckDraftNotBridge(t *testing.T) {
 	if reqs := b.seen(); len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "" {
 		t.Errorf("%d requests, the first with a token %v", len(reqs), len(reqs) > 0 &&
 			reqs[0].Header.Get("Authorization") != "")
+	}
+}
+
+// capture is an outbound.Recorder that keeps every record it gets.
+type capture struct {
+	mu      sync.Mutex
+	records []outbound.Record
+}
+
+func (c *capture) Record(_ context.Context, r outbound.Record) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, r)
+}
+
+// take is the records kept since the last take.
+func (c *capture) take() []outbound.Record {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.records
+	c.records = nil
+	return out
+}
+
+// recordingService is a Service over the store, keyring and interactive path of e whose clients record into a
+// capture.
+func recordingService(t *testing.T, e *draftEnv) (*connections.Service, *capture) {
+	t.Helper()
+	logger := logging.New(e.log, logging.LevelInfo)
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &capture{}
+	clocks := clock.Clocks{Business: e.business, Real: &ticking{at: t0, step: 7 * time.Millisecond}}
+	return connections.New(connections.Config{OrgID: 1, Store: e.store, Keyring: e.keys,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
+		Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+			Recorder: rec},
+		Interactive: e.path, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081", Path: "/"}, Log: logger}), rec
+}
+
+// TestCheckRuns covers the kinds and runs of the Connection checks (C-23.FR-1, FR-2, FR-5): a check of a saved
+// Connection records connection_check under the Connection and a run the result names; a check before saving records
+// draft_check, with no owner for a new Connection and under the Connection a draft names otherwise, its dry probe
+// included; each check has a run of its own, and a draft refused by its validation records nothing.
+func TestCheckRuns(t *testing.T) {
+	e := newDraftEnv(t)
+	svc, rec := recordingService(t, e)
+	runRe := regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`)
+	type want struct {
+		conn  int64
+		draft bool
+		kind  string
+		ops   []string
+	}
+	runs := map[string]bool{}
+	check := func(name string, res connections.CheckResult, err error, w want) {
+		t.Helper()
+		got := rec.take()
+		if err != nil || !runRe.MatchString(res.Run) || runs[res.Run] {
+			t.Fatalf("%s: run %q, %v", name, res.Run, err)
+		}
+		runs[res.Run] = true
+		ops := []string{}
+		for _, r := range got {
+			ops = append(ops, r.Operation)
+			if r.Owner.Connection != w.conn || r.Owner.Destination != 0 || r.Owner.Draft != w.draft ||
+				r.Links != (outbound.Links{Check: w.kind, Run: res.Run}) {
+				t.Errorf("%s: a record of %+v, links %+v", name, r.Owner, r.Links)
+			}
+		}
+		if !slices.Equal(ops, w.ops) {
+			t.Errorf("%s: operations %v, want %v", name, ops, w.ops)
+		}
+	}
+
+	res, err := svc.Check(t.Context(), e.savedBR.PublicID, nil)
+	check("the check of a saved Bridge", res, err, want{conn: e.savedBR.ID, kind: "connection_check",
+		ops: []string{"getInfo"}})
+	res, err = svc.Check(t.Context(), e.savedMM.PublicID, nil)
+	check("the check of a saved Mattermost Connection", res, err, want{conn: e.savedMM.ID, kind: "connection_check",
+		ops: []string{"getMe", "getRolesByNames"}})
+	res, err = svc.CheckDraft(t.Context(), of(brDraft(e.br2.URL()), "", fakebridge.SecondToken))
+	check("a new Bridge", res, err, want{draft: true, kind: "draft_check", ops: []string{"getInfo"}})
+	res, err = svc.CheckDraft(t.Context(), of(brDraft(e.br2.URL()), e.savedBR.PublicID, fakebridge.SecondToken))
+	check("a draft of a saved Bridge", res, err, want{conn: e.savedBR.ID, kind: "draft_check",
+		ops: []string{"getInfo"}})
+	res, err = svc.CheckDraft(t.Context(), tgDraft(e.tg2.URL()))
+	check("a new Telegram Connection without a token", res, err, want{draft: true, kind: "draft_check",
+		ops: []string{"getMe"}})
+	res, err = svc.CheckDraft(t.Context(), of(mmDraft(e.mm2.URL()), "", otherToken))
+	check("a new Mattermost Connection", res, err, want{draft: true, kind: "draft_check",
+		ops: []string{"getMe", "getRolesByNames"}})
+	res, err = svc.CheckDraft(t.Context(), of(mmDraft(e.mm2.URL()), e.savedMM.PublicID, ""))
+	check("a draft of a saved Mattermost Connection at another address", res, err, want{conn: e.savedMM.ID,
+		kind: "draft_check", ops: []string{"getPing"}})
+
+	if _, err := svc.CheckDraft(t.Context(), brDraft("http://x/?q")); fieldError(err) == nil {
+		t.Errorf("a refused draft = %v", err)
+	}
+	if got := rec.take(); len(got) != 0 {
+		t.Errorf("a refused draft recorded %+v", got)
 	}
 }
