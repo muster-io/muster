@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/oapi-codegen/nullable"
 
@@ -71,6 +72,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
@@ -124,6 +126,7 @@ var registry = []Probe{
 	{Name: "connection_drafts", Run: probeConnectionDrafts},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
+	{Name: "request_log", Run: probeRequestLog},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -2302,6 +2305,11 @@ func CheckProbe(ctx context.Context, p Probe) []Diagnostic {
 		diags = append(diags, Diagnostic{Rule: 5, Path: p.Name, Message: "the probe did not run its code path: " +
 			incomplete.what})
 	}
+	if leak, ok := errors.AsType[*probeLeak](err); ok {
+		for _, what := range leak.what {
+			diags = append(diags, Diagnostic{Rule: 5, Path: p.Name, Message: what})
+		}
+	}
 	for i, secret := range secrets {
 		forms := leakForms(secret)
 		for _, sink := range sinks {
@@ -2325,6 +2333,13 @@ func CheckProbe(ctx context.Context, p Probe) []Diagnostic {
 type probeIncomplete struct{ what string }
 
 func (e *probeIncomplete) Error() string { return "probe incomplete: " + e.what }
+
+// probeLeak is the error of a probe that found, itself, values that are not planted secrets — signed action ids,
+// tokens and codes the code under test made, the values of credential headers — where they must not be; each what
+// names one value and where it went, never the value, and CheckProbe reports each.
+type probeLeak struct{ what []string }
+
+func (e *probeLeak) Error() string { return "leak: " + strings.Join(e.what, "; ") }
 
 type leakForm struct {
 	encoding string // empty for the secret itself
@@ -4083,4 +4098,410 @@ func (s *probeRotationStore) Reencrypt(_ context.Context, _ string, _ int64, row
 		}
 	}
 	return 1, nil
+}
+
+// probeRequestLog pushes the secrets through the Request log (C-23.FR-3, AC-3). Clients of every type record their
+// requests with a requestlog.Writer whose INSERTs an in-memory stand-in keeps — the lint has no database — and the
+// probe returns every value an INSERT would store, so that no planted secret may be among them. The first secret is
+// the bot token of a Telegram, a Mattermost and a Bridge Connection, also in the Telegram URL's path, which the
+// stand-in server echoes in its answers with the Authorization header; the second the secret token of setWebhook and
+// an outgoing webhook's Secret, sent in the Authorization header, another header and the URL's query, and echoed; the
+// third the push secret of the Bridge Connection and the outgoing webhook's other Secret. Through them: getMe,
+// setWebhook and a getUpdates whose answer carries a `/start <token>` and a press of a signed action id; a Root
+// message with signed buttons through the adapter of each messenger; a pollEvents whose batch carries the token of an
+// account_link event and a press; the direct messages with the codes of a Mattermost and a Bridge Account link; and an
+// outgoing webhook event with its signature, Cookie and Proxy-Authorization headers, whose answer sets a cookie. The
+// signed action id, the tokens, the codes, the path prefixes of the base URLs and the values of those headers are not
+// planted secrets, so the probe looks for them in the stored values itself; it is incomplete when an operation it
+// drives left no record.
+func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	signed, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	stand := &probeRLServer{tg: probeWord(), mm: probeWord(), br: probeWord(), token: secrets[0], signed: signed,
+		start: probeToken(), link: probeToken(), cookie: probeWord(), proxyAuth: probeWord(), setCookie: probeWord()}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: stand}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	rows := &probeRLRows{}
+	w := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}, Recorder: w}
+	base := "http://" + ln.Addr().String()
+	tg, err := telegram.NewClient(telegram.Network(network), telegram.Settings{BaseURL: base + "/" + stand.tg,
+		Token: logging.Secret(secrets[0]), Owner: outbound.Owner{Connection: 1, PublicID: "CNAAAAAAAAAAA1"}})
+	if err != nil {
+		return err
+	}
+	mm, err := mattermost.NewClient(network, mattermost.Settings{ServerURL: base + "/" + stand.mm,
+		Token: logging.Secret(secrets[0]), Owner: outbound.Owner{Connection: 2, PublicID: "CNAAAAAAAAAAA2"}})
+	if err != nil {
+		return err
+	}
+	br, err := bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: base + "/" + stand.br,
+		Token: logging.Secret(secrets[0]), PushSecret: logging.Secret(secrets[2]),
+		Owner: outbound.Owner{Connection: 3, PublicID: "CNAAAAAAAAAAA3"}})
+	if err != nil {
+		return err
+	}
+	targets := probeRLTargets{tg: telegram.Target{Client: tg, ConnectionID: 1, Channel: "@probe"},
+		mm: mattermost.Target{Client: mm, ConnectionID: 2, ConnectionPublicID: "CNAAAAAAAAAAA2", TeamID: "t",
+			TeamName: "team", ChannelID: "c", BotUserID: "bot"},
+		br: bridge.Conn{ID: 3, PublicID: "CNAAAAAAAAAAA3", Version: 1, Client: br}}
+	path := deliverytest.Unlimited(1, clocks)
+
+	// Telegram: the token in the URL's path, the secret token of setWebhook, a `/start <token>` and a press polled.
+	_, _ = tg.GetMe(ctx, outbound.ClassInteractive)
+	_ = tg.SetWebhook(ctx, outbound.ClassInteractive, "http://localhost:8081/api/v1/callbacks/telegram/CNAAAAAAAAAAA1",
+		logging.Secret(secrets[1]))
+	_, _ = tg.GetUpdates(ctx, nil, 0)
+	// A Root message with signed buttons through each messenger's adapter, on the interactive path as lint 3 allows.
+	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"},
+		Buttons: []messages.Button{{Command: buttons.CommandAcknowledge, Label: "Acknowledge", ActionID: signed,
+			KeyID: keyID}}}
+	for i, a := range []delivery.Adapter{&telegram.Adapter{Targets: targets},
+		&mattermost.Adapter{Targets: targets, PublicURL: "http://localhost:8080", IngestURL: "http://localhost:8081",
+			Version: "v0.0.0"}, &bridge.Adapter{Targets: targets}} {
+		conn := int64(i + 1)
+		typ := []string{delivery.TypeTelegram, delivery.TypeMattermost, delivery.TypeBridge}[i]
+		dest := delivery.Destination{ID: conn, PublicID: fmt.Sprintf("DSAAAAAAAAAAA%d", conn), Type: typ,
+			Connection: &conn}
+		_, _ = path.Do(ctx, delivery.Subject{Destination: &dest}, delivery.PublishOp(a, m))
+	}
+	// Bridge: a batch with the token of an account_link event and a press.
+	_, _ = br.PollEvents(ctx, nil, 0)
+	// The codes of Account links in direct messages, which only the request knows as Secrets.
+	by := accountlinks.Requester{UserID: 1, UserPublicID: "SRAAAAAAAAAAA1", Actor: audit.System,
+		Transport: audit.TransportUI}
+	mmLinks := accountlinks.New(accountlinks.Config{OrgID: 1, Store: &probeLinkStore{},
+		Audit: audit.NewWriter(logger, clocks.Business), Business: clocks.Business, Log: logger,
+		Mattermost: mattermost.LinkBots{Conns: targets, Path: path}})
+	_, _ = mmLinks.StartMattermost(ctx, by, "CNAAAAAAAAAAA2", "bob")
+	brLinks := accountlinks.New(accountlinks.Config{OrgID: 1, Store: &probeLinkStore{
+		bridge: &alinkdb.GetLinkConnectionRow{ID: 3, PublicID: "CNAAAAAAAAAAA3", Type: "bridge", Name: "probe"}},
+		Audit: audit.NewWriter(logger, clocks.Business), Business: clocks.Business, Log: logger,
+		Bridge: bridge.LinkBots{Conns: targets, Path: path}})
+	_, _ = brLinks.StartBridgeCode(ctx, by, "CNAAAAAAAAAAA3", "bob")
+	// An outgoing webhook: its Secrets in headers and the URL's query, its signature, a cookie and a proxy credential.
+	if err := probeRLWebhook(ctx, k, stand, base, secrets, network, clocks); err != nil {
+		return err
+	}
+	return rows.verdict(stand, signed)
+}
+
+// probeRLWebhook sends one event of an outgoing webhook whose Secrets are the second and the third secret through a
+// client that records it with the Recorder of network.
+func probeRLWebhook(ctx context.Context, k *keyring.Keyring, stand *probeRLServer, base string, secrets []string,
+	network mattermost.Network, clocks clock.Clocks) error {
+	store := &probeWebhookStore{secrets: map[string]keyring.StoredSecret{}, row: whdb.GetTargetRow{ID: 4,
+		PublicID: "DSAAAAAAAAAAA4", WebhookMode: pgtype.Text{String: webhooks.ModeEvents, Valid: true},
+		Proxy: []byte(`{"enabled":false}`)}}
+	svc := webhooks.New(1, webhooks.Config{Store: store, Writer: store, Keyring: k,
+		Audit: audit.NewWriter(network.Log, clocks.Business), Business: clocks.Business,
+		PublicURL: "http://localhost:8080"})
+	by := webhooks.Requester{Actor: audit.System, Transport: audit.TransportAPI}
+	if _, _, err := svc.GenerateSigningSecret(ctx, by, "DSAAAAAAAAAAA4"); err != nil {
+		return err
+	}
+	for name, v := range map[string]string{"token": secrets[1], "other": secrets[2]} {
+		if _, _, err := svc.SetSecret(ctx, by, "DSAAAAAAAAAAA4", nil, name, logging.Secret(v)); err != nil {
+			return err
+		}
+	}
+	cfg, err := json.Marshal(webhooks.EventsConfig{URL: base + "/hook?k={{ .Secrets.token }}", Headers: []webhooks.Header{
+		{Name: "Authorization", Value: "Bearer {{ .Secrets.token }}"}, {Name: "X-Api-Key", Value: "{{ .Secrets.token }}"},
+		{Name: "X-Other", Value: "{{ .Secrets.other }}"}, {Name: "Cookie", Value: "session=" + stand.cookie},
+		{Name: "Proxy-Authorization", Value: "Basic " + stand.proxyAuth}}})
+	if err != nil {
+		return err
+	}
+	store.row.WebhookEventsConfig = cfg
+	a := &webhooks.Adapter{Service: svc, Sandbox: templates.New(clocks.Business, clocks.Real),
+		Network: webhooks.Network{Policy: network.Policy, Log: network.Log, Real: network.Real,
+			Recorder: network.Recorder}}
+	_ = a.SendEvent(ctx, delivery.EventCall{Class: outbound.ClassDelivery, Destination: delivery.Destination{ID: 4,
+		PublicID: "DSAAAAAAAAAAA4", Type: webhooks.TypeWebhook}, WebhookID: "msg_probe", Body: []byte(`{"event":"probe"}`)})
+	return nil
+}
+
+// probeWord is a random word of lower-case letters and digits.
+func probeWord() string { return "p" + strings.ToLower(rand.Text()) }
+
+// probeToken is a random token of an Account link: 32 bytes in base64url, 43 characters.
+func probeToken() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// probeRLTargets are the Connections of probeRequestLog for the adapters and the Account links of each messenger.
+type probeRLTargets struct {
+	tg telegram.Target
+	mm mattermost.Target
+	br bridge.Conn
+}
+
+func (p probeRLTargets) TelegramTarget(context.Context, int64) (telegram.Target, error) {
+	return p.tg, nil
+}
+
+func (p probeRLTargets) Target(context.Context, int64) (mattermost.Target, error) { return p.mm, nil }
+
+func (p probeRLTargets) Connection(context.Context, string) (mattermost.Connection, error) {
+	return mattermost.Connection{ID: p.mm.ConnectionID, PublicID: p.mm.ConnectionPublicID, Client: p.mm.Client}, nil
+}
+
+func (p probeRLTargets) BridgeTarget(context.Context, int64) (bridge.Target, error) {
+	return bridge.Target{Conn: p.br, ChannelID: "ch"}, nil
+}
+
+func (p probeRLTargets) BridgeConn(context.Context, string) (bridge.Conn, error) { return p.br, nil }
+
+func (p probeRLTargets) BridgeInfo(ctx context.Context, conn bridge.Conn, class outbound.Class) (bridge.Info,
+	bridge.Result) {
+	return conn.Client.GetInfo(ctx, class)
+}
+
+// probeRLServer is the stand-in Telegram, Mattermost, Bridge and outgoing webhook server of probeRequestLog, below the
+// path prefixes tg, mm and br and at /hook. It echoes the requests, their Authorization header and, from a messenger or
+// a bridge, the bot token where a remote side may; it answers getUpdates with a `/start` of the token start and a press of signed, and pollEvents with
+// an account_link event of the token link and a press of signed; it keeps the codes of the direct messages and the
+// signature, Cookie and Proxy-Authorization values of the webhook event, and sets the cookie setCookie.
+type probeRLServer struct {
+	tg, mm, br                          string
+	token, signed, start, link          string
+	cookie, proxyAuth, setCookie        string
+	mu                                  sync.Mutex
+	mmCodes, brCodes, signatures, sentC []string
+}
+
+func (p *probeRLServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	answer := func(status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	user := map[string]any{"id": 7001, "is_bot": false, "first_name": "Bob", "username": "bob"}
+	person := map[string]any{"external_id": "u-bob", "display_name": "Bob", "handle": "bob"}
+	echo := "echo " + string(body) + " " + r.Header.Get("Authorization") + " " + p.token
+	switch rest := r.URL.Path; {
+	case strings.HasPrefix(rest, "/"+p.tg+"/"):
+		switch rest[strings.LastIndex(rest, "/")+1:] {
+		case "getMe":
+			answer(http.StatusOK, map[string]any{"ok": true, "result": map[string]any{"id": 1, "is_bot": true,
+				"first_name": p.token, "username": "probe_bot"}})
+		case "getUpdates":
+			answer(http.StatusOK, map[string]any{"ok": true, "result": []any{
+				map[string]any{"update_id": 1, "message": map[string]any{"message_id": 1, "date": 0, "from": user,
+					"chat": map[string]any{"id": 7001, "type": "private"}, "text": "/start " + p.start}},
+				map[string]any{"update_id": 2, "callback_query": map[string]any{"id": "q1", "from": user,
+					"chat_instance": "c1", "data": p.signed}}}})
+		case "setWebhook":
+			answer(http.StatusOK, map[string]any{"ok": true, "result": true, "description": echo})
+		default:
+			answer(http.StatusOK, map[string]any{"ok": true, "result": map[string]any{"message_id": 5, "date": 0,
+				"chat": map[string]any{"id": -100, "type": "channel"}, "text": echo}})
+		}
+	case strings.HasPrefix(rest, "/"+p.mm+"/api/v4/"):
+		switch strings.TrimPrefix(rest, "/"+p.mm+"/api/v4/") {
+		case "users/username/bob":
+			answer(http.StatusOK, map[string]any{"id": "u-bob", "username": "bob"})
+		case "users/me":
+			answer(http.StatusOK, map[string]any{"id": "bot", "username": "probe", "is_bot": true})
+		case "channels/direct":
+			answer(http.StatusCreated, map[string]any{"id": "dm", "type": "D"})
+		default:
+			var post struct {
+				ChannelID string `json:"channel_id"`
+				Message   string `json:"message"`
+			}
+			_ = json.Unmarshal(body, &post)
+			if post.ChannelID == "dm" {
+				p.mmCodes = append(p.mmCodes, probeCodeRe.FindString(post.Message))
+			}
+			answer(http.StatusCreated, map[string]any{"id": "p1", "channel_id": post.ChannelID, "message": echo})
+		}
+	case strings.HasPrefix(rest, "/"+p.br+"/v1/"):
+		switch strings.TrimPrefix(rest, "/"+p.br+"/v1/") {
+		case "info":
+			answer(http.StatusOK, map[string]any{"protocol_version": "1",
+				"bridge": map[string]any{"name": "probe", "version": "1"}, "messenger": map[string]any{"name": "probe"},
+				"capabilities": map[string]any{"buttons": map[string]any{"max_per_message": 4, "max_per_row": 4,
+					"data_max_bytes": 64, "styles": []string{}}, "direct_messages": map[string]any{"bot_can_start": true}},
+				"limits":      map[string]any{"max_body_length": 4000, "edit_max_age_seconds": nil},
+				"user_lookup": "login", "event_delivery": []string{"poll"}})
+		case "messages":
+			answer(http.StatusCreated, map[string]any{"message_id": "m1", "truncated": false, "replayed": false})
+		case "events":
+			at := "2026-10-18T12:00:00Z"
+			answer(http.StatusOK, map[string]any{"next_cursor": "c1", "events": []any{
+				map[string]any{"id": "e1", "type": "account_link", "occurred_at": at, "token": p.link, "user": person},
+				map[string]any{"id": "e2", "type": "press", "occurred_at": at, "message_id": "m1", "user": person,
+					"data": p.signed}}})
+		case "users":
+			answer(http.StatusOK, map[string]any{"items": []any{person}})
+		case "direct-messages":
+			p.brCodes = append(p.brCodes, probeCodeRe.FindString(string(body)))
+			answer(http.StatusCreated, map[string]any{"message_id": "dm", "replayed": false})
+		default:
+			answer(http.StatusNotFound, map[string]any{"status": 404, "title": "gone", "class": "gone"})
+		}
+	case rest == "/hook":
+		p.signatures = append(p.signatures, r.Header.Get(webhooks.HeaderSignature))
+		p.sentC = append(p.sentC, r.Header.Get("Cookie")+" "+r.Header.Get("Proxy-Authorization"))
+		http.SetCookie(w, &http.Cookie{Name: "probe", Value: p.setCookie, Secure: true, HttpOnly: true,
+			SameSite: http.SameSiteStrictMode})
+		answer(http.StatusOK, map[string]any{"echo": r.URL.RawQuery + " " + r.Header.Get("X-Api-Key") + " " +
+			r.Header.Get("X-Other") + " " + r.Header.Get("Authorization") + " " + string(body)})
+	default:
+		answer(http.StatusNotFound, map[string]any{})
+	}
+}
+
+// probeRLRows stands for the database of the Request log: it keeps the arguments of every INSERT, which are the values
+// of the columns the Writer stores, and refuses every read.
+type probeRLRows struct {
+	mu   sync.Mutex
+	rows []probeRLRow
+}
+
+// probeRLRow is one record: its operation, the fifth parameter of InsertRecord, and every text and jsonb value.
+type probeRLRow struct {
+	operation string
+	values    []string
+}
+
+func (p *probeRLRows) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if !strings.Contains(sql, "INSERT INTO request_log") || len(args) < 5 {
+		return pgconn.CommandTag{}, errors.New("the probe keeps only the records of the request log")
+	}
+	row := probeRLRow{}
+	row.operation, _ = args[4].(string)
+	for _, a := range args {
+		switch v := a.(type) {
+		case string:
+			row.values = append(row.values, v)
+		case []byte:
+			row.values = append(row.values, string(v))
+		case pgtype.Text:
+			if v.Valid {
+				row.values = append(row.values, v.String)
+			}
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rows = append(p.rows, row)
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func (p *probeRLRows) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("the probe reads no records")
+}
+
+func (p *probeRLRows) QueryRow(context.Context, string, ...any) pgx.Row { return probeRLNoRow{} }
+
+// probeRLNoRow is the answer to every read of probeRLRows.
+type probeRLNoRow struct{}
+
+func (probeRLNoRow) Scan(...any) error { return errors.New("the probe reads no records") }
+
+// verdict is the error of probeRequestLog: every stored value, for CheckProbe to search for the planted secrets; a
+// probeLeak for each value that is no planted secret but must not be stored either, which the probe searches for
+// itself; and a probeIncomplete when an operation it drove left no record or the stand-in saw no code or signature.
+func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
+	p.mu.Lock()
+	rows := slices.Clone(p.rows)
+	p.mu.Unlock()
+	stand.mu.Lock()
+	mmCodes, brCodes := slices.Clone(stand.mmCodes), slices.Clone(stand.brCodes)
+	signatures, sent := slices.Clone(stand.signatures), slices.Clone(stand.sentC)
+	stand.mu.Unlock()
+	var errs []error
+	ops := map[string]int{}
+	var stored []string
+	for _, r := range rows {
+		ops[r.operation]++
+		stored = append(stored, r.values...)
+	}
+	var missing []string
+	for _, op := range []string{"getMe", "setWebhook", "getUpdates", "sendMessage", "getInfo", "postMessage",
+		"pollEvents", "getUserByUsername", "createDirectChannel", "findUsers", "sendDirectMessage", "event"} {
+		if ops[op] == 0 {
+			missing = append(missing, op)
+		}
+	}
+	if ops["createPost"] < 2 {
+		missing = append(missing, "createPost of the Root message and of the direct message")
+	}
+	if ops[""] > 0 {
+		missing = append(missing, "the operation of a record")
+	}
+	switch {
+	case len(missing) > 0:
+		errs = append(errs, &probeIncomplete{"no record of " + strings.Join(missing, ", ")})
+	case len(mmCodes) == 0 || slices.Contains(mmCodes, "") || len(brCodes) == 0 || slices.Contains(brCodes, ""):
+		errs = append(errs, &probeIncomplete{"the stand-in saw no code in a direct message"})
+	case len(signatures) == 0 || slices.Contains(signatures, "") ||
+		sent[0] != "session="+stand.cookie+" Basic "+stand.proxyAuth:
+		errs = append(errs, &probeIncomplete{"the webhook event carried no signature, Cookie or Proxy-Authorization"})
+	}
+	values := []struct{ what, value string }{
+		{"a signed action id", signed}, {"the token of a /start", stand.start},
+		{"the token of an account_link event", stand.link}, {"the path prefix of a Telegram base URL", stand.tg},
+		{"the path prefix of a Mattermost server URL", stand.mm}, {"the path prefix of a bridge's base URL", stand.br},
+		{"the value of Cookie", stand.cookie}, {"the value of Proxy-Authorization", stand.proxyAuth},
+		{"the value of Set-Cookie", stand.setCookie},
+	}
+	for _, c := range mmCodes {
+		values = append(values, struct{ what, value string }{"the code of a Mattermost direct message", c})
+	}
+	for _, c := range brCodes {
+		values = append(values, struct{ what, value string }{"the code of a Bridge direct message", c})
+	}
+	for _, s := range signatures {
+		values = append(values, struct{ what, value string }{"the value of webhook-signature", s})
+	}
+	var leaks []string
+	for _, v := range values {
+		for _, r := range rows {
+			if v.value != "" && slices.ContainsFunc(r.values, func(s string) bool { return strings.Contains(s, v.value) }) {
+				leaks = append(leaks, v.what+" reached the record of "+r.operation)
+			}
+		}
+	}
+	if len(leaks) > 0 {
+		slices.Sort(leaks)
+		errs = append(errs, &probeLeak{what: slices.Compact(leaks)})
+	}
+	return errors.Join(append(errs, fmt.Errorf("request_log rows: %s", strings.Join(stored, "\n")))...)
 }
