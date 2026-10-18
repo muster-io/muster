@@ -8,11 +8,12 @@
 // token, its event delivery mode, poll or push, a push secret in push mode, a proxy, its limiter and the last info its
 // check read. The package checks a Connection — the token of a Mattermost one, the steps with the dry probe of a
 // Telegram one, the info of a Bridge — lists the channels a Mattermost bot sees, and runs the Destination check of a
-// Mattermost channel for the Destination write path, each on the interactive path (C-11.FR-2). It sets and deletes the
-// webhook of a Telegram Connection when its update mode changes, and serves the Telegram Connections to the Leader's
-// poller and to the webhook endpoint. A Connection used by a Destination that is not deleted cannot be deleted;
-// deleting one wipes its secrets and abandons the final edits still pending for its deleted Destinations
-// (C-11.FR-14). Every change is recorded in the Audit log and announced with the live hint connection.
+// Mattermost channel for the Destination write path, each on the interactive path (C-11.FR-2); it also checks a draft
+// of a Connection before it is saved, storing nothing (C-13.FR-14, draft.go). It sets and deletes the webhook of a
+// Telegram Connection when its update mode changes, and serves the Telegram Connections to the Leader's poller and to
+// the webhook endpoint. A Connection used by a Destination that is not deleted cannot be deleted; deleting one wipes
+// its secrets and abandons the final edits still pending for its deleted Destinations (C-11.FR-14). Every change is
+// recorded in the Audit log and announced with the live hint connection.
 package connections
 
 import (
@@ -956,25 +957,13 @@ func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (
 	if err != nil {
 		return CheckResult{}, err
 	}
-	var user mattermost.User
-	var r mattermost.Result
-	var latency time.Duration
 	id := row.ID
-	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
-		func(ctx context.Context, call delivery.Call) delivery.Outcome {
-			start := s.cfg.Clocks.Real.Now()
-			user, r = c.Me(ctx, call.Class)
-			latency = s.cfg.Clocks.Real.Now().Sub(start)
-			return r.Outcome
-		})); err != nil {
+	run := mattermost.Interactive(s.cfg.Interactive, delivery.Subject{Connection: &id})
+	step, user, err := s.mattermostToken(ctx, c, run)
+	if err != nil {
 		return CheckResult{}, err
 	}
-	step := Step{Name: StepToken, OK: r.OK(), Latency: latency, Via: c.Via()}
-	if !r.OK() {
-		step.Message, step.Code = string(r.Outcome.Error), r.FailureCode()
-		if r.Status == http.StatusUnauthorized {
-			step.Message, step.Code = mattermost.MessageTokenInvalid, mattermost.CodeTokenInvalid
-		}
+	if !step.OK {
 		return CheckResult{Steps: []Step{step}}, nil
 	}
 	if err := s.cfg.Store.InTx(ctx, func(q Queries) error {
@@ -986,16 +975,48 @@ func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (
 	}); err != nil {
 		return CheckResult{}, err
 	}
-	res := CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username}
-	var granted bool
-	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
-		func(ctx context.Context, call delivery.Call) delivery.Outcome {
-			granted, r = c.Grants(ctx, call.Class, user, mattermost.PermissionEphemeralPosts)
-			return r.Outcome
-		})); err == nil && r.OK() && !granted {
-		res.Warnings = []string{WarningPressAnswersInThread}
+	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username,
+		Warnings: pressWarnings(ctx, c, run, user)}, nil
+}
+
+// mattermostToken is the step token of a Mattermost check: GET /api/v4/users/me with the bot token of c through run,
+// timed on the real clock, and the bot it found; a 401 fails with MessageTokenInvalid and mattermost.CodeTokenInvalid,
+// any other failure with the code of mattermost.Result.FailureCode. Its error is the runner's own.
+func (s *Service) mattermostToken(ctx context.Context, c *mattermost.Client, run mattermost.Runner) (Step,
+	mattermost.User, error) {
+	var user mattermost.User
+	var r mattermost.Result
+	var latency time.Duration
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		start := s.cfg.Clocks.Real.Now()
+		user, r = c.Me(ctx, call.Class)
+		latency = s.cfg.Clocks.Real.Now().Sub(start)
+		return r.Outcome
+	}); err != nil {
+		return Step{}, mattermost.User{}, err
 	}
-	return res, nil
+	step := Step{Name: StepToken, OK: r.OK(), Latency: latency, Via: c.Via()}
+	if !r.OK() {
+		step.Message, step.Code = string(r.Outcome.Error), r.FailureCode()
+		if r.Status == http.StatusUnauthorized {
+			step.Message, step.Code = mattermost.MessageTokenInvalid, mattermost.CodeTokenInvalid
+		}
+	}
+	return step, user, nil
+}
+
+// pressWarnings reads the roles of the bot through run: when they do not grant ephemeral posts it warns with
+// WarningPressAnswersInThread (D284, F-064); a failed read adds nothing.
+func pressWarnings(ctx context.Context, c *mattermost.Client, run mattermost.Runner, bot mattermost.User) []string {
+	var granted bool
+	var r mattermost.Result
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		granted, r = c.Grants(ctx, call.Class, bot, mattermost.PermissionEphemeralPosts)
+		return r.Outcome
+	}); err == nil && r.OK() && !granted {
+		return []string{WarningPressAnswersInThread}
+	}
+	return nil
 }
 
 // Channel is a channel the bot of a Mattermost Connection is a member of, with its team.

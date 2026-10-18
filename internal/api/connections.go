@@ -18,8 +18,8 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 )
 
-// Connections is what the API needs of internal/connections: Mattermost, Telegram and Bridge Connections, their checks
-// and the channels of a Mattermost one.
+// Connections is what the API needs of internal/connections: Mattermost, Telegram and Bridge Connections, their checks,
+// the checks of their drafts and the channels of a Mattermost one.
 type Connections interface {
 	List(ctx context.Context, f connections.ListFilter) (connections.Page, error)
 	Get(ctx context.Context, publicID string) (connections.Connection, error)
@@ -28,6 +28,7 @@ type Connections interface {
 		connections.Connection, error)
 	Delete(ctx context.Context, r connections.Requester, publicID string, version *int64) error
 	Check(ctx context.Context, publicID string, baseURL *string) (connections.CheckResult, error)
+	CheckDraft(ctx context.Context, d connections.Draft) (connections.CheckResult, error)
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
 	CallbackURL(publicID string) string
 	BridgeCallbackURL(publicID string) string
@@ -187,7 +188,83 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 	if err != nil {
 		return nil, err
 	}
-	out := gen.CheckConnection200JSONResponse{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
+	return gen.CheckConnection200JSONResponse(checkResultOf(res)), nil
+}
+
+// CheckConnectionDraft is checkConnectionDraft (C-13.FR-14) on the interactive path: the check of a Connection of any
+// type as its form holds it, with the steps of checkConnection, storing nothing; which token goes where is the rule of
+// connections.Service.CheckDraft.
+func (s *Server) CheckConnectionDraft(ctx context.Context, req gen.CheckConnectionDraftRequestObject) (
+	gen.CheckConnectionDraftResponseObject, error) {
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	d, err := connectionDraftOf(*req.Body)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.connections.CheckDraft(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	return gen.CheckConnectionDraft200JSONResponse(checkResultOf(res)), nil
+}
+
+// connectionDraftOf is the Draft of a draft's body, Mattermost, Telegram or Bridge: a bot token is the one typed in
+// the form, an omitted proxy the rule of the draft's Connection.
+func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
+	kind, err := body.Discriminator()
+	if err != nil {
+		return connections.Draft{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
+			"The type is not mattermost, telegram or bridge.")
+	}
+	var d connections.Draft
+	var token *string
+	var p *gen.ProxyConfigInput
+	switch kind {
+	case connections.TypeMattermost:
+		m, err := body.AsMattermostConnectionDraft()
+		if err != nil {
+			return connections.Draft{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+				"The body is not a Mattermost Connection.")
+		}
+		d = connections.Draft{Type: kind, ServerURL: m.ServerUrl, ConnectionID: m.ConnectionId}
+		token, p = m.BotToken, m.Proxy
+	case connections.TypeTelegram:
+		t, err := body.AsTelegramConnectionDraft()
+		if err != nil {
+			return connections.Draft{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+				"The body is not a Telegram Connection.")
+		}
+		d = connections.Draft{Type: kind, BotAPIBaseURL: t.BotApiBaseUrl, UpdateMode: string(t.UpdateMode),
+			ConnectionID: t.ConnectionId}
+		token, p = t.BotToken, t.Proxy
+	case connections.TypeBridge:
+		b, err := body.AsBridgeConnectionDraft()
+		if err != nil {
+			return connections.Draft{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+				"The body is not a Bridge Connection.")
+		}
+		d = connections.Draft{Type: kind, BridgeBaseURL: b.BaseUrl, EventDelivery: string(b.EventDelivery),
+			ConnectionID: b.ConnectionId}
+		token, p = b.BotToken, b.Proxy
+	default:
+		return connections.Draft{Type: kind}, nil
+	}
+	if token != nil {
+		d.BotToken = keyring.Replace(logging.Secret(*token))
+	}
+	if p != nil {
+		in := proxyInput(*p)
+		d.Proxy = &in
+	}
+	return d, nil
+}
+
+// checkResultOf is the API form of the result of a Connection check, of a saved Connection or of a draft: the steps,
+// skipped ones without latency, the bot's name, a Telegram bot's webhook and pending updates, and a Bridge's info.
+func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
+	out := gen.ConnectionCheckResult{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
 		Warnings: make([]gen.ConnectionCheckResultWarnings, 0, len(res.Warnings))}
 	for _, w := range res.Warnings {
 		out.Warnings = append(out.Warnings, gen.ConnectionCheckResultWarnings(w))
@@ -232,7 +309,7 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 	if res.Bridge {
 		out.Info = bridgeInfoOf(res.Info)
 	}
-	return out, nil
+	return out
 }
 
 // ListConnectionChannels is listConnectionChannels: the channels the bot of a Mattermost Connection belongs to, on the

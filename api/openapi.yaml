@@ -4121,6 +4121,56 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /connections/checks:
+    post:
+      operationId: checkConnectionDraft
+      tags:
+      - Connections
+      summary: Check a Connection before saving it
+      description: 'Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in
+        the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`,
+        and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token`
+        in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only
+        when the draft''s address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only
+        the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET
+        <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`.
+        A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no
+        Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a
+        proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a
+        `connection_id` takes its limiter token from that Connection, and when none is free within
+        `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter
+        and waits for none.'
+      x-permission: connections:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionDraft'
+      responses:
+        '200':
+          description: The check result; `ok` is false when a step failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionCheckResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
   /connections/{connection_id}:
     get:
       operationId: getConnection
@@ -4241,10 +4291,11 @@ paths:
       summary: Check a Connection
       description: 'Mattermost verifies the token and returns the bot''s name. Telegram works in steps and reports the latency
         and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry
-        probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection
-        is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored
-        on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection''s event
-        delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within
+        probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its
+        Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A
+        Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a
+        passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers
+        the Connection''s event delivery mode. Runs on the interactive path: when no limiter token is free within
         `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
       x-permission: connections:write
       x-listener: app
@@ -12025,6 +12076,106 @@ components:
           type:
           - string
           - 'null'
+    MattermostConnectionDraft:
+      type: object
+      description: A Mattermost Connection as its form holds it, for `checkConnectionDraft`.
+      required:
+      - type
+      - server_url
+      properties:
+        type:
+          type: string
+          enum:
+          - mattermost
+        server_url:
+          type: string
+          format: uri
+          description: The server URL as `MattermostConnectionBase` takes it.
+        bot_token:
+          type: string
+          format: password
+          writeOnly: true
+          description: A bot token typed in the form, sent only to `server_url`. Omit it to use the stored token of
+            `connection_id`, which goes only to its saved server URL through its saved proxy.
+        proxy:
+          $ref: '#/components/schemas/ProxyConfigInput'
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+          description: The saved Mattermost Connection that the form edits; omit it for a new one. An omitted `proxy` is
+            its saved proxy, and no proxy without it.
+    TelegramConnectionDraft:
+      type: object
+      description: A Telegram Connection as its form holds it, for `checkConnectionDraft`.
+      required:
+      - type
+      - bot_api_base_url
+      - update_mode
+      properties:
+        type:
+          type: string
+          enum:
+          - telegram
+        bot_api_base_url:
+          type: string
+          format: uri
+          description: The Bot API base URL as `TelegramConnectionBase` takes it.
+        update_mode:
+          $ref: '#/components/schemas/TelegramUpdateMode'
+        bot_token:
+          type: string
+          format: password
+          writeOnly: true
+          description: A bot token typed in the form, sent only to `bot_api_base_url`. Omit it to use the stored token of
+            `connection_id`, which goes only to its saved base URL through its saved proxy.
+        proxy:
+          $ref: '#/components/schemas/ProxyConfigInput'
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+          description: The saved Telegram Connection that the form edits; omit it for a new one. An omitted `proxy` is its
+            saved proxy, and no proxy without it.
+    BridgeConnectionDraft:
+      type: object
+      description: A Bridge Connection as its form holds it, for `checkConnectionDraft`; the push secret is not checked.
+      required:
+      - type
+      - base_url
+      - event_delivery
+      properties:
+        type:
+          type: string
+          enum:
+          - bridge
+        base_url:
+          type: string
+          format: uri
+          description: The bridge's base URL as `BridgeConnectionBase` takes it.
+        event_delivery:
+          $ref: '#/components/schemas/BridgeEventDelivery'
+        bot_token:
+          type: string
+          format: password
+          writeOnly: true
+          description: A token typed in the form, sent only to `base_url`. Omit it to use the stored token of
+            `connection_id`, which goes only to its saved base URL through its saved proxy.
+        proxy:
+          $ref: '#/components/schemas/ProxyConfigInput'
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+          description: The saved Bridge Connection that the form edits; omit it for a new one. An omitted `proxy` is its
+            saved proxy, and no proxy without it.
+    ConnectionDraft:
+      description: A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the
+        variant.
+      oneOf:
+      - $ref: '#/components/schemas/MattermostConnectionDraft'
+      - $ref: '#/components/schemas/TelegramConnectionDraft'
+      - $ref: '#/components/schemas/BridgeConnectionDraft'
+      discriminator:
+        propertyName: type
+        mapping:
+          mattermost: '#/components/schemas/MattermostConnectionDraft'
+          telegram: '#/components/schemas/TelegramConnectionDraft'
+          bridge: '#/components/schemas/BridgeConnectionDraft'
     ConnectionCheckRequest:
       type: object
       properties:
@@ -12032,8 +12183,9 @@ components:
           type:
           - string
           - 'null'
-          description: An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent
-            to that address.
+          description: 'An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the
+            token: a stored token is sent only to the saved address of its Connection. Kept for API clients;
+            `checkConnectionDraft` checks a draft with its token typed again.'
     ConnectionCheckStep:
       type: object
       required:
@@ -12075,9 +12227,13 @@ components:
       description: 'What a step of the Connection check found, as a stable code that clients translate, with `message` as
         its detail in English; null when the step passed with nothing to say or was skipped. A step that failed:
         `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token
-        (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON),
-        `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it
-        answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol
+        (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET
+        <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a
+        Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200`
+        JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge
+        protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is
+        wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge,
+        `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol
         version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the
         protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` —
         the bridge does not offer the Connection''s event delivery mode; for any step, `dns_failed` — the host name does
@@ -12102,6 +12258,8 @@ components:
       - protocol_version_unknown
       - protocol_mismatch
       - event_delivery_not_offered
+      - not_mattermost
+      - not_bridge
       - null
     ConnectionCheckResult:
       type: object
@@ -12141,8 +12299,9 @@ components:
           - integer
           - 'null'
         info:
-          description: Bridge only. The `info` that the step `info` read and stored on the Connection, with the members
-            of `BridgeInfo`, null when that step failed; omitted for the other types.
+          description: Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on
+            the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was
+            skipped; omitted for the other types.
           oneOf:
           - $ref: '#/components/schemas/BridgeInfo'
           - type: 'null'

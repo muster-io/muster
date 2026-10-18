@@ -459,6 +459,8 @@
       "eventDeliveryNotOffered": "The bridge does not offer this event delivery mode.",
       "notAChannel": "This chat is not a channel.",
       "notBotApi": "This is not a Bot API.",
+      "notBridge": "The address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem.",
+      "notMattermost": "The address answers, but not as a Mattermost server.",
       "protocolMismatch": "The bridge's answer does not match the protocol.",
       "protocolVersionUnknown": "The bridge speaks a protocol version this Muster does not.",
       "proxyRefused": "The proxy refused the connection.",
@@ -466,7 +468,7 @@
       "timeout": "No answer in time.",
       "tlsFailed": "The TLS handshake failed.",
       "tokenInvalid": "The bot token is not valid.",
-      "unexpectedStatus": "The server did not answer as a Bot API, with 401 and JSON.",
+      "unexpectedStatus": "The address answered with an unexpected status.",
       "webhookSet": "A webhook is set.",
       "wrongPathPrefix": "Wrong path prefix: the server answered 404."
     },

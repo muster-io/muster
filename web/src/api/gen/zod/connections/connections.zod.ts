@@ -473,6 +473,138 @@ export const CreateConnectionResponse = zod.union([zod.object({
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
+ * Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+ * @summary Check a Connection before saving it
+ */
+export const checkConnectionDraftBodyOneConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const checkConnectionDraftBodyTwoConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const checkConnectionDraftBodyThreeConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const CheckConnectionDraftBody = zod.union([zod.object({
+  "type": zod.enum(['mattermost']),
+  "server_url": zod.url().describe('The server URL as `MattermostConnectionBase` takes it.'),
+  "bot_token": zod.string().optional().describe('A bot token typed in the form, sent only to `server_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved server URL through its saved proxy.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).optional().describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.'),
+  "connection_id": zod.string().regex(checkConnectionDraftBodyOneConnectionIdRegExp).optional().describe('The saved Mattermost Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.')
+}).describe('A Mattermost Connection as its form holds it, for `checkConnectionDraft`.'),zod.object({
+  "type": zod.enum(['telegram']),
+  "bot_api_base_url": zod.url().describe('The Bot API base URL as `TelegramConnectionBase` takes it.'),
+  "update_mode": zod.enum(['long_polling', 'webhook']),
+  "bot_token": zod.string().optional().describe('A bot token typed in the form, sent only to `bot_api_base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).optional().describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.'),
+  "connection_id": zod.string().regex(checkConnectionDraftBodyTwoConnectionIdRegExp).optional().describe('The saved Telegram Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.')
+}).describe('A Telegram Connection as its form holds it, for `checkConnectionDraft`.'),zod.object({
+  "type": zod.enum(['bridge']),
+  "base_url": zod.url().describe('The bridge\'s base URL as `BridgeConnectionBase` takes it.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "bot_token": zod.string().optional().describe('A token typed in the form, sent only to `base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).optional().describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.'),
+  "connection_id": zod.string().regex(checkConnectionDraftBodyThreeConnectionIdRegExp).optional().describe('The saved Bridge Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.')
+}).describe('A Bridge Connection as its form holds it, for `checkConnectionDraft`; the push secret is not checked.')]).describe('A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.')
+
+export const checkConnectionDraftResponseInfoOneBridgeNameMax = 100;
+
+export const checkConnectionDraftResponseInfoOneBridgeVersionMax = 100;
+
+export const checkConnectionDraftResponseInfoOneMessengerNameMax = 100;
+
+export const checkConnectionDraftResponseInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const checkConnectionDraftResponseInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const checkConnectionDraftResponseInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const checkConnectionDraftResponseInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const checkConnectionDraftResponseInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const checkConnectionDraftResponseInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const checkConnectionDraftResponseInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
+export const CheckConnectionDraftResponse = zod.object({
+  "ok": zod.boolean(),
+  "steps": zod.array(zod.object({
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery']),
+  "ok": zod.boolean(),
+  "skipped": zod.boolean().optional(),
+  "latency_ms": zod.int().nullish(),
+  "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
+  "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.'),
+  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
+})),
+  "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
+  "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
+  "webhook_set": zod.boolean().nullish().describe('Telegram only. A set webhook makes long polling fail with 409.'),
+  "pending_updates": zod.int().nullish(),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(checkConnectionDraftResponseInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(checkConnectionDraftResponseInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(checkConnectionDraftResponseInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(checkConnectionDraftResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(checkConnectionDraftResponseInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(checkConnectionDraftResponseInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(checkConnectionDraftResponseInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(checkConnectionDraftResponseInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(checkConnectionDraftResponseInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.')
+})
+
+/**
  * @summary Read Connection
  */
 export const getConnectionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -946,7 +1078,7 @@ export const DeleteConnectionHeader = zod.object({
 export const DeleteConnectionResponse = zod.void()
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnectionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -957,7 +1089,7 @@ export const CheckConnectionParams = zod.object({
 })
 
 export const CheckConnectionBody = zod.object({
-  "base_url": zod.string().nullish().describe('An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent to that address.')
+  "base_url": zod.string().nullish().describe('An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.')
 })
 
 export const checkConnectionResponseInfoOneBridgeNameMax = 100;
@@ -996,7 +1128,7 @@ export const CheckConnectionResponse = zod.object({
   "latency_ms": zod.int().nullish(),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.'),
-  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
+  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
@@ -1040,7 +1172,7 @@ export const CheckConnectionResponse = zod.object({
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
-}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.')
 })
 
 /**

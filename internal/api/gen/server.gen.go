@@ -287,6 +287,21 @@ func (e BridgeConnectionBaseType) Valid() bool {
 	}
 }
 
+// Defines values for BridgeConnectionDraftType.
+const (
+	BridgeConnectionDraftTypeBridge BridgeConnectionDraftType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionDraftType enum.
+func (e BridgeConnectionDraftType) Valid() bool {
+	switch e {
+	case BridgeConnectionDraftTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeConnectionInputType.
 const (
 	BridgeConnectionInputTypeBridge BridgeConnectionInputType = "bridge"
@@ -1313,6 +1328,21 @@ func (e MattermostConnectionBaseType) Valid() bool {
 	}
 }
 
+// Defines values for MattermostConnectionDraftType.
+const (
+	MattermostConnectionDraftTypeMattermost MattermostConnectionDraftType = "mattermost"
+)
+
+// Valid indicates whether the value is a known member of the MattermostConnectionDraftType enum.
+func (e MattermostConnectionDraftType) Valid() bool {
+	switch e {
+	case MattermostConnectionDraftTypeMattermost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MattermostConnectionInputType.
 const (
 	MattermostConnectionInputTypeMattermost MattermostConnectionInputType = "mattermost"
@@ -1492,6 +1522,8 @@ const (
 	NullableConnectionCheckCodeEventDeliveryNotOffered NullableConnectionCheckCode = "event_delivery_not_offered"
 	NullableConnectionCheckCodeLessThannil             NullableConnectionCheckCode = "<nil>"
 	NullableConnectionCheckCodeNotBotApi               NullableConnectionCheckCode = "not_bot_api"
+	NullableConnectionCheckCodeNotBridge               NullableConnectionCheckCode = "not_bridge"
+	NullableConnectionCheckCodeNotMattermost           NullableConnectionCheckCode = "not_mattermost"
 	NullableConnectionCheckCodeProtocolMismatch        NullableConnectionCheckCode = "protocol_mismatch"
 	NullableConnectionCheckCodeProtocolVersionUnknown  NullableConnectionCheckCode = "protocol_version_unknown"
 	NullableConnectionCheckCodeProxyRefused            NullableConnectionCheckCode = "proxy_refused"
@@ -1518,6 +1550,10 @@ func (e NullableConnectionCheckCode) Valid() bool {
 	case NullableConnectionCheckCodeLessThannil:
 		return true
 	case NullableConnectionCheckCodeNotBotApi:
+		return true
+	case NullableConnectionCheckCodeNotBridge:
+		return true
+	case NullableConnectionCheckCodeNotMattermost:
 		return true
 	case NullableConnectionCheckCodeProtocolMismatch:
 		return true
@@ -2312,6 +2348,21 @@ const (
 func (e TelegramConnectionBaseType) Valid() bool {
 	switch e {
 	case TelegramConnectionBaseTypeTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelegramConnectionDraftType.
+const (
+	TelegramConnectionDraftTypeTelegram TelegramConnectionDraftType = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the TelegramConnectionDraftType enum.
+func (e TelegramConnectionDraftType) Valid() bool {
+	switch e {
+	case TelegramConnectionDraftTypeTelegram:
 		return true
 	default:
 		return false
@@ -3669,6 +3720,28 @@ type BridgeConnectionBase struct {
 // BridgeConnectionBaseType defines model for BridgeConnectionBase.Type.
 type BridgeConnectionBaseType string
 
+// BridgeConnectionDraft A Bridge Connection as its form holds it, for `checkConnectionDraft`; the push secret is not checked.
+type BridgeConnectionDraft struct {
+	// BaseUrl The bridge's base URL as `BridgeConnectionBase` takes it.
+	BaseUrl string `json:"base_url"`
+
+	// BotToken A token typed in the form, sent only to `base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Bridge Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+	EventDelivery BridgeEventDelivery `json:"event_delivery"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy *ProxyConfigInput         `json:"proxy,omitempty"`
+	Type  BridgeConnectionDraftType `json:"type"`
+}
+
+// BridgeConnectionDraftType defines model for BridgeConnectionDraft.Type.
+type BridgeConnectionDraftType string
+
 // BridgeConnectionInput defines model for BridgeConnectionInput.
 type BridgeConnectionInput struct {
 	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
@@ -3973,7 +4046,7 @@ type Connection struct {
 
 // ConnectionCheckRequest defines model for ConnectionCheckRequest.
 type ConnectionCheckRequest struct {
-	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent to that address.
+	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.
 	BaseUrl nullable.Nullable[string] `json:"base_url,omitempty"`
 }
 
@@ -3982,7 +4055,7 @@ type ConnectionCheckResult struct {
 	// BotName The bot's name or username.
 	BotName nullable.Nullable[string] `json:"bot_name,omitempty"`
 
-	// Info Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types.
+	// Info Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.
 	Info           nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
 	Ok             bool                          `json:"ok"`
 	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
@@ -4000,7 +4073,7 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code      nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 	LatencyMs nullable.Nullable[int]                         `json:"latency_ms,omitempty"`
 
@@ -4016,6 +4089,11 @@ type ConnectionCheckStep struct {
 
 // ConnectionCheckStepName defines model for ConnectionCheckStep.Name.
 type ConnectionCheckStepName string
+
+// ConnectionDraft A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.
+type ConnectionDraft struct {
+	union json.RawMessage
+}
 
 // ConnectionInput A Connection as written; `type` selects the variant and cannot change on update.
 type ConnectionInput struct {
@@ -4771,6 +4849,25 @@ type MattermostConnectionBase struct {
 // MattermostConnectionBaseType defines model for MattermostConnectionBase.Type.
 type MattermostConnectionBaseType string
 
+// MattermostConnectionDraft A Mattermost Connection as its form holds it, for `checkConnectionDraft`.
+type MattermostConnectionDraft struct {
+	// BotToken A bot token typed in the form, sent only to `server_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved server URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Mattermost Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy *ProxyConfigInput `json:"proxy,omitempty"`
+
+	// ServerUrl The server URL as `MattermostConnectionBase` takes it.
+	ServerUrl string                        `json:"server_url"`
+	Type      MattermostConnectionDraftType `json:"type"`
+}
+
+// MattermostConnectionDraftType defines model for MattermostConnectionDraft.Type.
+type MattermostConnectionDraftType string
+
 // MattermostConnectionInput defines model for MattermostConnectionInput.
 type MattermostConnectionInput struct {
 	// BotToken Write-only Secret. Omit on update to keep the stored one.
@@ -4969,7 +5066,7 @@ type NoteList struct {
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
@@ -6098,6 +6195,26 @@ type TelegramConnectionBase struct {
 
 // TelegramConnectionBaseType defines model for TelegramConnectionBase.Type.
 type TelegramConnectionBaseType string
+
+// TelegramConnectionDraft A Telegram Connection as its form holds it, for `checkConnectionDraft`.
+type TelegramConnectionDraft struct {
+	// BotApiBaseUrl The Bot API base URL as `TelegramConnectionBase` takes it.
+	BotApiBaseUrl string `json:"bot_api_base_url"`
+
+	// BotToken A bot token typed in the form, sent only to `bot_api_base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Telegram Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy      *ProxyConfigInput           `json:"proxy,omitempty"`
+	Type       TelegramConnectionDraftType `json:"type"`
+	UpdateMode TelegramUpdateMode          `json:"update_mode"`
+}
+
+// TelegramConnectionDraftType defines model for TelegramConnectionDraft.Type.
+type TelegramConnectionDraftType string
 
 // TelegramConnectionInput defines model for TelegramConnectionInput.
 type TelegramConnectionInput struct {
@@ -7601,6 +7718,9 @@ type TelegramWebhookJSONRequestBody = TelegramUpdate
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody = ConnectionInput
 
+// CheckConnectionDraftJSONRequestBody defines body for CheckConnectionDraft for application/json ContentType.
+type CheckConnectionDraftJSONRequestBody = ConnectionDraft
+
 // UpdateConnectionJSONRequestBody defines body for UpdateConnection for application/json ContentType.
 type UpdateConnectionJSONRequestBody = ConnectionInput
 
@@ -8655,6 +8775,143 @@ func (t *Connection) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsMattermostConnectionDraft returns the union data inside the ConnectionDraft as a MattermostConnectionDraft
+func (t ConnectionDraft) AsMattermostConnectionDraft() (MattermostConnectionDraft, error) {
+	var body MattermostConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMattermostConnectionDraft overwrites any union data inside the ConnectionDraft as the provided MattermostConnectionDraft
+func (t *ConnectionDraft) FromMattermostConnectionDraft(v MattermostConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"mattermost"}`))
+	t.union = b
+	return err
+}
+
+// MergeMattermostConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided MattermostConnectionDraft
+func (t *ConnectionDraft) MergeMattermostConnectionDraft(v MattermostConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"mattermost"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTelegramConnectionDraft returns the union data inside the ConnectionDraft as a TelegramConnectionDraft
+func (t ConnectionDraft) AsTelegramConnectionDraft() (TelegramConnectionDraft, error) {
+	var body TelegramConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTelegramConnectionDraft overwrites any union data inside the ConnectionDraft as the provided TelegramConnectionDraft
+func (t *ConnectionDraft) FromTelegramConnectionDraft(v TelegramConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"telegram"}`))
+	t.union = b
+	return err
+}
+
+// MergeTelegramConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided TelegramConnectionDraft
+func (t *ConnectionDraft) MergeTelegramConnectionDraft(v TelegramConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"telegram"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeConnectionDraft returns the union data inside the ConnectionDraft as a BridgeConnectionDraft
+func (t ConnectionDraft) AsBridgeConnectionDraft() (BridgeConnectionDraft, error) {
+	var body BridgeConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeConnectionDraft overwrites any union data inside the ConnectionDraft as the provided BridgeConnectionDraft
+func (t *ConnectionDraft) FromBridgeConnectionDraft(v BridgeConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided BridgeConnectionDraft
+func (t *ConnectionDraft) MergeBridgeConnectionDraft(v BridgeConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ConnectionDraft) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ConnectionDraft) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "bridge":
+		return t.AsBridgeConnectionDraft()
+	case "mattermost":
+		return t.AsMattermostConnectionDraft()
+	case "telegram":
+		return t.AsTelegramConnectionDraft()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ConnectionDraft) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ConnectionDraft) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsMattermostConnectionInput returns the union data inside the ConnectionInput as a MattermostConnectionInput
 func (t ConnectionInput) AsMattermostConnectionInput() (MattermostConnectionInput, error) {
 	var body MattermostConnectionInput
@@ -9457,6 +9714,9 @@ type ServerInterface interface {
 	// CreateConnection Create Connection
 	// (POST /connections)
 	CreateConnection(w http.ResponseWriter, r *http.Request)
+	// CheckConnectionDraft Check a Connection before saving it
+	// (POST /connections/checks)
+	CheckConnectionDraft(w http.ResponseWriter, r *http.Request)
 	// DeleteConnection Delete Connection
 	// (DELETE /connections/{connection_id})
 	DeleteConnection(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params DeleteConnectionParams)
@@ -11334,6 +11594,20 @@ func (siw *ServerInterfaceWrapper) CreateConnection(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckConnectionDraft operation middleware
+func (siw *ServerInterfaceWrapper) CheckConnectionDraft(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckConnectionDraft(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15375,6 +15649,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/live-updates", wrapper.StreamLiveUpdates)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/connections", wrapper.ListConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/connections", wrapper.CreateConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/connections/checks", wrapper.CheckConnectionDraft)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/connections/{connection_id}", wrapper.DeleteConnection)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/connections/{connection_id}", wrapper.GetConnection)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/connections/{connection_id}", wrapper.UpdateConnection)
@@ -17979,6 +18254,130 @@ func (response CreateConnection429ApplicationProblemPlusJSONResponse) VisitCreat
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
 	}
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraftRequestObject struct {
+	Body *CheckConnectionDraftJSONRequestBody
+}
+
+type CheckConnectionDraftResponseObject interface {
+	VisitCheckConnectionDraftResponse(w http.ResponseWriter) error
+}
+
+type CheckConnectionDraft200JSONResponse ConnectionCheckResult
+
+func (response CheckConnectionDraft200JSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft400ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft401ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft403ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft422ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft429ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckConnectionDraft503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response CheckConnectionDraft503ApplicationProblemPlusJSONResponse) VisitCheckConnectionDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -31512,6 +31911,9 @@ type StrictServerInterface interface {
 	// CreateConnection Create Connection
 	// (POST /connections)
 	CreateConnection(ctx context.Context, request CreateConnectionRequestObject) (CreateConnectionResponseObject, error)
+	// CheckConnectionDraft Check a Connection before saving it
+	// (POST /connections/checks)
+	CheckConnectionDraft(ctx context.Context, request CheckConnectionDraftRequestObject) (CheckConnectionDraftResponseObject, error)
 	// DeleteConnection Delete Connection
 	// (DELETE /connections/{connection_id})
 	DeleteConnection(ctx context.Context, request DeleteConnectionRequestObject) (DeleteConnectionResponseObject, error)
@@ -32617,6 +33019,37 @@ func (sh *strictHandler) CreateConnection(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateConnectionResponseObject); ok {
 		if err := validResponse.VisitCreateConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckConnectionDraft operation middleware
+func (sh *strictHandler) CheckConnectionDraft(w http.ResponseWriter, r *http.Request) {
+	var request CheckConnectionDraftRequestObject
+
+	var body CheckConnectionDraftJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckConnectionDraft(ctx, request.(CheckConnectionDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckConnectionDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckConnectionDraftResponseObject); ok {
+		if err := validResponse.VisitCheckConnectionDraftResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

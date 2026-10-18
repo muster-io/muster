@@ -289,6 +289,21 @@ func (e BridgeConnectionBaseType) Valid() bool {
 	}
 }
 
+// Defines values for BridgeConnectionDraftType.
+const (
+	BridgeConnectionDraftTypeBridge BridgeConnectionDraftType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionDraftType enum.
+func (e BridgeConnectionDraftType) Valid() bool {
+	switch e {
+	case BridgeConnectionDraftTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeConnectionInputType.
 const (
 	BridgeConnectionInputTypeBridge BridgeConnectionInputType = "bridge"
@@ -1315,6 +1330,21 @@ func (e MattermostConnectionBaseType) Valid() bool {
 	}
 }
 
+// Defines values for MattermostConnectionDraftType.
+const (
+	MattermostConnectionDraftTypeMattermost MattermostConnectionDraftType = "mattermost"
+)
+
+// Valid indicates whether the value is a known member of the MattermostConnectionDraftType enum.
+func (e MattermostConnectionDraftType) Valid() bool {
+	switch e {
+	case MattermostConnectionDraftTypeMattermost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MattermostConnectionInputType.
 const (
 	MattermostConnectionInputTypeMattermost MattermostConnectionInputType = "mattermost"
@@ -1494,6 +1524,8 @@ const (
 	NullableConnectionCheckCodeEventDeliveryNotOffered NullableConnectionCheckCode = "event_delivery_not_offered"
 	NullableConnectionCheckCodeLessThannil             NullableConnectionCheckCode = "<nil>"
 	NullableConnectionCheckCodeNotBotApi               NullableConnectionCheckCode = "not_bot_api"
+	NullableConnectionCheckCodeNotBridge               NullableConnectionCheckCode = "not_bridge"
+	NullableConnectionCheckCodeNotMattermost           NullableConnectionCheckCode = "not_mattermost"
 	NullableConnectionCheckCodeProtocolMismatch        NullableConnectionCheckCode = "protocol_mismatch"
 	NullableConnectionCheckCodeProtocolVersionUnknown  NullableConnectionCheckCode = "protocol_version_unknown"
 	NullableConnectionCheckCodeProxyRefused            NullableConnectionCheckCode = "proxy_refused"
@@ -1520,6 +1552,10 @@ func (e NullableConnectionCheckCode) Valid() bool {
 	case NullableConnectionCheckCodeLessThannil:
 		return true
 	case NullableConnectionCheckCodeNotBotApi:
+		return true
+	case NullableConnectionCheckCodeNotBridge:
+		return true
+	case NullableConnectionCheckCodeNotMattermost:
 		return true
 	case NullableConnectionCheckCodeProtocolMismatch:
 		return true
@@ -2314,6 +2350,21 @@ const (
 func (e TelegramConnectionBaseType) Valid() bool {
 	switch e {
 	case TelegramConnectionBaseTypeTelegram:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelegramConnectionDraftType.
+const (
+	TelegramConnectionDraftTypeTelegram TelegramConnectionDraftType = "telegram"
+)
+
+// Valid indicates whether the value is a known member of the TelegramConnectionDraftType enum.
+func (e TelegramConnectionDraftType) Valid() bool {
+	switch e {
+	case TelegramConnectionDraftTypeTelegram:
 		return true
 	default:
 		return false
@@ -3671,6 +3722,28 @@ type BridgeConnectionBase struct {
 // BridgeConnectionBaseType defines model for BridgeConnectionBase.Type.
 type BridgeConnectionBaseType string
 
+// BridgeConnectionDraft A Bridge Connection as its form holds it, for `checkConnectionDraft`; the push secret is not checked.
+type BridgeConnectionDraft struct {
+	// BaseUrl The bridge's base URL as `BridgeConnectionBase` takes it.
+	BaseUrl string `json:"base_url"`
+
+	// BotToken A token typed in the form, sent only to `base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Bridge Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+	EventDelivery BridgeEventDelivery `json:"event_delivery"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy *ProxyConfigInput         `json:"proxy,omitempty"`
+	Type  BridgeConnectionDraftType `json:"type"`
+}
+
+// BridgeConnectionDraftType defines model for BridgeConnectionDraft.Type.
+type BridgeConnectionDraftType string
+
 // BridgeConnectionInput defines model for BridgeConnectionInput.
 type BridgeConnectionInput struct {
 	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
@@ -3975,7 +4048,7 @@ type Connection struct {
 
 // ConnectionCheckRequest defines model for ConnectionCheckRequest.
 type ConnectionCheckRequest struct {
-	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent to that address.
+	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.
 	BaseUrl nullable.Nullable[string] `json:"base_url,omitempty"`
 }
 
@@ -3984,7 +4057,7 @@ type ConnectionCheckResult struct {
 	// BotName The bot's name or username.
 	BotName nullable.Nullable[string] `json:"bot_name,omitempty"`
 
-	// Info Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types.
+	// Info Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.
 	Info           nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
 	Ok             bool                          `json:"ok"`
 	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
@@ -4002,7 +4075,7 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code      nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 	LatencyMs nullable.Nullable[int]                         `json:"latency_ms,omitempty"`
 
@@ -4018,6 +4091,11 @@ type ConnectionCheckStep struct {
 
 // ConnectionCheckStepName defines model for ConnectionCheckStep.Name.
 type ConnectionCheckStepName string
+
+// ConnectionDraft A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.
+type ConnectionDraft struct {
+	union json.RawMessage
+}
 
 // ConnectionInput A Connection as written; `type` selects the variant and cannot change on update.
 type ConnectionInput struct {
@@ -4773,6 +4851,25 @@ type MattermostConnectionBase struct {
 // MattermostConnectionBaseType defines model for MattermostConnectionBase.Type.
 type MattermostConnectionBaseType string
 
+// MattermostConnectionDraft A Mattermost Connection as its form holds it, for `checkConnectionDraft`.
+type MattermostConnectionDraft struct {
+	// BotToken A bot token typed in the form, sent only to `server_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved server URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Mattermost Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy *ProxyConfigInput `json:"proxy,omitempty"`
+
+	// ServerUrl The server URL as `MattermostConnectionBase` takes it.
+	ServerUrl string                        `json:"server_url"`
+	Type      MattermostConnectionDraftType `json:"type"`
+}
+
+// MattermostConnectionDraftType defines model for MattermostConnectionDraft.Type.
+type MattermostConnectionDraftType string
+
 // MattermostConnectionInput defines model for MattermostConnectionInput.
 type MattermostConnectionInput struct {
 	// BotToken Write-only Secret. Omit on update to keep the stored one.
@@ -4971,7 +5068,7 @@ type NoteList struct {
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
@@ -6100,6 +6197,26 @@ type TelegramConnectionBase struct {
 
 // TelegramConnectionBaseType defines model for TelegramConnectionBase.Type.
 type TelegramConnectionBaseType string
+
+// TelegramConnectionDraft A Telegram Connection as its form holds it, for `checkConnectionDraft`.
+type TelegramConnectionDraft struct {
+	// BotApiBaseUrl The Bot API base URL as `TelegramConnectionBase` takes it.
+	BotApiBaseUrl string `json:"bot_api_base_url"`
+
+	// BotToken A bot token typed in the form, sent only to `bot_api_base_url`. Omit it to use the stored token of `connection_id`, which goes only to its saved base URL through its saved proxy.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Telegram Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy      *ProxyConfigInput           `json:"proxy,omitempty"`
+	Type       TelegramConnectionDraftType `json:"type"`
+	UpdateMode TelegramUpdateMode          `json:"update_mode"`
+}
+
+// TelegramConnectionDraftType defines model for TelegramConnectionDraft.Type.
+type TelegramConnectionDraftType string
 
 // TelegramConnectionInput defines model for TelegramConnectionInput.
 type TelegramConnectionInput struct {
@@ -7603,6 +7720,9 @@ type TelegramWebhookJSONRequestBody = TelegramUpdate
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody = ConnectionInput
 
+// CheckConnectionDraftJSONRequestBody defines body for CheckConnectionDraft for application/json ContentType.
+type CheckConnectionDraftJSONRequestBody = ConnectionDraft
+
 // UpdateConnectionJSONRequestBody defines body for UpdateConnection for application/json ContentType.
 type UpdateConnectionJSONRequestBody = ConnectionInput
 
@@ -8653,6 +8773,143 @@ func (t Connection) MarshalJSON() ([]byte, error) {
 }
 
 func (t *Connection) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsMattermostConnectionDraft returns the union data inside the ConnectionDraft as a MattermostConnectionDraft
+func (t ConnectionDraft) AsMattermostConnectionDraft() (MattermostConnectionDraft, error) {
+	var body MattermostConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMattermostConnectionDraft overwrites any union data inside the ConnectionDraft as the provided MattermostConnectionDraft
+func (t *ConnectionDraft) FromMattermostConnectionDraft(v MattermostConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"mattermost"}`))
+	t.union = b
+	return err
+}
+
+// MergeMattermostConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided MattermostConnectionDraft
+func (t *ConnectionDraft) MergeMattermostConnectionDraft(v MattermostConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"mattermost"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTelegramConnectionDraft returns the union data inside the ConnectionDraft as a TelegramConnectionDraft
+func (t ConnectionDraft) AsTelegramConnectionDraft() (TelegramConnectionDraft, error) {
+	var body TelegramConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTelegramConnectionDraft overwrites any union data inside the ConnectionDraft as the provided TelegramConnectionDraft
+func (t *ConnectionDraft) FromTelegramConnectionDraft(v TelegramConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"telegram"}`))
+	t.union = b
+	return err
+}
+
+// MergeTelegramConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided TelegramConnectionDraft
+func (t *ConnectionDraft) MergeTelegramConnectionDraft(v TelegramConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"telegram"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeConnectionDraft returns the union data inside the ConnectionDraft as a BridgeConnectionDraft
+func (t ConnectionDraft) AsBridgeConnectionDraft() (BridgeConnectionDraft, error) {
+	var body BridgeConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeConnectionDraft overwrites any union data inside the ConnectionDraft as the provided BridgeConnectionDraft
+func (t *ConnectionDraft) FromBridgeConnectionDraft(v BridgeConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided BridgeConnectionDraft
+func (t *ConnectionDraft) MergeBridgeConnectionDraft(v BridgeConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ConnectionDraft) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ConnectionDraft) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "bridge":
+		return t.AsBridgeConnectionDraft()
+	case "mattermost":
+		return t.AsMattermostConnectionDraft()
+	case "telegram":
+		return t.AsTelegramConnectionDraft()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ConnectionDraft) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ConnectionDraft) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -9709,6 +9966,24 @@ type ClientInterface interface {
 	// Corresponds with POST /connections (the `CreateConnection` operationId).
 	CreateConnection(ctx context.Context, body CreateConnectionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CheckConnectionDraftWithBody Check a Connection before saving it
+	//
+	// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+	CheckConnectionDraftWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CheckConnectionDraft Check a Connection before saving it
+	//
+	// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+	CheckConnectionDraft(ctx context.Context, body CheckConnectionDraftJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeleteConnection Delete Connection
 	//
 	// A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
@@ -9748,7 +10023,7 @@ type ClientInterface interface {
 
 	// CheckConnectionWithBody Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9757,7 +10032,7 @@ type ClientInterface interface {
 
 	// CheckConnection Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11610,6 +11885,44 @@ func (c *Client) CreateConnection(ctx context.Context, body CreateConnectionJSON
 	return c.Client.Do(req)
 }
 
+// CheckConnectionDraftWithBody Check a Connection before saving it
+//
+// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+func (c *Client) CheckConnectionDraftWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckConnectionDraftRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CheckConnectionDraft Check a Connection before saving it
+//
+// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+func (c *Client) CheckConnectionDraft(ctx context.Context, body CheckConnectionDraftJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCheckConnectionDraftRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // DeleteConnection Delete Connection
 //
 // A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
@@ -11699,7 +12012,7 @@ func (c *Client) ListConnectionChannels(ctx context.Context, connectionId Connec
 
 // CheckConnectionWithBody Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11718,7 +12031,7 @@ func (c *Client) CheckConnectionWithBody(ctx context.Context, connectionId Conne
 
 // CheckConnection Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -16442,6 +16755,46 @@ func NewCreateConnectionRequestWithBody(server string, contentType string, body 
 	}
 
 	operationPath := fmt.Sprintf("/connections")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCheckConnectionDraftRequest calls the generic CheckConnectionDraft builder with application/json body
+func NewCheckConnectionDraftRequest(server string, body CheckConnectionDraftJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCheckConnectionDraftRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCheckConnectionDraftRequestWithBody constructs an http.Request for the CheckConnectionDraft method, with any body, and a specified content type
+func NewCheckConnectionDraftRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/connections/checks")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -22308,6 +22661,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /connections (the `CreateConnection` operationId).
 	CreateConnectionWithResponse(ctx context.Context, body CreateConnectionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateConnectionResponse, error)
 
+	// CheckConnectionDraftWithBodyWithResponse Check a Connection before saving it
+	//
+	// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+	CheckConnectionDraftWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckConnectionDraftResponse, error)
+
+	// CheckConnectionDraftWithResponse Check a Connection before saving it
+	//
+	// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+	CheckConnectionDraftWithResponse(ctx context.Context, body CheckConnectionDraftJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckConnectionDraftResponse, error)
+
 	// DeleteConnectionWithResponse Delete Connection
 	//
 	// A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
@@ -22353,7 +22724,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckConnectionWithBodyWithResponse Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -22362,7 +22733,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckConnectionWithResponse Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -25717,6 +26088,103 @@ func (r CreateConnectionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreateConnectionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CheckConnectionDraftResponse429Headers the declared response headers of an HTTP 429 response for CheckConnectionDraft
+type CheckConnectionDraftResponse429Headers struct {
+	RetryAfter *int
+}
+
+// CheckConnectionDraftResponse503Headers the declared response headers of an HTTP 503 response for CheckConnectionDraft
+type CheckConnectionDraftResponse503Headers struct {
+	RetryAfter *int
+}
+
+type CheckConnectionDraftResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ConnectionCheckResult
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *CheckConnectionDraftResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *CheckConnectionDraftResponse503Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CheckConnectionDraftResponse) GetJSON200() *ConnectionCheckResult {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r CheckConnectionDraftResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CheckConnectionDraftResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CheckConnectionDraftResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CheckConnectionDraftResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CheckConnectionDraftResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -36807,6 +37275,36 @@ func (c *ClientWithResponses) CreateConnectionWithResponse(ctx context.Context, 
 	return ParseCreateConnectionResponse(rsp)
 }
 
+// CheckConnectionDraftWithBodyWithResponse Check a Connection before saving it
+//
+// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+func (c *ClientWithResponses) CheckConnectionDraftWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CheckConnectionDraftResponse, error) {
+	rsp, err := c.CheckConnectionDraftWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckConnectionDraftResponse(rsp)
+}
+
+// CheckConnectionDraftWithResponse Check a Connection before saving it
+//
+// Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /connections/checks (the `CheckConnectionDraft` operationId).
+func (c *ClientWithResponses) CheckConnectionDraftWithResponse(ctx context.Context, body CheckConnectionDraftJSONRequestBody, reqEditors ...RequestEditorFn) (*CheckConnectionDraftResponse, error) {
+	rsp, err := c.CheckConnectionDraft(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCheckConnectionDraftResponse(rsp)
+}
+
 // DeleteConnectionWithResponse Delete Connection
 //
 // A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
@@ -36882,7 +37380,7 @@ func (c *ClientWithResponses) ListConnectionChannelsWithResponse(ctx context.Con
 
 // CheckConnectionWithBodyWithResponse Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36897,7 +37395,7 @@ func (c *ClientWithResponses) CheckConnectionWithBodyWithResponse(ctx context.Co
 
 // CheckConnectionWithResponse Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -41029,6 +41527,97 @@ func ParseCreateConnectionResponse(rsp *http.Response) (*CreateConnectionRespons
 			headers.RetryAfter = &value
 		}
 		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseCheckConnectionDraftResponse parses an HTTP response from a CheckConnectionDraftWithResponse call
+func ParseCheckConnectionDraftResponse(rsp *http.Response) (*CheckConnectionDraftResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CheckConnectionDraftResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConnectionCheckResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers CheckConnectionDraftResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers CheckConnectionDraftResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil

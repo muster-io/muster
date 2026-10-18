@@ -20,7 +20,7 @@
 
 export interface ConnectionCheckRequest {
   /**
-     * An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent to that address.
+     * An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.
      * @nullable
      */
   base_url?: string | null;

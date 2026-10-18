@@ -132,6 +132,10 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
       return t("checks.codes.protocolMismatch");
     case "event_delivery_not_offered":
       return t("checks.codes.eventDeliveryNotOffered");
+    case "not_mattermost":
+      return t("checks.codes.notMattermost");
+    case "not_bridge":
+      return t("checks.codes.notBridge");
     default:
       return unreachable(code);
   }

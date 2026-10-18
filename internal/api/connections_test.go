@@ -34,7 +34,7 @@ const connectionBody = `{"type":"mattermost","name":"mm","server_url":"http://12
 	`"bot_token":"` + botTokenValue + `","proxy":{"enabled":false},"limiter":{"limit":5,"per_seconds":1}}`
 
 // fakeConnections stands for internal/connections: the Connections in id order, the inputs of the writes with who
-// asked and the version they named, and the answers of the check and the channel list.
+// asked and the version they named, the drafts checked, and the answers of the checks and the channel list.
 type fakeConnections struct {
 	list     []connections.Connection
 	filters  []connections.ListFilter
@@ -46,6 +46,7 @@ type fakeConnections struct {
 	channels []connections.Channel
 	chanArgs [][2]string
 	baseURLs []*string
+	drafts   []connections.Draft
 	err      error
 }
 
@@ -142,6 +143,11 @@ func (f *fakeConnections) Check(_ context.Context, id string, baseURL *string) (
 	if f.find(id) < 0 {
 		return connections.CheckResult{}, connections.ErrNotFound
 	}
+	return f.check, f.err
+}
+
+func (f *fakeConnections) CheckDraft(_ context.Context, d connections.Draft) (connections.CheckResult, error) {
+	f.drafts = append(f.drafts, d)
 	return f.check, f.err
 }
 
@@ -428,6 +434,141 @@ func TestCheckConnectionAPI(t *testing.T) {
 	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/CN000000000000/checks", ""); a.status !=
 		http.StatusNotFound {
 		t.Errorf("unknown = %d", a.status)
+	}
+}
+
+// TestCheckConnectionDraftAPI is checkConnectionDraft (C-13.FR-14): a draft of each type reaches the service with the
+// token typed in the form, its proxy and the Connection it edits, and its result has the steps and codes of
+// checkConnection, skipped steps without latency and a Bridge's info; nothing is written. The refusals of the service
+// are 422 at their pointers, no limiter token 503 with Retry-After; a reader is 403, and a body the specification
+// refuses is 400.
+func TestCheckConnectionDraftAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	const path = "/api/v1/connections/checks"
+	fc.check = connections.CheckResult{Steps: []connections.Step{
+		{Name: mattermost.StepDryProbe, Latency: 4 * time.Millisecond, Via: mattermost.ViaProxy,
+			Message: "The address answered 200 with text/html, not as a Mattermost server.",
+			Code:    mattermost.CodeNotMattermost},
+		{Name: connections.StepToken, Skipped: true, Via: mattermost.ViaProxy}}}
+	body := `{"type":"mattermost","server_url":"http://127.0.0.1:18066","bot_token":"` + botTokenValue +
+		`","proxy":{"enabled":true,"type":"http","address":"127.0.0.1:18091","password":"proxy-pass"},` +
+		`"connection_id":"` + connectionID + `"}`
+	a := x.as(t, connectionsWriter, http.MethodPost, path, body)
+	noToken(t, a)
+	var res gen.ConnectionCheckResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || res.Ok || len(res.Steps) != 2 || res.Steps[0].Name != "dry_probe" ||
+		res.Steps[0].Code.MustGet() != gen.NullableConnectionCheckCodeNotMattermost ||
+		res.Steps[0].LatencyMs.MustGet() != 4 || *res.Steps[0].Via != "proxy" || res.Steps[1].Name != "token" ||
+		!*res.Steps[1].Skipped || !res.Steps[1].LatencyMs.IsNull() || !res.Steps[1].Code.IsNull() ||
+		!res.BotName.IsNull() || strings.Contains(string(a.body), `"info"`) ||
+		strings.Contains(string(a.body), "proxy-pass") {
+		t.Fatalf("mattermost = %d %s", a.status, a.body)
+	}
+	d := fc.drafts[0]
+	if d.Type != connections.TypeMattermost || d.ServerURL != "http://127.0.0.1:18066" || !d.BotToken.Given ||
+		string(d.BotToken.Value) != botTokenValue || d.Proxy == nil || !d.Proxy.Enabled ||
+		*d.Proxy.Address != "127.0.0.1:18091" || string(d.Proxy.Password.Value) != "proxy-pass" ||
+		d.ConnectionID == nil || *d.ConnectionID != connectionID {
+		t.Errorf("mattermost draft %+v", d)
+	}
+	fc.check = connections.CheckResult{OK: true, BotName: "muster-dev-bot-b", Steps: []connections.Step{{
+		Name: connections.StepToken, OK: true, Latency: 7 * time.Millisecond, Via: mattermost.ViaDirect}},
+		Warnings: []string{connections.WarningPressAnswersInThread}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path, `{"type":"mattermost","server_url":"http://127.0.0.1:18066"}`)
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || !res.Ok || res.BotName.MustGet() != "muster-dev-bot-b" ||
+		res.Warnings[0] != gen.PressAnswersInThread || len(fc.drafts) != 2 || fc.drafts[1].BotToken.Given ||
+		fc.drafts[1].Proxy != nil || fc.drafts[1].ConnectionID != nil {
+		t.Fatalf("a new draft without a token = %d %s, %+v", a.status, a.body, fc.drafts)
+	}
+
+	webhook, pending := false, int64(0)
+	fc.check = connections.CheckResult{OK: true, BotName: "muster_dev_bot", WebhookSet: &webhook,
+		PendingUpdates: &pending, Steps: []connections.Step{
+			{Name: "dry_probe", OK: true, Latency: time.Millisecond, Via: "direct"},
+			{Name: "get_me", OK: true, Latency: time.Millisecond, Via: "direct"},
+			{Name: "get_webhook_info", OK: true, Latency: time.Millisecond, Via: "direct"}}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path,
+		`{"type":"telegram","bot_api_base_url":"http://127.0.0.1:18081/","update_mode":"long_polling"}`)
+	decodeInto(t, a, &res)
+	if d := fc.drafts[2]; a.status != http.StatusOK || !res.Ok || len(res.Steps) != 3 ||
+		res.WebhookSet.MustGet() || res.PendingUpdates.MustGet() != 0 || d.Type != connections.TypeTelegram ||
+		d.BotAPIBaseURL != "http://127.0.0.1:18081/" || d.UpdateMode != connections.ModeLongPolling ||
+		d.BotToken.Given || d.Proxy != nil || d.ServerURL != "" {
+		t.Errorf("telegram = %d %s, %+v", a.status, a.body, d)
+	}
+
+	fc.check = connections.CheckResult{OK: true, Bridge: true, Info: []byte(bridgeInfoJSON), Steps: []connections.Step{
+		{Name: connections.StepInfo, OK: true, Latency: 9 * time.Millisecond, Via: "direct"},
+		{Name: connections.StepEventDelivery, OK: true, Via: "direct"}}}
+	bridgeBody := `{"type":"bridge","base_url":"http://127.0.0.1:18094","event_delivery":"push","bot_token":"` +
+		botTokenValue + `","connection_id":"CNAAAAAAAAAAB1"}`
+	a = x.as(t, connectionsWriter, http.MethodPost, path, bridgeBody)
+	noToken(t, a)
+	decodeInto(t, a, &res)
+	if info, err := res.Info.Get(); a.status != http.StatusOK || err != nil || info.Messenger.Name != "Fake chat" {
+		t.Errorf("bridge = %d %s", a.status, a.body)
+	}
+	if d := fc.drafts[3]; d.Type != connections.TypeBridge || d.BridgeBaseURL != "http://127.0.0.1:18094" ||
+		d.EventDelivery != connections.EventDeliveryPush || string(d.BotToken.Value) != botTokenValue ||
+		*d.ConnectionID != "CNAAAAAAAAAAB1" {
+		t.Errorf("bridge draft %+v", d)
+	}
+	fc.check = connections.CheckResult{Bridge: true, Steps: []connections.Step{
+		{Name: "dry_probe", Latency: time.Millisecond, Via: "direct", Message: "not a bridge", Code: "not_bridge"},
+		{Name: connections.StepInfo, Skipped: true, Via: "direct"},
+		{Name: connections.StepEventDelivery, Skipped: true, Via: "direct"}}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path,
+		`{"type":"bridge","base_url":"http://127.0.0.1:18065","event_delivery":"poll"}`)
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || res.Ok || !res.Info.IsNull() ||
+		res.Steps[0].Code.MustGet() != gen.NullableConnectionCheckCodeNotBridge || !*res.Steps[2].Skipped {
+		t.Errorf("bridge without a token = %d %s", a.status, a.body)
+	}
+
+	for _, fe := range []*connections.FieldError{
+		{Pointer: "/connection_id", Code: connections.CodeUnknownID, Detail: "No Connection of this type has this id."},
+		{Pointer: "/server_url", Code: connections.CodeInvalidFormat, Detail: "bad"},
+		{Pointer: "/proxy/address", Code: connections.CodeRequired, Detail: "An enabled proxy needs its address."},
+	} {
+		fc.err = fe
+		a := x.as(t, connectionsWriter, http.MethodPost, path, body)
+		if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
+			errs[0]["pointer"] != fe.Pointer || errs[0]["code"] != fe.Code {
+			t.Errorf("%s = %d %s", fe.Pointer, a.status, a.body)
+		}
+	}
+	fc.err = &delivery.LimitedError{RetryAfter: 1500 * time.Millisecond}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, body); a.status != http.StatusServiceUnavailable ||
+		a.header.Get("Retry-After") != "2" {
+		t.Errorf("limited = %d %v", a.status, a.header)
+	}
+	fc.err = nil
+	n := len(fc.drafts)
+	for name, tc := range map[string]struct {
+		token, method, body string
+		status              int
+	}{
+		"reader":          {connectionsReader, http.MethodPost, body, http.StatusForbidden},
+		"no server_url":   {connectionsWriter, http.MethodPost, `{"type":"mattermost"}`, http.StatusBadRequest},
+		"unknown type":    {connectionsWriter, http.MethodPost, `{"type":"slack","server_url":"x"}`, 400},
+		"malformed id":    {connectionsWriter, http.MethodPost, strings.Replace(body, connectionID, "checks", 1), 400},
+		"bad update mode": {connectionsWriter, http.MethodPost, `{"type":"telegram","bot_api_base_url":"x"}`, 400},
+		"no body":         {connectionsWriter, http.MethodPost, "", http.StatusBadRequest},
+		"read":            {connectionsWriter, http.MethodGet, "", http.StatusMethodNotAllowed},
+	} {
+		if a := x.as(t, tc.token, tc.method, path, tc.body); a.status != tc.status {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, strings.Replace(body, connectionID, "checks", 1)); len(
+		problemErrors(t, a)) == 0 || problemErrors(t, a)[0]["pointer"] != "/connection_id" {
+		t.Errorf("a malformed connection_id = %s", a.body)
+	}
+	if len(fc.drafts) != n || len(fc.inputs) != 0 || len(fc.deleted) != 0 || len(fc.list) != 3 {
+		t.Errorf("refused drafts reached the service or a draft wrote: %d drafts, %d inputs, %d deleted, %d listed",
+			len(fc.drafts)-n, len(fc.inputs), len(fc.deleted), len(fc.list))
 	}
 }
 
