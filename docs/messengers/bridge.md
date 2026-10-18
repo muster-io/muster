@@ -7,6 +7,9 @@ envelope in its messenger. A **Bridge Connection** is one bot of your messenger 
 bot. Muster posts one **Root message** per Alert Group to a channel of that messenger, edits it as the Alert Group
 changes, and replies in its **Thread** for what happens later, as it does for Mattermost and Telegram.
 
+To write a bridge, read [Write a bridge](write-a-bridge.md); the protocol itself is the
+[Bridge protocol](../reference/bridge-protocol.md) reference.
+
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_INGEST_URL` is
 `https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The examples use the
 [API](../reference/api.md), with a Personal access token of an Admin in `MUSTER_TOKEN`; the web UI has the same forms

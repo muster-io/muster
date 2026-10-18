@@ -209,8 +209,19 @@ jobs:
     env:
       # renovate: datasource=go depName=github.com/oasdiff/oasdiff
       OASDIFF_VERSION: v1.33.0
-    # The report never blocks before 1.0 (ADR-0008): its steps continue on error, so a failure shows in the step and
-    # the job stays green. A full checkout fetches every branch, so origin/<base branch> is present.
+    # The report on api/openapi.yaml never blocks before 1.0 (ADR-0008): its steps continue on error, so a failure
+    # shows in the step and the job stays green. The Bridge protocol is published and frozen (ADR-0017): a breaking
+    # change of api/bridge.yaml fails the job, with no override, because a breaking change takes a new major path.
+    # The bridge serves the operations Muster calls, so its step compares in both directions: from the base to the
+    # head as Muster the client sees the operations and as an existing bridge calls the push webhook (a removed
+    # operation or answer field, a new required event member), and from the head to the base as an existing bridge
+    # serves the operations (a new required answer field, a request field that becomes optional, a new request enum
+    # value). In that direction a new operation looks removed; it is additive, since Muster calls it only when the
+    # bridge's info declares it, so the two rules on removed operations are off there. --flatten-allof compares each
+    # event as one schema: branch by branch, oasdiff reports a new required member of an event in the oneOf only as a
+    # warning. What oasdiff cannot judge is left to the libraries' check of their copy of api/bridge.yaml and to
+    # muster bridge check. The step runs last, so its failure skips neither the report nor its comment. A full
+    # checkout fetches every branch, so origin/<base branch> is present.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -219,7 +230,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: oasdiff breaking
+      - name: oasdiff breaking, api/openapi.yaml
         id: diff
         continue-on-error: true
         env:
@@ -229,7 +240,7 @@ jobs:
           go run "github.com/oasdiff/oasdiff@$OASDIFF_VERSION" breaking \
             "origin/$BASE_REF:api/openapi.yaml" api/openapi.yaml --format markdown >"$report"
           if [ ! -s "$report" ]; then echo "No breaking changes." >"$report"; fi
-          cat "$report" >>"$GITHUB_STEP_SUMMARY"
+          { printf '%s\n\n' '# API (`api/openapi.yaml`), not blocking'; cat "$report"; } >>"$GITHUB_STEP_SUMMARY"
       # Pull requests from forks get a read-only token, so only those from this repository get the comment.
       - name: post or update the comment
         if: steps.diff.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
@@ -249,6 +260,30 @@ jobs:
           else
             gh api -X POST "repos/$REPO/issues/$PR/comments" -F body=@"$comment" --silent
           fi
+      - name: oasdiff breaking, api/bridge.yaml
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base="origin/$BASE_REF:api/bridge.yaml"
+          levels="$RUNNER_TEMP/oasdiff-bridge-levels.txt"
+          printf '%s\n' 'api-path-removed-without-deprecation NONE' 'api-removed-without-deprecation NONE' >"$levels"
+          status=0
+          compare() {
+            title=$1
+            shift
+            report="$RUNNER_TEMP/oasdiff-bridge.md"
+            rc=0
+            go run "github.com/oasdiff/oasdiff@$OASDIFF_VERSION" breaking --fail-on ERR --flatten-allof "$@" \
+              --format markdown >"$report" || rc=$?
+            if [ ! -s "$report" ] && [ "$rc" -eq 0 ]; then echo "No breaking changes." >"$report"; fi
+            if [ ! -s "$report" ]; then echo "oasdiff failed with exit status $rc; see the step log." >"$report"; fi
+            { printf '%s\n\n' "$title"; cat "$report"; printf '\n'; } >>"$GITHUB_STEP_SUMMARY"
+            if [ "$rc" -ne 0 ]; then status=$rc; fi
+          }
+          compare '# Bridge protocol (`api/bridge.yaml`), Muster as the client' "$base" api/bridge.yaml
+          compare '# Bridge protocol (`api/bridge.yaml`), existing bridges as the server' \
+            --severity-levels "$levels" api/bridge.yaml "$base"
+          exit "$status"
 
   build:
     name: build

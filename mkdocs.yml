@@ -81,6 +81,7 @@ nav:
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
       - messengers/bridge.md
+      - messengers/write-a-bridge.md
       - messengers/account-links.md
   - Outgoing webhooks:
       - outgoing-webhooks/events.md
@@ -113,3 +114,4 @@ nav:
       - reference/environment.md
       - reference/chart-values.md
       - reference/api.md
+      - reference/bridge-protocol.md

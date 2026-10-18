@@ -10,3 +10,4 @@ The pages of this section are generated from the code and the specification of t
 - [Environment variables](environment.md): the bootstrap settings, read at start.
 - [Chart values](chart-values.md): the values of the Helm chart.
 - [API](api.md): the conventions of the HTTP API and its reference, rendered from the specification.
+- [Bridge protocol](bridge-protocol.md): the HTTP protocol between Muster and a bridge, and its reference, rendered from the specification.

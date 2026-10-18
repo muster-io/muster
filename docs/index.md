@@ -1,8 +1,8 @@
 # Muster
 
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It groups Alerts into Alert
-Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram or behind an
-outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.
+Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram, in any other
+messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.
 
 ```mermaid
 flowchart LR
@@ -13,10 +13,12 @@ flowchart LR
   subgraph destinations["Destinations"]
     mm["Mattermost"]
     tg["Telegram"]
+    br["Bridge"]
     wh["Outgoing webhook"]
   end
   groups --> mm
   groups --> tg
+  groups --> br
   groups --> wh
 ```
 
@@ -31,11 +33,12 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, and watch the path from it with
   a [Heartbeat](integrations/heartbeat.md).
 - [Messengers](messengers/mattermost.md): connect [Mattermost](messengers/mattermost.md) and
-  [Telegram](messengers/telegram.md), and [link your messenger accounts](messengers/account-links.md).
+  [Telegram](messengers/telegram.md), reach any other messenger through a [Bridge](messengers/bridge.md) (and
+  [write one](messengers/write-a-bridge.md)), and [link your messenger accounts](messengers/account-links.md).
 - [Outgoing webhooks](outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](outgoing-webhooks/templates.md).
 - [Sign-in](sign-in/oidc-keycloak.md): sign in with OpenID Connect, shown with Keycloak.
 - [Runbooks](operations/runbooks/index.md): what each alert about Muster means and how to fix it.
-- [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values and the
-  API.
+- [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values, the API
+  and the Bridge protocol.

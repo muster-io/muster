@@ -91,19 +91,21 @@ KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERS
 
 # The documentation toolchain (Zensical, pinned with hashes in docs/requirements.txt) lives in a virtual environment
 # under bin/, made with Python 3.11 or newer and re-made when the requirements change. make docs renders the API
-# reference from api/openapi.yaml into docs/, where git ignores it, so that the site carries it.
+# reference from api/openapi.yaml and the Bridge protocol reference from api/bridge.yaml into docs/, where git ignores
+# them, so that the site carries them.
 PYTHON ?= python3
 DOCS_VENV := $(BIN)/docs-venv
 DOCS_DEPS := $(DOCS_VENV)/.installed
 ZENSICAL := $(DOCS_VENV)/bin/zensical
 API_REFERENCE := docs/reference/api/spec/index.html
+BRIDGE_REFERENCE := docs/reference/bridge/spec/index.html
 
 # The third-party scripts of the site, served from the site itself so that a page loads nothing from another host but
 # GitHub (NFR-7): Mermaid, which the theme otherwise loads from unpkg.com on a page with a diagram, and Redoc, which the
-# API reference otherwise loads from cdn.redocly.com, each with its licence. make docs fetches every file once into
-# bin/docs-vendor/, named by its SHA-256, which it checks, and copies it under docs/assets/vendor/, where git ignores it.
-# MERMAID_VERSION stays on the major the theme asks for (mermaid@11); REDOC_VERSION is the Redoc that the Redocly CLI
-# of web/package.json links, and docs-api fails when the CLI links another.
+# API and Bridge protocol references otherwise load from cdn.redocly.com, each with its licence. make docs fetches every
+# file once into bin/docs-vendor/, named by its SHA-256, which it checks, and copies it under docs/assets/vendor/, where
+# git ignores it. MERMAID_VERSION stays on the major the theme asks for (mermaid@11); REDOC_VERSION is the Redoc that
+# the Redocly CLI of web/package.json links, and docs-api fails when the CLI links another.
 MERMAID_VERSION := 11.17.2
 REDOC_VERSION := 2.5.4
 DOCS_VENDOR := docs/assets/vendor
@@ -438,23 +440,30 @@ demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.
 	test $$size -le 3145728 || { echo "$(DEMO_GIF) is $$size bytes, more than 3 MB"; exit 1; }; \
 	echo "$(DEMO_GIF): $$size bytes"
 
-# The API reference, rendered by the Redocly CLI that make lint runs; .redocly.yaml keeps its telemetry off, the
-# environment its update check quiet, and --disableGoogleFont the page from loading fonts from Google (NFR-7). The
-# page then loads Redoc from docs-vendor's copy instead of cdn.redocly.com, with the CLI's integrity hash unchanged,
-# and takes a Content-Security-Policy that allows images only from the site, so that Redoc's sidebar does not load the
-# Redocly logo from cdn.redoc.ly; the logo hides itself when it cannot load.
+# The API reference and the Bridge protocol reference, each rendered by the Redocly CLI that make lint runs;
+# .redocly.yaml keeps its telemetry off, the environment its update check quiet, and --disableGoogleFont the page from
+# loading fonts from Google (NFR-7). Each page then loads Redoc from docs-vendor's copy instead of cdn.redocly.com, with
+# the CLI's integrity hash unchanged, and takes a Content-Security-Policy that allows images only from the site, so that
+# Redoc's sidebar does not load the Redocly logo from cdn.redoc.ly; the logo hides itself when it cannot load. Both
+# pages lie equally deep under docs/, so the same relative path reaches the vendored copy from either.
+# $(call render-reference,<specification>,<page>) renders one of them.
+define render-reference
+@mkdir -p $(dir $(2))
+REDOCLY_SUPPRESS_UPDATE_NOTICE=true $(PNPM) --dir web exec redocly build-docs ../$(1) \
+	--config ../.redocly.yaml --disableGoogleFont --output ../$(2)
+@cdn='<script src="https://cdn.redocly.com/redoc/v$(REDOC_VERSION)/bundles/redoc.standalone.js"'; \
+grep -qF "$$cdn" $(2) || \
+	{ echo "$(2) does not load Redoc $(REDOC_VERSION): update REDOC_VERSION and its SHA-256"; exit 1; }; \
+sed -e "s|$$cdn|<script src=\"../../../assets/vendor/redoc/redoc.standalone.js\"|" \
+	-e "s|<meta charset=\"utf8\" />|&<meta http-equiv=\"Content-Security-Policy\" content=\"img-src 'self' data:\">|" \
+	$(2) >$(2).tmp && mv $(2).tmp $(2); \
+grep -qF 'http-equiv="Content-Security-Policy"' $(2) || \
+	{ echo "$(2): the Content-Security-Policy could not be added"; exit 1; }
+endef
+
 docs-api: $(WEB_DEPS)
-	@mkdir -p $(dir $(API_REFERENCE))
-	REDOCLY_SUPPRESS_UPDATE_NOTICE=true $(PNPM) --dir web exec redocly build-docs ../api/openapi.yaml \
-		--config ../.redocly.yaml --disableGoogleFont --output ../$(API_REFERENCE)
-	@cdn='<script src="https://cdn.redocly.com/redoc/v$(REDOC_VERSION)/bundles/redoc.standalone.js"'; \
-	grep -qF "$$cdn" $(API_REFERENCE) || \
-		{ echo "$(API_REFERENCE) does not load Redoc $(REDOC_VERSION): update REDOC_VERSION and its SHA-256"; exit 1; }; \
-	sed -e "s|$$cdn|<script src=\"../../../assets/vendor/redoc/redoc.standalone.js\"|" \
-		-e "s|<meta charset=\"utf8\" />|&<meta http-equiv=\"Content-Security-Policy\" content=\"img-src 'self' data:\">|" \
-		$(API_REFERENCE) >$(API_REFERENCE).tmp && mv $(API_REFERENCE).tmp $(API_REFERENCE); \
-	grep -qF 'http-equiv="Content-Security-Policy"' $(API_REFERENCE) || \
-		{ echo "$(API_REFERENCE): the Content-Security-Policy could not be added"; exit 1; }
+	$(call render-reference,api/openapi.yaml,$(API_REFERENCE))
+	$(call render-reference,api/bridge.yaml,$(BRIDGE_REFERENCE))
 
 # Fetches each file of DOCS_VENDOR_FILES into the cache unless it is there, fails on a SHA-256 other than the pinned
 # one, and copies it under docs/.
@@ -474,17 +483,19 @@ docs-vendor:
 # alerts, the chart rules of reference.md and the rules of the chart rendered with its all-options values, when a
 # rendered rule's runbook_url does not end in its page, or a page lacks one of its four sections; its commands are not
 # echoed, so that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other
-# files and not the navigation, so after the build the rendered API reference is checked, then that every page the nav
+# files and not the navigation, so after the build the rendered references are checked, then that every page the nav
 # of mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the
 # nav, and last that no page loads a script or a stylesheet from another host and every page with a diagram loads
 # Mermaid from the site.
-docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API reference and build the site strictly into site/
+docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references and build the site strictly into site/
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \
 		$(GO) run ./internal/tools/runbookcheck -manifest "$$tmp/chart.yaml"
 	$(ZENSICAL) build --strict --config-file mkdocs.yml
 	@test -s site/$(API_REFERENCE:docs/%=%) || \
 		{ echo "site/$(API_REFERENCE:docs/%=%) is missing: the API page links to it"; exit 1; }
+	@test -s site/$(BRIDGE_REFERENCE:docs/%=%) || \
+		{ echo "site/$(BRIDGE_REFERENCE:docs/%=%) is missing: the Bridge protocol page links to it"; exit 1; }
 	@nav=$$(awk '/^nav:/ { n = 1; next } /^[^ #]/ { n = 0 } n' mkdocs.yml | grep -oE '[^ :]+\.md' | sort -u); \
 	excluded=$$(awk '/^exclude_docs:/ { n = 1; next } /^[^ #]/ { n = 0 } n' mkdocs.yml | grep -oE '[^ ]+\.md'); \
 	pages=$$(cd docs && find . -name '*.md' | sed 's|^\./||' | grep -vxF "$$excluded" | sort); \

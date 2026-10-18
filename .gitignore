@@ -12,7 +12,9 @@ CLAUDE.local.md
 /deploy/compose/.env
 # Goreleaser output
 /dist/
-# The documentation site, the API reference that make docs renders into docs/ and the third-party scripts it copies there
+# The documentation site, the API and Bridge protocol references that make docs renders into docs/ and the third-party
+# scripts it copies there
 /site/
 /docs/reference/api/spec/
+/docs/reference/bridge/spec/
 /docs/assets/vendor/
