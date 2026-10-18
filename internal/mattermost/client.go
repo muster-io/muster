@@ -311,7 +311,8 @@ func (c *Client) send(ctx context.Context, class outbound.Class, op, method, pat
 	}
 	if err := json.Unmarshal(res.Body, out); err != nil {
 		return Result{Status: res.Status, Outcome: delivery.Outcome{Kind: delivery.OutcomeUnknown,
-			Error: outbound.Untrusted(method + " " + path + ": the answer is not the expected JSON")}}
+			Error:  outbound.Untrusted(method + " " + path + ": the answer is not the expected JSON"),
+			Status: res.Status}}
 	}
 	return r
 }
@@ -454,8 +455,8 @@ func resultOf(res outbound.Result, err error) Result {
 	if err == nil {
 		return Result{Status: res.Status, Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
 	}
-	r := Result{Status: res.Status, Outcome: delivery.Outcome{Error: outbound.Untrusted(err.Error())},
-		Blocked: res.Outcome == outbound.OutcomeBlocked}
+	r := Result{Status: res.Status, Outcome: delivery.Outcome{Error: outbound.Untrusted(err.Error()),
+		Status: res.Status}, Blocked: res.Outcome == outbound.OutcomeBlocked}
 	if oe, ok := errors.AsType[*outbound.Error](err); ok {
 		r.Network = oe.Network
 	}
