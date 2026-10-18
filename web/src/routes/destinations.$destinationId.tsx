@@ -12,10 +12,12 @@
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
 // form's version without a word, whether the form has changes or not. Health comes and goes without a reload: from the
 // destination hint, and at once from a check's or a test's result. "Test" and "Preview" (C-16) close the page, with
-// destinations:test.
+// destinations:test. The outgoing webhook's page has the tab "Request log" (C-23.FR-6), with the tab and its filters in
+// the URL; the form stays mounted behind it, so that its changes last. A messenger Destination's requests are its
+// Connection's, which the check and test panels and the Alert Group page link to.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,6 +52,8 @@ import { destinationMessengerName, useConnectionsById } from "../components/dest
 import { DestinationPreviewPanel } from "../components/destination-preview-panel";
 import { DestinationTestPanel } from "../components/destination-test-panel";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
+import { RequestLogTabs } from "../components/request-log";
+import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
 import { SigningSecret } from "../components/signing-secret";
 import { StatusTabs } from "../components/status-tabs";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
@@ -61,6 +65,7 @@ import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
 import { problemText } from "../lib/api";
 
 export const Route = createFileRoute("/destinations/$destinationId")({
+  validateSearch: requestLogSearchSchema,
   staticData: { shell: true },
   component: DestinationPage,
 });
@@ -321,6 +326,10 @@ function DestinationView({ destinationId }: { destinationId: string }) {
     destination === undefined || destination.type === "webhook"
       ? undefined
       : connections.get(destination.connection_id);
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const onSearch = (patch: Partial<RequestLogSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -360,22 +369,34 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           <div role="status" aria-live="polite" className="empty:hidden">
             <BrokenBanner health={destination.health} />
           </div>
-          <RoutesOf destination={destination} />
-          {destination.type === "mattermost" ? (
-            <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
-          ) : destination.type === "telegram" ? (
-            <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
-          ) : destination.type === "bridge" ? (
-            <EditForm current={destination} kind={BRIDGE_KIND} onDirtyChange={setDirty} />
-          ) : (
-            <>
+          {destination.type === "webhook" ? (
+            <RequestLogTabs
+              search={search}
+              onSearch={onSearch}
+              scope={{ destination: destination.id }}
+            >
+              <RoutesOf destination={destination} />
               <EditForm current={destination} kind={WEBHOOK_KIND} onDirtyChange={setDirty} />
               <DestinationSecrets destinationId={destination.id} />
               <SigningSecret destination={destination} />
+              {canTest && (
+                <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
+              )}
+            </RequestLogTabs>
+          ) : (
+            <>
+              <RoutesOf destination={destination} />
+              {destination.type === "mattermost" ? (
+                <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
+              ) : destination.type === "telegram" ? (
+                <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
+              ) : (
+                <EditForm current={destination} kind={BRIDGE_KIND} onDirtyChange={setDirty} />
+              )}
+              {canTest && (
+                <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
+              )}
             </>
-          )}
-          {canTest && (
-            <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
           )}
         </>
       )}

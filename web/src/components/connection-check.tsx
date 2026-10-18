@@ -13,7 +13,8 @@
 // address, the stored one only to the saved address through the saved proxy, and otherwise only the dry probe runs —
 // the skipped steps then ask for the token, which the panel reads from the result, never deciding it itself. A change of
 // the form makes an earlier result stale, and the panel hides it. The check runs on the interactive path, so a busy
-// messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
+// messenger answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and
+// "Requests of this check" opens the requests it made (C-23.FR-6), a check before saving included.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -40,6 +41,7 @@ import type {
 import { isApiError, problemText } from "../lib/api";
 import { draftAddress, draftFieldErrorText, serverErrors } from "./connection-form";
 import { unreachable } from "./destination-test-panel";
+import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -586,6 +588,15 @@ export function ConnectionCheck({
             <Result result={check.data} type={type} mode={mode} updateMode={updateMode} />
           )}
         </div>
+        {shown && check.isSuccess && check.data.request_log_run !== undefined && (
+          <div>
+            <RequestLogButton
+              scope={{ run: check.data.request_log_run }}
+              label={t("requestLog.ofThisCheck")}
+              title={t("requestLog.ofThisCheck")}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

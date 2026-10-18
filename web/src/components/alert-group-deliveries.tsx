@@ -10,7 +10,8 @@
 // http or https one. The alert-group hint reads the section again: the dispatcher sends it with every change of the
 // Alert Group, and the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so
 // nothing polls. A Destination shows its name; its full label (D309) is the name's tooltip and accessible description,
-// and a Destination the Destinations list does not show keeps its name alone.
+// and a Destination the Destinations list does not show keeps its name alone. With destinations:read each row has
+// "Requests" (C-23.FR-6, AC-1): what was sent to the Destination for this Alert Group and what came back, in a dialog.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -24,6 +25,7 @@ import { problemText } from "../lib/api";
 import { useCan } from "./app-shell";
 import { HealthBadge } from "./destination-health";
 import { useDestinationLabels } from "./destination-label";
+import { RequestLogButton } from "./request-log";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
 
@@ -138,8 +140,17 @@ function Mark({ children, testId }: { children: ReactNode; testId: string }) {
   );
 }
 
-function Row({ delivery, label }: { delivery: AlertGroupDelivery; label?: string }) {
+function Row({
+  delivery,
+  label,
+  alertGroupId,
+}: {
+  delivery: AlertGroupDelivery;
+  label?: string;
+  alertGroupId: string;
+}) {
   const { t } = useTranslation();
+  const canRequests = useCan("destinations:read");
   return (
     <li
       className="flex min-w-0 flex-col gap-1 border-t py-2.5 first:border-t-0 first:pt-0 last:pb-0"
@@ -149,6 +160,14 @@ function Row({ delivery, label }: { delivery: AlertGroupDelivery; label?: string
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
         <DestinationName delivery={delivery} label={label} />
         <HealthBadge health={delivery.destination.health} />
+        {canRequests && (
+          <RequestLogButton
+            className="ml-auto"
+            scope={{ destination: delivery.destination.id, alert_group: alertGroupId }}
+            label={t("requestLog.open")}
+            title={t("requestLog.dialogTitle", { name: delivery.destination.name })}
+          />
+        )}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <State delivery={delivery} />
@@ -188,7 +207,12 @@ export function AlertGroupDeliveries({ alertGroupId }: { alertGroupId: string })
         ) : (
           <ul className="flex flex-col" aria-label={t("deliveries.title")}>
             {items.map((d) => (
-              <Row key={d.destination.id} delivery={d} label={labels.get(d.destination.id)?.full} />
+              <Row
+                key={d.destination.id}
+                delivery={d}
+                label={labels.get(d.destination.id)?.full}
+                alertGroupId={alertGroupId}
+              />
             ))}
           </ul>
         )}

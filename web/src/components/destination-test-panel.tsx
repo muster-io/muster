@@ -10,7 +10,8 @@
 // Muster and, when it did not, what to do, translated by its error code with the server's English text as the detail.
 // The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
 // and when a step failed the Destination stays Broken, which the result explains, the button press included. The hint
-// above the button says what the test of each type sends; a Bridge sends one test message through the bridge.
+// above the button says what the test of each type sends; a Bridge sends one test message through the bridge. A result
+// names its check run, and "Requests of this check" opens the requests it made (C-23.FR-6).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -33,6 +34,7 @@ import type {
 } from "../api/gen/model";
 import { isApiError, problemText } from "../lib/api";
 import { CodeText, RenderedRequest, readableBody } from "./rendered-request";
+import { RequestLogButton } from "./request-log";
 import { type PickedSource, TEST_SOURCE_QUERY, testSource } from "./test-source-picker";
 import { Button } from "./ui/button";
 import { cn } from "./ui/utils";
@@ -374,6 +376,15 @@ export function DestinationTestPanel({
         </div>
       )}
       {test.isSuccess && <TestResult result={test.data} />}
+      {test.isSuccess && test.data.request_log_run !== undefined && (
+        <div>
+          <RequestLogButton
+            scope={{ destination: destination.id, run: test.data.request_log_run }}
+            label={t("requestLog.ofThisCheck")}
+            title={t("requestLog.ofThisCheck")}
+          />
+        </div>
+      )}
     </div>
   );
 }
