@@ -26,7 +26,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { ConnectionCheck, checkErrorText } from "./connection-check";
+import { ConnectionCheck, connectionCheckErrorText } from "./connection-check";
 import {
   BASE_URL_FORMAT,
   ConnectionForm,
@@ -595,8 +595,8 @@ describe("ConnectionCheck of a Telegram Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Dry probe without the token: ok · 2 ms · through the proxy",
-        "getMe: Skipped: type the bot token again to check the new address, or save first",
-        "getWebhookInfo: Skipped: type the bot token again to check the new address, or save first",
+        "getMe: Skipped: type the bot token again to check the new address or proxy, or save first",
+        "getWebhookInfo: Skipped: type the bot token again to check the new address or proxy, or save first",
       ]);
   });
 
@@ -645,7 +645,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
 
   test("names the refusal of a base URL and the wait of a busy messenger", async () => {
     expect(
-      checkErrorText(
+      connectionCheckErrorText(
         i18n.t,
         refusal(422, {
           code: "validation_failed",
@@ -688,8 +688,8 @@ describe("ConnectionCheck of a Telegram Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Пробный запрос без токена: успешно · 2 мс · напрямую",
-        "getMe: Пропущено: введите токен бота заново, чтобы проверить новый адрес, или сохраните изменения",
-        "getWebhookInfo: Пропущено: введите токен бота заново, чтобы проверить новый адрес, или сохраните изменения",
+        "getMe: Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения",
+        "getWebhookInfo: Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения",
       ]);
     await expect
       .element(page.getByTestId("connection-check-draft"))

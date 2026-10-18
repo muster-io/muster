@@ -146,16 +146,16 @@ issue: 265
   generated `useCheckConnectionDraft`. On a saved Connection the panel checks the saved Connection with
   `checkConnection` while the form holds no changes, and the draft with `connection_id` while it does; a changed address
   or proxy with no token typed shows the dry probe and, on the skipped steps, "Skipped: type the bot token again to
-  check the new address, or save first" («Пропущено: введите токен бота заново, чтобы проверить новый адрес, или
-  сохраните изменения»); a new Connection's draft without a token says "Skipped: type the bot token to check it"
-  («Пропущено: введите токен бота, чтобы проверить его»); after a passed dry probe the summary names the type ("The
-  address answers as a Mattermost server.", "… as a Bot API.", "… as a bridge."); a failed dry probe keeps "Skipped:
-  an earlier step failed"; a change of the form makes an earlier result stale and clears it. The texts of the codes
-  `not_mattermost` ("The address answers, but not as a Mattermost server.") and `not_bridge` ("The address answers,
-  but not as a bridge: a bridge answers a request without its token with 401 and a problem.") join `checkCodeText`,
-  and the text of `unexpected_status` becomes one for every type ("The address answered with an unexpected status.");
-  the hints of the three types say that the form's values are checked before saving. The Telegram panel's
-  `unsavedBaseUrl` path is replaced by the draft check.
+  check the new address or proxy, or save first" («Пропущено: введите токен бота заново, чтобы проверить новый адрес
+  или прокси, или сохраните изменения»); a new Connection's draft without a token says "Skipped: type the bot token to
+  check it" («Пропущено: введите токен бота, чтобы проверить его»); after a passed dry probe the summary names the type
+  ("The address answers as a Mattermost server.", "… as a Bot API.", "… as a bridge."); a failed dry probe keeps
+  "Skipped: an earlier step failed" («Пропущено: предыдущий шаг не прошёл»); a change of the form makes an earlier
+  result stale and clears it. The texts of the codes `not_mattermost` ("The address answers, but not as a Mattermost
+  server.") and `not_bridge` ("The address answers, but not as a bridge: a bridge answers a request without its token
+  with 401 and a problem.") join `checkCodeText`, and the text of `unexpected_status` becomes one for every type ("The
+  address answered with an unexpected status."); the hints of the three types say that the form's values are checked
+  before saving. The Telegram panel's `unsavedBaseUrl` path is replaced by the draft check.
 - **Fake Mattermost server** (`fakemattermost.go`): `GET /api/v4/system/ping` answers `200` `{"status":"OK"}`
   without a token, as a Mattermost server does; every other API path still needs one.
 - **Secrets** (lint 5): the probe `connection_drafts` runs a draft that changes the address and one that changes the
@@ -233,7 +233,8 @@ Connections list still has its earlier rows; the same for Telegram and Bridge wi
 Telegram", a base URL with another path prefix shows the failed dry probe and the other steps skipped, and the fake
 Telegram server records no request with the stored token under that prefix; with only the proxy changed to the
 development HTTP proxy and no token, the dry probe passes through the proxy and `getMe` and `getWebhookInfo` show
-"Skipped: type the bot token again to check the new address, or save first". A fake server records no host, so another
+"Skipped: type the bot token again to check the new address or proxy, or save first" («Пропущено: введите токен бота
+заново, чтобы проверить новый адрес или прокси, или сохраните изменения»). A fake server records no host, so another
 address of the same fake cannot be told apart from the saved one. Screenshots of both widths go into the pull request.
 
 ## Open questions

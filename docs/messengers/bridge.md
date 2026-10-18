@@ -93,7 +93,7 @@ gets no entry.
   the token, which a bridge answers with `401` and a problem (`application/problem+json`). An address that answers
   otherwise fails with `not_bridge`, a `404` with `wrong_path_prefix`, another status with a problem with
   `unexpected_status`; after a dry probe that passes, `info` and `event_delivery` ask you to type the token again to
-  check the new address, or to save first. A new Connection without a token gets the dry probe alone too.
+  check the new address or proxy, or to save first. A new Connection without a token gets the dry probe alone too.
 
 ```sh
 curl -X POST https://muster.example.org/api/v1/connections/checks \

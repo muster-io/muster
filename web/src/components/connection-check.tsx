@@ -206,13 +206,32 @@ function WarningText({ warning }: { warning: ConnectionCheckResultWarningsItem }
 }
 
 /**
- * The text of a refused check: a busy messenger names its wait, a draft that names a Connection that is gone asks for a
- * reload, a value of the form the server refuses names its field, anything else as every form shows it.
+ * The text of a refused check: a busy messenger names its wait, an unsaved base URL the server refuses says what it
+ * takes, anything else as every form shows it.
  */
-export function checkErrorText(
+export function checkErrorText(t: TFunction, err: unknown): string {
+  if (isApiError(err) && err.status === 503) {
+    return t("connections.check.busy", { seconds: Math.max(1, err.retry_after_seconds ?? 1) });
+  }
+  if (
+    isApiError(err) &&
+    err.status === 422 &&
+    (err.errors ?? []).some((e) => e.pointer === "/base_url" && e.code === "invalid_format")
+  ) {
+    return t("connections.errors.baseUrlFormat");
+  }
+  return problemText(t, err);
+}
+
+/**
+ * The text of a refused check of a Connection: a busy messenger names its wait, a draft that names a Connection that is
+ * gone asks for a reload, a value of the form the server refuses names its field, anything else as every form shows
+ * it.
+ */
+export function connectionCheckErrorText(
   t: TFunction,
   err: unknown,
-  type: Connection["type"] = "mattermost",
+  type: Connection["type"],
 ): string {
   if (isApiError(err) && err.status === 503) {
     return t("connections.check.busy", { seconds: Math.max(1, err.retry_after_seconds ?? 1) });
@@ -560,7 +579,7 @@ export function ConnectionCheck({
               className="rounded-lg border border-destructive/40 px-4 py-2.5 text-sm wrap-anywhere text-destructive"
               data-testid="connection-check-error"
             >
-              {checkErrorText(t, check.error, type)}
+              {connectionCheckErrorText(t, check.error, type)}
             </div>
           )}
           {shown && check.isSuccess && (

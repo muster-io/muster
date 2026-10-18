@@ -275,7 +275,7 @@ describe("the check of a saved Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Dry probe without the token: ok · 2 ms · direct",
-        "Token: Skipped: type the bot token again to check the new address, or save first",
+        "Token: Skipped: type the bot token again to check the new address or proxy, or save first",
       ]);
     const [url, init] = fetch.mock.calls[0] ?? [];
     expect(url).toBe("/api/v1/connections/checks");
@@ -386,7 +386,7 @@ describe("the check in Russian", () => {
     await expect
       .poll(() => stepTexts()[1])
       .toBe(
-        "Токен: Пропущено: введите токен бота заново, чтобы проверить новый адрес, или сохраните изменения",
+        "Токен: Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения",
       );
 
     vi.restoreAllMocks();
@@ -412,6 +412,6 @@ describe("the check in Russian", () => {
     await expect
       .element(page.getByTestId("connection-check-step-reason"))
       .toHaveTextContent("Адрес отвечает, но не как сервер Mattermost.");
-    await expect.poll(() => stepTexts()[1]).toBe("Токен: Пропущен: предыдущий шаг не прошёл");
+    await expect.poll(() => stepTexts()[1]).toBe("Токен: Пропущено: предыдущий шаг не прошёл");
   });
 });

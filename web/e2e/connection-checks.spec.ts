@@ -52,9 +52,9 @@ const DRAFT = "The check uses the values in the form and saves nothing.";
 const DRAFT_RU = "Проверка берёт значения из формы и ничего не сохраняет.";
 const NO_TOKEN = "Skipped: type the bot token to check it";
 const NO_TOKEN_RU = "Пропущено: введите токен бота, чтобы проверить его";
-const RETYPE = "Skipped: type the bot token again to check the new address, or save first";
+const RETYPE = "Skipped: type the bot token again to check the new address or proxy, or save first";
 const RETYPE_RU =
-  "Пропущено: введите токен бота заново, чтобы проверить новый адрес, или сохраните изменения";
+  "Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения";
 const EARLIER = "Skipped: an earlier step failed";
 const NOT_BRIDGE =
   "The address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem.";

@@ -39,8 +39,8 @@ no entry.
   aside — and the proxy are the saved ones: the stored token is sent only to the saved address, through the saved
   proxy, since a proxy you have not saved would see it in the path of an `http` base URL. After a change of the base
   URL or of the proxy, the check makes only the dry probe there, `GET <base>/bot0:x/getMe` without your token, and
-  `getMe` and `getWebhookInfo` ask you to type the bot token again to check the new address, or to save first. A new
-  Connection without a token gets the dry probe alone too.
+  `getMe` and `getWebhookInfo` ask you to type the bot token again to check the new address or proxy, or to save
+  first. A new Connection without a token gets the dry probe alone too.
 
 The check is `POST /api/v1/connections/checks`, which needs `connections:write`; with a Personal access token of an
 Admin in `MUSTER_TOKEN`:

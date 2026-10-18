@@ -38,7 +38,7 @@ bot token, if you typed one — and saves nothing: no bot name is recorded and t
   the server URL or of the proxy, the check makes only a dry probe: `GET <server>/api/v4/system/ping` without a token,
   which a Mattermost server answers to anyone with `200` and `"status":"OK"`. It tells a wrong address, a wrong path
   prefix (`404`) and a server that is not Mattermost apart, and the step **Token** asks you to type the bot token again
-  to check the new address, or to save first. A new Connection without a token gets the dry probe alone too.
+  to check the new address or proxy, or to save first. A new Connection without a token gets the dry probe alone too.
 
 The check is `POST /api/v1/connections/checks`, which needs `connections:write`; with a Personal access token of an
 Admin in `MUSTER_TOKEN`:

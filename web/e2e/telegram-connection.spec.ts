@@ -279,8 +279,8 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(steps(page)).toHaveText([
     /^Пробный запрос без токена: ошибка \d+ мс · напрямуюНеверный префикс пути: сервер ответил 404\.Подробности: Wrong path prefix: the server answered 404\.$/,
-    "getMe: Пропущен: предыдущий шаг не прошёл",
-    "getWebhookInfo: Пропущен: предыдущий шаг не прошёл",
+    "getMe: Пропущено: предыдущий шаг не прошёл",
+    "getWebhookInfo: Пропущено: предыдущий шаг не прошёл",
   ]);
   await expectNoHorizontalScroll(page);
   for (const id of ["telegram-base-url-hint", "telegram-http-warning"]) {

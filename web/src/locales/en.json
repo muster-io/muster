@@ -663,7 +663,7 @@
       "running": "Checking…",
       "skippedEarlier": "Skipped: an earlier step failed",
       "skippedNoToken": "Skipped: type the bot token to check it",
-      "skippedRetype": "Skipped: type the bot token again to check the new address, or save first",
+      "skippedRetype": "Skipped: type the bot token again to check the new address or proxy, or save first",
       "start": "Check connection",
       "steps": {
         "dryProbe": "Dry probe without the token",
