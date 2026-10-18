@@ -52,9 +52,9 @@ is parsed and run on a dry run with a built-in example Alert Group, its Secrets 
 an absolute `http` or `https` URL.
 
 Muster sets `webhook-id`, `webhook-timestamp` and `webhook-signature` on every request, signed with the Destination's
-Signing secret as in the events mode, and `Content-Type: application/json` when a request has a body and no
-`Content-Type` header of its own. The requests go through Muster's outbound address policy and the Destination's
-proxy; redirects are never followed. The answers map to outcomes as in the [events mode](events.md#how-the-answer-counts).
+Signing secret as in the events mode, `Content-Type: application/json` when a request has a body and no
+`Content-Type` header of its own, and `User-Agent: Muster/<version>` when it has no `User-Agent` of its own. The
+requests go through Muster's outbound address policy and the Destination's proxy; redirects are never followed. The answers map to outcomes as in the [events mode](events.md#how-the-answer-counts).
 
 ## What the templates read
 

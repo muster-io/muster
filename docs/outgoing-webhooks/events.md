@@ -32,7 +32,7 @@ Create a Destination of type `webhook` with the mode `events`:
   not check that the Secret exists. They are parsed and run on a dry run when you save; an error names the field, its
   line and its column.
 - Muster sets `Content-Type`, `webhook-id`, `webhook-timestamp` and `webhook-signature` itself; a header template may
-  not name them.
+  not name them. Every request also carries `User-Agent: Muster/<version>` unless a header template sets its own.
 - The **proxy** is the Destination's own; the requests never read `HTTP_PROXY` or `HTTPS_PROXY`.
 - The **limiter** defaults to 5 requests per second in the form (`destination.webhook.limiter`).
 - An outgoing webhook has no Connection and no Destination check: checking it answers `422 check_not_supported`.
