@@ -3501,14 +3501,15 @@ func (p *probeLines) Write(b []byte) (int, error) {
 }
 
 // probeConnectionDrafts pushes the secrets through the check of a draft Connection (C-13.FR-14) of each type. A saved
-// Connection holds the bot token (secret 0) and the password (secret 1) of its SOCKS5 proxy, which refuses it, at an
-// address where nothing listens. Four drafts of it are checked: another address without a proxy, the saved address
-// through another proxy, an HTTP one, and another address through the saved proxy, all three without a token, and
-// another address with a token typed (secret 2). The other addresses and the HTTP proxy are stand-ins that record every
-// request they get — its method, target, headers and body — and answer the type's dry probe as it passes and anything
-// else with an error that echoes the request's Authorization header and target. The probe returns the records, the
-// typed token masked in those of its own address, so that the stored token or the stored proxy password in a request
-// to an address or a proxy that is not the saved one fails rule 5 as a log line or an error does.
+// Connection holds the bot token (secret 0) and the password (secret 1) of its SOCKS5 proxy, which accepts it. Five
+// drafts of it are checked, four without a token — another address without a proxy, the saved address through another
+// proxy, an HTTP one, another address through the saved proxy and the saved address without a proxy — and one with a
+// token typed (secret 2) for another address. The saved address, the other addresses and the HTTP proxy are stand-ins
+// that record every request they get — its method, target, headers and body — and answer the type's dry probe as it
+// passes and anything else with an error that echoes the request's Authorization header and target. The probe returns
+// the records, the typed token masked in those of its own address, so that the stored token or the stored proxy
+// password in a request to an address or through a route that is not the saved one fails rule 5 as a log line or an
+// error does; it is incomplete when a draft reached no stand-in or the draft through the saved proxy did not pass it.
 func probeConnectionDrafts(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
@@ -3526,7 +3527,7 @@ func probeConnectionDrafts(ctx context.Context, secrets []string, log io.Writer)
 		return err
 	}
 	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
-		Password: "other"})
+		Password: secrets[1]})
 	if err != nil {
 		return err
 	}
@@ -3542,18 +3543,35 @@ func probeConnectionDrafts(ctx context.Context, secrets []string, log io.Writer)
 			Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
 			Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
 			Log: logger})
-		errs = append(errs, probeDraftsOf(ctx, svc, typ, secrets, socks.Addr()))
+		errs = append(errs, probeDraftsOf(ctx, svc, typ, secrets, socks))
 	}
 	return errors.Join(errs...)
 }
 
-// probeDraftsOf saves a Connection of typ for probeConnectionDrafts behind the SOCKS5 proxy at socks and checks its
-// four drafts; it returns their errors and step messages and the requests that the stand-ins recorded.
-func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, secrets []string, socks string) error {
-	const saved = "http://127.0.0.1:1"
+// probeDraftsOf saves a Connection of typ for probeConnectionDrafts at a stand-in behind the SOCKS5 proxy socks and
+// checks its five drafts; it returns their errors and step messages and the requests that the stand-ins recorded.
+func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, secrets []string,
+	socks *fakeproxy.Server) error {
+	// the saved address, another address, another proxy, another address through the saved proxy, and the address of
+	// the typed token
+	var stand [5]*probeDraftStandIn
+	defer func() {
+		for _, s := range stand {
+			if s != nil {
+				_ = s.srv.Close()
+			}
+		}
+	}()
+	var err error
+	for i := range stand {
+		if stand[i], err = startDraftStandIn(ctx); err != nil {
+			return err
+		}
+	}
+	saved, other, viaProxy, throughSaved, typed := stand[0], stand[1], stand[2], stand[3], stand[4]
 	in := connections.Input{Type: typ, Name: "probe", BotToken: keyring.Replace(logging.Secret(secrets[0])),
 		Limiter: connections.Limiter{Limit: 5, PerSeconds: 1},
-		Proxy: proxyconf.Input{Enabled: true, Type: new("socks5"), Address: new(socks), UsernameSet: true,
+		Proxy: proxyconf.Input{Enabled: true, Type: new("socks5"), Address: new(socks.Addr()), UsernameSet: true,
 			Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[1]))}}
 	setAddress := func(addr string) {
 		switch typ {
@@ -3565,7 +3583,7 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 			in.ServerURL = addr
 		}
 	}
-	setAddress(saved)
+	setAddress(saved.url())
 	c, err := svc.Create(ctx, connections.Requester{Actor: audit.System, Transport: audit.TransportUI}, in)
 	if err != nil {
 		return err
@@ -3576,24 +3594,12 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 			UpdateMode: in.UpdateMode, BridgeBaseURL: in.BridgeBaseURL, EventDelivery: in.EventDelivery, BotToken: token,
 			Proxy: p, ConnectionID: &c.PublicID}
 	}
-	var stand [3]*probeDraftStandIn // another address, another proxy, the address of the typed token
-	defer func() {
-		for _, s := range stand {
-			if s != nil {
-				_ = s.srv.Close()
-			}
-		}
-	}()
-	for i := range stand {
-		if stand[i], err = startDraftStandIn(ctx); err != nil {
-			return err
-		}
-	}
-	other, viaProxy, typed := stand[0], stand[1], stand[2]
 	drafts := []connections.Draft{
 		draft(other.url(), keyring.Keep, &proxyconf.Input{Enabled: false}),
-		draft(saved, keyring.Keep, &proxyconf.Input{Enabled: true, Type: new("http"), Address: new(viaProxy.addr())}),
-		draft(other.url(), keyring.Keep, nil),
+		draft(saved.url(), keyring.Keep, &proxyconf.Input{Enabled: true, Type: new("http"),
+			Address: new(viaProxy.addr())}),
+		draft(throughSaved.url(), keyring.Keep, nil),
+		draft(saved.url(), keyring.Keep, &proxyconf.Input{Enabled: false}),
 		draft(typed.url(), keyring.Replace(logging.Secret(secrets[2])), &proxyconf.Input{Enabled: false}),
 	}
 	var errs []error
@@ -3604,8 +3610,10 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 			errs = append(errs, errors.New(st.Message))
 		}
 	}
-	for i, what := range []string{"the draft with another address made no dry probe there",
-		"the draft with another proxy sent nothing through it", "the draft with a typed token sent nothing"} {
+	for i, what := range []string{"the draft at the saved address without a proxy made no dry probe there",
+		"the draft with another address made no dry probe there", "the draft with another proxy sent nothing through it",
+		"the draft with another address through the saved proxy made no dry probe there",
+		"the draft with a typed token sent nothing"} {
 		records := stand[i].taken()
 		if len(records) == 0 {
 			errs = append(errs, &probeIncomplete{typ + ": " + what})
@@ -3617,10 +3625,13 @@ func probeDraftsOf(ctx context.Context, svc *connections.Service, typ string, se
 			errs = append(errs, errors.New(r))
 		}
 	}
+	if !slices.Contains(socks.Targets(), throughSaved.addr()) {
+		errs = append(errs, &probeIncomplete{typ + ": the draft with another address did not pass the saved proxy"})
+	}
 	return errors.Join(errs...)
 }
 
-// probeDraftStandIn is another address or another proxy of probeConnectionDrafts. It records every request it gets
+// probeDraftStandIn is an address or the HTTP proxy of probeConnectionDrafts. It records every request it gets
 // and answers the dry probe of each type as it passes: the Mattermost system ping 200 with the status OK, the Telegram
 // getMe of the token 0:x 401 with JSON and a Bridge's info without a token 401 with a problem. Anything else gets an
 // error that echoes the request's Authorization header, target and body, so that a token sent there also reaches the

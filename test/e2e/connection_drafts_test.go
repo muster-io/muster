@@ -403,6 +403,21 @@ func TestConnectionDrafts(t *testing.T) {
 			t.Fatalf("requests to the address that is not a bridge %v", got)
 		}
 
+		// An address that answers 200 with an HTML page, as a web server does.
+		page := h.Fakes.MattermostSecond
+		resetFake(t, page)
+		if a := call(t, http.MethodPost, page+"/_fake/faults", `{"path":"/v1/info","status":200,`+
+			`"content_type":"text/html","body":"<html></html>","times":1}`); a.status != http.StatusNoContent {
+			t.Fatalf("POST /_fake/faults = %d %s", a.status, a.body)
+		}
+		r = e.wantSteps(t, body(page, ""), "dry_probe:fail info:skip event_delivery:skip")
+		if r.Steps[0].Code != "not_bridge" || !strings.Contains(r.Steps[0].Message, "text/html") {
+			t.Fatalf("an HTML page = %+v", r)
+		}
+		if got := described(fakeRequests(t, page)); !slices.Equal(got, []string{"GET /v1/info auth=false"}) {
+			t.Fatalf("requests to the HTML page %v", got)
+		}
+
 		// Another bridge, no token: only the dry probe there.
 		r = e.wantSteps(t, body(other.URL(), ""), "dry_probe:ok info:skip event_delivery:skip")
 		if r.Info != nil || !r.OK {
@@ -423,7 +438,8 @@ func TestConnectionDrafts(t *testing.T) {
 			t.Fatalf("stored token = %+v", r)
 		}
 
-		for _, reqs := range [][]fakeserver.Request{other.Requests(), fakeRequests(t, h.Fakes.Mattermost)} {
+		for _, reqs := range [][]fakeserver.Request{other.Requests(), fakeRequests(t, h.Fakes.Mattermost),
+			fakeRequests(t, page)} {
 			for _, q := range reqs {
 				if carries(q, devmode.BridgeConnectionBotToken) {
 					t.Fatalf("the stored token reached another address: %v", described([]fakeserver.Request{q}))

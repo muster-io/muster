@@ -6,6 +6,7 @@ package connections_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"reflect"
 	"slices"
@@ -374,6 +375,71 @@ func TestCheckDraftProxyPassword(t *testing.T) {
 	}
 }
 
+// TestCheckDraftProxyTurnedOff is the proxy route of the rule of C-13.FR-14 for a saved Connection of each type behind
+// a proxy: a draft of the saved values checks the stored token through that proxy, and a draft at the saved address
+// with the proxy turned off and no token typed runs only the dry probe, directly, so that the stored token never
+// leaves the saved proxy out.
+func TestCheckDraftProxyTurnedOff(t *testing.T) {
+	e := newDraftEnv(t)
+	p := startProxy(t, fakeproxy.Options{})
+	br := bridgeInput("br-proxied", e.br.URL(), connections.EventDeliveryPoll)
+	br.BotToken = keyring.Replace(logging.Secret(fakebridge.Token))
+	for _, tc := range []struct {
+		in          connections.Input
+		draft       connections.Draft
+		saved       recorder
+		full, probe string
+		dry         string
+	}{
+		{in: input("mm-proxied", e.fake.URL()), draft: mmDraft(e.fake.URL()), saved: e.fake, full: "token:ok",
+			probe: "dry_probe:ok token:skip", dry: "GET /api/v4/system/ping"},
+		{in: e.input("tg-proxied", connections.ModeLongPolling), draft: tgDraft(e.tg.URL()), saved: e.tg,
+			full: "dry_probe:ok get_me:ok get_webhook_info:ok", probe: "dry_probe:ok get_me:skip get_webhook_info:skip",
+			dry: "GET /bot0:x/getMe"},
+		{in: br, draft: brDraft(e.br.URL()), saved: e.br, full: "info:ok event_delivery:ok",
+			probe: "dry_probe:ok info:skip event_delivery:skip", dry: "GET /v1/info"},
+	} {
+		t.Run(tc.in.Type, func(t *testing.T) {
+			tc.in.Proxy = proxyconf.Input{Enabled: true, Type: new("http"), Address: new(p.Addr())}
+			c, err := e.svc.Create(t.Context(), by, tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.reset()
+			targets := len(p.Targets())
+			res, err := e.svc.CheckDraft(t.Context(), of(tc.draft, c.PublicID, ""))
+			if err != nil || stepsOf(res) != tc.full || slices.ContainsFunc(vias(res), func(v string) bool {
+				return v != "proxy"
+			}) {
+				t.Fatalf("the saved proxy: steps %q through %v, %v; want %q", stepsOf(res), vias(res), err, tc.full)
+			}
+			if got := p.Targets()[targets:]; len(got) == 0 || slices.ContainsFunc(got, func(s string) bool {
+				return s != hostOf(t, tc.saved.URL())
+			}) {
+				t.Errorf("the saved proxy connected to %v", got)
+			}
+
+			e.reset()
+			targets = len(p.Targets())
+			off := of(tc.draft, c.PublicID, "")
+			off.Proxy = &proxyconf.Input{Enabled: false}
+			res, err = e.svc.CheckDraft(t.Context(), off)
+			if err != nil || stepsOf(res) != tc.probe || slices.ContainsFunc(vias(res), func(v string) bool {
+				return v != "direct"
+			}) {
+				t.Fatalf("the proxy turned off: steps %q through %v, %v; want %q", stepsOf(res), vias(res), err,
+					tc.probe)
+			}
+			if got := p.Targets()[targets:]; len(got) != 0 {
+				t.Errorf("with the proxy turned off a request went through it to %v", got)
+			}
+			if got := calls(tc.saved); !slices.Equal(got, []string{tc.dry}) {
+				t.Errorf("with the proxy turned off the saved address got %q, want only %q", got, tc.dry)
+			}
+		})
+	}
+}
+
 // TestCheckDraftStoresNothing is C-13.FR-14: drafts of new Connections of each type pass with their typed tokens and
 // drafts of the saved ones with the stored tokens, and nothing is written — no Connection, no bot, no info, no hint,
 // no Audit log entry, no log line — and the saved Connections keep their bot, info and version.
@@ -577,7 +643,7 @@ func TestCheckDraftRefusals(t *testing.T) {
 		row.BotTokenCiphertext = []byte("garbage")
 		if _, err := e.svc.CheckDraft(t.Context(), d); err == nil || strings.Contains(err.Error(), botToken) ||
 			strings.Contains(err.Error(), tgToken) || strings.Contains(err.Error(), fakebridge.Token) {
-			t.Errorf("%s with an unreadable token = %v", c.Type, err)
+			t.Errorf("%s with an unreadable token = %s", c.Type, tokenNames.Replace(fmt.Sprint(err)))
 		}
 		other := d
 		other.ServerURL, other.BotAPIBaseURL, other.BridgeBaseURL = e.mm2.URL(), e.tg2.URL(), e.br2.URL()
