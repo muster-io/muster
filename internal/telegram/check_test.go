@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,52 @@ type failingResolver struct{}
 
 func (failingResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
 	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+// TestCheckProxyDNS covers C-14.FR-11: through a proxy whose name does not resolve, HTTP or SOCKS5, on the saved base
+// URL or an unsaved one, the dry probe is dns_failed with the error's own text, which names the proxy as the name that
+// did not resolve and never the Bot API's host, whose name Muster leaves to the proxy; the other steps are skipped and
+// nothing reaches the server.
+func TestCheckProxyDNS(t *testing.T) {
+	f := startFake(t)
+	n := network(t, nil)
+	n.Resolver = failingResolver{}
+	server, err := url.Parse(f.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []outbound.ProxyType{outbound.ProxyHTTP, outbound.ProxySOCKS5} {
+		proxy := &outbound.Proxy{Type: kind, Address: "proxy.invalid:3128"}
+		saved, err := NewClient(n, Settings{BaseURL: f.URL(), Token: testToken, Proxy: proxy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe, err := NewClient(n, Settings{BaseURL: f.URL(), Proxy: proxy})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name         string
+			saved, probe *Client
+		}{{"saved", saved, nil}, {"unsaved", nil, probe}} {
+			t.Run(string(kind)+" "+tc.name, func(t *testing.T) {
+				res, err := RunCheck(t.Context(), tc.saved, tc.probe, direct, clock.Real{})
+				if err != nil || res.OK() || names(res) != "dry_probe:fail get_me:skip get_webhook_info:skip" {
+					t.Fatalf("check = %+v, %v", res, err)
+				}
+				dry := res.Steps[0]
+				if dry.Code != delivery.CodeDNSFailed || dry.Via != ViaProxy ||
+					!strings.Contains(dry.Message, "lookup proxy.invalid") ||
+					strings.Contains(dry.Message, "DNS lookup failed: "+server.Hostname()) ||
+					strings.Contains(dry.Message, testToken) {
+					t.Errorf("dry probe = %+v", dry)
+				}
+			})
+		}
+	}
+	if reqs := f.Requests(); len(reqs) != 0 {
+		t.Errorf("requests %v", paths(f))
+	}
 }
 
 // TestCheckUnsavedBaseURL covers C-14.FR-11 and AC-6: with an unsaved base URL only the dry probe runs, against it,

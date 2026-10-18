@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -586,8 +587,9 @@ func (failingResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.A
 }
 
 // TestDryProbeWithoutAnswer covers C-13.FR-2: a dry probe without an answer has the code of delivery.FailureCode — an
-// unknown name, a refused connection, an address the outbound address policy refuses — and a proxy that refuses the
-// credentials, SOCKS5 or HTTP, is proxy_refused; nothing reaches the server.
+// unknown name, a refused connection, a failed TLS handshake, no answer in time, an address the outbound address
+// policy refuses — and a proxy that refuses the credentials, SOCKS5 or HTTP, is proxy_refused; an unknown name, the
+// time and the proxy have the text of delivery.FailureMessage. Nothing reaches the server.
 func TestDryProbeWithoutAnswer(t *testing.T) {
 	f := startFake(t)
 	proxies := map[fakeproxy.Kind]string{}
@@ -602,16 +604,27 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 	loopback := network(t, &bytes.Buffer{}, "127.0.0.0/8")
 	dns := network(t, &bytes.Buffer{}, "127.0.0.0/8")
 	dns.Resolver = failingResolver{}
+	tlsServer := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(tlsServer.Close)
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(release) })
 	for _, tc := range []struct {
 		name      string
 		n         mattermost.Network
 		serverURL string
 		proxy     *outbound.Proxy
+		within    time.Duration
 		code      string
 		message   string
 	}{
-		{name: "dns", n: dns, serverURL: "http://mattermost.invalid", code: delivery.CodeDNSFailed},
+		{name: "dns", n: dns, serverURL: "http://mattermost.invalid", code: delivery.CodeDNSFailed,
+			message: "DNS lookup failed: mattermost.invalid"},
 		{name: "refused", n: loopback, serverURL: "http://127.0.0.1:1", code: delivery.CodeConnectFailed},
+		{name: "tls", n: loopback, serverURL: tlsServer.URL, code: delivery.CodeTLSFailed},
+		{name: "timeout", n: loopback, serverURL: slow.URL, within: 100 * time.Millisecond, code: delivery.CodeTimeout,
+			message: "No answer within 10 s"},
 		{name: "blocked", n: network(t, &bytes.Buffer{}), serverURL: f.URL(), code: delivery.CodeBlocked},
 		{name: "socks5 refused the credentials", n: loopback, serverURL: f.URL(), proxy: &outbound.Proxy{
 			Type: outbound.ProxySOCKS5, Address: proxies[fakeproxy.SOCKS5], Username: "u", Password: "wrong"},
@@ -621,8 +634,14 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 			code: delivery.CodeProxyRefused, message: mattermost.MessageProxyRefused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			if tc.within > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.within)
+				defer cancel()
+			}
 			c := newTokenless(t, tc.n, tc.serverURL, tc.proxy)
-			p, err := mattermost.RunDryProbe(t.Context(), c, interactive, clock.NewManual(t0))
+			p, err := mattermost.RunDryProbe(ctx, c, interactive, clock.NewManual(t0))
 			if err != nil || p.OK || p.Code != tc.code || p.Message == "" ||
 				(tc.message != "" && p.Message != tc.message) || strings.Contains(p.Message, "wrong") {
 				t.Errorf("probe = %+v, %v", p, err)
@@ -635,6 +654,33 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 	if err != nil || p.OK || p.Code != delivery.CodeRequestFailed || p.Message != "the Mattermost client has no "+
 		"heartbeat class" {
 		t.Errorf("a class the client has not = %+v, %v", p, err)
+	}
+	if reqs := f.Requests(); len(reqs) != 0 {
+		t.Errorf("requests %+v", reqs)
+	}
+}
+
+// TestDryProbeProxyDNS covers C-13.FR-2: through a proxy whose name does not resolve, HTTP or SOCKS5, the dry probe is
+// dns_failed with the error's own text, which names the proxy as the name that did not resolve and never the server,
+// whose name Muster leaves to the proxy. Nothing reaches the server.
+func TestDryProbeProxyDNS(t *testing.T) {
+	f := startFake(t)
+	n := network(t, &bytes.Buffer{}, "127.0.0.0/8")
+	n.Resolver = failingResolver{}
+	server, err := url.Parse(f.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []outbound.ProxyType{outbound.ProxyHTTP, outbound.ProxySOCKS5} {
+		t.Run(string(kind), func(t *testing.T) {
+			c := newTokenless(t, n, f.URL(), &outbound.Proxy{Type: kind, Address: "proxy.invalid:3128"})
+			p, err := mattermost.RunDryProbe(t.Context(), c, interactive, clock.NewManual(t0))
+			if err != nil || p.OK || p.Code != delivery.CodeDNSFailed ||
+				!strings.Contains(p.Message, "lookup proxy.invalid") ||
+				strings.Contains(p.Message, "DNS lookup failed: "+server.Hostname()) {
+				t.Errorf("probe = %+v, %v", p, err)
+			}
+		})
 	}
 	if reqs := f.Requests(); len(reqs) != 0 {
 		t.Errorf("requests %+v", reqs)
