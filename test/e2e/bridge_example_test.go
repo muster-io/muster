@@ -36,6 +36,10 @@ const (
 	exampleURL    = "http://" + exampleListen
 	// examplePush is where the push listener of `muster bridge check` listens in the interactive run.
 	examplePush = "127.0.0.1:18096"
+	// exampleName is the container's name, fixed so that each start first removes a container that a killed run left
+	// holding the port; exampleLabel marks it for `docker ps --filter label=muster-e2e`.
+	exampleName  = "muster-e2e-example-bridge"
+	exampleLabel = "muster-e2e=example-bridge"
 )
 
 // exampleBridge is the example bridge in a Docker container on the host's network. Its token and push secret are in
@@ -63,7 +67,7 @@ func newExampleBridge(t *testing.T) *exampleBridge {
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
 	dir := t.TempDir()
-	x := &exampleBridge{t: t, name: "muster-e2e-example-" + strings.ToLower(rand.Text()[:10]),
+	x := &exampleBridge{t: t, name: exampleName,
 		token: "example-" + rand.Text(), tokenFile: filepath.Join(dir, "token"),
 		secret: "whsec_" + base64.StdEncoding.EncodeToString(key), secretFile: filepath.Join(dir, "push-secret")}
 	x.secrets = &[]string{x.token, x.secret, strings.TrimPrefix(x.secret, "whsec_")}
@@ -91,15 +95,17 @@ func (x *exampleBridge) on(t *testing.T) *exampleBridge {
 	return &c
 }
 
-// restart removes the container, if any, and starts the example again with run, which loses everything it kept; it
-// waits until the page answers.
+// restart removes the container, if any, once its output is checked for secrets, and starts the example again with
+// run, which loses everything it kept; it waits until the page answers.
 func (x *exampleBridge) restart(run exampleRun) {
 	x.t.Helper()
+	x.leaked(x.t, "the example's output", x.output())
 	x.remove()
 	if answers(x.t.Context(), exampleURL+"/") {
-		x.t.Fatalf("something else answers at %s; is an earlier example bridge still running (docker ps)?", exampleURL)
+		x.t.Fatalf("something else answers at %s once %s is removed (docker ps)", exampleURL, x.name)
 	}
-	args := []string{"run", "-d", "--name", x.name, "--network", "host", "-v", x.tokenFile + ":/token:ro"}
+	args := []string{"run", "-d", "--name", x.name, "--label", exampleLabel, "--network", "host",
+		"-v", x.tokenFile + ":/token:ro"}
 	flags := []string{"-listen", exampleListen, "-token-file", "/token"}
 	if run.features != "" {
 		args = append(args, "-e", "BRIDGE_FEATURES="+run.features)
@@ -233,20 +239,23 @@ func (x *exampleBridge) root(n int) examplePost {
 	return got
 }
 
-// botDirect are the bot's messages in the direct chat of the person login.
+// botDirect are the bot's answers in the direct chat of the person login. The direct chat holds the link token, so
+// its body is never printed.
 func (x *exampleBridge) botDirect(login string) []string {
 	x.t.Helper()
 	a := call(x.t, http.MethodGet, exampleURL+"/chat/api/direct-messages?user="+login, "")
+	if a.status != http.StatusOK {
+		x.t.Fatalf("the direct chat of %s = %d", login, a.status)
+	}
 	var chat []struct {
 		Bot  bool   `json:"bot"`
 		Text string `json:"text"`
-		Body string `json:"body"`
 	}
 	decode(x.t, a, &chat)
 	var out []string
 	for _, m := range chat {
 		if m.Bot {
-			out = append(out, m.Text+m.Body)
+			out = append(out, m.Text)
 		}
 	}
 	return out
@@ -285,7 +294,8 @@ func (x *exampleBridge) leaked(t *testing.T, what string, out ...string) {
 // binary under test passes every step with all its features and --no-interactive but press and push, skips the
 // optional steps with BRIDGE_FEATURES=thread_messages, and interactively, with the example pushing to the check's
 // listener with the secret of --push-secret-file, passes press, push and answer once the test presses the button the
-// WAIT line names through the page's JSON API. The token and the push secret reach neither output.
+// WAIT line names through the page's JSON API. The token and the push secret reach neither the check's output nor the
+// example's.
 func TestBridgeExampleCheck(t *testing.T) {
 	bin := binary(t)
 	x := newExampleBridge(t)
@@ -397,17 +407,18 @@ func TestBridgeExampleCheck(t *testing.T) {
 			t.Errorf("the answer to alice's press on the page %+v", notes)
 		}
 	})
+
+	x.leaked(t, "the example's output", x.output())
 }
 
 // TestBridgeExampleFlows is C-22.AC-23 against `muster dev` and the pinned image of the example bridge: a Bridge
 // Connection polls the example, and its Destination for the channel alerts posts each new Alert Group there as a Root
 // message #N. Alice, signed in to the web UI, starts an Account link and sends its token to the bot in her direct chat
 // on the page, which links her account; her press of Ack acknowledges the Alert Group with the Transport bridge and the
-// page shows the buttons of the acknowledged status. With the example restarted offering only thread_messages, the
-// Connection checked again and the development clock past bridge.info_max_age, so that every replica reads info again,
-// her `ack` in the Thread of a new Alert Group acknowledges it and is answered there. With the Connection in push mode
-// and the example pushing to its callback with the push secret, her press reaches Muster as a signed push, recorded in
-// the Request log. No secret reaches a log.
+// page shows the buttons of the acknowledged status. With the example restarted offering only thread_messages and the
+// Connection checked again, her `ack` in the Thread of a new Alert Group acknowledges it and is answered there. With the
+// Connection in push mode and the example pushing to its callback with the push secret, her press reaches Muster as a
+// signed push, recorded in the Request log. No secret reaches a log.
 func TestBridgeExampleFlows(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -418,10 +429,28 @@ func TestBridgeExampleFlows(t *testing.T) {
 	created, _ := json.Marshal(map[string]any{"type": "bridge", "name": "Example bridge", "base_url": exampleURL,
 		"bot_token": x.token, "event_delivery": "poll", "proxy": map[string]bool{"enabled": false},
 		"limiter": map[string]int{"limit": 10, "per_seconds": 1}})
-	b.conn = b.api.json(http.MethodPost, "/api/v1/connections", string(created), http.StatusCreated)["id"].(string)
+	b.conn, _ = b.api.json(http.MethodPost, "/api/v1/connections", string(created), http.StatusCreated)["id"].(string)
+	if b.conn == "" {
+		t.Fatal("the created Connection has no id")
+	}
 	e.check(b.conn)
 	b.route("example", "example", []string{b.destination("example", "alerts")}, calm)
 	alice := e.person("Alice A.", "alice", "responder")
+	// recheck checks the Connection, which reads info again. A check refreshes only the replica that runs it, and
+	// another replica keeps its copy of info in memory until it is bridge.info_max_age old, so with more than one
+	// replica the development clock moves past that and the test waits until every replica runs on it.
+	recheck := func() {
+		t.Helper()
+		e.check(b.conn)
+		if len(h.Replicas) > 1 {
+			c := advance(t, r, int(bridge.DefaultInfoMaxAge/time.Second)+1)
+			for _, rep := range h.Replicas {
+				eventually(t, rep.name()+" on the advanced clock", func() bool {
+					return readClock(t, rep).OffsetSeconds == c.OffsetSeconds
+				})
+			}
+		}
+	}
 	acknowledged := func(g string) {
 		t.Helper()
 		eventually(t, g+" acknowledged", func() bool { return b.status(g) == "acknowledged" })
@@ -456,9 +485,9 @@ func TestBridgeExampleFlows(t *testing.T) {
 	eventually(t, "the bot's answer in alice's direct chat", func() bool {
 		return slices.Contains(x.botDirect("alice"), "Linked to Muster user Alice A. (alice)")
 	})
-	if l := linkOf(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK),
-		"bridge"); l["external_id"] != "alice" || l["display_name"] != "Alice Smith" ||
-		l["connection"].(map[string]any)["name"] != "Example bridge" {
+	l := linkOf(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK), "bridge")
+	if connection, _ := l["connection"].(map[string]any); l["external_id"] != "alice" ||
+		l["display_name"] != "Alice Smith" || connection["name"] != "Example bridge" {
 		t.Errorf("alice's bridge link %v", l)
 	}
 	x.press(root.ID, "alice", x.button(root, "Ack"))
@@ -467,10 +496,7 @@ func TestBridgeExampleFlows(t *testing.T) {
 
 	// Without buttons: ack written in the Thread of a new Alert Group.
 	x.restart(exampleRun{features: "thread_messages"})
-	e.check(b.conn)
-	// The check reads info again on the replica that runs it; another replica reads its copy in memory again only past
-	// bridge.info_max_age.
-	advance(t, r, int(bridge.DefaultInfoMaxAge/time.Second)+1)
+	recheck()
 	g2 := b.start("e2", "ExampleTwo", "example", "two")
 	n2 := b.number(g2)
 	root = x.root(n2)
@@ -484,7 +510,9 @@ func TestBridgeExampleFlows(t *testing.T) {
 		return slices.ContainsFunc(x.message(root.ID).Thread, func(p examplePost) bool { return p.Bot && p.Text == done })
 	})
 
-	// Push mode: a press reaches Muster as a signed push to the Connection's callback.
+	// Push mode: a press reaches Muster as a signed push to the Connection's callback. No delivery is pending when the
+	// Connection changes, so that none reads info for its new version while the example offers thread_messages only.
+	b.settled()
 	a := b.api.do(http.MethodGet, "/api/v1/connections/"+b.conn, "")
 	var conn map[string]any
 	decode(t, a, &conn)
@@ -498,7 +526,7 @@ func TestBridgeExampleFlows(t *testing.T) {
 		t.Fatalf("callback_url %s", callback)
 	}
 	x.restart(exampleRun{push: callback})
-	e.check(b.conn)
+	recheck()
 	g3 := b.start("e3", "ExampleThree", "example", "three")
 	root = x.root(b.number(g3))
 	x.press(root.ID, "alice", x.button(root, "Ack"))
@@ -506,7 +534,11 @@ func TestBridgeExampleFlows(t *testing.T) {
 	var push map[string]any
 	eventually(t, "the signed push of the press in the Request log", func() bool {
 		for _, rec := range b.inbound(b.conn, "push") {
-			full, _ := b.requestRecord(rec["id"].(string))
+			id, ok := rec["id"].(string)
+			if !ok {
+				t.Fatalf("a Request log record without id: %v", rec)
+			}
+			full, _ := b.requestRecord(id)
 			var ev struct {
 				Type      string `json:"type"`
 				MessageID string `json:"message_id"`
@@ -519,7 +551,8 @@ func TestBridgeExampleFlows(t *testing.T) {
 		}
 		return false
 	})
-	signature, _ := push["request_headers"].(map[string]any)["Webhook-Signature"].([]any)
+	headers, _ := push["request_headers"].(map[string]any)
+	signature, _ := headers["Webhook-Signature"].([]any)
 	if push["status"] != 204.0 || len(signature) != 1 || signature[0] != "[redacted]" {
 		t.Errorf("the push of the press: status %v, signature %v", push["status"], signature)
 	}

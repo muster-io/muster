@@ -29,7 +29,7 @@ with the project's toolchain. `make compose-check` also needs the Docker CLI wit
 daemon; `make dev-db` and `make dev` need Docker with the compose plugin and a running daemon. `make e2e-go` also
 pulls the example bridge's image (`ghcr.io/muster-io/muster-example-bridge`, pinned by digest in
 `test/e2e/bridge_example_test.go`) from GitHub Container Registry and runs it with host networking, so it needs Docker
-on Linux, as on the CI runners and the development VM.
+Engine on Linux, as on the CI runners.
 
 The Makefile is the only entry point:
 

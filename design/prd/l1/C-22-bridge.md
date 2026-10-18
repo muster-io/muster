@@ -237,8 +237,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   the protocol, switchable one by one so that a bridge without buttons can be tried, and both event delivery modes. It
   passes `muster bridge check`. Its image `ghcr.io/muster-io/muster-example-bridge` is published for each commit on
   that repository's `master` and for each of its releases. Muster's end-to-end tests run its image, pinned by digest
-  (the released one once the libraries are released) and updated by Renovate, so that a change of Muster that breaks a
-  released bridge library fails Muster's CI.
+  (the released one once the libraries are released) and updated by Renovate, so that a change of Muster that breaks
+  the bridge library fails Muster's CI.
 - **C-22.FR-23** The documentation covers: under Messengers, setting up a Bridge — the Connection with its token and
   event delivery mode (polling when the bridge cannot reach Muster, push with its callback address and secret
   otherwise), Destinations by channel id, what the Connection check shows, Text commands, Account links by token and
