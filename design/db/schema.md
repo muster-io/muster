@@ -27,7 +27,9 @@
   [`0012_bridge_account_link_requests`](../../internal/db/migrations/0012_bridge_account_link_requests.up.sql)
   (Bridge Account link requests, S-076) and
   [`0013_request_log`](../../internal/db/migrations/0013_request_log.up.sql)
-  (the Request log, S-088), in
+  (the Request log, S-088) and
+  [`0014_alerts_org_last_seen_index`](../../internal/db/migrations/0014_alerts_org_last_seen_index.up.sql)
+  (`alerts_org_last_seen_idx` for the values seen of the severity label), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -831,7 +833,10 @@ Serves C-06, C-07.FR-5, C-08.FR-13; [ADR-0002](../adr/0002-webhook-only-ingestio
   with this row. A new firing after a resolution reuses the row and increments `episode`; a Continuation (new
   `startsAt`, no resolve in between) only updates `starts_at`. This is the Alerts view of an Integration (C-06.FR-19):
   indexes for sorting by `last_seen_at` or `starts_at` with cursor `(value, id)`, GIN on `labels` for label filters.
-  Internal alerts are the rows of the built-in Integration, deduplicated by fingerprint through the same unique key.
+  `alerts_org_last_seen_idx` `(org_id, last_seen_at)` (migration 0014) serves the values seen of the severity label
+  (C-20.FR-1), which range over the last `organization.severity_values_window` of every Integration of the Organization
+  at once, where the sorting index leads with `integration_id`. Internal alerts are the rows of the built-in
+  Integration, deduplicated by fingerprint through the same unique key.
 - **`alert_presences`** — the presence of an Alert in one `groupKey`: `state` (`listed`, `missed`, `gone`, `stale`),
   `last_seen_at`, `last_listed_window`, `last_seen_clock_ms` and `missed_since`, the receipt time of the first window
   that missed it (set only while `missed`; `CHECK` keeps them together). An Alert listed in several Alertmanager groups
