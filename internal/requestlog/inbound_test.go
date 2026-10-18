@@ -237,6 +237,127 @@ func TestInboundBodies(t *testing.T) {
 	}
 }
 
+// TestInboundBounded: a request to a known Connection with a 1 MiB query and a 1 MiB header is answered as any other,
+// and its record keeps at most urlMax bytes of its URL and headersMax bytes of its headers, masked before the cut.
+func TestInboundBounded(t *testing.T) {
+	ack := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge)
+	q := &fakeQueries{}
+	writer, out, _ := newTestWriter(q, 0)
+	h := Inbound(writer, clock.NewManual(t0), OperationUpdate, annotated(`{"ok":true}`))
+	target := "/api/v1/callbacks/telegram/" + inboundConn + "?q=" + strings.Repeat(".", urlMax-100) + "&a=" + ack +
+		"&b=" + strings.Repeat(".", 1<<20)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, target, strings.NewReader(`{"update_id":1}`))
+	req.Header.Set("Authorization", "Bearer s3cret-a")
+	req.Header.Set("X-Big", strings.Repeat(".", headersMax-100)+" "+ack+" "+strings.Repeat(".", 1<<20))
+	req.Header.Set("X-Late", "gone")
+	w := serve(t, h, req)
+	if w.Code != http.StatusOK || w.Body.String() != `{"ok":true}` || len(q.inserts) != 1 {
+		t.Fatalf("answered %d %q, %d inserts, logged %s", w.Code, w.Body, len(q.inserts), out)
+	}
+	p := q.inserts[0]
+	if len(p.Url) != urlMax || !strings.HasPrefix(p.Url, "/api/v1/callbacks/telegram/"+inboundConn+"?q=") ||
+		!strings.HasSuffix(p.Url, ellipsis) || !strings.Contains(p.Url, "&a="+redacted) {
+		t.Errorf("URL of %d bytes", len(p.Url))
+	}
+	headers, n := headerBytes(t, p.RequestHeaders)
+	if n > headersMax || len(headers["X-Big"]) != 1 || !strings.HasSuffix(headers["X-Big"][0], ellipsis) ||
+		!strings.Contains(headers["X-Big"][0], redacted) || headers["X-Late"] != nil ||
+		headers["Authorization"][0] != redacted {
+		t.Errorf("headers of %d bytes, names %d", n, len(headers))
+	}
+	for _, text := range texts(p) {
+		for _, secret := range []string{ack[:16], "s3cret-"} {
+			if strings.Contains(text, secret) {
+				t.Errorf("stores %q", secret)
+			}
+		}
+	}
+	if len(p.RequestHeaders) > 2*headersMax || len(p.ResponseHeaders) > headersMax {
+		t.Errorf("stored headers of %d and %d bytes", len(p.RequestHeaders), len(p.ResponseHeaders))
+	}
+}
+
+// TestInboundInformational: an informational status is not the answer's: the status that follows is, and without one
+// the answer is 200.
+func TestInboundInformational(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		handle func(w http.ResponseWriter)
+		status int
+		body   string
+	}{
+		{name: "early hints, then created", handle: func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusEarlyHints)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("made"))
+		}, status: http.StatusCreated, body: "made"},
+		{name: "continue, then a body", handle: func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusContinue)
+			_, _ = w.Write([]byte("ok"))
+		}, status: http.StatusOK, body: "ok"},
+		{name: "continue alone", handle: func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusContinue)
+		}, status: http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &captureRecorder{}
+			h := Inbound(rec, clock.NewManual(t0), OperationPush, http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					Annotate(r.Context(), Links{Connection: 7, ConnectionID: inboundConn})
+					tt.handle(w)
+				}))
+			w := serve(t, h, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/x", http.NoBody))
+			got := rec.got()
+			if w.Code != tt.status || w.Body.String() != tt.body || len(got) != 1 || got[0].Status != tt.status {
+				t.Errorf("answered %d %q, records %+v", w.Code, w.Body, got)
+			}
+		})
+	}
+}
+
+// TestInboundHeadersAtStatus: as with net/http, the answer's headers are those set before its status, written or
+// implied by the first write; a later change reaches neither the caller nor the record.
+func TestInboundHeadersAtStatus(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		handle func(w http.ResponseWriter)
+		status int
+	}{
+		{name: "after WriteHeader", handle: func(w http.ResponseWriter) {
+			w.Header().Set("X-Before", "1")
+			w.WriteHeader(http.StatusAccepted)
+			w.Header().Set("X-After", "2")
+			_, _ = w.Write([]byte("ok"))
+			w.Header().Set("X-Late", "3")
+		}, status: http.StatusAccepted},
+		{name: "after the first write", handle: func(w http.ResponseWriter) {
+			w.Header().Set("X-Before", "1")
+			_, _ = w.Write([]byte("ok"))
+			w.Header().Set("X-After", "2")
+			w.Header().Del("X-Before")
+		}, status: http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &captureRecorder{}
+			h := Inbound(rec, clock.NewManual(t0), OperationPress, http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					Annotate(r.Context(), Links{Connection: 7, ConnectionID: inboundConn})
+					tt.handle(w)
+				}))
+			w := serve(t, h, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/x", http.NoBody))
+			if w.Code != tt.status || w.Body.String() != "ok" || w.Header().Get("X-Before") != "1" ||
+				w.Header().Get("X-After") != "" || w.Header().Get("X-Late") != "" {
+				t.Errorf("answered %d %q %v", w.Code, w.Body, w.Header())
+			}
+			got := rec.got()
+			if len(got) != 1 || got[0].ResponseHeader.Get("X-Before") != "1" ||
+				got[0].ResponseHeader.Get("X-After") != "" || got[0].ResponseHeader.Get("X-Late") != "" {
+				t.Errorf("records %+v", got)
+			}
+		})
+	}
+}
+
 // failingWriter is a ResponseWriter whose writes fail.
 type failingWriter struct{ *httptest.ResponseRecorder }
 

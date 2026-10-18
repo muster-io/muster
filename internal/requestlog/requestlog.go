@@ -5,10 +5,10 @@
 // webhook Destination, and the requests that reached a Connection's callbacks, each with its answer. The outbound
 // package hands each attempt to the Writer already masked of the Secrets of its client and request, and Inbound each
 // request of a callback masked of the values of outbound.MaskedHeaders; the Writer applies the shape masking — signed
-// action ids, `/start` tokens, the token of an account_link event — and the truncation of mask.go, and inserts one row
-// with the business time on the main pool, outside any transaction of the caller, never failing or retrying the
-// request it records. A record's owner is its Connection, else its outgoing
-// webhook Destination, else nobody. The Reader shows only the records newer than request_log.max_age among the newest
+// action ids, `/start` tokens, the token of an account_link event — and the truncation of bodies, URLs and headers,
+// and inserts one row with the business time on the main pool, outside any transaction of the caller, never failing
+// or retrying the request it records. A record's owner is its Connection, else its outgoing webhook Destination, else
+// nobody. The Reader shows only the records newer than request_log.max_age among the newest
 // request_log.max_records of their owner, and Prune deletes the rest.
 package requestlog
 
@@ -18,9 +18,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,6 +46,19 @@ const (
 	// BodyMax is request_log.body_max: the bytes kept of a body.
 	BodyMax = 16384
 )
+
+// The bounds of what a record keeps of a URL and of headers, which the callers of the callbacks choose: net/http takes
+// up to 1 MiB of a request's line and headers. A cut URL, header name or header value ends with "…".
+const (
+	// urlMax is the most bytes a record keeps of a URL, request_log.body_max.
+	urlMax = BodyMax
+	// headersMax is the most bytes a record keeps of the names and values of a request's or an answer's headers, as
+	// many as the outbound package reads of an answer's header.
+	headersMax = 64 << 10
+)
+
+// ellipsis ends a URL, a header name or a header value that a record keeps cut.
+const ellipsis = "…"
 
 // WriteTimeout bounds the write of one record.
 const WriteTimeout = 2 * time.Second
@@ -175,7 +191,7 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 	body, size, cut := textOf(r.RequestBody)
 	p := dbgen.InsertRecordParams{
 		OrgID: w.orgID, PublicID: publicid.New(publicid.RequestRecord), At: w.business.Now(), Direction: direction,
-		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: clean(r.URL),
+		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: bounded(clean(r.URL), urlMax),
 		RequestHeaders: headersOf(r.RequestHeader), RequestBody: body, RequestBodyBytes: size,
 		RequestBodyTruncated: cut, LatencyMs: clamp32(r.Latency.Milliseconds()), Via: cmp.Or(r.Via, outbound.ViaDirect),
 		Attempt: clamp32(int64(max(r.Attempt, 1))), ConnectionID: id(r.Owner.Connection),
@@ -203,20 +219,79 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 	return p
 }
 
-// headersOf is h as a JSON object of string arrays, every name and value masked; nil is an empty object.
+// header is a header as a record keeps it: its name and values masked.
+type header struct {
+	name   string
+	values []string
+}
+
+// headersOf is h as a JSON object of string arrays, every name and value masked; nil is an empty object. It keeps at
+// most headersMax bytes of names and values, masked first so that no part of a secret survives a cut, in the order of
+// the names: the name or value that crosses the bound is cut at a character boundary and ends with "…", and the
+// headers after it are left out.
 func headersOf(h map[string][]string) []byte {
-	out := make(map[string][]string, len(h))
-	for name, values := range h {
-		name = clean(name)
-		for _, v := range values {
-			out[name] = append(out[name], clean(v))
+	all := make([]header, 0, len(h))
+	size := 0
+	for _, name := range slices.Sorted(maps.Keys(h)) {
+		e := header{name: clean(name), values: make([]string, 0, len(h[name]))}
+		size += len(e.name)
+		for _, v := range h[name] {
+			v = clean(v)
+			e.values = append(e.values, v)
+			size += len(v)
 		}
-		if out[name] == nil {
-			out[name] = []string{}
+		all = append(all, e)
+	}
+	all = within(all, size > headersMax)
+	out := make(map[string][]string, len(all))
+	for _, e := range all {
+		out[e.name] = append(out[e.name], e.values...)
+		if out[e.name] == nil {
+			out[e.name] = []string{}
 		}
 	}
 	b, _ := json.Marshal(out) // a map of strings always encodes
 	return b
+}
+
+// within keeps of the headers hs, in order, at most headersMax bytes of names and values, the ellipsis included, when
+// they hold more (over): the name or value that crosses the bound is cut and ends with "…", and the headers after it
+// are left out.
+func within(hs []header, over bool) []header {
+	left := headersMax - len(ellipsis)
+	for i := range hs {
+		e := &hs[i]
+		if over && len(e.name) > left {
+			e.name, e.values = cutAt(e.name, left)+ellipsis, nil
+			return hs[:i+1]
+		}
+		left -= len(e.name)
+		for j, v := range e.values {
+			if over && len(v) > left {
+				e.values = append(e.values[:j], cutAt(v, left)+ellipsis)
+				return hs[:i+1]
+			}
+			left -= len(v)
+		}
+	}
+	return hs
+}
+
+// bounded is s, or past limit bytes s cut at a character boundary and ended with "…" within limit.
+func bounded(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return cutAt(s, limit-len(ellipsis)) + ellipsis
+}
+
+// cutAt is s cut at a character boundary to at most n bytes.
+func cutAt(s string, n int) string {
+	n = min(n, len(s))
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func id(v int64) pgtype.Int8 { return pgtype.Int8{Int64: v, Valid: v != 0} }

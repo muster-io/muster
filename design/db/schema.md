@@ -1145,6 +1145,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   the values of `outbound.MaskedHeaders` of an inbound request and its answer, and `internal/requestlog` masks signed
   action ids, `/start` tokens and the token of an `account_link` event, cuts each body to `request_log.body_max` at a
   character boundary and replaces bytes that are not UTF-8 and NUL; headers, bodies and the error are untrusted text.
+  The caller of a callback chooses its URL and headers, up to the 1 MiB net/http takes, so a record also keeps at most
+  `request_log.body_max` bytes of a URL and 64 KiB of the names and values of each set of headers (the bound of the
+  outbound package on an answer's header), counted after the masking so that no part of a secret survives a cut: the
+  URL, or the header name or value that crosses its bound in the order of the names, is cut at a character boundary
+  and ends with `…`, and the headers after it are left out.
   The owner of a record is its `connection_id`, else its `destination_id` (an outgoing webhook), else nobody (the checks
   before saving of new Connections, read by their `check_run`); a delivery request of a Connection also names its
   messenger Destination in `destination_id`, and a request about an Alert Group its `alert_group_id`, which has no
@@ -1170,11 +1175,13 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   transaction of the caller, under its own 2-second timeout; a write that fails is dropped, logged
   (`request_log_write_failed`) and counted, and never fails the request it records.
   - *Notes (write volume)*: one row per request — each Publication, edit and Thread reply, answer, check, non-empty poll
-    and callback request — typically a few thousand to a few tens of thousands a day per installation, at most the sum
-    of the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection 15, a Bridge
-    Connection 10, an outgoing webhook 5); each row at most two bodies of `request_log.body_max`, the request headers
-    and at most 64 KiB of answer headers, the bound of the outbound package on an answer's header. The table holds at
-    most `request_log.max_records` rows per owner plus what arrived since the last pruning.
+    and callback request — typically a few thousand to a few tens of thousands a day per installation. Outbound rows
+    are at most the sum of the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection
+    15, a Bridge Connection 10, an outgoing webhook 5). Inbound rows are one per request to a known Connection's
+    callback, refused ones included, which no limiter bounds: whoever knows a callback address can send them, each
+    costing a lookup of the Connection and one `INSERT` on the main pool. Each row holds at most two bodies and a URL of
+    `request_log.body_max` and two sets of headers of 64 KiB. The table holds at most `request_log.max_records` rows
+    per owner plus what arrived since the last pruning, which runs every minute.
 
 ### 4.12 Link rules and Lookup tables
 

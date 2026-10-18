@@ -94,10 +94,12 @@ issue: 267
   hands it to the recorder, the `Writer` of S-088 (`RecordInbound`), which applies the shape masking and truncation;
   without an annotation, nothing is recorded, so a request for an unknown or deleted Connection leaves no trace. The
   shape masking needs a body whole: a body the handler did not read to its end, or larger than 16 ×
-  `request_log.body_max`, is stored empty and marked cut, with its size, and so is such an answer. Inbound records
-  have the direction `inbound`, the path `direct`, the attempt `1` and no error class: Muster's answer is their
-  status. Operations: `press` (`callbacks/mattermost/{connection_id}`), `update` (`callbacks/telegram/{connection_id}`),
-  `push` (`callbacks/bridge/{connection_id}`).
+  `request_log.body_max`, is stored empty and marked cut, with its size, and so is such an answer. The caller chooses
+  the URL and the headers, up to the 1 MiB net/http takes, so the `Writer` keeps at most `request_log.body_max` bytes
+  of a URL and 64 KiB of the names and values of each set of headers, masked before the cut, the cut ending with `…`
+  (`design/db/schema.md`). Inbound records have the direction `inbound`, the path `direct`, the attempt `1` and no error
+  class: Muster's answer is their status. Operations: `press` (`callbacks/mattermost/{connection_id}`), `update`
+  (`callbacks/telegram/{connection_id}`), `push` (`callbacks/bridge/{connection_id}`).
 - **Handlers** (`internal/mattermost/callback.go`, `internal/telegram/webhook.go`, `internal/bridge/push.go`): each
   annotates where it has read its Connection, before any refusal, so that a refusal of a known Connection is recorded:
   Mattermost and Bridge read their Connection before their first refusal, with their answers and the order of their
@@ -159,7 +161,11 @@ ETAG=$(curl -s -b jar $API/connections/$C | jq -r .etag)
 curl -s "${H[@]}" -X PUT -H "If-Match: $ETAG" $API/connections/$C -d '{"type":"bridge","name":"Dev Bridge",
   "base_url":"http://127.0.0.1:18094","event_delivery":"push","push_secret":"whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   "proxy":{"enabled":false},"limiter":{"limit":10,"per_seconds":1}}' > /dev/null
-curl -s -X POST $FB/link -d '{"user_id":"u-bob","token":"rl0123456789abcdefghijklmnopqrstuvwxyzABCDE","bot":1}' > /dev/null; sleep 2
+curl -s -X POST $FB/link -d '{"user_id":"u-bob","token":"rl0123456789abcdefghijklmnopqrstuvwxyzABCDE","bot":1}' > /dev/null
+for i in $(seq 20); do                                     # the record follows the answer: poll the list, at most 2 s
+  curl -s -b jar "$API/request-log?connection=$C&operation=push&limit=1" | jq -e '.items[0].status == 401' > /dev/null && break
+  sleep 0.1
+done
 curl -s -b jar "$API/request-log?connection=$C&operation=push&limit=1" | jq -c '.items[0] | {status}'          # {"status":401}
 
 # C-23.FR-5: the run of a check, and a check before saving of a new Connection

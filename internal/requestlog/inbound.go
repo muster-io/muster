@@ -133,7 +133,7 @@ func Inbound(rec InboundRecorder, realClock clock.Clock, operation string, next 
 		rec.RecordInbound(ctx, InboundRecord{Links: l, Operation: operation, Method: r.Method,
 			URL: r.URL.RequestURI(), RequestHeader: outbound.MaskHeaders(r.Header, unchanged),
 			Request: body.kept(r.ContentLength), Status: out.status,
-			ResponseHeader: outbound.MaskHeaders(out.header, unchanged), Response: out.kept(), Latency: latency})
+			ResponseHeader: outbound.MaskHeaders(out.sent, unchanged), Response: out.kept(), Latency: latency})
 	})
 }
 
@@ -176,10 +176,12 @@ func (t *bodyTee) kept(declared int64) Body {
 }
 
 // answerWriter holds a callback's answer back until its handler returns; an answer that outgrows captureMax goes out
-// as it is written (passing) and keeps only its size.
+// as it is written (passing) and keeps only its size. As with net/http, the first final status counts, and the headers
+// are those set before it: sent is header as it was then.
 type answerWriter struct {
 	w       http.ResponseWriter
 	header  http.Header
+	sent    http.Header
 	status  int
 	body    []byte
 	size    int64
@@ -188,10 +190,13 @@ type answerWriter struct {
 
 func (a *answerWriter) Header() http.Header { return a.header }
 
+// WriteHeader takes the first final status and the headers set so far; an informational one (1xx) is not sent, since
+// the answer is held back.
 func (a *answerWriter) WriteHeader(code int) {
-	if a.status == 0 {
-		a.status = code
+	if a.status != 0 || code >= 100 && code < 200 {
+		return
 	}
+	a.status, a.sent = code, a.header.Clone()
 }
 
 func (a *answerWriter) Write(p []byte) (int, error) {
@@ -217,7 +222,7 @@ func (a *answerWriter) Write(p []byte) (int, error) {
 // handler set none.
 func (a *answerWriter) commit(length bool) {
 	h := a.w.Header()
-	maps.Copy(h, a.header)
+	maps.Copy(h, a.sent)
 	if length && bodyAllowed(a.status) && h.Get("Content-Length") == "" {
 		h.Set("Content-Length", strconv.Itoa(len(a.body)))
 	}
@@ -227,9 +232,7 @@ func (a *answerWriter) commit(length bool) {
 // finish sends the answer the handler wrote, with its length, and flushes it: the caller has all of it before anything
 // else happens.
 func (a *answerWriter) finish() {
-	if a.status == 0 {
-		a.status = http.StatusOK
-	}
+	a.WriteHeader(http.StatusOK)
 	if !a.passing {
 		a.commit(true)
 		if len(a.body) > 0 {

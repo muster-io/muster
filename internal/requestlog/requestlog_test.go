@@ -285,6 +285,77 @@ func TestParamsOf(t *testing.T) {
 	}
 }
 
+// headerBytes is the bytes of the names and values of the stored headers b.
+func headerBytes(t *testing.T, b []byte) (map[string][]string, int) {
+	t.Helper()
+	var h map[string][]string
+	if err := json.Unmarshal(b, &h); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for name, values := range h {
+		n += len(name)
+		for _, v := range values {
+			n += len(v)
+		}
+	}
+	return h, n
+}
+
+// TestBounds: a record keeps at most urlMax bytes of a URL and headersMax bytes of the names and values of headers,
+// masked before the cut; the URL, the name or the value that crosses its bound is cut at a character boundary and ends
+// with "…", and the headers after it, in the order of the names, are left out; what fits is kept as it is.
+func TestBounds(t *testing.T) {
+	if got := bounded("short", urlMax); got != "short" {
+		t.Errorf("bounded short: %q", got)
+	}
+	if got := bounded(strings.Repeat("я", 10), 9); got != "яяя"+ellipsis {
+		t.Errorf("bounded at a character boundary: %q", got)
+	}
+	if got := cutAt("aяb", 2); got != "a" || cutAt("ab", 5) != "ab" {
+		t.Errorf("cutAt: %q", got)
+	}
+
+	exact := http.Header{"A": {strings.Repeat("a", headersMax-2)}, "B": nil}
+	if h, n := headerBytes(t, headersOf(exact)); n != headersMax || len(h["A"][0]) != headersMax-2 || h["B"] == nil {
+		t.Errorf("headers of exactly headersMax bytes: %d bytes, %v", n, h["B"])
+	}
+
+	ack := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge)
+	left := headersMax - len(ellipsis) - len("A-First") - len("kept") - len("X-Big")
+	value := strings.Repeat(".", left-20) + " " + ack + " " + strings.Repeat(".", 1<<20)
+	h, n := headerBytes(t, headersOf(http.Header{"A-First": {"kept"}, "X-Big": {value, "next"},
+		"Z-Last": {"gone"}}))
+	if n != headersMax || h["A-First"][0] != "kept" || len(h["X-Big"]) != 1 ||
+		!strings.HasSuffix(h["X-Big"][0], ellipsis) || !strings.Contains(h["X-Big"][0], redacted) ||
+		strings.Contains(h["X-Big"][0], ack[:16]) || h["Z-Last"] != nil {
+		t.Errorf("a value across the bound: %d bytes, names %d, value of %d bytes", n, len(h), len(h["X-Big"][0]))
+	}
+
+	h, n = headerBytes(t, headersOf(http.Header{"A": {"1"}, strings.Repeat("N", 1<<20): {"v"}}))
+	var long string
+	for name := range h {
+		if name != "A" {
+			long = name
+		}
+	}
+	if n != headersMax || len(h) != 2 || !strings.HasSuffix(long, ellipsis) || len(h[long]) != 0 {
+		t.Errorf("a name across the bound: %d bytes, %d names, %d values", n, len(h), len(h[long]))
+	}
+
+	w, _, _ := newTestWriter(&fakeQueries{}, 0)
+	url := "/x?q=" + strings.Repeat(".", urlMax-35) + "&a=" + ack + "&b=" + strings.Repeat(".", 1<<20)
+	p := w.paramsOf(DirectionInbound, outbound.Record{URL: url, Status: 200,
+		ResponseHeader: http.Header{"X-Big": {strings.Repeat("r", 1<<20)}}})
+	if len(p.Url) != urlMax || !strings.HasSuffix(p.Url, ellipsis) || !strings.Contains(p.Url, "&a="+redacted) ||
+		strings.Contains(p.Url, ack[:16]) {
+		t.Errorf("a URL across the bound: %d bytes", len(p.Url))
+	}
+	if _, n := headerBytes(t, p.ResponseHeaders); n != headersMax {
+		t.Errorf("answer headers across the bound: %d bytes", n)
+	}
+}
+
 // TestRecord covers the write statements of C-23.FR-4: a written record is counted in
 // muster_request_log_records_total; one the database refuses, or whose write runs past its timeout, is logged as
 // request_log_write_failed without its content and counted in muster_request_log_write_failures_total, and nothing
