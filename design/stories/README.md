@@ -10,7 +10,7 @@ CLI commands — which files it touches, how its acceptance is checked and what 
 code: the implementation writes the code in the repository against compiler and test feedback, and the contract is what
 the review checks the code against.
 
-Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-22`. Every functional requirement
+Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-23`. Every functional requirement
 (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the
 [coverage table](coverage.md) shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the
 reasons behind technical choices are in the [ADRs](../adr/README.md).
@@ -54,7 +54,7 @@ issue: null
 | `capability` | The capability `C-NN` the story belongs to. |
 | `kind` | `be` (backend: Go, SQL, OpenAPI), `fe` (the web UI), `infra` (build, CI, release, deployment) or `docs` (the documentation site). |
 | `layer` | `L1` for every story of the first release. |
-| `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there closes the story's issue here with `Closes muster-io/muster#<issue>`; the contract and the issue stay in this repository. Without the key the story is for this repository. |
+| `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there says `Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is closed by hand once that pull request merges. The contract and the issue stay in this repository. Without the key the story is for this repository. |
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
 | `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
@@ -128,8 +128,9 @@ current.
   the frontend story. A statement that needs a later capability is covered in part by the earlier story and completed by
   the later one; the coverage table names both.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
-  (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22) and the
-  last documentation story, S-060. The architecture lints of ADR-0016 exist from the first story that contains code.
+  (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
+  check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation story, S-060. The
+  architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
 
@@ -247,8 +248,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
-| Bridge | C-22, and S-060 of C-21 | S-073 – S-081, S-083 – S-086, S-060 | 14 |
-| **L1** | 22 | | **86** |
+| Bridge | C-22, C-23, S-087 of C-13 and S-060 of C-21 | S-073 – S-081, S-083 – S-090, S-060 | 18 |
+| **L1** | 23 | | **90** |
 
 ### Foundation
 
@@ -360,6 +361,10 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-077](S-077-bridge-connection-and-destination-pages-and-profile-links.md) | C-22 | Bridge Connection and Destination pages, Account links through a Bridge in the profile, and labels (FE) | fe | S-076, S-070 |
 | [S-078](S-078-example-bridge-and-the-bridge-conformance-check.md) | C-22 | The conformance check `muster bridge check` against the fake bridge (BE) | be | S-076 |
 | [S-083](S-083-go-bridge-library.md) | C-22 | The Go bridge library `muster-bridge-go` with its CI and releases (BE) — in `muster-io/muster-bridge-go` | be | S-078 |
+| [S-087](S-087-check-a-connection-before-saving-it.md) | C-13 | Check a Connection before saving it, for Mattermost, Telegram and Bridge Connections (BE) | be | S-077, S-076 |
+| [S-088](S-088-request-log-of-outbound-requests-masking-pruning-and-api.md) | C-23 | Request log of outbound requests: recording in the outbound package, masking, pruning and the API (BE) | be | S-087 |
+| [S-089](S-089-request-log-of-inbound-requests-and-the-runs-of-checks.md) | C-23 | Request log of inbound requests at the callbacks, and the kinds and runs of checks and tests (BE) | be | S-088 |
+| [S-090](S-090-request-log-tab-record-view-and-links.md) | C-23 | Request log tab, the record view, and the links from the Alert Group page and the check panels (FE) | fe | S-089 |
 | [S-085](S-085-example-bridge-on-the-go-library.md) | C-22 | The example bridge on the Go bridge library, with its chat page and image (BE) — in `muster-io/muster-bridge-go` | be | S-083 |
 | [S-086](S-086-end-to-end-test-against-the-released-example-bridge.md) | C-22 | End-to-end test against the released image of the example bridge | infra | S-085 |
 | [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-086 |
@@ -429,6 +434,16 @@ touched about 46 files; S-086 then runs Muster's end-to-end test against the exa
 digest, which completes C-22.AC-22 and covers C-22.AC-23. S-079 follows with Write a bridge, which leads with the Go
 library; S-084, the Python library in `muster-io/muster-bridge-python`, comes after S-079 as the maintainer ordered,
 and S-060, which follows it, adds the Python library's section of Write a bridge.
+
+S-087 to S-090 were added after S-083 merged, when the maintainer tried a Bridge on the test environment (D353, D354).
+S-087 adds the check of a Connection before saving it, for every Connection type, with a dry probe for Mattermost and
+Bridges and the rule that a stored token goes only to its saved address; it belongs to C-13, whose FR-14 states it for
+all three types, and its operation and form panel are one pull request, because neither half is useful alone and
+together they touch 40 files, at the edge of the size signal. S-088 to S-090 build the Request log of C-23, in three
+parts because together they touched about 80 files: S-088 the table, recording in the outbound package, masking, pruning
+and the API; S-089 the inbound requests at the callbacks and the kinds and runs of checks, the checks before saving of
+S-087 included; S-090 the pages. They follow S-083 and come before S-085 in the maintainer's queue; S-085 still depends
+only on S-083, since nothing of theirs is in the library's repository.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

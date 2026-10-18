@@ -98,9 +98,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   each: (1) a dry probe `GET <base>/bot0:x/getMe` without the token, which passes on a `401` JSON answer and otherwise
   names what answered (DNS, TLS, timeout, proxy `407`, not JSON — "this is not a Bot API", `404` — wrong path prefix);
   (2) `getMe` with the token — the bot's username; (3) `getWebhookInfo` — whether a webhook is set (which makes long
-  polling fail with `409`) and how many updates are pending. Steps 2 and 3 run only against the saved base URL: while
-  the form holds an unsaved base URL, only the dry probe runs. Muster never sends the token to any address other than
-  the saved base URL — no check, metric or background task does.
+  polling fail with `409`) and how many updates are pending. Steps 2 and 3 run only with a token Muster may send to
+  the base URL (C-13.FR-14): the stored token against the saved base URL through the saved proxy, or a token typed in
+  the same request against the base URL typed with it — a new Connection, or a token being replaced, checked before
+  saving. While the form holds an unsaved base URL or proxy and no token is typed, only the dry probe runs, without the
+  token. Muster never sends the stored token to any address other than the saved base URL — no check, metric or
+  background task does.
 - **C-14.FR-12** The bot token never appears in a log line, an error shown in the UI, the Timeline or a metric,
   including errors that embed the request URL; logs show only the scheme and host of the base URL (C-02.FR-20).
 - **C-14.FR-13** The adapter escapes alert data for Telegram HTML (C-12.FR-7) and declares a length limit of 4,096
@@ -127,13 +130,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 
 ## UI
 
-Connections → Telegram (create, edit, base URL with its hint and warning, step-by-step check, update mode, proxy form,
-delete); the Telegram Destination form with the channel only and a check that shows the discussion group found;
-"Thread not attached" in the delivery state.
+Connections → Telegram (create, edit, base URL with its hint and warning, step-by-step check — also before saving
+(C-13.FR-14) — update mode, proxy form, delete); the Telegram Destination form with the channel only and a check that
+shows the discussion group found; "Thread not attached" in the delivery state.
 
 ## API surface
 
 `connections` of type Telegram (list, create, read, update, delete); `connections/{id}/checks` (create → result);
+`connections/checks` for a draft of the type (C-13.FR-14);
 `destinations` of type Telegram (create, update); the webhook endpoint `callbacks/telegram/{connection_id}` on the ingest listener (it answers `401` to a missing
 or wrong secret token header and to an unknown Connection alike).
 
@@ -150,8 +154,8 @@ Checked against the fake Telegram server.
   changes nothing.
 - **C-14.AC-5** The dry probe passes against a server answering `401` JSON to `/bot0:x/getMe` and fails with "this is
   not a Bot API" against one answering HTML; neither request carries the real token.
-- **C-14.AC-6** With a changed but unsaved base URL, the check makes only the dry probe; no request with the real token
-  reaches the new address.
+- **C-14.AC-6** With a changed but unsaved base URL and no token typed again, the check makes only the dry probe; no
+  request with the real token reaches the new address.
 - **C-14.AC-7** A network error on a request to the fake server leaves the token in no log line and no error shown in
   the UI.
 - **C-14.AC-8** A label value `@channel <b>x</b>` arrives as literal text; an Alert Group with 25 Alerts fits in 4,096
@@ -183,6 +187,11 @@ Checked against the fake Telegram server.
 - **C-14.AC-19** Muster posts nothing to the channel but Root messages, Storm summaries and test messages: every
   lifecycle event of an Alert Group after its Publication reaches the fake server as a reply in the discussion group or
   as an edit of the Root message.
+- **C-14.AC-20** "Check connection" in the create form, with the fake server's base URL and a bot token, makes the dry
+  probe, `getMe` and `getWebhookInfo` against that base URL with the typed token and shows the bot's username, and no
+  Connection is saved. In the edit form of a saved Connection with a changed base URL and the token typed again, the
+  same three steps reach only the new base URL, with the typed token; with only the proxy changed and no token typed,
+  only the dry probe runs, through the new proxy.
 
 ## Related ADRs
 

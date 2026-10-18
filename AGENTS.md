@@ -74,7 +74,8 @@ a schema change is a new expand/contract migration plus an update of `schema.md`
 A story whose frontmatter names a `repository` — the bridge libraries `muster-io/muster-bridge-go` and
 `muster-io/muster-bridge-python` — is worked in that repository: its branch, `files_touched`, `verify` and pull request
 are there, that repository's own AGENTS.md and licence (MIT, no CLA) apply, and the pull request says
-`Closes muster-io/muster#<issue>`. Its contract and its issue stay here.
+`Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is
+closed by hand once that pull request merges. Its contract and its issue stay here.
 
 Issues are generated from the story files by `scripts/stories-sync`. Edit the files, never the issues, and never edit
 the `issue:` field by hand.

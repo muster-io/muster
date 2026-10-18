@@ -4,6 +4,10 @@
 - Date: 2026-10-02
 - Amended: 2026-10-03 — the Broken probe, its Destination check included, runs in the delivery class, not the
   interactive one
+- Amended: 2026-10-18 — a Connection can be checked before it is saved (journal D353): a stored token still goes only
+  to the saved address through the saved proxy, a token typed in the same request may go to the address typed with it,
+  and every Connection type has a dry probe without the token; the outbound package records each request it sends
+  for a Connection or an outgoing webhook in the Request log, masked like its logs (journal D354)
 
 ## Context
 
@@ -91,14 +95,25 @@ proxy setting cannot reach a metadata, link-local or denied address, and a proxy
 
 **Base addresses and secrets in URLs.** A Telegram Connection has a Bot API base URL, `https://api.telegram.org` by
 default, that may point at a reverse proxy or at a self-hosted Bot API server, with a path prefix if needed; it is an
-ordinary target under the outbound address policy and the Connection's proxy. Muster sends the real token only to the
-saved base URL. A connection check of an address first makes a dry probe without the token — `GET <base>/bot0:x/getMe`,
-which any Bot API answers with `401` — and only against the saved address calls `getMe` and `getWebhookInfo` with the
-token. Muster offers no server kind and no wizard for moving a bot between servers; the documentation explains the
-trade-offs and recommends a proxy or a reverse proxy over a self-hosted server. The outbound package redacts secrets
-that travel in URLs from everything it logs and from every error it returns, including the URL inside Go's `url.Error`,
-and logs only the scheme and host of a base URL, whose path may be a secret prefix; the architecture lint that pushes
-known secrets through the code (ADR-0016) covers these errors.
+ordinary target under the outbound address policy and the Connection's proxy. Muster sends a stored token — of a
+Telegram, Mattermost or Bridge Connection — only to the saved address of its Connection, through its saved proxy. A
+token typed in the same request as an address, when a new Connection or a replaced token is checked before saving, may
+go to that address: it is not a stored secret leaving for somewhere it was not saved for. A connection check of an
+address first makes a dry probe without the token — `GET <base>/bot0:x/getMe`, which any Bot API answers with `401`;
+`GET <server>/api/v4/system/ping`, which a Mattermost server answers to anyone; `GET <base>/v1/info`, which a bridge
+answers with `401` and a problem — and calls with a token only where the rule above allows it: with a changed but
+unsaved address or proxy and no token typed again, the dry probe is the whole check. Muster offers no server kind and no
+wizard for moving a bot between servers; the documentation explains the trade-offs and recommends a proxy or a reverse
+proxy over a self-hosted server. The outbound package redacts secrets that travel in URLs from everything it logs and
+from every error it returns, including the URL inside Go's `url.Error`, and logs only the scheme and host of a base URL,
+whose path may be a secret prefix; the architecture lint that pushes known secrets through the code (ADR-0016) covers
+these errors.
+
+**Request log.** The outbound package also records each request it sends for a Connection or an outgoing webhook
+Destination, with its answer, in the Request log (C-23): the caller names the operation and what the request concerns,
+and the package masks the record as it redacts its logs — the Secrets it knows replaced, credential headers replaced
+whatever they hold — before the record is written. Recording never fails or retries the request it records. Clients
+without an owner, OIDC and the outgoing heartbeat among them, record nothing.
 
 **Scope.** Clients added later — LLM providers, MCP servers, Alertmanager polling — use the same package, the same
 policy and the same proxy settings.

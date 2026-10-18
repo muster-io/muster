@@ -8,6 +8,8 @@
   (`rerender_after_rotation`) is a Leader task: the rotation CLI has no renderer (ADR-0011)
 - Amended: 2026-10-14 — polling the events of Bridge Connections in the poll mode (`bridge_polling`) is a Leader task
   (ADR-0017); it is safe to run twice, because an event polled twice is handled once by its id
+- Amended: 2026-10-18 — pruning the Request log to its bounds (`request_log_pruning`) is a Leader task; it is safe to
+  run twice, because it only deletes records past the bounds
 
 ## Context
 
@@ -21,6 +23,7 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
 - creating and dropping partitions, and pruning short-lived rows (ended sessions, expired requests and links) and the
   records of gone replicas;
+- pruning the Request log to the newest records of each Connection and outgoing webhook and to its age bound;
 - gauges computed from the database;
 - a periodic "alive" mark that tells a restarted Muster how long it was down;
 - Muster's own outgoing heartbeat to an external dead man's switch (ADR-0014);

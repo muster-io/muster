@@ -35,7 +35,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   — the check still passes, with the warning `press_answers_in_thread`: the bot may not make ephemeral messages, so
   answers to button presses will show in the Thread of the Root message, and granting the bot that permission, for
   example the system admin role, shows them in the channel (FR-4, F-063). `muster doctor` prints the same hint as a
-  WARN line.
+  WARN line. When the check has no token it may send to the server URL — a changed server URL whose token is not typed
+  again (FR-14) — it makes only a dry probe without the token, `GET <server>/api/v4/system/ping`, which a Mattermost
+  server answers to anyone; it passes on a `200` JSON answer whose `status` is `OK` and otherwise names what answered:
+  `not_mattermost` (an answer that is not that JSON), `wrong_path_prefix` (`404`), `unexpected_status` (another status
+  with JSON) and the network codes of the other steps.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
   limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is a short summary line — the
   status emoji, `#N` and the Alert Group's title — with one attachment, coloured by status, that holds the details of
@@ -126,18 +130,35 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   read that setting through the bot; instead, the test message of a Mattermost Destination presses its own button
   through the bot and reports whether the press reached Muster, naming the setting when it did not (C-16.FR-3, F-022,
   F-054).
+- **C-13.FR-14** Check before saving, for every Connection type — Mattermost, Telegram and Bridge — so that their forms
+  behave alike: the create form, and the edit form while it holds unsaved changes, has "Check connection", which checks
+  the form's draft without saving it — the type, the address, the token typed in the form, the proxy and, for a
+  Bridge, the event delivery mode — with the steps and step codes of the check of a saved Connection (FR-2,
+  C-14.FR-11, C-22.FR-2), through the interactive path. It stores nothing — no Connection, no bot name, no `info` — and
+  writes no Audit log entry, because it changes no configuration. Which token goes where:
+  1. A token **typed in the same request** may be sent to the address typed in the same request: a new Connection, or
+     a Connection whose token is being replaced.
+  2. A **stored** token is sent only to the saved address of its Connection, through its saved proxy. With a changed
+     but unsaved address or proxy and no token typed, the check makes only the dry probe of its type, without any
+     token: FR-2 for Mattermost, C-14.FR-11 for Telegram, C-22.FR-2 for a Bridge.
+  3. A stored proxy password is used only with the proxy type and address it was saved with; a draft that changes them
+     uses the password typed with it, or none.
+
+  No check, metric or background task sends a stored token anywhere else (NFR-6).
 
 ## UI
 
-Connections → Mattermost (create, edit, check, delete, proxy form, the callback address with its hint); the shared
-Destinations list and Destination page with "Check"; the Mattermost Destination form with team and channel pickers
-loaded through the bot; the delivery state section of the Alert Group page; the "Delivery problem" filter and mark in
-the Alert Group list; the Internal alerts Route suggestion.
+Connections → Mattermost (create, edit, check — also in the create form and in the edit form with unsaved changes
+(FR-14), the same for Telegram and Bridge Connections — delete, proxy form, the callback address with its hint); the
+shared Destinations list and Destination page with "Check"; the Mattermost Destination form with team and channel
+pickers loaded through the bot; the delivery state section of the Alert Group page; the "Delivery problem" filter and
+mark in the Alert Group list; the Internal alerts Route suggestion.
 
 ## API surface
 
 `connections` of type Mattermost (list, create, read, update, delete; reads carry the callback address);
-`connections/{id}/checks` (create → result);
+`connections/{id}/checks` (create → result); `connections/checks` (create → result: the check of a draft, for every
+Connection type, FR-14);
 `connections/{id}/channels` (list channels visible to the bot); `destinations` of type Mattermost (create, update);
 `destinations/{id}/checks` (create → result, for types with a Destination check); the `delivery_problem` filter on `alert-groups`; the action callback endpoint
 `callbacks/mattermost/{connection_id}` on the ingest listener.
@@ -187,6 +208,11 @@ Checked against the fake Mattermost server.
 - **C-13.AC-16** The connection check of a bot whose roles do not grant `create_post_ephemeral` passes with the warning
   `press_answers_in_thread`, and `muster doctor` prints it as a WARN line; with the system admin role there is no
   warning.
+- **C-13.AC-17** "Check connection" in the create form, with the fake server's address and a bot token, shows the
+  bot's name, and afterwards no Connection exists and the Audit log has no new entry. In the edit form of a saved
+  Connection, with only the server URL changed to a second fake server, the check makes only the dry probe
+  `GET /api/v4/system/ping` there, and neither fake server records a request that carries the stored token; with the
+  token typed again, the check makes the step `token` against the new address with the typed token.
 
 ## Related ADRs
 
@@ -203,3 +229,5 @@ C-11 — delivery; C-12 — rendering and Mention settings.
 - **FE** — Connection pages with the callback address and its hint, the shared Destination pages with "Check", the
   Mattermost Destination form, the delivery state section, the "Delivery problem" filter, the Internal alerts Route
   suggestion.
+- **BE and FE** — the check before saving of every Connection type (FR-14), added after the Bridge: one story, its
+  operation and the forms' check panel together.

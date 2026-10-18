@@ -45,7 +45,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   bot), the event delivery mode (`connection.bridge.event_delivery`: `poll` or `push`), with `push` a push secret
   (encrypted, write-only, the Standard Webhooks `whsec_` form), a proxy (C-03.FR-19) and its limiter
   (`connection.bridge.limiter`). Muster sends the token as `Authorization: Bearer` on every
-  request, only to the saved base URL; the base URL is an ordinary target under the outbound address policy and the
+  request: the stored token only to the saved base URL, and a token typed in a check before saving only to the base
+  URL typed with it (C-13.FR-14); the base URL is an ordinary target under the outbound address policy and the
   Connection's proxy (ADR-0015). The token and the push secret never appear in a log line, an error shown in the UI, the
   Timeline or a metric (C-02.FR-20), and a key rotation re-encrypts both like every other Secret (C-20.FR-7). The
   Connection returns, read-only, the callback address of FR-11 for push and the last `info` it read. Deleting a Bridge
@@ -57,7 +58,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   answer does not match the protocol or is larger than 64 KiB, or when the Connection's event delivery mode is not one
   the bridge offers. Muster keeps the last `info` on the Connection, reads it again on every check and, before a call
   that depends on it, when it is older than `bridge.info_max_age`, so a change in the bridge reaches Muster without a
-  restart.
+  restart. When the check has no token it may send to the base URL — a changed base URL or proxy whose token is not
+  typed again (C-13.FR-14) — it makes only a dry probe without the token, `GET <base>/v1/info`, which every bridge
+  answers with `401` and a problem (`application/problem+json`) when the token is missing; it passes on that answer and
+  otherwise names what answered: `not_bridge` (an answer that is not a problem), `wrong_path_prefix` (`404`),
+  `unexpected_status` (another status with a problem) and the network codes of the step `info`. A check before saving
+  stores no `info`.
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
   `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and
@@ -263,17 +269,19 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
 
 ## UI
 
-Connections → Bridge (create, edit, the event delivery mode with the push secret and the callback address for push,
-the check with what the bridge offers, proxy form, delete); the Bridge Destination form with the channel id, the
-check that shows the channel's name, Mention settings with nobody or chosen users, and limiters proposed from `info`;
-"Past the edit window" in the delivery state; Profile → Messenger accounts → "Link through {Connection}" with the
-token, the bridge's link and, where offered, the handle field labelled by its kind and the code entry; the labels of
-Connections and Destinations across the UI (S-070) for the Bridge type, with the messenger's name from `info`.
+Connections → Bridge (create, edit, the event delivery mode with the push secret and the callback address for push, the
+check with what the bridge offers — also before saving (C-13.FR-14) — proxy form, delete); the Bridge Destination form
+with the channel id, the check that shows the channel's name, Mention settings with nobody or chosen users, and limiters
+proposed from `info`; "Past the edit window" in the delivery state; Profile → Messenger accounts → "Link through
+{Connection}" with the token, the bridge's link and, where offered, the handle field labelled by its kind and the code
+entry; the labels of Connections and Destinations across the UI (S-070) for the Bridge type, with the messenger's name
+from `info`.
 
 ## API surface
 
 In `api/openapi.yaml`, added by the stories that implement them: `connections` of type `bridge` (list, create, read,
-update, delete; reads carry the callback address and the last `info`); `connections/{id}/checks`; `destinations` of type
+update, delete; reads carry the callback address and the last `info`); `connections/{id}/checks`; `connections/checks`
+for a draft of the type (C-13.FR-14); `destinations` of type
 `bridge` (create, update); `destinations/{id}/checks` with the check item `channel`, `tests` and `previews` for the
 type; `me/account-links/bridge` (`startBridgeLink` → token and link), `me/account-links/bridge/codes`
 (`startBridgeCodeLink` → code sent) and `me/account-links/bridge/confirmation` (`confirmBridgeLink`, with the code);
@@ -368,6 +376,11 @@ Checked against the fake bridge, unless an acceptance statement names the exampl
   `muster bridge check` run from `ghcr.io/muster-io/muster:edge` with all its features, and skips the optional ones when
   it offers only `thread_messages`; a copy of `api/bridge.yaml` that differs by one byte from Muster's fails the
   library's CI.
+- **C-22.AC-26** "Check connection" in the create form, with the fake bridge's base URL and a token, shows the steps
+  `info` and `event_delivery` with what the bridge offers, and no Connection and no `info` are stored. In the edit form
+  of a saved Connection with only the base URL changed, the check makes only the dry probe `GET <base>/v1/info`
+  without an `Authorization` header and passes on the fake's `401` problem; against an address that answers `200`
+  with HTML it fails with `not_bridge`; no request that carries the stored token reaches the new address.
 
 ## Related ADRs
 
