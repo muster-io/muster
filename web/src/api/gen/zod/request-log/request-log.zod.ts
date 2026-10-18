@@ -152,10 +152,10 @@ export const GetRequestRecordResponse = zod.object({
 }).describe('One attempt of a request as a list shows it.').and(zod.object({
   "request_headers": zod.record(zod.string(), zod.array(zod.string())).describe('HTTP headers by name, each with its values, masked. Untrusted text.'),
   "request_body": zod.string().describe('The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text.'),
-  "request_body_bytes": zod.int().min(getRequestRecordResponseTwoRequestBodyBytesMin).describe('The size of the request body as stored before truncation, after Secrets are masked.'),
+  "request_body_bytes": zod.int().min(getRequestRecordResponseTwoRequestBodyBytesMin).describe('The length in bytes of the request body after Secrets are masked and before signed action ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut.'),
   "response_headers": zod.record(zod.string(), zod.array(zod.string())).nullable().describe('HTTP headers by name, each with its values, masked, or null. Untrusted text.'),
   "response_body": zod.string().nullable().describe('The answer\'s body, masked and cut as the request body; null without an answer; untrusted text.'),
-  "response_body_bytes": zod.int().min(getRequestRecordResponseTwoResponseBodyBytesMin).describe('The size of the answer\'s body as stored before truncation, after Secrets are masked; for an answer larger than the client reads, the bytes read. 0 without an answer.'),
+  "response_body_bytes": zod.int().min(getRequestRecordResponseTwoResponseBodyBytesMin).describe('The length in bytes of the answer\'s body after Secrets are masked and before signed action ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut; for an answer larger than the client reads, of the bytes read. 0 without an answer.'),
   "error": zod.string().nullable().describe('Why the attempt failed, masked; null for one that succeeded. Untrusted where it comes from the remote side.')
 })).describe('One attempt of a request with its headers and bodies, masked. Headers, bodies and the error are untrusted text.')
 

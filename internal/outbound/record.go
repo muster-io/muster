@@ -103,7 +103,7 @@ func MaskHeaders(h http.Header, redact func(string) string) http.Header {
 
 // Record is one attempt of a request, as the Recorder gets it: its URL as errors show it, its headers as sent and its
 // bodies, all masked of the client's and the request's Secrets, of a base URL's path prefix of at least
-// minSecretPrefix characters and of MaskedHeaders, with Location and Content-Location shown as the URL is. Status is
+// minSecretPrefix bytes and of MaskedHeaders, with Location and Content-Location shown as the URL is. Status is
 // 0, and the answer's header and body nil, when the attempt got no answer; Outcome is ok for an attempt that
 // succeeded, and Network and Error say what failed otherwise.
 type Record struct {
@@ -142,7 +142,7 @@ func (ex *exchange) answer(resp *http.Response, data []byte) {
 }
 
 // record hands the Recorder the record of attempt n of req to u, which ended with res and err after elapsed, masked
-// of the client's and the request's Secrets, of a base URL's path prefix of at least minSecretPrefix characters and of
+// of the client's and the request's Secrets, of a base URL's path prefix of at least minSecretPrefix bytes and of
 // MaskedHeaders. Nothing is recorded without a Recorder or an Owner, for an attempt that sent nothing, for one whose
 // caller went away (context.Canceled) and for a successful one that req.SkipRecord leaves out. Everything handed over
 // is a copy, so that no Recorder can change the result.
@@ -178,19 +178,32 @@ func (c *Client) record(ctx context.Context, req Request, u *url.URL, n int, res
 // urlHeaders are the answer's headers whose values are URLs, which a record shows as display shows a URL.
 var urlHeaders = []string{"Location", "Content-Location"}
 
-// answerHeader is the answer's header h to the request to u as a record shows it: the values of urlHeaders resolved
-// against u and shown with the secrets of red as display shows a URL, the base URL's path prefix [redacted] whatever
-// its length, and then masked by MaskHeaders.
+// answerHeader is the answer's header h to the request to u as a record shows it: the values of urlHeaders that resolve
+// against u to an http or https URL with a host shown with the secrets of red as display shows a URL, the base URL's
+// path prefix [redacted] whatever its length, and then masked by MaskHeaders. Any other value, an empty one or one
+// such as mailto:a@b, is no URL a request could go to and stays as it was, left to MaskHeaders.
 func (c *Client) answerHeader(red redactor, u *url.URL, h http.Header) http.Header {
 	h = h.Clone()
 	for _, name := range urlHeaders {
 		for i, v := range h[name] {
-			if l, err := u.Parse(v); err == nil {
+			if l, ok := webTarget(u, v); ok {
 				h[name][i] = c.displayWith(red, l)
 			}
 		}
 	}
 	return MaskHeaders(h, red.redact)
+}
+
+// webTarget is v resolved against u when v is not empty and resolves to an http or https URL with a host.
+func webTarget(u *url.URL, v string) (*url.URL, bool) {
+	if v == "" {
+		return nil, false
+	}
+	l, err := u.Parse(v)
+	if err != nil || l.Host == "" || l.Scheme != "http" && l.Scheme != "https" {
+		return nil, false
+	}
+	return l, true
 }
 
 // redactBytes is a copy of b with the secrets of red replaced, nil for nil.

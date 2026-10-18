@@ -5828,7 +5828,7 @@ type RequestRecord struct {
 	// RequestBody The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text.
 	RequestBody string `json:"request_body"`
 
-	// RequestBodyBytes The size of the request body as stored before truncation, after Secrets are masked.
+	// RequestBodyBytes The length in bytes of the request body after Secrets are masked and before signed action ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut.
 	RequestBodyBytes int `json:"request_body_bytes"`
 
 	// RequestBodyTruncated The request body is cut to `request_log.body_max` bytes.
@@ -5840,7 +5840,7 @@ type RequestRecord struct {
 	// ResponseBody The answer's body, masked and cut as the request body; null without an answer; untrusted text.
 	ResponseBody nullable.Nullable[string] `json:"response_body"`
 
-	// ResponseBodyBytes The size of the answer's body as stored before truncation, after Secrets are masked; for an answer larger than the client reads, the bytes read. 0 without an answer.
+	// ResponseBodyBytes The length in bytes of the answer's body after Secrets are masked and before signed action ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut; for an answer larger than the client reads, of the bytes read. 0 without an answer.
 	ResponseBodyBytes int `json:"response_body_bytes"`
 
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.

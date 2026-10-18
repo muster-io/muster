@@ -163,7 +163,8 @@ issue: 266
     saving — record nothing.
   - Not recorded on purpose: the `setWebhook` that creating a Telegram Connection in the webhook mode makes
     (`internal/connections/telegram.go` gives that client no owner), as it runs inside the transaction that inserts the
-    Connection and the record's foreign key would wait on that uncommitted row for the `Writer`'s 2-second timeout —
+    Connection: the `Writer` inserts on another connection, which does not see that uncommitted row, so the record's
+    foreign key would fail at once (`23503`), logged as `request_log_write_failed` and counted on every such create —
     S-089 may record it after the commit; and an attempt whose caller's context was cancelled (`context.Canceled` — a
     shutdown, a lost Leader stopping a long poll), whose outcome nobody waits for, while an attempt that ran past a
     deadline (`context.DeadlineExceeded`) is recorded.
@@ -185,9 +186,12 @@ issue: 266
     `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token`, `webhook-signature` and the
     outgoing webhook's signature header (`outbound.MaskedHeaders`, which S-089 reuses) are replaced whatever they hold.
     The base URL's path prefix is `[redacted]` in the URL and in the answer's `Location` and `Content-Location`, which
-    a record shows as the URL, resolved against the request's; a prefix of at least 16 characters without its slashes
-    is also `[redacted]` wherever else the record holds it, such as a body that echoes the request path, while a
-    shorter one, such as `/api/v4` or `/v1`, is a route rather than a secret and bodies keep it.
+    a record shows as the URL, resolved against the request's when they resolve to an `http` or `https` URL with a
+    host (any other value, an empty one included, is kept as it came); the base URL's host and scheme are compared
+    without regard to case, an explicit default port equal to none; a prefix at least 16 bytes long without its
+    leading and trailing slashes (inner slashes count) is also `[redacted]` wherever else the record holds it, such
+    as a body that echoes the request path, while a shorter one, such as `/api/v4` or `/v1`, is a route rather than a
+    secret and bodies keep it.
   - Every outbound transport reads at most 64 KiB of an answer's header (`MaxResponseHeaderBytes`, instead of the
     10 MB of `net/http`); an answer with a larger header fails as a transport error, like any answer that cannot be
     read.
@@ -199,8 +203,9 @@ issue: 266
   text: every string that `buttons.LooksSigned` recognizes as a signed action id — the structure of an action id,
   checked without its key — a 43-character base64url word after `/start `, and the `token` member of an `account_link`
   event; then each body is cut to `request_log.body_max` bytes at a UTF-8 boundary, invalid bytes replaced, with its
-  size (`*_body_bytes`: the size of the body as stored before truncation, after Secrets are masked; for an answer larger
-  than the client reads, the bytes read) and the truncated mark. A failed write is logged as `request_log_write_failed`
+  size (`*_body_bytes`: the length in bytes of the body the outbound package hands over — after Secrets are masked,
+  before the shape masking, the replacement of invalid bytes and the truncation; for an answer larger than the client
+  reads, of the bytes read) and the truncated mark. A failed write is logged as `request_log_write_failed`
   (WARN: direction, operation, the owner's `public_id` and the database error, never a header or a body) and counted.
 - **Reading** (`requestlog.go`, `query.sql`): newest first by `(at, id)`, cursor pagination; only records newer than
   `request_log.max_age` and among the newest `request_log.max_records` of their owner; a messenger Destination's view
@@ -337,20 +342,23 @@ None.
 - Contract corrections made in review, each a deliberate departure with its reason:
   - The `setWebhook` that creating a Telegram Connection in the webhook mode makes is not recorded
     (`internal/connections/telegram.go` gives that client no owner): it runs inside the transaction that inserts the
-    Connection, and the record's foreign key would wait on that uncommitted row for the `Writer`'s 2-second timeout.
-    S-089 may record it after the commit (Contracts → Recording).
+    Connection, and the `Writer` inserts on another connection, which does not see that uncommitted row, so the
+    record's foreign key would fail at once (`23503`), logged as `request_log_write_failed` and counted on every such
+    create. S-089 may record it after the commit (Contracts → Recording).
   - An attempt whose caller's context was cancelled (`context.Canceled` — a shutdown, a lost Leader stopping a long
     poll) is not recorded, as nobody waits for its outcome; one that ran past a deadline (`context.DeadlineExceeded`)
     is (Contracts → Recording).
   - Every outbound transport bounds an answer's header to 64 KiB: `net/http`'s default of 10 MB would let each row
     carry megabytes of answer headers (Contracts → Recording and Write volume).
-  - The base URL's path prefix is `[redacted]` in `Location` and `Content-Location` too and, from 16 characters, in
-    every header and body of the record: a redirect or a body echoing the request path stored it otherwise. A shorter
-    prefix is a route, not a secret, and replacing it everywhere would garble bodies (Contracts → Recording, Secrets).
+  - The base URL's path prefix is `[redacted]` in `Location` and `Content-Location` too and, from 16 bytes without its
+    leading and trailing slashes, in every header and body of the record: a redirect or a body echoing the request
+    path stored it otherwise. A shorter prefix is a route, not a secret, and replacing it everywhere would garble
+    bodies (Contracts → Recording, Secrets).
   - `request_log_unowned_idx` joins the indexes: no index served the count bound of the records without an owner
     (`CountNewerUnowned`, `PruneUnownedExcess`), which scanned the Organization's whole table (Contracts → Schema).
-  - `*_body_bytes` is the size of the body as stored before truncation, after Secrets are masked, and for an answer
-    larger than the client reads the bytes read, not the size as sent or received (Contracts → Writing).
+  - `*_body_bytes` is the length in bytes of the body the outbound package hands over — after Secrets are masked,
+    before the shape masking, the replacement of invalid bytes and the truncation — and for an answer larger than the
+    client reads that of the bytes read, not the size as sent or received (Contracts → Writing).
 
 ## Coverage
 

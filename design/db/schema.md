@@ -1131,9 +1131,10 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   and tests) and `check_run` (a `CR` id) from S-089, `method`, `url` as errors show it, the request's `request_headers`
   (a `jsonb` object of string arrays) and `request_body`, the answer's `status` (100 to 999), `response_headers` and
   `response_body` — all three null for a request that got no answer (`request_log_answer_check`) — each body's size
-  (`*_body_bytes`: the size of the body as stored before truncation, after Secrets are masked; for an answer larger than
-  the client reads, the bytes read) and whether its text was cut (`*_truncated`), `latency_ms` on the real clock, `via`
-  (`direct`, `proxy`), `attempt`, and for a failed attempt `error_class` (the outcomes of the outbound package),
+  (`*_body_bytes`: the length in bytes of the body the outbound package hands over — after Secrets are masked, before
+  the masking of signed action ids and tokens, the replacement of invalid bytes and the cut; for an answer larger than
+  the client reads, of the bytes read) and whether its text was cut (`*_truncated`), `latency_ms` on the real clock,
+  `via` (`direct`, `proxy`), `attempt`, and for a failed attempt `error_class` (the outcomes of the outbound package),
   `error_code` (a check code, only without an answer: `request_log_code_without_answer_check`) and the masked `error`.
   Nothing secret is stored: the outbound package masks the Secrets of the client and of the request and the values of
   `outbound.MaskedHeaders` before the record leaves it, and `internal/requestlog` masks signed action ids, `/start`

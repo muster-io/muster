@@ -14114,7 +14114,8 @@ components:
           request_body_bytes:
             type: integer
             minimum: 0
-            description: The size of the request body as stored before truncation, after Secrets are masked.
+            description: The length in bytes of the request body after Secrets are masked and before signed action ids
+              and tokens are masked, bytes that are not UTF-8 replaced and the body cut.
           response_headers:
             $ref: '#/components/schemas/NullableHttpHeaders'
           response_body:
@@ -14125,8 +14126,9 @@ components:
           response_body_bytes:
             type: integer
             minimum: 0
-            description: The size of the answer's body as stored before truncation, after Secrets are masked; for an
-              answer larger than the client reads, the bytes read. 0 without an answer.
+            description: The length in bytes of the answer's body after Secrets are masked and before signed action
+              ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut; for an answer larger than
+              the client reads, of the bytes read. 0 without an answer.
           error:
             type:
             - string

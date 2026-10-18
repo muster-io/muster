@@ -42,9 +42,10 @@ const DefaultMaxBodyBytes = 8 << 20
 // log holds more of an answer's header than this.
 const maxResponseHeaderBytes = 64 << 10
 
-// minSecretPrefix is the length from which the path prefix of a base URL, without its slashes, is masked wherever a
-// record holds it, in its headers and bodies as in its URL: a shorter prefix, such as /api/v4 or /v1, is a route
-// rather than a secret, and replacing it everywhere would garble the bodies that name it.
+// minSecretPrefix is the length in bytes from which the path prefix of a base URL, without its leading and trailing
+// slashes (inner slashes count), is masked wherever a record holds it, in its headers and bodies as in its URL: a
+// shorter prefix, such as /api/v4 or /v1, is a route rather than a secret, and replacing it everywhere would garble
+// the bodies that name it.
 const minSecretPrefix = 16
 
 // userAgent is the User-Agent of every request that does not set its own, and of every CONNECT to a proxy: Muster and
@@ -151,7 +152,7 @@ type Client struct {
 	// secrets are those of the configuration and the proxy's password, which redactor replaces.
 	secrets  []logging.Secret
 	redactor redactor
-	// recordSecrets are secrets and the base URL's path prefix of at least minSecretPrefix characters, which
+	// recordSecrets are secrets and the base URL's path prefix of at least minSecretPrefix bytes, which
 	// recordRedactor replaces in a record; a record adds the request's own.
 	recordSecrets  []logging.Secret
 	recordRedactor redactor
@@ -405,7 +406,7 @@ func (c *Client) display(u *url.URL) string { return c.displayWith(c.redactor, u
 
 // displayWith is display with the secrets of red.
 func (c *Client) displayWith(red redactor, u *url.URL) string {
-	if c.base != nil && u.Host == c.base.Host && u.Scheme == c.base.Scheme {
+	if c.base != nil && sameOrigin(u, c.base) {
 		if prefix := strings.TrimSuffix(c.base.Path, "/"); prefix != "" {
 			if rest, ok := strings.CutPrefix(u.Path, prefix); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
 				v := *u
@@ -415,6 +416,24 @@ func (c *Client) displayWith(red redactor, u *url.URL) string {
 		}
 	}
 	return red.redact(red.url(u))
+}
+
+// sameOrigin reports whether a and b have the same scheme and host, both compared without regard to case, with an
+// explicit default port (:80 for http, :443 for https) equal to none.
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(originHost(a), originHost(b))
+}
+
+// originHost is the host and port of u, without the port when it is the default port of u's scheme.
+func originHost(u *url.URL) string {
+	port := u.Port()
+	switch {
+	case port == "",
+		port == "80" && strings.EqualFold(u.Scheme, "http"),
+		port == "443" && strings.EqualFold(u.Scheme, "https"):
+		return u.Hostname()
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // send makes one attempt of req: its result, and what it sent and was answered for its record.

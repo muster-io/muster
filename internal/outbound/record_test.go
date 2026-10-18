@@ -536,6 +536,48 @@ func TestRecordBasePrefix(t *testing.T) {
 	}
 }
 
+// TestRecordLocationTargets: a record shows a Location or Content-Location as display shows a URL only when it
+// resolves to an http or https URL with a host; an empty value, which the error calls no Location, and one that names
+// no web address stay as they came, never resolved to the request URL or rewritten as scheme://.
+func TestRecordLocationTargets(t *testing.T) {
+	const prefix = "s3cret-pr3fix-0123456789"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil
+		w.Header()["Location"] = []string{r.URL.Query().Get("loc")}
+		w.Header()["Content-Location"] = []string{r.URL.Query().Get("loc")}
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	srvURL := srv.URL
+	host := strings.TrimPrefix(srvURL, "http://")
+	for _, tt := range []struct{ loc, want, err string }{
+		{"", "", "redirect refused: the answer 302 has no Location"},
+		{"mailto:a@b", "mailto:a@b", ""},
+		{"ftp://files.example/x", "ftp://files.example/x", ""},
+		{"http:///no-host", "http:///no-host", ""},
+		{"/" + prefix + "/elsewhere", srvURL + "/[redacted]/elsewhere", ""},
+		{"HTTP://" + host + "/" + prefix + "/up", srvURL + "/[redacted]/up", ""},
+		{"https://other.example/" + prefix, "https://other.example/[redacted]", ""},
+	} {
+		t.Run(tt.loc, func(t *testing.T) {
+			c, rec := recording(t, Config{BaseURL: srvURL + "/" + prefix + "/"})
+			_, err := c.Do(t.Context(), Request{URL: "/moved?loc=" + url.QueryEscape(tt.loc)})
+			if err == nil || tt.err != "" && err.Error() != tt.err {
+				t.Fatalf("error %v", err)
+			}
+			got := rec.got()
+			if len(got) != 1 {
+				t.Fatalf("records %+v", got)
+			}
+			for _, name := range urlHeaders {
+				if v := got[0].ResponseHeader[name]; !reflect.DeepEqual(v, []string{tt.want}) {
+					t.Errorf("%s %q, want %q", name, v, tt.want)
+				}
+			}
+		})
+	}
+}
+
 // TestAnswerHeaderBound: an answer whose header is larger than maxResponseHeaderBytes fails as a transport error and
 // its record has no answer; one just below the bound is read.
 func TestAnswerHeaderBound(t *testing.T) {
