@@ -160,8 +160,8 @@ None.
 
 - Suggested commit: `feat(cli): add the bridge conformance check`.
 - The example bridge and its image left this story with D343: they live in `muster-io/muster-bridge-go`, built on the
-  Go bridge library (S-083, S-085), and S-086 runs this check and the flows of C-22.AC-23 against a released image of
-  it. The check comes first because the libraries' CI runs it from `ghcr.io/muster-io/muster:edge`.
+  Go bridge library (S-083, S-085), and S-086 runs this check and the flows of C-22.AC-23 against its image, pinned by
+  digest. The check comes first because the libraries' CI runs it from `ghcr.io/muster-io/muster:edge`.
 - The file keeps its name from before the move; the title says what the story now delivers.
 
 ## Coverage
@@ -169,4 +169,4 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-22.FR-21 | full | |
-| C-22.AC-22 | partial | against the fake bridge; against the released example bridge in S-086 |
+| C-22.AC-22 | partial | against the fake bridge; against the example bridge's pinned image in S-086 |

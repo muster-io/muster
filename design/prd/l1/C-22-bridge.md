@@ -236,8 +236,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   its own web page — channels, Threads, buttons, direct messages, users found by login — that offers every feature of
   the protocol, switchable one by one so that a bridge without buttons can be tried, and both event delivery modes. It
   passes `muster bridge check`. Its image `ghcr.io/muster-io/muster-example-bridge` is published for each commit on
-  that repository's `master` and for each of its releases. Muster's end-to-end tests run a released image of it, pinned
-  by digest and updated by Renovate, so that a change of Muster that breaks a released bridge library fails Muster's CI.
+  that repository's `master` and for each of its releases. Muster's end-to-end tests run its image, pinned by digest
+  (the released one once the libraries are released) and updated by Renovate, so that a change of Muster that breaks a
+  released bridge library fails Muster's CI.
 - **C-22.FR-23** The documentation covers: under Messengers, setting up a Bridge — the Connection with its token and
   event delivery mode (polling when the bridge cannot reach Muster, push with its callback address and secret
   otherwise), Destinations by channel id, what the Connection check shows, Text commands, Account links by token and
@@ -364,11 +365,13 @@ Checked against the fake bridge, unless an acceptance statement names the exampl
   its check; the profile links an account through a Bridge Connection by token and, where offered, by a code with the
   handle field labelled as the bridge declares — all in English and Russian, without horizontal scrolling at 360 px wide.
 - **C-22.AC-22** `muster bridge check` passes every step against the fake bridge with all its features and skips the
-  optional ones when they are switched off, and does the same against the released image of the example bridge;
-  against the fake bridge with replays turned off it fails the idempotency step and exits `1`.
-- **C-22.AC-23** On `muster dev` with a Bridge Connection to the released image of the example bridge, a new Alert
-  Group appears on the example's web page; pressing Ack there acknowledges it in Muster; with the example's buttons
-  switched off, `ack` written in the Thread acknowledges it.
+  optional ones when they are switched off, and does the same against the image of the example bridge pinned by digest
+  (the released one once the libraries are released); against the fake bridge with replays turned off it fails the
+  idempotency step and exits `1`.
+- **C-22.AC-23** On `muster dev` with a Bridge Connection to the image of the example bridge pinned by digest (the
+  released one once the libraries are released), a new Alert Group appears on the example's web page; pressing Ack
+  there acknowledges it in Muster; with the example's buttons switched off, `ack` written in the Thread acknowledges
+  it.
 - **C-22.AC-24** The documentation site has the Bridge and "Write a bridge" pages and the protocol reference rendered
   from `api/bridge.yaml`, linked from the navigation, and `make docs-check` passes.
 - **C-22.AC-25** In each library's repository, a bridge built on the library — the example bridge in Go, the library's
@@ -406,6 +409,7 @@ timers and Account links of the Act stage.
 - **BE** — `muster bridge check`, checked against the fake bridge.
 - **BE** — the Go bridge library, in its own repository.
 - **BE** — the example bridge on the Go library, in the same repository.
-- **Infra** — Muster's end-to-end test against the example's released image.
+- **Infra** — Muster's end-to-end test against the example's image pinned by digest (the released one once the
+  libraries are released).
 - **Docs** — "Write a bridge" and the protocol reference on the documentation site.
 - **BE** — the Python bridge library, in its own repository.
