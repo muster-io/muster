@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The queries of Storms over the fake database.
@@ -406,7 +407,8 @@ func TestStorm(t *testing.T) {
 		case c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on Route payments"):
 			summaries++
 			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
-				!strings.Contains(textOf(c), "1 new Alert Groups, 0 Urgent") {
+				!strings.Contains(textOf(c), "1 new Alert Groups, 0 Urgent") ||
+				c.Links != (outbound.Links{Destination: c.Destination.ID}) {
 				t.Errorf("summary %+v", c)
 			}
 		case c.Method == deliverytest.MethodPublish:

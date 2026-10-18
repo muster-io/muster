@@ -45,6 +45,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/telegram"
@@ -572,7 +573,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 			return err
 		}
 		if secret != "" {
-			if hooked, err = s.setWebhook(ctx, q, created.PublicID, secret); err != nil {
+			if hooked, err = s.setWebhook(ctx, q, created.PublicID, secret, true); err != nil {
 				return err
 			}
 		}
@@ -730,7 +731,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			return err
 		}
 		if secret != "" {
-			if hooked, err = s.setWebhook(ctx, q, out.PublicID, secret); err != nil {
+			if hooked, err = s.setWebhook(ctx, q, out.PublicID, secret, false); err != nil {
 				return err
 			}
 		}
@@ -816,7 +817,8 @@ func (s *Service) record(ctx context.Context, q Queries, r Requester, action str
 	return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: c.PublicID})
 }
 
-// client builds the Mattermost client of the stored Connection row, with its decrypted bot token and proxy password.
+// client builds the Mattermost client of the stored Connection row, with its decrypted bot token and proxy password;
+// its requests go to the Request log of the Connection.
 func (s *Service) client(row dbgen.GetConnectionRow) (*mattermost.Client, error) {
 	if row.Type != TypeMattermost {
 		return nil, ErrNotMattermost
@@ -834,7 +836,7 @@ func (s *Service) client(row dbgen.GetConnectionRow) (*mattermost.Client, error)
 		return nil, err
 	}
 	return mattermost.NewClient(s.cfg.Network, mattermost.Settings{ServerURL: row.MattermostServerUrl.String,
-		Token: token, Proxy: p.Outbound(password)})
+		Token: token, Proxy: p.Outbound(password), Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}})
 }
 
 // Target is where the Mattermost Destination destinationID posts, for the adapter: its team and channel and the client

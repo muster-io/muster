@@ -195,12 +195,12 @@ func (t *Tester) send(ctx context.Context, d delivery.Destination, tg target, re
 			header[HeaderID] = []string{id}
 			header[HeaderTimestamp] = []string{strconv.FormatInt(at.Unix(), 10)}
 			header[HeaderSignature] = []string{sig}
-			client, err := t.Adapter.client(d.ID, c.Class, tg)
+			client, err := t.Adapter.client(d, c.Class, tg)
 			if err != nil {
 				return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(red.redact(err.Error()))}
 			}
 			res, sendErr = client.Do(ctx, outbound.Request{Method: p.method, URL: p.url, Header: header, Body: p.body,
-				Mapping: Mapping})
+				Mapping: Mapping, Operation: name})
 			return outcomeOf(res, sendErr, red)
 		}))
 	st, err := delivery.Step(name, out, err, t.Adapter.Network.Real.Now().Sub(start))

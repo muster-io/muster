@@ -7,15 +7,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
@@ -120,7 +125,7 @@ func TestRequestPlumbing(t *testing.T) {
 	var out struct {
 		MessageID string `json:"message_id"`
 	}
-	_, r := c.do(t.Context(), outbound.ClassDelivery, http.MethodPost, "messages/"+Segment("a/b c?#%"),
+	_, r := c.do(t.Context(), outbound.ClassDelivery, "postMessage", http.MethodPost, "messages/"+Segment("a/b c?#%"),
 		http.Header{"Idempotency-Key": {"k-1"}}, map[string]string{"body": "x"}, &out)
 	if !r.OK() || out.MessageID != "m1" {
 		t.Fatalf("post = %+v %+v", r, out)
@@ -342,16 +347,16 @@ func TestAnswersThatAreNotTheExpectedJSON(t *testing.T) {
 	b := startStandIn(t, answerJSON(http.StatusOK, "text/html", "<html>hello</html>"))
 	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
 	var out struct{}
-	_, r := c.do(t.Context(), outbound.ClassBackground, http.MethodGet, "events", nil, nil, &out)
+	_, r := c.do(t.Context(), outbound.ClassBackground, "pollEvents", http.MethodGet, "events", nil, nil, &out)
 	if r.Classification.Class != ClassInvalid || r.Status != http.StatusOK ||
 		r.Error != "GET events: the answer is not the expected JSON" || r.Outcome().Kind != delivery.OutcomeUnknown {
 		t.Fatalf("result %+v", r)
 	}
-	_, r = c.do(t.Context(), outbound.ClassBackground, http.MethodPost, "events", nil, func() {}, nil)
+	_, r = c.do(t.Context(), outbound.ClassBackground, "pollEvents", http.MethodPost, "events", nil, func() {}, nil)
 	if r.Classification.Class != ClassInvalid || !strings.Contains(string(r.Error), "not valid JSON") {
 		t.Fatalf("unencodable body = %+v", r)
 	}
-	_, r = c.do(t.Context(), outbound.ClassHeartbeat, http.MethodGet, "info", nil, nil, nil)
+	_, r = c.do(t.Context(), outbound.ClassHeartbeat, "getInfo", http.MethodGet, "info", nil, nil, nil)
 	if r.Classification.Class != ClassInvalid || !strings.Contains(string(r.Error), "no heartbeat class") {
 		t.Fatalf("heartbeat class = %+v", r)
 	}
@@ -432,8 +437,8 @@ func TestSegment(t *testing.T) {
 	b := startStandIn(t, answerJSON(http.StatusOK, "application/json", `{}`))
 	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL + "/pfx", Token: testToken})
 	for _, id := range []string{".", ".."} {
-		if _, r := c.do(t.Context(), outbound.ClassDelivery, http.MethodDelete, "messages/"+Segment(id), nil, nil,
-			nil); !r.OK() {
+		if _, r := c.do(t.Context(), outbound.ClassDelivery, "deleteMessage", http.MethodDelete, "messages/"+Segment(id),
+			nil, nil, nil); !r.OK() {
 			t.Fatalf("delete %q = %+v", id, r)
 		}
 	}
@@ -498,3 +503,103 @@ func TestOutcome(t *testing.T) {
 		t.Error("a call that succeeded has a check code")
 	}
 }
+
+// records is an outbound.Recorder that keeps what it gets.
+type records struct {
+	mu   sync.Mutex
+	list []outbound.Record
+}
+
+func (r *records) Record(_ context.Context, rec outbound.Record) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.list = append(r.list, rec)
+}
+
+func (r *records) got() []outbound.Record {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]outbound.Record(nil), r.list...)
+}
+
+// TestRequestLog: every call is recorded under the Connection by its operationId of api/bridge.yaml, the base URL's
+// path prefix, the token and the push secret [redacted], except a pollEvents that ended without events; a failed poll
+// is recorded; a Secret of the request, such as an Account link code, is [redacted] in its record; a client without an
+// Owner records nothing (C-23.FR-1, AC-2, AC-3).
+func TestRequestLog(t *testing.T) {
+	spec, err := os.ReadFile("../../api/bridge.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, m := range regexp.MustCompile(`operationId: (\w+)`).FindAllStringSubmatch(string(spec), -1) {
+		ids = append(ids, m[1])
+	}
+	b := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		switch cursor := r.URL.Query().Get("cursor"); {
+		case !strings.HasSuffix(r.URL.Path, "/events"):
+			answerJSON(http.StatusOK, "application/json", `{"echo":"`+testPushSecret+`"}`)(w, r)
+		case cursor == "":
+			answerJSON(http.StatusOK, "application/json", `{"events":[],"next_cursor":"c1"}`)(w, r)
+		case cursor == "c1":
+			answerJSON(http.StatusOK, "application/json", `{"events":[{"id":"e1"}],"next_cursor":"c2"}`)(w, r)
+		default:
+			answerJSON(http.StatusForbidden, "application/problem+json", `{"class":"forbidden","title":"no"}`)(w, r)
+		}
+	})
+	rec := &records{}
+	n := network(t, nil)
+	n.Recorder = rec
+	owner := outbound.Owner{Connection: 11, PublicID: "CN0000000000AB"}
+	c := newClient(t, n, Settings{BaseURL: b.srv.URL + "/pfx", Token: testToken, PushSecret: testPushSecret,
+		Owner: owner})
+	ctx, class := t.Context(), outbound.ClassInteractive
+	for _, cursor := range []*string{nil, ptr("c1"), ptr("c2")} {
+		_, _ = c.PollEvents(ctx, cursor, 0)
+	}
+	_, _ = c.GetInfo(ctx, class)
+	_, _ = c.dryProbe(ctx, class)
+	_, _ = c.CheckChannel(ctx, class, "ch1")
+	_, _ = c.PostMessage(ctx, class, "k1", gen.MessageInput{})
+	_, _ = c.EditMessage(ctx, class, "m1", gen.MessageContent{})
+	_, _ = c.ReplyInThread(ctx, class, "m1", "k2", gen.ThreadReplyInput{})
+	_ = c.DeleteMessage(ctx, class, "m1")
+	_, _ = c.AnswerEvent(ctx, class, "e1", "done")
+	_, _, _ = c.FindUsers(ctx, class, "@who")
+	_, _ = c.SendDirectMessage(outbound.WithSecrets(ctx, "LINK-c0de-77"), class, "dm-1", "u1", "code LINK-c0de-77")
+	var ops []string
+	for _, r := range rec.got() {
+		ops = append(ops, r.Operation)
+		if !slices.Contains(ids, r.Operation) {
+			t.Errorf("%s is no operationId of api/bridge.yaml", r.Operation)
+		}
+		text := fmt.Sprintf("%s %v %s %s %s", r.URL, r.RequestHeader, r.RequestBody, r.ResponseBody, r.Error)
+		if r.Owner != owner || strings.Contains(text, testToken) || strings.Contains(text, testPushSecret) ||
+			strings.Contains(text, "LINK-c0de-77") || strings.Contains(text, "/pfx") ||
+			!strings.HasPrefix(r.URL, b.srv.URL+"/[redacted]/v1/") {
+			t.Errorf("record %+v", r)
+		}
+	}
+	want := "[pollEvents pollEvents getInfo getInfo checkChannel postMessage editMessage replyInThread deleteMessage " +
+		"answerEvent findUsers sendDirectMessage]"
+	if fmt.Sprint(ops) != want {
+		t.Fatalf("operations %v", ops)
+	}
+	if got := rec.got(); got[0].Status != http.StatusOK || got[1].Status != http.StatusForbidden ||
+		got[1].Outcome != outbound.OutcomeFatal || string(got[11].RequestBody) != `{"body":"code [redacted]",`+
+		`"user_external_id":"u1"}` {
+		t.Errorf("records %+v %+v %s", got[0], got[1], got[11].RequestBody)
+	}
+	quiet := newClient(t, n, Settings{BaseURL: b.srv.URL, Token: testToken})
+	if _, r := quiet.GetInfo(ctx, class); len(rec.got()) != 12 {
+		t.Fatalf("a client without an Owner recorded: %+v %d", r, len(rec.got()))
+	}
+	for body, want := range map[string]bool{`{"events":[],"next_cursor":""}`: true, `{"events":[{}]}`: false,
+		`{"events":null}`: false, `{}`: false, `[]`: false} {
+		if noEvents(200, []byte(body)) != want {
+			t.Errorf("noEvents(%s) = %v", body, !want)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

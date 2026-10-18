@@ -16,7 +16,9 @@ import (
 
 	"github.com/muster-io/muster/internal/accountlinks/dbgen"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -157,7 +159,9 @@ func (s *Service) startMattermost(ctx context.Context, b MattermostBot, r Reques
 		s.logRejected(ctx, MessengerMattermost, conn.publicID, ReasonConflict, nil)
 		return MattermostStarted{}, ErrLinkedElsewhere
 	}
-	if err := b.SendDirect(ctx, acct.ID, messages.T(lang, "accountLink.code", messages.Args{"code": code})); err != nil {
+	// The code is masked in the Request log's record of the direct message (C-23.FR-3).
+	if err := b.SendDirect(outbound.WithSecrets(ctx, logging.Secret(code)), acct.ID,
+		messages.T(lang, "accountLink.code", messages.Args{"code": code})); err != nil {
 		if verr := s.cfg.Store.VoidLinkRequest(context.WithoutCancel(ctx), dbgen.VoidLinkRequestParams{Now: now,
 			OrgID: s.cfg.OrgID, ID: reqID}); verr != nil {
 			return MattermostStarted{}, errors.Join(err, fmt.Errorf("void the link request: %w", verr))

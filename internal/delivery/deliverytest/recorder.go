@@ -49,6 +49,8 @@ type Call struct {
 	Webhook *delivery.WebhookCall
 	// Answered is the outcome the recorder answered with.
 	Answered delivery.Outcome
+	// Links are the links the Request log gives the call's requests (outbound.WithLinks).
+	Links outbound.Links
 }
 
 // Answer is one scripted answer: an outcome, a delay before it, and a hook that runs after the call was accepted and
@@ -139,7 +141,7 @@ func (r *Recorder) now() time.Time {
 // answer records the call and answers it from the script.
 func (r *Recorder) answer(ctx context.Context, c Call) delivery.Outcome {
 	r.mu.Lock()
-	c.At = r.now()
+	c.At, c.Links = r.now(), outbound.LinksOf(ctx)
 	a := OK()
 	if q := r.script[c.Method]; len(q) > 0 {
 		a, r.script[c.Method] = q[0], q[1:]

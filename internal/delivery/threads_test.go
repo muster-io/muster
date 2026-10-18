@@ -19,6 +19,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // alertsAdded is the alerts_added event of new Alerts joining an Alert Group in a status.
@@ -62,7 +63,8 @@ func TestThreadBatching(t *testing.T) {
 	e.enqueue(t, g, groups.System, alertsAdded(2, groups.StatusFiring, "fp00"))
 	e.round(t)
 	if r := e.replies(); len(r) != 1 || textOf(r[0]) != "#7 alerts_added\nfp00" ||
-		r[0].Loudness != groups.Loud || !slices.Equal(r[0].Mentions, []groups.Mention{groups.MentionNewAlerts}) {
+		r[0].Loudness != groups.Loud || !slices.Equal(r[0].Mentions, []groups.Mention{groups.MentionNewAlerts}) ||
+		r[0].Links != (outbound.Links{Destination: r[0].Destination.ID, AlertGroup: groupID}) {
 		t.Fatalf("leading reply %+v", r)
 	}
 	n := 1

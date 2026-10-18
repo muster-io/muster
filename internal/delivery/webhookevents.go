@@ -280,6 +280,7 @@ func (w *Worker) prepareEvent(ctx context.Context, org, id int64) (eventAttempt,
 
 // callEvent sends a prepared event outside any transaction and records its outcome.
 func (w *Worker) callEvent(ctx context.Context, org int64, a eventAttempt) error {
+	ctx = outbound.WithLinks(ctx, linksOf(a.destination, &a.row.AlertGroupID))
 	start := w.Lease.Clocks.Real.Now()
 	out := Outcome{Kind: OutcomeUnknown, Error: "no sender for outgoing webhook events"}
 	if w.Events != nil {

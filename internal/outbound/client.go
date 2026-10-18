@@ -69,6 +69,10 @@ type Config struct {
 	Resolver Resolver
 	// MaxBodyBytes is the largest answer read; 0 is DefaultMaxBodyBytes.
 	MaxBodyBytes int64
+	// Recorder, with an Owner that names a Connection or an outgoing webhook Destination, gets the record of each
+	// attempt (C-23.FR-1); without either the client records nothing.
+	Recorder Recorder
+	Owner    Owner
 }
 
 // policyGeneration moves each time the outbound address policy may have changed (CloseIdleConnections).
@@ -134,8 +138,11 @@ type Client struct {
 	http       *http.Client
 	transports *transports
 	resolver   Resolver
-	redactor   redactor
-	maxBody    int64
+	// secrets are those of the configuration and the proxy's password, which redactor replaces; a record adds the
+	// request's own.
+	secrets  []logging.Secret
+	redactor redactor
+	maxBody  int64
 	// sleep waits between the attempts of the background class, and jitter spreads its backoff; tests replace both.
 	sleep  func(context.Context, time.Duration) error
 	jitter func(time.Duration) time.Duration
@@ -147,8 +154,8 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Proxy != nil {
 		secrets = append(secrets, cfg.Proxy.Password)
 	}
-	c := &Client{cfg: cfg, redactor: newRedactor(secrets), resolver: cfg.Resolver, maxBody: cfg.MaxBodyBytes,
-		sleep: sleepContext, jitter: randomJitter}
+	c := &Client{cfg: cfg, secrets: secrets, redactor: newRedactor(secrets), resolver: cfg.Resolver,
+		maxBody: cfg.MaxBodyBytes, sleep: sleepContext, jitter: randomJitter}
 	if err := c.build(); err != nil {
 		return nil, errors.New(c.redact("outbound client: " + err.Error()))
 	}
@@ -261,6 +268,11 @@ type Request struct {
 	Mapping Mapping
 	// ClassifyBody finds errors the provider reports in the body; nil reads none.
 	ClassifyBody BodyClassifier
+	// Operation names the request in the Request log as its protocol names it, such as createPost or getUpdates.
+	Operation string
+	// SkipRecord, when set, says of an attempt that succeeded, by its status and body, that the Request log leaves it
+	// out, as it does a long poll that ended without events; a failed attempt is always recorded.
+	SkipRecord func(status int, body []byte) bool
 }
 
 // Result is what a request ended with. Body and Header are those of the last answer, if there was one.
@@ -311,7 +323,8 @@ func (e *Error) Error() string { return e.msg }
 func (e *Error) Unwrap() error { return e.cause }
 
 // Do sends req and makes further attempts as the client's class allows. The returned error is an *Error whenever the
-// outcome is not ok.
+// outcome is not ok. A client with a Recorder and an Owner records each attempt once it has its outcome, before the
+// next one.
 func (c *Client) Do(ctx context.Context, req Request) (Result, error) {
 	u, err := c.target(req.URL)
 	if err != nil {
@@ -319,8 +332,9 @@ func (c *Client) Do(ctx context.Context, req Request) (Result, error) {
 		return Result{Outcome: OutcomeFatal, Attempts: 1}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
 	}
 	for n := 1; ; n++ {
-		res, err := c.attempt(ctx, req, u)
+		res, ex, elapsed, err := c.attempt(ctx, req, u)
 		res.Attempts = n
+		c.record(ctx, req, u, n, res, ex, elapsed, err)
 		if err == nil || !c.cfg.Class.retries(res.Outcome) {
 			return res, err
 		}
@@ -350,11 +364,13 @@ func (c *Client) target(raw string) (*url.URL, error) {
 	return parseTarget(joined)
 }
 
-func (c *Client) attempt(ctx context.Context, req Request, u *url.URL) (Result, error) {
+// attempt sends req once: its result, what it exchanged and how long it took on the real clock.
+func (c *Client) attempt(ctx context.Context, req Request, u *url.URL) (Result, exchange, time.Duration, error) {
 	start := c.cfg.Clock.Now()
-	res, err := c.send(ctx, req, u)
-	c.observe(res.Outcome, c.cfg.Clock.Now().Sub(start))
-	return res, err
+	res, ex, err := c.send(ctx, req, u)
+	elapsed := c.cfg.Clock.Now().Sub(start)
+	c.observe(res.Outcome, elapsed)
+	return res, ex, elapsed, err
 }
 
 func (c *Client) observe(o Outcome, elapsed time.Duration) {
@@ -364,7 +380,10 @@ func (c *Client) observe(o Outcome, elapsed time.Duration) {
 
 // display is u as an error shows it: redacted, and with the path of the base URL, which may be a secret prefix,
 // replaced with [redacted].
-func (c *Client) display(u *url.URL) string {
+func (c *Client) display(u *url.URL) string { return c.displayWith(c.redactor, u) }
+
+// displayWith is display with the secrets of red.
+func (c *Client) displayWith(red redactor, u *url.URL) string {
 	if c.base != nil && u.Host == c.base.Host && u.Scheme == c.base.Scheme {
 		if prefix := strings.TrimSuffix(c.base.Path, "/"); prefix != "" {
 			if rest, ok := strings.CutPrefix(u.Path, prefix); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
@@ -374,10 +393,11 @@ func (c *Client) display(u *url.URL) string {
 			}
 		}
 	}
-	return c.redact(c.redactor.url(u))
+	return red.redact(red.url(u))
 }
 
-func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, error) {
+// send makes one attempt of req: its result, and what it sent and was answered for its record.
+func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, exchange, error) {
 	actx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
 	method := req.Method
@@ -390,34 +410,46 @@ func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, err
 	}
 	hreq, err := http.NewRequestWithContext(actx, method, u.String(), body)
 	if err != nil {
-		return Result{Outcome: OutcomeFatal}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
+		return Result{Outcome: OutcomeFatal}, exchange{}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
 	}
-	if req.Header != nil {
-		hreq.Header = req.Header.Clone()
-	}
-	// An outgoing webhook may name its own User-Agent in a header template.
-	if hreq.Header.Get("User-Agent") == "" {
-		hreq.Header.Set("User-Agent", userAgent)
-	}
+	hreq.Header = sentHeader(req.Header)
+	ex := exchange{sent: true, header: hreq.Header}
 	resp, err := c.http.Do(hreq)
 	if err != nil {
-		return c.transportError(ctx, u, err)
+		res, err := c.transportError(ctx, u, err)
+		return res, ex, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody+1))
 	if err != nil {
-		return c.transportError(ctx, u, &url.Error{Op: "read the answer of " + method, URL: u.String(), Err: err})
+		res, err := c.transportError(ctx, u, &url.Error{Op: "read the answer of " + method, URL: u.String(), Err: err})
+		return res, ex, err
 	}
+	ex.answer(resp, data)
 	if int64(len(data)) > c.maxBody {
-		return Result{Outcome: OutcomeUnknown, Status: resp.StatusCode, Header: resp.Header},
+		return Result{Outcome: OutcomeUnknown, Status: resp.StatusCode, Header: resp.Header}, ex,
 			&Error{Outcome: OutcomeUnknown, Status: resp.StatusCode,
 				msg: fmt.Sprintf("%s %q: the answer is larger than %d bytes", method, c.display(u), c.maxBody)}
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
-		return Result{Outcome: OutcomeRedirect, Status: resp.StatusCode, Header: resp.Header, Body: data},
+		return Result{Outcome: OutcomeRedirect, Status: resp.StatusCode, Header: resp.Header, Body: data}, ex,
 			&Error{Outcome: OutcomeRedirect, Status: resp.StatusCode, msg: c.redirectMessage(u, resp)}
 	}
-	return c.classify(req, method, u, resp, data)
+	res, err := c.classify(req, method, u, resp, data)
+	return res, ex, err
+}
+
+// sentHeader is h as a request sends it: a copy, with Muster's User-Agent unless h names its own, as an outgoing
+// webhook may in a header template.
+func sentHeader(h http.Header) http.Header {
+	out := h.Clone()
+	if out == nil {
+		out = http.Header{}
+	}
+	if out.Get("User-Agent") == "" {
+		out.Set("User-Agent", userAgent)
+	}
+	return out
 }
 
 func (c *Client) redirectMessage(u *url.URL, resp *http.Response) string {

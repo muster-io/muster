@@ -380,14 +380,16 @@ func (f *fakeDB) DeleteExpiredWebhookEvents(_ context.Context, arg dbgen.DeleteE
 type fakeSender struct {
 	mu      sync.Mutex
 	calls   []delivery.EventCall
+	links   []outbound.Links
 	answers []delivery.Outcome
 	before  func()
 }
 
-func (s *fakeSender) SendEvent(_ context.Context, c delivery.EventCall) delivery.Outcome {
+func (s *fakeSender) SendEvent(ctx context.Context, c delivery.EventCall) delivery.Outcome {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, c)
+	s.links = append(s.links, outbound.LinksOf(ctx))
 	if s.before != nil {
 		b := s.before
 		s.before = nil
@@ -550,8 +552,9 @@ func TestWebhookEventsEveryRow(t *testing.T) {
 				t.Errorf("mentions %+v", b.Mentions)
 			}
 			if c := e.sender.calls[0]; c.Class != outbound.ClassDelivery || c.WebhookID != we.webhookID ||
-				c.Destination.ID != destWH {
-				t.Errorf("call %+v", c)
+				c.Destination.ID != destWH || we.group == 0 ||
+				e.sender.links[0] != (outbound.Links{Destination: destWH, AlertGroup: we.group}) {
+				t.Errorf("call %+v, links %+v", c, e.sender.links)
 			}
 			if we.state != "delivered" || len(e.rec.Calls()) != 0 {
 				t.Errorf("state %s, messenger calls %d", we.state, len(e.rec.Calls()))

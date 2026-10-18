@@ -33,6 +33,10 @@ import (
 	"github.com/muster-io/muster/internal/webhooks/dbgen"
 )
 
+// OperationEvent is how the Request log names a request of the events mode; one of the template mode is named by its
+// request, such as create (C-23.FR-1).
+const OperationEvent = "event"
+
 // The timeouts of a request and the largest answer read; only its status and the start of its text are used.
 const (
 	connectTimeout = 5 * time.Second
@@ -41,12 +45,14 @@ const (
 )
 
 // Network is what the outbound clients of the adapter need: the outbound address policy, the logger, the real clock
-// of the signatures and the outbound metrics, and a resolver (nil: the system resolver).
+// of the signatures and the outbound metrics, a resolver (nil: the system resolver) and the Request log, which keeps
+// every request under its Destination, nil for none (C-23.FR-1).
 type Network struct {
 	Policy   outbound.PolicySource
 	Log      *logging.Logger
 	Real     clock.Clock
 	Resolver outbound.Resolver
+	Recorder outbound.Recorder
 }
 
 // Adapter sends the requests of outgoing webhooks for delivery (C-15.FR-2, FR-3, FR-5, FR-6, FR-8): the events-mode
@@ -214,12 +220,12 @@ func (a *Adapter) SendEvent(ctx context.Context, c delivery.EventCall) delivery.
 	header[HeaderID] = []string{c.WebhookID}
 	header[HeaderTimestamp] = []string{strconv.FormatInt(at.Unix(), 10)}
 	header[HeaderSignature] = []string{sig}
-	client, err := a.client(c.Destination.ID, c.Class, t)
+	client, err := a.client(c.Destination, c.Class, t)
 	if err != nil {
 		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(red.redact(err.Error()))}
 	}
 	res, err := client.Do(ctx, outbound.Request{Method: http.MethodPost, URL: target, Header: header, Body: c.Body,
-		Mapping: Mapping})
+		Mapping: Mapping, Operation: OperationEvent})
 	out := outcomeOf(res, err, red)
 	out.Rendered, out.Request = true, RequestEvents
 	return out
@@ -254,8 +260,9 @@ func templateFailure(red redactor, name string, err error) delivery.Outcome {
 		Error: outbound.Untrusted(red.redact("the request template failed: " + err.Error()))}
 }
 
-// client is the outbound client of the Destination in class, built again when its proxy or its secrets changed.
-func (a *Adapter) client(destination int64, class outbound.Class, t target) (*outbound.Client, error) {
+// client is the outbound client of the Destination d in class, built again when its proxy or its secrets changed; its
+// requests go to the Request log of d.
+func (a *Adapter) client(d delivery.Destination, class outbound.Class, t target) (*outbound.Client, error) {
 	h := sha256.New()
 	h.Write(t.proxy.JSON())
 	for _, s := range t.all() {
@@ -263,7 +270,7 @@ func (a *Adapter) client(destination int64, class outbound.Class, t target) (*ou
 	}
 	var digest [32]byte
 	copy(digest[:], h.Sum(nil))
-	key := clientKey{destination: destination, class: class}
+	key := clientKey{destination: d.ID, class: class}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if c, ok := a.clients[key]; ok && c.digest == digest {
@@ -272,7 +279,8 @@ func (a *Adapter) client(destination int64, class outbound.Class, t target) (*ou
 	n := a.Network
 	c, err := outbound.New(outbound.Config{Class: class, ConnectTimeout: connectTimeout, Timeout: callTimeout,
 		Proxy: t.proxy.Outbound(t.password), Secrets: t.all(), Policy: n.Policy, Logger: n.Log, Clock: n.Real,
-		Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
+		Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder,
+		Owner: outbound.Owner{Destination: d.ID, PublicID: d.PublicID}})
 	if err != nil {
 		return nil, err
 	}
@@ -457,13 +465,13 @@ func (a *Adapter) send(ctx context.Context, c delivery.Call, t target, name stri
 	header[HeaderID] = []string{id}
 	header[HeaderTimestamp] = []string{strconv.FormatInt(at.Unix(), 10)}
 	header[HeaderSignature] = []string{sig}
-	client, err := a.client(c.Destination.ID, c.Class, t)
+	client, err := a.client(c.Destination, c.Class, t)
 	if err != nil {
 		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(red.redact(err.Error())),
 			Request: name}
 	}
 	res, err := client.Do(ctx, outbound.Request{Method: b.method, URL: b.url, Header: header, Body: b.body,
-		Mapping: Mapping})
+		Mapping: Mapping, Operation: name})
 	out := outcomeOf(res, err, red)
 	out.Rendered, out.Request = true, name
 	if out.Kind == delivery.OutcomeOK && len(rt.Extract) > 0 {

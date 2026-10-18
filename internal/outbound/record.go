@@ -4,8 +4,11 @@
 package outbound
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"time"
 
@@ -120,4 +123,60 @@ type Record struct {
 	Outcome Outcome
 	Network string
 	Error   string
+}
+
+// exchange is what one attempt sent — nothing when its request could not be built — and the answer it got, if any.
+type exchange struct {
+	sent       bool
+	header     http.Header
+	answered   bool
+	status     int
+	respHeader http.Header
+	body       []byte
+}
+
+// answer notes the answer resp, whose body read was data.
+func (ex *exchange) answer(resp *http.Response, data []byte) {
+	ex.answered, ex.status, ex.respHeader, ex.body = true, resp.StatusCode, resp.Header, data
+}
+
+// record hands the Recorder the record of attempt n of req to u, which ended with res and err after elapsed, masked
+// of the client's and the request's Secrets and of MaskedHeaders. Nothing is recorded without a Recorder or an Owner,
+// for an attempt that sent nothing, for one whose caller went away (context.Canceled) and for a successful one that
+// req.SkipRecord leaves out. Everything handed over is a copy, so that no Recorder can change the result.
+func (c *Client) record(ctx context.Context, req Request, u *url.URL, n int, res Result, ex exchange,
+	elapsed time.Duration, err error) {
+	switch {
+	case c.cfg.Recorder == nil, !c.cfg.Owner.set(), !ex.sent, errors.Is(ctx.Err(), context.Canceled):
+		return
+	case err == nil && req.SkipRecord != nil && req.SkipRecord(res.Status, res.Body):
+		return
+	}
+	red := c.redactor
+	if extra := secretsOf(ctx); len(extra) > 0 {
+		red = newRedactor(append(slices.Clone(c.secrets), extra...))
+	}
+	r := Record{Owner: c.cfg.Owner, Links: LinksOf(ctx), Operation: req.Operation,
+		Method: cmp.Or(req.Method, http.MethodGet), URL: c.displayWith(red, u),
+		RequestHeader: MaskHeaders(ex.header, red.redact), RequestBody: redactBytes(red, req.Body),
+		Latency: elapsed, Via: ViaDirect, Attempt: n, Outcome: res.Outcome}
+	if c.cfg.Proxy != nil {
+		r.Via = ViaProxy
+	}
+	if ex.answered {
+		r.Status, r.ResponseHeader, r.ResponseBody = ex.status, MaskHeaders(ex.respHeader, red.redact),
+			redactBytes(red, ex.body)
+	}
+	if e, ok := errors.AsType[*Error](err); ok {
+		r.Network, r.Error = e.Network, red.redact(e.msg)
+	}
+	c.cfg.Recorder.Record(ctx, r)
+}
+
+// redactBytes is a copy of b with the secrets of red replaced, nil for nil.
+func redactBytes(red redactor, b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return []byte(red.redact(string(b)))
 }
