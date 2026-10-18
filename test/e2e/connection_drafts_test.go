@@ -7,6 +7,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -41,6 +42,13 @@ type draftResult struct {
 	} `json:"info"`
 }
 
+// String is r as JSON for a failure message, without any token.
+func (r draftResult) String() string {
+	type plain draftResult
+	b, _ := json.Marshal(plain(r))
+	return redacted(string(b))
+}
+
 func (e *draftEnv) api(t *testing.T) patClient {
 	return patClient{t: t, base: e.base, token: e.token}
 }
@@ -61,7 +69,7 @@ func (e *draftEnv) wantSteps(t *testing.T, body, want string) draftResult {
 	t.Helper()
 	r, a := e.draft(t, body)
 	if a.status != http.StatusOK || steps(r.checkResult) != want {
-		t.Fatalf("draft %s = %d %s, want the steps %s", redacted(body), a.status, a.body, want)
+		t.Fatalf("draft %s = %d %s, want the steps %s", redacted(body), a.status, redacted(string(a.body)), want)
 	}
 	return r
 }
@@ -332,7 +340,7 @@ func TestConnectionDrafts(t *testing.T) {
 		var typed []string
 		for _, q := range other.Requests() {
 			if carries(q, devmode.TelegramSecondBotToken) {
-				typed = append(typed, strings.TrimPrefix(q.Path, "/bot"+devmode.TelegramSecondBotToken))
+				typed = append(typed, redacted(strings.TrimPrefix(q.Path, "/bot"+devmode.TelegramSecondBotToken)))
 			}
 		}
 		if !slices.Equal(typed, []string{"/getMe", "/getWebhookInfo"}) {
@@ -369,7 +377,7 @@ func TestConnectionDrafts(t *testing.T) {
 		id := e.id(t, "bridge", devmode.BridgeConnectionName)
 		if a := e.api(t).do(http.MethodPost, "/api/v1/connections/"+id+"/checks", "{}"); a.status != http.StatusOK ||
 			!strings.Contains(string(a.body), `"ok":true`) {
-			t.Fatalf("check of the saved Bridge = %d %s", a.status, a.body)
+			t.Fatalf("check of the saved Bridge = %d %s", a.status, redacted(string(a.body)))
 		}
 		// A draft that stored info would store it at a later time.
 		advance(t, h.Replicas[0], 60)
@@ -439,7 +447,8 @@ func TestConnectionDrafts(t *testing.T) {
 			_, a := e.draft(t, c.body)
 			if pointer, code := firstError(t, a); a.status != http.StatusUnprocessableEntity || pointer != c.pointer ||
 				code != c.code {
-				t.Errorf("draft %s = %d %s, want 422 %s at %s", c.body, a.status, a.body, c.code, c.pointer)
+				t.Errorf("draft %s = %d %s, want 422 %s at %s", c.body, a.status, redacted(string(a.body)), c.code,
+					c.pointer)
 			}
 		}
 		session := newAgent(t, e.base)
@@ -451,7 +460,7 @@ func TestConnectionDrafts(t *testing.T) {
 		a := patClient{t: t, base: e.base, token: reader}.do(http.MethodPost, "/api/v1/connections/checks",
 			`{"type":"mattermost","server_url":"`+h.Fakes.MattermostSecond+`"}`)
 		if a.status != http.StatusForbidden {
-			t.Fatalf("draft with connections:read = %d %s", a.status, a.body)
+			t.Fatalf("draft with connections:read = %d %s", a.status, redacted(string(a.body)))
 		}
 	})
 
