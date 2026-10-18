@@ -133,6 +133,17 @@ function rows(scope: Page | Locator): Locator {
   return scope.locator("tbody tr");
 }
 
+/**
+ * A screenshot of what the viewport shows, for a dialog: a full page would add the page under the dialog, which the
+ * dialog covers.
+ */
+async function dialogShot(page: Page, name: string): Promise<void> {
+  const dir = process.env.MUSTER_E2E_SCREENSHOTS;
+  if (dir !== undefined && dir !== "") {
+    await page.screenshot({ path: `${dir}/${name}.png` });
+  }
+}
+
 /** Nothing is wider than the 360 px of the phone. */
 async function expectPhoneWidth(page: Page): Promise<void> {
   await expectNoHorizontalScroll(page);
@@ -307,7 +318,7 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await request.getByRole("button", { name: "Copy body" }).click();
   await expect(request.getByRole("button", { name: "Copied" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(stored.request_body);
-  await shot(page, "request-log-record");
+  await dialogShot(page, "request-log-record");
   // Escape closes the record and keeps the list.
   await page.keyboard.press("Escape");
   await expect(record).toHaveCount(0);
@@ -323,13 +334,13 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await requests.click();
   const dialog = page.getByRole("dialog", { name: "Requests: alerts" });
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
-  await shot(page, "request-log-alert-group");
+  await dialogShot(page, "request-log-alert-group");
 
   // At 360 px: the Alert Group page with the dialog open and closed, the tab and the record scroll vertically only.
   await page.setViewportSize({ width: 360, height: 740 });
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
   await expectPhoneWidth(page);
-  await shot(page, "request-log-alert-group-360");
+  await dialogShot(page, "request-log-alert-group-360");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(requests).toBeVisible();
@@ -342,7 +353,7 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await table.getByRole("button", { name: "createPost", exact: true }).first().click();
   await expect(request.getByTestId("record-request-body")).toBeVisible();
   await expectPhoneWidth(page);
-  await shot(page, "request-log-record-360");
+  await dialogShot(page, "request-log-record-360");
   expect(csp).toEqual([]);
 });
 
@@ -383,7 +394,7 @@ test("lists the requests of a test message and of a check before saving", async 
     '"error": "endpoint down"',
   );
   await expect(record.getByTestId("record-check")).toHaveText("Test message");
-  await shot(page, "request-log-test-message");
+  await dialogShot(page, "request-log-test-message");
   await page.keyboard.press("Escape");
   await expect(record).toHaveCount(0);
   await page.keyboard.press("Escape");
@@ -418,7 +429,7 @@ test("lists the requests of a test message and of a check before saving", async 
   await expect(info).toHaveCount(1);
   await expect(info.getByTestId("request-check")).toHaveText("Check before saving");
   await expect(info.getByTestId("request-status")).toHaveText("200");
-  await shot(page, "request-log-draft-check");
+  await dialogShot(page, "request-log-draft-check");
   expect(csp).toEqual([]);
 });
 
@@ -464,7 +475,7 @@ async function russianViewer(browser: Browser): Promise<void> {
     record.getByRole("region", { name: "Запрос" }).getByRole("button", { name: "Копировать тело" }),
   ).toBeVisible();
   await expectPhoneWidth(page);
-  await shot(page, "request-log-record-ru-360");
+  await dialogShot(page, "request-log-record-ru-360");
   await page.keyboard.press("Escape");
   await expect(record).toHaveCount(0);
 
@@ -481,7 +492,7 @@ async function russianViewer(browser: Browser): Promise<void> {
   const dialog = page.getByRole("dialog", { name: "Запросы: alerts" });
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
   await expectPhoneWidth(page);
-  await shot(page, "request-log-alert-group-ru-360");
+  await dialogShot(page, "request-log-alert-group-ru-360");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   expect(csp).toEqual([]);
