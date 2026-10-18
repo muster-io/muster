@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -612,5 +613,42 @@ func TestInfoCacheVersions(t *testing.T) {
 	if i, r, err := ic.Refresh(t.Context(), v2, outbound.ClassInteractive); err != nil || r.OK() ||
 		i.Messenger.Name != "" || strings.Contains(log.String(), "bridge_info_read") {
 		t.Fatalf("a failed refresh: %+v %+v %v", r, i.Info, err)
+	}
+}
+
+// TestInfoCacheForget: Forget drops the copy kept in memory of a deleted Connection, and only that one; the next read
+// of the Connection goes to the store again, and forgetting a Connection without a copy changes nothing.
+func TestInfoCacheForget(t *testing.T) {
+	t0 := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	b := startInfoBridge(t)
+	var log bytes.Buffer
+	n := network(t, &log)
+	client := newClient(t, n, Settings{BaseURL: b.srv.URL, Token: testToken})
+	c7 := Conn{ID: 7, PublicID: "CNAAAAAAAAAAA7", Version: 1, Client: client}
+	c8 := Conn{ID: 8, PublicID: "CNAAAAAAAAAAA8", Version: 1, Client: client}
+	store := &memStore{}
+	ic := NewInfoCache(store, clock.NewManual(t0), 0, n.Log)
+	for _, c := range []Conn{c7, c8} {
+		if _, r := ic.Info(t.Context(), c, outbound.ClassInteractive); !r.OK() {
+			t.Fatalf("read %s: %+v", c.PublicID, r)
+		}
+	}
+	kept := func() []int64 {
+		ic.mu.Lock()
+		defer ic.mu.Unlock()
+		return slices.Sorted(maps.Keys(ic.copies))
+	}
+	if got := kept(); !slices.Equal(got, []int64{7, 8}) {
+		t.Fatalf("kept %v", got)
+	}
+	ic.Forget(7)
+	ic.Forget(9)
+	if got := kept(); !slices.Equal(got, []int64{8}) {
+		t.Errorf("after Forget(7): kept %v, want [8]", got)
+	}
+	reads := store.reads
+	if _, r := ic.Info(t.Context(), c7, outbound.ClassInteractive); !r.OK() || store.reads != reads+1 ||
+		len(b.seen()) != 2 {
+		t.Errorf("a read after Forget: %+v, %d store reads, %d bridge reads", r, store.reads-reads, len(b.seen()))
 	}
 }

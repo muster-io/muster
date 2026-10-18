@@ -520,6 +520,13 @@ func (ic *InfoCache) keep(ctx context.Context, conn Conn, i Info) error {
 	return ic.store.StoreInfo(ctx, conn, i, now)
 }
 
+// Forget drops the copy kept in memory of the Connection id, which was deleted.
+func (ic *InfoCache) Forget(id int64) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	delete(ic.copies, id)
+}
+
 // copy is the copy kept in memory for the version of conn, else the stored one, which is then kept.
 func (ic *InfoCache) copy(ctx context.Context, conn Conn) (Stored, bool, error) {
 	ic.mu.Lock()
