@@ -170,6 +170,14 @@ Other lifecycle values:
 | `bridge.edit_window_margin` | 60 s: a Root message is treated as past the bridge's edit window this long before `edit_max_age_seconds` | built in | C-22 | decided |
 | `bridge.text_commands` | `ack`, `unack`, `resolve`, `snooze <duration>`, `unsnooze`, `still on it`, and in Russian `взял`, `отпускаю`, `решено`, `отложить <duration>`, `вернуть`, `ещё работаю` (also with `е`); every word works whatever the Route's language | built in | C-22 | decided |
 
+## Request log
+
+| Name | Default | Set on | Capability | Status |
+|---|---|---|---|---|
+| `request_log.max_records` | the newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of new Connections in an Organization; the Leader deletes older ones every minute (`request_log_pruning`), and reads never show more | built in | C-23 | P-55 |
+| `request_log.max_age` | 7 days on the business clock; older records are neither listed nor kept | built in | C-23 | P-56 |
+| `request_log.body_max` | 16 KB (16,384 bytes) per request or answer body, cut at a character boundary and marked truncated with its full size | built in | C-23 | P-57 |
+
 ## Account links
 
 | Name | Default | Set on | Capability | Status |

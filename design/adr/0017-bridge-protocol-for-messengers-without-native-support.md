@@ -15,6 +15,10 @@
   repository and is built on it; each library keeps a copy of the specification that its CI compares with Muster's and
   runs `muster bridge check` from Muster's development image; Muster's end-to-end test runs a released image of the
   example; the libraries are 0.x until Muster's first release, then follow the protocol's major version
+- Amended: 2026-10-18 — a Bridge Connection can be checked before it is saved (journal D353): a token typed in the
+  same request may go to the base URL typed with it, the stored token still only to the saved base URL, and a changed
+  base URL without a typed token gets a dry probe, `GET <base>/v1/info` without the token, that passes on `401` with a
+  problem
 
 ## Context
 
@@ -179,7 +183,8 @@ delivery and the interactive path send has nothing to protect there. The command
 protocol client directly, which this decision permits; since lint 3 does not check the client, it needs no entry for it.
 All requests go through the outbound package (ADR-0015) — the delivery class for deliveries and the Broken probe, the
 interactive class for checks started by a person, answers and messages during linking, the background class for polling
-— under the outbound address policy and the Connection's proxy, with the token sent only to the saved base URL. Polling
+— under the outbound address policy and the Connection's proxy, with the stored token sent only to the saved base URL
+and a token typed into a check before saving only to the base URL typed with it (ADR-0015). Polling
 a bridge joins the closed list of Leader tasks (ADR-0007): it is safe to run twice, because an event polled twice is
 handled once by its id.
 

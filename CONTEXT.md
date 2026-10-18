@@ -322,6 +322,12 @@ A test of whether Muster can still reach and post to a Destination, without send
 Something that happens while delivering to a Destination, such as a failed attempt or the Destination becoming Broken.
 It is not a Lifecycle event.
 
+**Request log**:
+The recent HTTP requests Muster sent to a messenger, a bridge or an outgoing webhook, and those that reached a
+Connection's addresses, each with its answer and with secrets masked, kept briefly for troubleshooting. It is neither
+the Audit log nor the Delivery events.
+_Avoid_: Request history, Traffic log, Access log
+
 **Broken**:
 A Destination that keeps failing or has used up its retry budget. Muster probes it and sends the current state once it
 recovers.

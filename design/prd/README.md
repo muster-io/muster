@@ -91,7 +91,7 @@ code. Neither signs in to the UI or links messenger accounts.
 | Document | Content |
 |---|---|
 | [L1.md](L1.md) | The first release: scope, rollout stages, the capability map, conventions, non-functional requirements, what is out of scope and what is still open |
-| [l1/C-NN-….md](l1/) | One file per L1 capability `C-01`…`C-21`, with scenarios, functional requirements (`C-NN.FR-n`), UI, API surface, acceptance statements (`C-NN.AC-n`) and a suggested story split |
+| [l1/C-NN-….md](l1/) | One file per L1 capability `C-01`…`C-23`, with scenarios, functional requirements (`C-NN.FR-n`), UI, API surface, acceptance statements (`C-NN.AC-n`) and a suggested story split |
 | [l1/reference.md](l1/reference.md) | Tables shared by several capabilities: Loud and Quiet, buttons, banners, Roles and Permissions, Internal alerts, metrics, chart rules |
 | [l1/defaults.md](l1/defaults.md) | Every configurable value and built-in limit of L1, with its status: decided or provisional |
 | [L2.md](L2.md) | Scope of the on-call parity layer and the designs already kept for it, plus features waiting for operating experience |

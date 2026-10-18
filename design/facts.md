@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-16
+- Date: 2026-10-18
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost and Alertmanager actually behave. Each fact has a stable id `F-NNN`, never
@@ -469,6 +469,9 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
+  What `GET /api/v4/system/ping` answers without a token — `200` with JSON whose `status` is `OK`, as Mattermost's API
+  reference describes it, through a reverse proxy too — on which the dry probe of a Mattermost Connection relies
+  (C-13.FR-2); to check on the test stand and record as a fact before S-087 merges.
 - **Mattermost 12.** Mattermost 12.0.0 draws message attachments as Mattermost Blocks; whether Root messages, their
   colour and the button styles of F-068 look the same is to be checked once the test stand is upgraded from 11.2.2.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair

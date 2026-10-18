@@ -60,30 +60,34 @@ issue: 258
   module, so it always builds against the library of the same commit and adds no dependency to the module. Every file
   carries the MIT header of S-083.
 - **Chat** (`chat.go`, `web.go`, `web/`): channels from `-channels` (default `alerts,ops`; any other channel id is one
-  the bot is not in, `forbidden`), people from `-users` (default `alice:Alice Smith,bob:Bob Brown`, found by login),
-  messages with their edits and Threads, buttons rendered with their style hints, direct messages between a person and
-  the bot, and an event log, all in memory. The page (`index.html`, `app.js`, `app.css`, embedded in the binary) polls
-  the example's JSON API under `/chat/api/` — `GET messages?channel=`, `GET direct-messages?user=`, `POST press`
-  `{message_id, user, button}`, `POST thread` `{message_id, user, text}`, `POST direct-message` `{user, text}` — and
-  lets the viewer pick who they are. The page and its API have no authentication: the README says to put them behind
+  the bot is not in, `bridge.ForbiddenError`), people from `-users` (default `alice:Alice Smith,bob:Bob Brown`, found by
+  login), messages with their edits and Threads, buttons rendered with their style hints, direct messages between a
+  person and the bot, and an event log, all in memory. The page (`index.html`, `app.js`, `app.css`, embedded in the
+  binary) polls the example's JSON API under `/chat/api/` — `GET messages?channel=`, `GET direct-messages?user=`, `POST
+  press` `{message_id, user, button}`, `POST thread` `{message_id, user, text}`, `POST direct-message` `{user, text}` —
+  and lets the viewer pick who they are. The page and its API have no authentication: the README says to put them behind
   some before exposing them. Muster's end-to-end test (S-086) and this repository's CI drive the same API as a person
   would.
 - **Messenger** (`messenger.go`, `render.go`): implements `bridge.Messenger`, `UserFinder`, `DirectMessenger` and
-  `Deleter` over the chat. The envelope is rendered to HTML by a small renderer of its own for the CommonMark Muster
+  `Deleter` over the chat, failing with the library's constructors (`ForbiddenError`, `GoneError`, `InvalidError`,
+  S-083). The envelope is rendered to HTML by a small renderer of its own for the CommonMark Muster
   writes — paragraphs, hard line breaks, emphasis, strong emphasis, strikethrough, code spans, `http` and `https` links,
   bullet lists, block quotes and backslash escapes — with anything else shown as text and every text escaped; Mention
   markers become highlighted names through `bridge.ReplaceMentions`; the status colour, or the emoji without
   `status_color`, marks the message. A press is confirmed on the page at once and reported with `Press`; a Thread
   message with `ThreadMessage`; a deletion on the page with `MessageDeleted`; a message to the bot with
-  `DirectMessage`, which the library turns into an `account_link` event when it carries a token. Answers are shown to
-  their person only (`ephemeral`), in the Thread, or in the direct chat, as `answerEvent` asks.
+  `DirectMessage`, which the library turns into an `account_link` event when it carries a token. Each report carries
+  the page's id of the update as `UpdateID` and, but for a deletion, the chat as `Chat`. Answers are shown to their
+  person only (`ephemeral`), in the Thread, or in the direct chat, as `answerEvent` asks; `AnswerEvent` finds where
+  through the `ReportedEvent` the library gives it, whose `Chat` is the one reported.
 - **Configuration** (`main.go`): `-listen` (default `127.0.0.1:18095`; `:8095` in the image), the token from
   `BRIDGE_TOKEN` or `-token-file`, push with `BRIDGE_PUSH_URL` and `BRIDGE_PUSH_SECRET` or `-push-secret-file`,
   `-edit-max-age` (seconds, none by default) and `-max-body-length` (default 4000), and `BRIDGE_FEATURES`, a
   comma-separated list of the members of `info.capabilities`, all by default; `user_lookup` is `login` while
-  `direct_messages` is on and `none` without it. `info` names the bridge "Muster example bridge" with the library's
-  version and the messenger "Example chat". The README says that the example keeps everything in memory, so a restart
-  loses its messages, events and keys.
+  `direct_messages` is on and `none` without it. `info` names the bridge (`Config.Name`) "Muster example bridge" with
+  the library's version and the messenger (`Config.MessengerName`) "Example chat". Its `http.Server` sets no
+  `WriteTimeout`, as S-083 requires for long polls. The README says that the example keeps everything in memory, so a
+  restart loses its messages, events and keys.
 - **Conformance** (`Makefile`, `ci.yml`): `make conformance` runs, after S-083's three runs against `examples/minimal`,
   the same two non-interactive runs against `examples/chat`, and a third, interactive one: the example starts with
   `BRIDGE_PUSH_URL` pointing at the check's listener (`--push-listen 127.0.0.1:18096`) and the secret of

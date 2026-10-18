@@ -14,7 +14,7 @@ part; this page joins them.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [NFR](#non-functional-requirements)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [NFR](#non-functional-requirements)
 
 ## Summary
 
@@ -32,8 +32,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-10 Commands | Observation | 35 | S-032, S-063, S-033 | yes | 35 of 35 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082 | yes | 19 of 19 |
-| C-13 Mattermost | Shadow | 28 | S-039, S-061, S-040, S-064 | yes | 28 of 28 |
-| C-14 Telegram | Shadow | 35 | S-041, S-042, S-066, S-067, S-043 | yes | 35 of 35 |
+| C-13 Mattermost | Shadow | 31 | S-039, S-061, S-040, S-064, S-087 | yes | 31 of 31 |
+| C-14 Telegram | Shadow | 36 | S-041, S-042, S-066, S-067, S-043 | yes | 36 of 36 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
@@ -41,7 +41,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
-| C-22 Bridge | Bridge | 50 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084 | yes | 50 of 50 |
+| C-22 Bridge | Bridge | 51 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084 | yes | 51 of 51 |
+| C-23 Request log | Bridge | 13 | S-088, S-089, S-090 | yes | 13 of 13 |
 
 ## C-01
 
@@ -486,12 +487,12 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-13
 
-[Mattermost](../prd/l1/C-13-mattermost.md) · Shadow · stories: S-039, S-061, S-040, S-064
+[Mattermost](../prd/l1/C-13-mattermost.md) · Shadow · stories: S-039, S-061, S-040, S-064, S-087
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-13.FR-1 | S-039 (part), S-040 (part), S-070 (part) | complete | the Connections list shows the Mattermost server in S-070 (D309) |
-| C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040 |
+| C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part), S-087 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040; the dry probe in S-087 (D353) |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
 | C-13.FR-4 | S-061 (part), S-068 (part), S-069 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-13.FR-5 | S-061 | complete |  |
@@ -503,6 +504,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.FR-11 | S-061 (part), S-064 (part), S-070 (part) | complete | the Internal-alerts suggestion picker's labels in S-070 (D309) |
 | C-13.FR-12 | S-061 (part), S-064 (part) | complete |  |
 | C-13.FR-13 | S-039 (part), S-040 (part), S-047 (part), S-048 (part) | complete |  |
+| C-13.FR-14 | S-087 | complete | added after the Bridge (D353): the check before saving of every Connection type |
 | C-13.AC-1 | S-061 | complete |  |
 | C-13.AC-2 | S-061 | complete |  |
 | C-13.AC-3 | S-061 (part), S-064 (part) | complete |  |
@@ -519,6 +521,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.AC-14 | S-061 | complete |  |
 | C-13.AC-15 | S-061 | complete |  |
 | C-13.AC-16 | S-061 (part), S-040 (part) | complete | the warning in the API and `muster doctor` in S-061; on the Connection page in S-040 |
+| C-13.AC-17 | S-087 | complete |  |
 
 ## C-14
 
@@ -536,7 +539,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.FR-8 | S-041 (part), S-051 | complete | the router receives `/start`; the bot answers it once Account links exist (S-051) |
 | C-14.FR-9 | S-042 (part), S-058 | complete | the section on restricted networks is C-21.FR-7 (S-058) |
 | C-14.FR-10 | S-041 (part), S-043 (part) | complete |  |
-| C-14.FR-11 | S-041 (part), S-043 (part) | complete |  |
+| C-14.FR-11 | S-041 (part), S-043 (part), S-087 (part) | complete | a token typed into a check before saving in S-087 (D353) |
 | C-14.FR-12 | S-041 (part), S-042 (part) | complete |  |
 | C-14.FR-13 | S-042 | complete |  |
 | C-14.FR-14 | S-042 (part), S-043 (part) | complete |  |
@@ -547,7 +550,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.AC-3 | S-041 | complete |  |
 | C-14.AC-4 | S-067 | complete | by the press-age rule of C-14.FR-4 |
 | C-14.AC-5 | S-041 | complete |  |
-| C-14.AC-6 | S-041 (part), S-043 (part) | complete |  |
+| C-14.AC-6 | S-041 (part), S-043 (part), S-087 (part) | complete | with no token typed again, in S-087 |
 | C-14.AC-7 | S-041 (part), S-042 (part), S-043 (part) | complete |  |
 | C-14.AC-8 | S-042 | complete |  |
 | C-14.AC-9 | S-067 | complete |  |
@@ -561,6 +564,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.AC-17 | S-042 | complete |  |
 | C-14.AC-18 | S-067 | complete |  |
 | C-14.AC-19 | S-066 | complete |  |
+| C-14.AC-20 | S-087 | complete |  |
 
 ## C-15
 
@@ -730,8 +734,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-22.FR-1 | S-073 (part), S-077 (part) | complete |  |
-| C-22.FR-2 | S-073 (part), S-074 (part), S-077 (part) | complete |  |
+| C-22.FR-1 | S-073 (part), S-077 (part), S-087 (part) | complete | the token rule of a check before saving in S-087 |
+| C-22.FR-2 | S-073 (part), S-074 (part), S-077 (part), S-087 (part) | complete | the dry probe in S-087 |
 | C-22.FR-3 | S-080 (part), S-074 (part), S-077 (part) | complete |  |
 | C-22.FR-4 | S-074 | complete |  |
 | C-22.FR-5 | S-074 | complete |  |
@@ -780,6 +784,27 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.AC-23 | S-086 | complete |  |
 | C-22.AC-24 | S-079 | complete |  |
 | C-22.AC-25 | S-083 (part), S-085 (part), S-084 (part) | complete |  |
+| C-22.AC-26 | S-087 | complete |  |
+
+## C-23
+
+[Request log](../prd/l1/C-23-request-log.md) · Bridge · stories: S-088, S-089, S-090
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-23.FR-1 | S-088 (part), S-089 (part) | complete | outbound requests in S-088; inbound ones and the checks before saving of new Connections in S-089 |
+| C-23.FR-2 | S-088 (part), S-089 (part) | complete | the kind and run of checks in S-089 |
+| C-23.FR-3 | S-088 (part), S-089 (part) | complete |  |
+| C-23.FR-4 | S-088 | complete |  |
+| C-23.FR-5 | S-088 (part), S-089 (part) | complete | the run filter and the run on check and test results in S-089 |
+| C-23.FR-6 | S-090 | complete |  |
+| C-23.FR-7 | S-088 | complete |  |
+| C-23.AC-1 | S-088 (part), S-090 (part) | complete | "Requests" on the Alert Group page in S-090 |
+| C-23.AC-2 | S-088 (part), S-089 (part) | complete |  |
+| C-23.AC-3 | S-088 (part), S-089 (part) | complete |  |
+| C-23.AC-4 | S-088 | complete |  |
+| C-23.AC-5 | S-088 (part), S-089 (part) | complete |  |
+| C-23.AC-6 | S-090 | complete |  |
 
 ## Non-functional requirements
 
@@ -793,7 +818,7 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
-| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075) |
+| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075, S-087, S-088, S-089 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075); a stored token sent only to its saved address and a typed one only to the address typed with it, in the check before saving (S-087); secrets masked in the Request log (S-088, S-089) |
 | NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |

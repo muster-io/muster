@@ -766,7 +766,8 @@ class Sync:
         if s.repository:
             lines.append(
                 f"- **Repository:** [`{s.repository}`](https://github.com/{s.repository}) — the pull request goes"
-                f" there and closes this issue by its full reference, `{self.repo}#…`."
+                f" there and names this issue as `Part of {self.repo}#…`; it does not close it, so the issue is closed"
+                " by hand once that pull request merges."
             )
         if s.operator_attention:
             lines.append("- **Operator attention:** the operator acts or decides during this story; the Notes say why.")
