@@ -10,6 +10,7 @@ files_touched:
   - api/openapi.yaml
   - internal/api/connections.go
   - internal/api/connections_test.go
+  - internal/api/server.go
   - internal/connections/draft.go
   - internal/connections/draft_test.go
   - internal/connections/connections.go
@@ -36,6 +37,8 @@ files_touched:
   - web/src/components/connection-check.test.tsx
   - web/src/components/connection-form.tsx
   - web/src/components/connection-form.test.tsx
+  - web/src/components/telegram-connection-fields.test.tsx
+  - web/src/components/bridge-connection-fields.test.tsx
   - web/src/routes/connections.new.tsx
   - web/src/routes/connections.$connectionId.tsx
   - web/src/locales/en.json
@@ -45,12 +48,13 @@ files_touched:
   - docs/messengers/mattermost.md
   - docs/messengers/telegram.md
   - docs/messengers/bridge.md
+  - docs/messengers/telegram-restricted-networks.md
   - design/facts.md
   - design/prd/l1/C-13-mattermost.md
 acceptance:
   - "[C-13.FR-14] `checkConnectionDraft` (`POST /connections/checks`, `connections:write`, interactive) checks a draft of each Connection type with the steps and step codes of `checkConnection` and stores nothing: after passing draft checks of a new Mattermost, Telegram and Bridge Connection, `listConnections` lists what it listed before and the Audit log has no new entry; a draft check of a saved Connection leaves its `bot_username`, its `info` and its `etag` unchanged (`internal/api/connections_test.go`, `draft_test.go`, the Verification)."
   - "[C-13.FR-14, C-14.FR-11, C-22.FR-1] Which token goes where, one case per rule and per type (`draft_test.go`): a token typed in the draft is sent to the address typed in the draft; with no token typed, the stored token of `connection_id` is used only when the draft's address, after the normalization a save applies, and its proxy type and address are the saved ones; otherwise only the dry probe of the type runs and the other steps are skipped; a stored proxy password is used only with the saved proxy type and address. The probe `connection_drafts` of `secretleak.go` checks a draft that changes the address and one that changes the proxy: the stored token reaches neither fake, no log line and no returned error."
-  - "[C-13.FR-2, C-13.AC-17] The dry probe of a Mattermost Connection is `GET <server>/api/v4/system/ping` without an `Authorization` header: it passes on `200` JSON whose `status` is `OK`, and fails with `not_mattermost` on any other `200`, `wrong_path_prefix` on `404`, `unexpected_status` on another status and the network codes of `delivery.FailureCode` (`internal/mattermost/check_test.go`); the fake Mattermost server answers the ping without a token (`fakemattermost_test.go`); in `connection_drafts_test.go` the edit draft of a saved Mattermost Connection with only the server URL changed to the second fake server makes only that probe there, and with the token typed again the step `token` with the typed token."
+  - "[C-13.FR-2, C-13.AC-17] The dry probe of a Mattermost Connection is `GET <server>/api/v4/system/ping` without an `Authorization` header: it passes on `200` JSON whose `status` is `OK`, and fails with `wrong_path_prefix` on `404`, `not_mattermost` on an answer that is not JSON or a `200` whose `status` is not `OK`, `unexpected_status` on another status with JSON and the network codes of `delivery.FailureCode` (`internal/mattermost/check_test.go`); the fake Mattermost server answers the ping without a token (`fakemattermost_test.go`); in `connection_drafts_test.go` the edit draft of a saved Mattermost Connection with only the server URL changed to the second fake server makes only that probe there, and with the token typed again the step `token` with the typed token."
   - "[C-22.FR-2, C-22.AC-26] The dry probe of a Bridge Connection is `GET <base>/v1/info` without an `Authorization` header: it passes on `401` with an `application/problem+json` body, and fails with `not_bridge` on an answer that is not a problem, `wrong_path_prefix` on `404` and `unexpected_status` on another status with a problem (`internal/bridge/check_test.go`); `connection_drafts_test.go` checks a new Bridge Connection's draft against the fake bridge — `info` and `event_delivery`, the `info` returned and not stored — and an edit draft with only the base URL changed, which makes only the dry probe and fails with `not_bridge` against the fake Mattermost server's address."
   - "[C-14.FR-11, C-14.AC-6, C-14.AC-20] A Telegram draft with a typed token runs the dry probe, `getMe` and `getWebhookInfo` against the draft's base URL with that token; an edit draft with a changed base URL and no token, or with only the proxy changed and no token, runs only the dry probe and skips the other two (`internal/telegram/check_test.go`, `connection_drafts_test.go`, which reads the fake Telegram server's recorded requests to show that the stored token reached no other address)."
   - "[C-13.FR-14] A draft that names a saved Connection takes its limiter token from that Connection and answers `503` with `Retry-After` when none frees within `delivery.interactive_budget`; a draft of a new Connection takes no limiter token (`limiter_test.go`); a `connection_id` that names no Connection, a deleted one or one of another type is refused with `422` `unknown_id` at `/connection_id`, and an address in the wrong format with `422` `invalid_format` at its pointer (`internal/api/connections_test.go`)."
@@ -108,8 +112,9 @@ issue: 265
   the address of the type, the proxy — then decides the token and the proxy password:
   1. a `bot_token` in the draft is used against the draft's address;
   2. without one, and with a `connection_id`, the stored token is used when the draft's address equals the saved one
-     after the normalization a save applies (a trailing `/` dropped) and the draft's proxy has the saved `enabled`,
-     `type` and `address`;
+     after the normalization a save applies (the address as `checkAddress` normalizes it: white space trimmed, and a
+     trailing `/` dropped from a Telegram or Bridge base URL) and the draft's proxy has the saved `enabled`, `type` and
+     `address` — two disabled proxies count as the same;
   3. otherwise there is no token: the check runs the type's dry probe and reports its other steps skipped.
 
   The stored proxy password is used only when the draft's proxy has the saved type and address and the draft carries no
@@ -121,17 +126,22 @@ issue: 265
   in the Request log from S-089.
 - **Dry probes** (`internal/mattermost/check.go`, `client.go`; `internal/bridge/check.go`, `client.go`): a request to
   the draft's address through the draft's proxy with no `Authorization` header, on a client built without a token.
-  Mattermost: `GET /api/v4/system/ping` — `200` JSON with `status` `OK` passes, any other `200` is `not_mattermost`
-  with the content type named, `404` `wrong_path_prefix`, another status `unexpected_status`. Bridge: `GET /v1/info` —
-  `401` with `application/problem+json` passes, an answer that is not a problem `not_bridge`, `404`
-  `wrong_path_prefix`, another status with a problem `unexpected_status`. A request without an answer, or one the
-  outbound address policy refuses, takes the code of `delivery.FailureCode`, as every other step does; a `407` of the
-  proxy is `proxy_refused`. A failing dry probe never leads to a step with a token. `telegram.RunCheck` takes the step
-  path of a skipped step from the probe's client, so that a draft without any token needs no client with one.
+  Mattermost: `GET /api/v4/system/ping` — `200` JSON with `status` `OK` passes; `404` is `wrong_path_prefix`; an
+  answer that is not JSON is `not_mattermost` with its status and content type named, and so is a `200` whose `status`
+  is not `OK`; another status with JSON is `unexpected_status`. Bridge: `GET /v1/info` — `404` is `wrong_path_prefix`,
+  checked before the problem, so that a reverse proxy's page still names the prefix; an answer that is not a problem is
+  `not_bridge` with its status and content type named; `401` with `application/problem+json` passes; another status
+  with a problem is `unexpected_status`. A request without an answer, or one the outbound address policy refuses,
+  takes the code of `delivery.FailureCode`, as every other step does; a `407` of the proxy is `proxy_refused`. A
+  failing dry probe never leads to a step with a token. `telegram.RunCheck` takes the step path of a skipped step from
+  the probe's client, so that a draft without any token needs no client with one.
 - **Interactive path** (`internal/delivery/interactive.go`): a draft that names a saved Connection takes its token from
   that Connection's limiter bucket; a draft of a new Connection has no bucket and takes no token — a `Subject` that
-  says so explicitly, never an empty one, which stays an error — bounded by `delivery.interactive_budget` per call and
-  by the caller's `api.rate_limit`.
+  says so explicitly, never an empty one, which stays an error. It waits for no token, so it never waits past
+  `delivery.interactive_budget`; each request is bounded by its client's call timeout, and the caller by
+  `api.rate_limit`. A draft never holds a limiter: a `RetryAfter` answered to it reaches the interactive path as
+  `Transient`, so that an address that is not saved never pauses the deliveries of the Connection whose bucket the
+  draft takes its token from; the step keeps its failure.
 - **Refusals**: a `connection_id` that names no Connection, a deleted one or one whose type differs from the draft's is
   `422` `unknown_id` at `/connection_id`; an address that a save would refuse is `422` `invalid_format` at its pointer
   (`/server_url`, `/bot_api_base_url`, `/base_url`); a proxy that a save would refuse, its errors at `/proxy/...`.
@@ -141,9 +151,13 @@ issue: 265
   `checkConnection` while the form holds no changes, and the draft with `connection_id` while it does; a changed address
   or proxy with no token typed shows the dry probe and, on the skipped steps, "Skipped: type the bot token again to
   check the new address, or save first" («Пропущено: введите токен бота заново, чтобы проверить новый адрес, или
-  сохраните изменения»); a change of the form makes an earlier result stale and clears it. The texts of the codes
+  сохраните изменения»); a new Connection's draft without a token says "Skipped: type the bot token to check it"
+  («Пропущено: введите токен бота, чтобы проверить его»); after a passed dry probe the summary names the type ("The
+  address answers as a Mattermost server.", "… as a Bot API.", "… as a bridge."); a failed dry probe keeps "Skipped:
+  an earlier step failed"; a change of the form makes an earlier result stale and clears it. The texts of the codes
   `not_mattermost` ("The address answers, but not as a Mattermost server.") and `not_bridge` ("The address answers,
-  but not as a bridge: a bridge answers a request without its token with 401 and a problem.") join `checkCodeText`;
+  but not as a bridge: a bridge answers a request without its token with 401 and a problem.") join `checkCodeText`,
+  and the text of `unexpected_status` becomes one for every type ("The address answered with an unexpected status.");
   the hints of the three types say that the form's values are checked before saving. The Telegram panel's
   `unsavedBaseUrl` path is replaced by the draft check.
 - **Fake Mattermost server** (`fakemattermost.go`): `GET /api/v4/system/ping` answers `200` `{"status":"OK"}`
@@ -177,6 +191,7 @@ make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011
 API=localhost:8080/api/v1
 before=$(curl -s -b jar "$API/connections?limit=500" | jq '.items | length')
+audits=$(curl -s -b jar "$API/audit-log?limit=500" | jq '.items | length')
 
 # C-13.FR-14: drafts of new Connections of each type; nothing is saved
 curl -s "${H[@]}" $API/connections/checks -d '{"type":"mattermost","server_url":"http://127.0.0.1:18066",
@@ -189,7 +204,7 @@ curl -s "${H[@]}" $API/connections/checks -d '{"type":"bridge","base_url":"http:
   "bot_token":"muster-dev-bridge-token-b"}' | jq -c '{ok, s: [.steps[].name], m: .info.messenger.name}'
 # {"ok":true,"s":["info","event_delivery"],"m":"Fake chat"}
 curl -s -b jar "$API/connections?limit=500" | jq --argjson b "$before" '(.items | length) == $b'        # true
-curl -s -b jar "$API/audit-log?limit=10" | jq '[.items[] | select(.action | startswith("connection."))] | length'  # 0
+curl -s -b jar "$API/audit-log?limit=500" | jq --argjson a "$audits" '(.items | length) == $a'           # true
 
 # C-13.FR-2, C-13.AC-17: an edit draft of "Dev Mattermost" with only the server URL changed — the dry probe only
 MM=$(curl -s -b jar "$API/connections?type=mattermost" | jq -r '.items[] | select(.name=="Dev Mattermost") | .id')
@@ -219,22 +234,22 @@ grep -c 'muster-dev-mattermost-token\|muster-dev-bridge-token\|dev-telegram-toke
 In the browser (`connection-checks.spec.ts`, at 1280 px and 360 px, English and Russian): Connections → New →
 Mattermost, the second fake server and its token, "Check connection" shows "Connected as muster-dev-bot-b" and the
 Connections list still has its earlier rows; the same for Telegram and Bridge with their steps; on the page of "Dev
-Telegram", a changed base URL shows the dry probe and "Skipped: type the bot token again to check the new address, or
-save first" on `getMe` and `getWebhookInfo`, and the fake Telegram server records no request with the stored token at
-the new address. Screenshots of both widths go into the pull request.
+Telegram", a base URL with another path prefix shows the failed dry probe and the other steps skipped, and the fake
+Telegram server records no request with the stored token under that prefix; with only the proxy changed to the
+development HTTP proxy and no token, the dry probe passes through the proxy and `getMe` and `getWebhookInfo` show
+"Skipped: type the bot token again to check the new address, or save first". A fake server records no host, so another
+address of the same fake cannot be told apart from the saved one. Screenshots of both widths go into the pull request.
 
 ## Open questions
 
-None. The Mattermost dry probe relies on Mattermost's documented public ping; the maintainer confirms it on the test
-stand before the merge (Notes).
+None. The Mattermost dry probe relies on Mattermost's public ping, seen on the test stand on 2026-10-18 (F-069).
 
 ## Notes
 
 - Suggested commit: `feat(connections): check a connection before saving it`.
-- **Maintainer** (operator attention): on the test stand, `curl -s https://<mattermost>/api/v4/system/ping` without a
-  token, directly and through the reverse proxy in front of the server; when it answers `200` with `"status":"OK"`, the
-  entry moves from Pending to `F-069` with the date, the version and C-13.FR-2, in this pull request. If it does not,
-  the dry probe changes to what the server does answer before the merge.
+- **Maintainer** (operator attention): the maintainer saw the ping without a token answer `200` with `"status":"OK"`
+  on both Mattermost servers of the test stand on 2026-10-18; the entry moved from Pending to `F-069` with the date,
+  the version and C-13.FR-2, in this pull request.
 - One pull request for the operation and the forms (D353): the backend half alone has nothing a person can use, and
   together they touch 40 files, at the edge of the size signal. The story is `be` because the format has one kind per
   story, as S-070 and S-073 carry parts of the other half.

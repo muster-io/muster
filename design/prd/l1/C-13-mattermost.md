@@ -37,9 +37,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   example the system admin role, shows them in the channel (FR-4, F-063). `muster doctor` prints the same hint as a
   WARN line. When the check has no token it may send to the server URL — a changed server URL whose token is not typed
   again (FR-14) — it makes only a dry probe without the token, `GET <server>/api/v4/system/ping`, which a Mattermost
-  server answers to anyone; it passes on a `200` JSON answer whose `status` is `OK` and otherwise names what answered:
-  `not_mattermost` (an answer that is not that JSON), `wrong_path_prefix` (`404`), `unexpected_status` (another status
-  with JSON) and the network codes of the other steps.
+  server answers to anyone (F-069); it passes on a `200` JSON answer whose `status` is `OK` and otherwise names what
+  answered: `not_mattermost` (an answer that is not that JSON), `wrong_path_prefix` (`404`), `unexpected_status`
+  (another status with JSON) and the network codes of the other steps.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
   limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is a short summary line — the
   status emoji, `#N` and the Alert Group's title — with one attachment, coloured by status, that holds the details of
