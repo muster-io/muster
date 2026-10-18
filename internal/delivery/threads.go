@@ -191,6 +191,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 // a markup the messenger rejects is sent again without markup, and a reply whose Thread is lost again without its reply
 // link, in the same attempt.
 func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error {
+	ctx = outbound.WithLinks(ctx, linksOf(a.destination, &a.row.AlertGroupID))
 	start := w.Lease.Clocks.Real.Now()
 	c := a.call
 	var lost *Outcome

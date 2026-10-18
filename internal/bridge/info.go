@@ -386,7 +386,7 @@ func uniqueValid[E interface {
 // GetInfo calls getInfo (C-22.FR-2). A 401 is the code token_invalid with MessageTokenInvalid; an info that Muster
 // cannot use is invalid, with the code and the message of its *InfoError.
 func (c *Client) GetInfo(ctx context.Context, class outbound.Class) (Info, Result) {
-	res, r := c.do(ctx, class, http.MethodGet, "info", nil, nil, nil)
+	res, r := c.do(ctx, class, "getInfo", http.MethodGet, "info", nil, nil, nil)
 	switch {
 	case r.Status == http.StatusUnauthorized:
 		r.Code, r.Error = CodeTokenInvalid, MessageTokenInvalid

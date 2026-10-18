@@ -42,9 +42,10 @@ func (s *Service) WebhookURL(publicID string) string {
 	return base + telegram.WebhookPath + publicID
 }
 
-// telegramSettings are the settings of the client of a stored Telegram Connection, its secrets decrypted.
-func (s *Service) telegramSettings(id string, base string, token, password keyring.StoredSecret, proxy []byte) (
-	telegram.Settings, error) {
+// telegramSettings are the settings of the client of the stored Telegram Connection id, its secrets decrypted, whose
+// requests go to the Request log of the Connection conn, none for 0.
+func (s *Service) telegramSettings(id string, conn int64, base string, token, password keyring.StoredSecret,
+	proxy []byte) (telegram.Settings, error) {
 	t, err := s.cfg.Keyring.OpenSecret(fieldBotToken, token)
 	if err != nil {
 		return telegram.Settings{}, fmt.Errorf("open the bot token of the connection %s: %w", id, err)
@@ -57,15 +58,21 @@ func (s *Service) telegramSettings(id string, base string, token, password keyri
 	if err != nil {
 		return telegram.Settings{}, err
 	}
-	return telegram.Settings{BaseURL: base, Token: t, Proxy: p.Outbound(pw)}, nil
+	return telegram.Settings{BaseURL: base, Token: t, Proxy: p.Outbound(pw),
+		Owner: outbound.Owner{Connection: conn, PublicID: id}}, nil
 }
 
-// telegramClient builds the Telegram client of the stored Connection row.
+// telegramClient builds the Telegram client of the stored Connection row, whose requests go to its Request log.
 func (s *Service) telegramClient(row dbgen.GetConnectionRow) (*telegram.Client, error) {
+	return s.telegramClientOf(row, row.ID)
+}
+
+// telegramClientOf is telegramClient with its requests going to the Request log of the Connection owner, none for 0.
+func (s *Service) telegramClientOf(row dbgen.GetConnectionRow, owner int64) (*telegram.Client, error) {
 	if row.Type != TypeTelegram {
 		return nil, errNotTelegram
 	}
-	st, err := s.telegramSettings(row.PublicID, row.TelegramBotApiBaseUrl.String, storedToken(row),
+	st, err := s.telegramSettings(row.PublicID, owner, row.TelegramBotApiBaseUrl.String, storedToken(row),
 		storedPassword(row), row.Proxy)
 	if err != nil {
 		return nil, err
@@ -112,13 +119,19 @@ func (s *Service) webhookSecret(in Input, before *Connection, stored keyring.Sto
 
 // setWebhook registers the webhook of the Telegram Connection publicID, as saved in q, with secret, in the interactive
 // client class while the person waits, and returns the host of the webhook for webhookSet; a failure is a FieldError
-// at /update_mode with the step's message.
-func (s *Service) setWebhook(ctx context.Context, q Queries, publicID string, secret logging.Secret) (string, error) {
+// at /update_mode with the step's message. The request of a Connection that q creates is not recorded: its record
+// would name a row that is not committed yet, which the Request log's write on another connection does not see.
+func (s *Service) setWebhook(ctx context.Context, q Queries, publicID string, secret logging.Secret, created bool) (
+	string, error) {
 	row, err := s.row(ctx, q, publicID)
 	if err != nil {
 		return "", err
 	}
-	c, err := s.telegramClient(row)
+	owner := row.ID
+	if created {
+		owner = 0
+	}
+	c, err := s.telegramClientOf(row, owner)
 	if err != nil {
 		return "", err
 	}
@@ -174,7 +187,8 @@ func (s *Service) checkTelegram(ctx context.Context, row dbgen.GetConnectionRow,
 				Detail: "The Bot API base URL is not an absolute http or https URL without user information, query or " +
 					"fragment."}
 		}
-		st, err := s.telegramSettings(row.PublicID, base, keyring.StoredSecret{}, storedPassword(row), row.Proxy)
+		st, err := s.telegramSettings(row.PublicID, row.ID, base, keyring.StoredSecret{}, storedPassword(row),
+			row.Proxy)
 		if err != nil {
 			return CheckResult{}, err
 		}
@@ -232,7 +246,7 @@ func (s *Service) Polling(ctx context.Context) ([]telegram.Polled, error) {
 	out := make([]telegram.Polled, 0, len(rows))
 	for _, r := range rows {
 		c, err := s.cachedTelegramClient(r.ID, r.Version, func() (*telegram.Client, error) {
-			st, err := s.telegramSettings(r.PublicID, r.TelegramBotApiBaseUrl.String,
+			st, err := s.telegramSettings(r.PublicID, r.ID, r.TelegramBotApiBaseUrl.String,
 				storedToken(dbgen.GetConnectionRow{BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID,
 					BotTokenUpdatedAt: r.BotTokenUpdatedAt}),
 				storedPassword(dbgen.GetConnectionRow{ProxyPasswordCiphertext: r.ProxyPasswordCiphertext,

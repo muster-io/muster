@@ -37,6 +37,17 @@ import (
 // DefaultMaxBodyBytes is how much of an answer a client reads unless its configuration says otherwise.
 const DefaultMaxBodyBytes = 8 << 20
 
+// maxResponseHeaderBytes bounds the header of every answer, instead of the 10 MB net/http allows: an answer with a
+// larger header fails as a transport error like any other answer that cannot be read, and no record of the Request
+// log holds more of an answer's header than this.
+const maxResponseHeaderBytes = 64 << 10
+
+// minSecretPrefix is the length in bytes from which the path prefix of a base URL, without its leading and trailing
+// slashes (inner slashes count), is masked wherever a record holds it, in its headers and bodies as in its URL: a
+// shorter prefix, such as /api/v4 or /v1, is a route rather than a secret, and replacing it everywhere would garble
+// the bodies that name it.
+const minSecretPrefix = 16
+
 // userAgent is the User-Agent of every request that does not set its own, and of every CONNECT to a proxy: Muster and
 // its version, nothing else.
 var userAgent = userAgentOf(buildinfo.Version)
@@ -69,6 +80,10 @@ type Config struct {
 	Resolver Resolver
 	// MaxBodyBytes is the largest answer read; 0 is DefaultMaxBodyBytes.
 	MaxBodyBytes int64
+	// Recorder, with an Owner that names a Connection or an outgoing webhook Destination, gets the record of each
+	// attempt (C-23.FR-1); without either the client records nothing.
+	Recorder Recorder
+	Owner    Owner
 }
 
 // policyGeneration moves each time the outbound address policy may have changed (CloseIdleConnections).
@@ -134,8 +149,14 @@ type Client struct {
 	http       *http.Client
 	transports *transports
 	resolver   Resolver
-	redactor   redactor
-	maxBody    int64
+	// secrets are those of the configuration and the proxy's password, which redactor replaces.
+	secrets  []logging.Secret
+	redactor redactor
+	// recordSecrets are secrets and the base URL's path prefix of at least minSecretPrefix bytes, which
+	// recordRedactor replaces in a record; a record adds the request's own.
+	recordSecrets  []logging.Secret
+	recordRedactor redactor
+	maxBody        int64
 	// sleep waits between the attempts of the background class, and jitter spreads its backoff; tests replace both.
 	sleep  func(context.Context, time.Duration) error
 	jitter func(time.Duration) time.Duration
@@ -147,11 +168,18 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Proxy != nil {
 		secrets = append(secrets, cfg.Proxy.Password)
 	}
-	c := &Client{cfg: cfg, redactor: newRedactor(secrets), resolver: cfg.Resolver, maxBody: cfg.MaxBodyBytes,
-		sleep: sleepContext, jitter: randomJitter}
+	c := &Client{cfg: cfg, secrets: secrets, redactor: newRedactor(secrets), resolver: cfg.Resolver,
+		maxBody: cfg.MaxBodyBytes, sleep: sleepContext, jitter: randomJitter}
 	if err := c.build(); err != nil {
 		return nil, errors.New(c.redact("outbound client: " + err.Error()))
 	}
+	c.recordSecrets = secrets
+	if c.base != nil {
+		if prefix := strings.Trim(c.base.Path, "/"); len(prefix) >= minSecretPrefix {
+			c.recordSecrets = append(slices.Clone(secrets), logging.Secret(prefix))
+		}
+	}
+	c.recordRedactor = newRedactor(c.recordSecrets)
 	return c, nil
 }
 
@@ -193,14 +221,15 @@ func (c *Client) build() error {
 	}
 	c.transports = newTransports(func() *http.Transport {
 		return &http.Transport{
-			DialContext:         d.DialContext,
-			Proxy:               proxy,
-			ProxyConnectHeader:  http.Header{"User-Agent": {userAgent}},
-			ForceAttemptHTTP2:   true,
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-			TLSHandshakeTimeout: cfg.ConnectTimeout,
-			IdleConnTimeout:     30 * time.Second,
-			MaxIdleConnsPerHost: 4,
+			DialContext:            d.DialContext,
+			Proxy:                  proxy,
+			ProxyConnectHeader:     http.Header{"User-Agent": {userAgent}},
+			ForceAttemptHTTP2:      true,
+			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout:    cfg.ConnectTimeout,
+			IdleConnTimeout:        30 * time.Second,
+			MaxIdleConnsPerHost:    4,
+			MaxResponseHeaderBytes: maxResponseHeaderBytes,
 		}
 	})
 	c.http = &http.Client{
@@ -261,6 +290,11 @@ type Request struct {
 	Mapping Mapping
 	// ClassifyBody finds errors the provider reports in the body; nil reads none.
 	ClassifyBody BodyClassifier
+	// Operation names the request in the Request log as its protocol names it, such as createPost or getUpdates.
+	Operation string
+	// SkipRecord, when set, says of an attempt that succeeded, by its status and body, that the Request log leaves it
+	// out, as it does a long poll that ended without events; a failed attempt is always recorded.
+	SkipRecord func(status int, body []byte) bool
 }
 
 // Result is what a request ended with. Body and Header are those of the last answer, if there was one.
@@ -311,7 +345,8 @@ func (e *Error) Error() string { return e.msg }
 func (e *Error) Unwrap() error { return e.cause }
 
 // Do sends req and makes further attempts as the client's class allows. The returned error is an *Error whenever the
-// outcome is not ok.
+// outcome is not ok. A client with a Recorder and an Owner records each attempt once it has its outcome, before the
+// next one.
 func (c *Client) Do(ctx context.Context, req Request) (Result, error) {
 	u, err := c.target(req.URL)
 	if err != nil {
@@ -319,8 +354,9 @@ func (c *Client) Do(ctx context.Context, req Request) (Result, error) {
 		return Result{Outcome: OutcomeFatal, Attempts: 1}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
 	}
 	for n := 1; ; n++ {
-		res, err := c.attempt(ctx, req, u)
+		res, ex, elapsed, err := c.attempt(ctx, req, u)
 		res.Attempts = n
+		c.record(ctx, req, u, n, res, ex, elapsed, err)
 		if err == nil || !c.cfg.Class.retries(res.Outcome) {
 			return res, err
 		}
@@ -350,11 +386,13 @@ func (c *Client) target(raw string) (*url.URL, error) {
 	return parseTarget(joined)
 }
 
-func (c *Client) attempt(ctx context.Context, req Request, u *url.URL) (Result, error) {
+// attempt sends req once: its result, what it exchanged and how long it took on the real clock.
+func (c *Client) attempt(ctx context.Context, req Request, u *url.URL) (Result, exchange, time.Duration, error) {
 	start := c.cfg.Clock.Now()
-	res, err := c.send(ctx, req, u)
-	c.observe(res.Outcome, c.cfg.Clock.Now().Sub(start))
-	return res, err
+	res, ex, err := c.send(ctx, req, u)
+	elapsed := c.cfg.Clock.Now().Sub(start)
+	c.observe(res.Outcome, elapsed)
+	return res, ex, elapsed, err
 }
 
 func (c *Client) observe(o Outcome, elapsed time.Duration) {
@@ -364,8 +402,11 @@ func (c *Client) observe(o Outcome, elapsed time.Duration) {
 
 // display is u as an error shows it: redacted, and with the path of the base URL, which may be a secret prefix,
 // replaced with [redacted].
-func (c *Client) display(u *url.URL) string {
-	if c.base != nil && u.Host == c.base.Host && u.Scheme == c.base.Scheme {
+func (c *Client) display(u *url.URL) string { return c.displayWith(c.redactor, u) }
+
+// displayWith is display with the secrets of red.
+func (c *Client) displayWith(red redactor, u *url.URL) string {
+	if c.base != nil && sameOrigin(u, c.base) {
 		if prefix := strings.TrimSuffix(c.base.Path, "/"); prefix != "" {
 			if rest, ok := strings.CutPrefix(u.Path, prefix); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
 				v := *u
@@ -374,10 +415,29 @@ func (c *Client) display(u *url.URL) string {
 			}
 		}
 	}
-	return c.redact(c.redactor.url(u))
+	return red.redact(red.url(u))
 }
 
-func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, error) {
+// sameOrigin reports whether a and b have the same scheme and host, both compared without regard to case, with an
+// explicit default port (:80 for http, :443 for https) equal to none.
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(originHost(a), originHost(b))
+}
+
+// originHost is the host and port of u, without the port when it is the default port of u's scheme.
+func originHost(u *url.URL) string {
+	port := u.Port()
+	switch {
+	case port == "",
+		port == "80" && strings.EqualFold(u.Scheme, "http"),
+		port == "443" && strings.EqualFold(u.Scheme, "https"):
+		return u.Hostname()
+	}
+	return net.JoinHostPort(u.Hostname(), port)
+}
+
+// send makes one attempt of req: its result, and what it sent and was answered for its record.
+func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, exchange, error) {
 	actx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
 	method := req.Method
@@ -390,34 +450,46 @@ func (c *Client) send(ctx context.Context, req Request, u *url.URL) (Result, err
 	}
 	hreq, err := http.NewRequestWithContext(actx, method, u.String(), body)
 	if err != nil {
-		return Result{Outcome: OutcomeFatal}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
+		return Result{Outcome: OutcomeFatal}, exchange{}, &Error{Outcome: OutcomeFatal, msg: c.redact(err.Error())}
 	}
-	if req.Header != nil {
-		hreq.Header = req.Header.Clone()
-	}
-	// An outgoing webhook may name its own User-Agent in a header template.
-	if hreq.Header.Get("User-Agent") == "" {
-		hreq.Header.Set("User-Agent", userAgent)
-	}
+	hreq.Header = sentHeader(req.Header)
+	ex := exchange{sent: true, header: hreq.Header}
 	resp, err := c.http.Do(hreq)
 	if err != nil {
-		return c.transportError(ctx, u, err)
+		res, err := c.transportError(ctx, u, err)
+		return res, ex, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody+1))
 	if err != nil {
-		return c.transportError(ctx, u, &url.Error{Op: "read the answer of " + method, URL: u.String(), Err: err})
+		res, err := c.transportError(ctx, u, &url.Error{Op: "read the answer of " + method, URL: u.String(), Err: err})
+		return res, ex, err
 	}
+	ex.answer(resp, data)
 	if int64(len(data)) > c.maxBody {
-		return Result{Outcome: OutcomeUnknown, Status: resp.StatusCode, Header: resp.Header},
+		return Result{Outcome: OutcomeUnknown, Status: resp.StatusCode, Header: resp.Header}, ex,
 			&Error{Outcome: OutcomeUnknown, Status: resp.StatusCode,
 				msg: fmt.Sprintf("%s %q: the answer is larger than %d bytes", method, c.display(u), c.maxBody)}
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
-		return Result{Outcome: OutcomeRedirect, Status: resp.StatusCode, Header: resp.Header, Body: data},
+		return Result{Outcome: OutcomeRedirect, Status: resp.StatusCode, Header: resp.Header, Body: data}, ex,
 			&Error{Outcome: OutcomeRedirect, Status: resp.StatusCode, msg: c.redirectMessage(u, resp)}
 	}
-	return c.classify(req, method, u, resp, data)
+	res, err := c.classify(req, method, u, resp, data)
+	return res, ex, err
+}
+
+// sentHeader is h as a request sends it: a copy, with Muster's User-Agent unless h names its own, as an outgoing
+// webhook may in a header template.
+func sentHeader(h http.Header) http.Header {
+	out := h.Clone()
+	if out == nil {
+		out = http.Header{}
+	}
+	if out.Get("User-Agent") == "" {
+		out.Set("User-Agent", userAgent)
+	}
+	return out
 }
 
 func (c *Client) redirectMessage(u *url.URL, resp *http.Response) string {

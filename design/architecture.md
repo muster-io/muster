@@ -217,6 +217,7 @@ flowchart TB
 
     adapters["adapters<br/>Mattermost, Telegram, Bridge,<br/>outgoing webhook"]
     outbound["outbound HTTP package"]
+    requestlog["Request log<br/>(requestlog)"]
     db[("PostgreSQL")]
 
     ingestH -- "Stored Snapshot + NOTIFY" --> db
@@ -236,6 +237,8 @@ flowchart TB
     mmCb & tgUp & brEv -- "private answers" --> interactive
     interactive --> adapters
     adapters --> outbound
+    outbound -- "each attempt, masked" --> requestlog
+    requestlog --> db
 ```
 
 - **Snapshot processing** reads Stored Snapshots in arrival order per Alertmanager group, several Alertmanager groups
@@ -273,6 +276,14 @@ flowchart TB
   runs presses and Text commands through the dispatcher with the Transport `bridge`, starts the deleted Root message
   flow for `message_deleted`, and answers the person through the interactive path before it acknowledges the event
   ([C-22].FR-10 to FR-14, [flow c'](#c-bridge-press-through-polling-or-push)).
+- **Request log** keeps, for troubleshooting, the recent HTTP requests of the Connections and the outgoing webhook
+  Destinations, each attempt with its answer ([C-23]). The outbound HTTP package hands each attempt of a client that has
+  an owner to the Request log after its outcome is known, masked of the Secrets of the client and of the request and of
+  the credential headers; the Request log masks what the shape of a value tells is a secret — signed action ids, the
+  tokens of `/start` and of `account_link` events — cuts each body to `request_log.body_max`, and inserts one row on
+  the main pool, outside any transaction of the caller, never failing or delaying the request beyond that write. The
+  delivery worker links each attempt to its Destination and Alert Group. The API lists and reads the records within
+  `request_log.max_records` per owner and `request_log.max_age`, and the Leader prunes the rest every minute.
 
 ### 3.2 Access, configuration and secrets
 
@@ -1375,6 +1386,9 @@ erDiagram
     Organization ||--o{ LinkRule : has
     Organization ||--o{ LookupTable : has
     LinkRule }o--o{ LookupTable : uses
+    Connection ||--o{ RequestRecord : "requests of"
+    Destination |o--o{ RequestRecord : "owns (outgoing webhook) or concerns"
+    AlertGroup |o..o{ RequestRecord : concerns
 
     Route {
         id id PK
@@ -1442,6 +1456,15 @@ erDiagram
     SigningSecret {
         string value "encrypted, shown once"
         timestamp retired_at "previous one signs until retired"
+    }
+    RequestRecord {
+        id id PK
+        timestamp at "business clock"
+        string direction "outbound; inbound from S-089"
+        string operation "as the protocol names it"
+        int status "null without an answer"
+        string bodies "masked, cut to request_log.body_max"
+        string error "masked, untrusted"
     }
 ```
 
@@ -1581,3 +1604,4 @@ These are engineering terms used in the ADRs and in this document; domain terms 
 [C-19]: prd/l1/C-19-self-observation.md
 [C-20]: prd/l1/C-20-organization-settings-and-security.md
 [C-22]: prd/l1/C-22-bridge.md
+[C-23]: prd/l1/C-23-request-log.md

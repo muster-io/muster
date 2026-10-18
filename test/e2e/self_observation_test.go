@@ -331,7 +331,7 @@ var metricLabelRe = regexp.MustCompile(`([a-z_]+)="`)
 // gauges, the version and commit of the build and le.
 var allowedMetricLabels = []string{"integration", "route", "destination", "client", "outcome", "state",
 	"route_pattern", "method", "code", "kind", "reason", "status", "by", "command", "transport", "template", "table",
-	"name", "version", "commit", "le"}
+	"direction", "name", "version", "commit", "le"}
 
 // TestSystemStatus covers C-19.FR-10, C-19.AC-6, C-19.AC-2 and C-19.AC-3 on two replicas: a Broken Mattermost
 // Destination raises MusterDestinationBroken, which reaches the Destination of the internal_alerts suggestion, and the

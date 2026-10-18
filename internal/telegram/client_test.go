@@ -5,6 +5,7 @@ package telegram
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -365,5 +366,91 @@ func TestDryProbeRetryAfterIsTransient(t *testing.T) {
 	r := newClient(t, Settings{BaseURL: base}).DryProbe(t.Context(), outbound.ClassInteractive)
 	if r.Outcome.Kind != delivery.OutcomeTransient || r.Outcome.Scope != "" || r.Outcome.RetryAfter != 0 || r.Status != 429 {
 		t.Fatalf("dry probe 429 = %+v", r)
+	}
+}
+
+// records is an outbound.Recorder that keeps what it gets.
+type records struct {
+	mu   sync.Mutex
+	list []outbound.Record
+}
+
+func (r *records) Record(_ context.Context, rec outbound.Record) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.list = append(r.list, rec)
+}
+
+func (r *records) got() []outbound.Record {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]outbound.Record(nil), r.list...)
+}
+
+// TestRequestLog: every call is recorded under the Connection by its Bot API method, the token [redacted] in the URL,
+// except a getUpdates that ended without updates; a failed one is recorded; setWebhook's secret token is [redacted] in
+// its body; a client without an Owner records nothing (C-23.FR-1, AC-2, AC-3).
+func TestRequestLog(t *testing.T) {
+	_, base := serve(t,
+		jsonAnswer(200, `{"ok":true,"result":[]}`),
+		jsonAnswer(200, `{"ok":true,"result":[{"update_id":5,"message":{"message_id":1,"chat":{"id":1,"type":"private"},"text":"hi"}}]}`),
+		jsonAnswer(409, `{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}`),
+		jsonAnswer(200, `{"ok":true,"result":true}`),
+		jsonAnswer(200, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"b"}}`),
+		jsonAnswer(401, `{"ok":false,"error_code":401,"description":"Unauthorized"}`),
+		jsonAnswer(200, `{"ok":true,"result":[]}`))
+	rec := &records{}
+	n := network(t, nil)
+	n.Recorder = rec
+	owner := outbound.Owner{Connection: 9, PublicID: "CN0000000000A9"}
+	c, err := NewClient(n, Settings{BaseURL: base, Token: testToken, Owner: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		_, _ = c.GetUpdates(t.Context(), nil, 0)
+	}
+	if r := c.SetWebhook(t.Context(), outbound.ClassInteractive, "https://in.example.org/hook", "s3cr3t-h00k"); !r.OK() {
+		t.Fatalf("setWebhook = %+v", r)
+	}
+	if _, r := c.GetMe(t.Context(), outbound.ClassInteractive); !r.OK() {
+		t.Fatalf("getMe = %+v", r)
+	}
+	if r := c.DryProbe(t.Context(), outbound.ClassInteractive); r.Status != http.StatusUnauthorized {
+		t.Fatalf("dry probe = %+v", r)
+	}
+	got := rec.got()
+	var ops []string
+	for _, r := range got {
+		ops = append(ops, fmt.Sprintf("%s:%d", r.Operation, r.Status))
+		text := fmt.Sprintf("%s %v %s %s %s", r.URL, r.RequestHeader, r.RequestBody, r.ResponseBody, r.Error)
+		if r.Owner != owner || strings.Contains(text, testToken) || strings.Contains(text, "s3cr3t-h00k") {
+			t.Errorf("record %+v", r)
+		}
+	}
+	if fmt.Sprint(ops) != "[getUpdates:200 getUpdates:409 setWebhook:200 getMe:200 getMe:401]" {
+		t.Fatalf("records %v", ops)
+	}
+	if got[0].URL != base+"/bot[redacted]/getUpdates" || got[1].Outcome != outbound.OutcomeUnknown ||
+		got[4].URL != base+"/bot0:x/getMe" {
+		t.Errorf("urls %q %q, outcome %s", got[0].URL, got[4].URL, got[1].Outcome)
+	}
+	var hook map[string]any
+	if json.Unmarshal(got[2].RequestBody, &hook) != nil || hook["secret_token"] != "[redacted]" ||
+		hook["url"] != "https://in.example.org/hook" {
+		t.Errorf("setWebhook body %s", got[2].RequestBody)
+	}
+	quiet, err := NewClient(n, Settings{BaseURL: base, Token: testToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, r := quiet.GetUpdates(t.Context(), nil, 0); !r.OK() || len(rec.got()) != len(got) {
+		t.Fatalf("a client without an Owner: %+v, %d records", r, len(rec.got()))
+	}
+	for body, want := range map[string]bool{`{"ok":true,"result":[]}`: true, `{"ok":true,"result":[{}]}`: false,
+		`{"ok":true,"result":null}`: false, `{"ok":false,"result":[]}`: false, `not json`: false} {
+		if noUpdates(200, []byte(body)) != want {
+			t.Errorf("noUpdates(%s) = %v", body, !want)
+		}
 	}
 }

@@ -160,7 +160,8 @@ type cachedBridge struct {
 }
 
 // bridgeClient builds the client of the stored Bridge Connection row, with its decrypted token, push secret and proxy
-// password; the bridge knows the push secret too, so the client masks it like the token.
+// password; the bridge knows the push secret too, so the client masks it like the token. Its requests go to the
+// Request log of the Connection.
 func (s *Service) bridgeClient(row dbgen.GetConnectionRow) (*bridge.Client, error) {
 	token, err := s.cfg.Keyring.OpenSecret(fieldBotToken, storedToken(row))
 	if err != nil {
@@ -179,7 +180,8 @@ func (s *Service) bridgeClient(row dbgen.GetConnectionRow) (*bridge.Client, erro
 		return nil, err
 	}
 	return bridge.NewClient(bridge.Network(s.cfg.Network), bridge.Settings{BaseURL: row.BridgeBaseUrl.String,
-		Token: token, PushSecret: pushSecret, Proxy: p.Outbound(password)})
+		Token: token, PushSecret: pushSecret, Proxy: p.Outbound(password),
+		Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}})
 }
 
 // cachedBridgeClient is the Bridge client of the Connection id at version for delivery, built again when the version

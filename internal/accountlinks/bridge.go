@@ -19,7 +19,9 @@ import (
 	"github.com/muster-io/muster/internal/accountlinks/dbgen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -428,8 +430,9 @@ func (s *Service) startBridgeCode(ctx context.Context, b BridgeBot, r Requester,
 		s.logRejected(ctx, MessengerBridge, conn.publicID, ReasonConflict, nil)
 		return BridgeCodeStarted{}, ErrLinkedElsewhere
 	}
-	err = b.SendDirectMessage(ctx, "dm-"+started.RequestPublicID, acct.ExternalID,
-		messages.T(lang, "accountLink.code", messages.Args{"code": code}))
+	// The code is masked in the Request log's record of the direct message (C-23.FR-3).
+	err = b.SendDirectMessage(outbound.WithSecrets(ctx, logging.Secret(code)), "dm-"+started.RequestPublicID,
+		acct.ExternalID, messages.T(lang, "accountLink.code", messages.Args{"code": code}))
 	if err == nil {
 		return started, nil
 	}

@@ -471,3 +471,31 @@ var TemplateRenderDuration = newHistogram(Definition{
 	Buckets:    []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
 	Capability: "C-12",
 })
+
+// RequestLogDirections are the direction values of the Request log metrics: Muster sent the request, or received it.
+var RequestLogDirections = []string{"outbound", "inbound"}
+
+// RequestLogRecords counts the records written to the Request log, by direction (C-23.FR-7).
+var RequestLogRecords = newCounter(Definition{
+	Name:       "muster_request_log_records_total",
+	Help:       "Records written to the Request log, one per request, by direction.",
+	Labels:     []Label{closed("direction", "whether Muster sent the request or received it", RequestLogDirections...)},
+	Capability: "C-23",
+})
+
+// RequestLogWriteFailures counts the records of the Request log that could not be written, by direction (C-23.FR-4).
+var RequestLogWriteFailures = newCounter(Definition{
+	Name: "muster_request_log_write_failures_total",
+	Help: "Records of the Request log that could not be written — the database refused them or their write ran " +
+		"past its timeout — and were dropped, by direction; the requests they record went on unchanged.",
+	Labels:     []Label{closed("direction", "whether Muster sent the request or received it", RequestLogDirections...)},
+	Capability: "C-23",
+})
+
+// RequestLogPruned counts the records of the Request log the Leader deleted past its bounds (C-23.FR-4).
+var RequestLogPruned = newCounter(Definition{
+	Name: "muster_request_log_pruned_total",
+	Help: "Records of the Request log that the Leader deleted, older than request_log.max_age or past the newest " +
+		"request_log.max_records of their owner.",
+	Capability: "C-23",
+})

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -678,24 +679,179 @@ func TestIntegrationBridgeLinkRequests(t *testing.T) {
 	})
 }
 
+// TestIntegrationRequestLog runs 0013: before it there is no request_log; after up the records of a Connection, of an
+// outgoing webhook Destination, of a Connection naming a messenger Destination and an Alert Group, and of no owner
+// without an answer are accepted, every CHECK refuses what it bounds, a public_id is unique in its Organization, an
+// owner must exist and the hard deletion of a Connection takes its records along; the four indexes exist. Down drops
+// the table; up again works.
+func TestIntegrationRequestLog(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 12)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, c.public_id, 'mattermost', c.public_id, 'http://mm', '\x00', 'k1', '2026-10-05', 1, 1,
+				'2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('CN0000000000M1'), ('CN0000000000M2')) AS c (public_id)`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000W1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-10-05', '{}', 1, 1,
+				'healthy', '2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, connection_id, mattermost_team_id,
+			mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			SELECT c.org_id, 'DS0000000000M1', 'mattermost', 'alerts', c.id, 't1', 'ch1', '{}', 1, 1, 'healthy',
+				'2026-10-05', '2026-10-05'
+			FROM connections c WHERE c.public_id = 'CN0000000000M1'`)
+		if got := e.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'request_log'`); got != 0 {
+			t.Fatal("before 0013: request_log exists")
+		}
+
+		e.step(t, 1)
+		n := 0
+		record := func(t *testing.T, set map[string]string) error {
+			t.Helper()
+			n++
+			cols := map[string]string{
+				"public_id": fmt.Sprintf("'RQ%012d'", n), "at": "'2026-10-05 12:00:00+00'", "direction": "'outbound'",
+				"operation": "'createPost'", "method": "'POST'", "url": "'http://mm/api/v4/posts'",
+				"request_headers": `'{"User-Agent": ["Muster/1.0.0"]}'`, "request_body": "'{}'",
+				"request_body_bytes": "2", "request_body_truncated": "false", "status": "201",
+				"response_headers": "'{}'", "response_body": "'{}'", "response_body_bytes": "2",
+				"response_body_truncated": "false", "latency_ms": "12", "via": "'direct'", "attempt": "1",
+				"connection_id": "(SELECT id FROM connections WHERE public_id = 'CN0000000000M1')",
+			}
+			maps.Copy(cols, set)
+			names, values := make([]string, 0, len(cols)), make([]string, 0, len(cols))
+			for k, v := range cols {
+				names, values = append(names, k), append(values, v)
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO request_log (org_id, `+strings.Join(names, ", ")+`)
+				SELECT id, `+strings.Join(values, ", ")+` FROM organizations`)
+			return err
+		}
+		code := func(err error) string {
+			var pe *pgconn.PgError
+			switch {
+			case err == nil:
+				return ""
+			case errors.As(err, &pe):
+				return pe.Code
+			}
+			return err.Error()
+		}
+		const (
+			webhook   = "(SELECT id FROM destinations WHERE public_id = 'DS0000000000W1')"
+			messenger = "(SELECT id FROM destinations WHERE public_id = 'DS0000000000M1')"
+		)
+		noAnswer := map[string]string{"status": "NULL", "response_headers": "NULL", "response_body": "NULL",
+			"response_body_bytes": "0"}
+		with := func(base map[string]string, kv ...string) map[string]string {
+			out := maps.Clone(base)
+			if out == nil {
+				out = map[string]string{}
+			}
+			for i := 0; i+1 < len(kv); i += 2 {
+				out[kv[i]] = kv[i+1]
+			}
+			return out
+		}
+		for _, tt := range []struct {
+			name string
+			set  map[string]string
+			want string
+		}{
+			{"a Connection's record", nil, ""},
+			{"an outgoing webhook's record", with(nil, "connection_id", "NULL", "destination_id", webhook,
+				"status", "500", "error_class", "'transient'", "error", "'500 Internal Server Error (transient)'"), ""},
+			{"a record naming a messenger Destination and an Alert Group", with(nil, "destination_id", messenger,
+				"alert_group_id", "42"), ""},
+			{"a record of no owner without an answer", with(noAnswer, "connection_id", "NULL",
+				"error_class", "'transient'", "error_code", "'connect_failed'", "error", "'connection refused'",
+				"check_kind", "'draft_check'", "check_run", "'CR0000000000A1'"), ""},
+			{"an inbound record", with(nil, "direction", "'inbound'", "operation", "'press'"), ""},
+			{"a wrong public_id prefix", with(nil, "public_id", "'XX0000000000A1'"), "23514"},
+			{"an empty operation", with(nil, "operation", "''"), "23514"},
+			{"an operation of 65 characters", with(nil, "operation", "'"+strings.Repeat("o", 65)+"'"), "23514"},
+			{"an unknown direction", with(nil, "direction", "'sideways'"), "23514"},
+			{"a status without answer headers", with(nil, "response_headers", "NULL"), "23514"},
+			{"a status without an answer body", with(nil, "response_body", "NULL"), "23514"},
+			{"answer headers without a status", with(noAnswer, "response_headers", "'{}'"), "23514"},
+			{"a status below 100", with(nil, "status", "99"), "23514"},
+			{"an error code with a status", with(nil, "error_code", "'timeout'"), "23514"},
+			{"an unknown error code", with(noAnswer, "error_code", "'eof'"), "23514"},
+			{"an unknown error class", with(nil, "error_class", "'ok'"), "23514"},
+			{"an unknown check kind", with(nil, "check_kind", "'other'"), "23514"},
+			{"a check run that is no CR id", with(nil, "check_run", "'RQ0000000000A1'"), "23514"},
+			{"an unknown path", with(nil, "via", "'tunnel'"), "23514"},
+			{"attempt 0", with(nil, "attempt", "0"), "23514"},
+			{"a negative latency", with(nil, "latency_ms", "-1"), "23514"},
+			{"headers that are no object", with(nil, "request_headers", "'[]'"), "23514"},
+			{"an empty method", with(nil, "method", "''"), "23514"},
+			{"a public_id used twice", with(nil, "public_id", "'RQ000000000001'"), "23505"},
+			{"an unknown Connection", with(nil, "connection_id", "-1"), "23503"},
+			{"an unknown Destination", with(nil, "destination_id", "-1"), "23503"},
+		} {
+			if got := code(record(t, tt.set)); got != tt.want {
+				t.Errorf("%s: %s, want %q", tt.name, got, tt.want)
+			}
+		}
+		for range 3 {
+			if err := record(t, map[string]string{
+				"connection_id": "(SELECT id FROM connections WHERE public_id = 'CN0000000000M2')"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.exec(t, `DELETE FROM connections WHERE public_id = 'CN0000000000M2'`)
+		if got := e.count(t, `SELECT count(*) FROM request_log`); got != 5 {
+			t.Errorf("after the deletion of a Connection: %d records, want the 5 of the others", got)
+		}
+		indexes := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'request_log'
+				AND indexname IN ('request_log_connection_idx', 'request_log_destination_idx',
+					'request_log_unowned_idx', 'request_log_at_idx')`)
+		}
+		if got := indexes(t); got != 4 {
+			t.Errorf("after up: %d of the 4 indexes", got)
+		}
+
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'request_log'`); got != 0 {
+			t.Error("after down: request_log is left")
+		}
+
+		e.step(t, 1)
+		if got := indexes(t); got != 4 {
+			t.Errorf("after up again: %d of the 4 indexes", got)
+		}
+		if err := record(t, nil); err != nil {
+			t.Errorf("after up again: %v", err)
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 13 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (12)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (13)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":12`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":13`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":12`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":13`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -711,10 +867,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (12)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (13)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":12`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":13`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

@@ -200,3 +200,10 @@ sql:
       go:
         <<: *go
         out: internal/webhooks/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/requestlog/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/requestlog/dbgen

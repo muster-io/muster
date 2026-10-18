@@ -737,6 +737,24 @@ var BridgePollFailed = newEvent("bridge_poll_failed", LevelWarn, "C-22",
 		"polls again from the stored cursor. A failed poll makes no Destination Broken.",
 	"connection", "failures", "error")
 
+// RequestLogWriteFailed is logged when a record of the Request log could not be written (C-23.FR-4, FR-7).
+var RequestLogWriteFailed = newEvent("request_log_write_failed", LevelWarn, "C-23",
+	"A record of the Request log could not be written — the database refused it, or its write ran past its 2 s "+
+		"timeout — and was dropped; the request it records went on unchanged. direction and operation are the "+
+		"record's, owner the public_id of its Connection or outgoing webhook Destination, empty without one, and "+
+		"error the database error. The headers and bodies of the record are never logged; "+
+		"muster_request_log_write_failures_total counts the dropped records.",
+	"direction", "operation", "owner", "error")
+
+// RequestLogPruned is logged when the Leader task request_log_pruning deleted records of the Request log
+// (C-23.FR-4, FR-7).
+var RequestLogPruned = newEvent("request_log_pruned", LevelInfo, "C-23",
+	"The Leader task request_log_pruning deleted, in batches, records of the Request log older than "+
+		"request_log.max_age or past the newest request_log.max_records of their Connection, of their outgoing "+
+		"webhook Destination or of the records without an owner: rows is how many it deleted in one run. Not "+
+		"logged when a run deleted nothing.",
+	"rows")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

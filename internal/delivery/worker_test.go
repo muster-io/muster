@@ -31,6 +31,7 @@ import (
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 const orgID = 1
@@ -1921,6 +1922,11 @@ func TestPublishAndCollapse(t *testing.T) {
 	if c := calls[1]; c.MessageID != "p1" || c.Loudness != groups.Quiet || len(c.Mentions) != 0 ||
 		!strings.Contains(textOf(c), "Acknowledged") || c.Message.Buttons[0].Command != "unacknowledge" {
 		t.Errorf("update %+v", c)
+	}
+	for _, c := range calls {
+		if c.Links != (outbound.Links{Destination: destMM, AlertGroup: groupID}) {
+			t.Errorf("the links of the %s: %+v", c.Method, c.Links)
+		}
 	}
 	if d.state != "delivered" || d.actualVersion != 2 || *d.messageID != "p1" || *d.messageURL !=
 		"https://chat.example.org/p1" || d.publications != 1 || d.publishedAt == nil || d.started == nil ||

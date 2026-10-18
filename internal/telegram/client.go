@@ -63,20 +63,24 @@ const dryProbeToken = "0:x"
 var errNoToken = errors.New("this client has no bot token: only the dry probe runs against an unsaved base URL")
 
 // Network is what a Client needs besides its Connection: the outbound address policy, the logger, the real clock of
-// the outbound metrics and a resolver (nil: the system resolver).
+// the outbound metrics, a resolver (nil: the system resolver) and the Request log, nil for none (C-23.FR-1). Its fields
+// are those of mattermost.Network, so that one converts into the other.
 type Network struct {
 	Policy   outbound.PolicySource
 	Log      *logging.Logger
 	Real     clock.Clock
 	Resolver outbound.Resolver
+	Recorder outbound.Recorder
 }
 
 // Settings are a Connection as its client needs it: the normalized Bot API base URL, the bot token — empty for the
-// client of the dry probe of an unsaved base URL — and the proxy, nil for none.
+// client of the dry probe of an unsaved base URL — and the proxy, nil for none; and the Connection whose Request log
+// keeps its requests, none for a client that records nothing.
 type Settings struct {
 	BaseURL string
 	Token   logging.Secret
 	Proxy   *outbound.Proxy
+	Owner   outbound.Owner
 }
 
 // Client calls the Bot API of one Connection, in the interactive and the delivery client classes, and in the
@@ -136,7 +140,7 @@ func (c *Client) client(k clientKey) (*outbound.Client, error) {
 	}
 	oc, err := outbound.New(outbound.Config{Class: k.class, ConnectTimeout: connectTimeout, Timeout: timeout,
 		Proxy: s.Proxy, Secrets: secrets, BaseURL: s.BaseURL, Policy: n.Policy, Logger: n.Log, Clock: n.Real,
-		Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
+		Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err
 	}
@@ -226,8 +230,11 @@ func (c *Client) GetUpdates(ctx context.Context, offset *int64, timeout time.Dur
 }
 
 // SetWebhook sets the webhook at hookURL with the secret token header secret and AllowedUpdates, one connection at a
-// time, so that updates arrive in order.
+// time, so that updates arrive in order. Its record in the Request log masks the secret token.
 func (c *Client) SetWebhook(ctx context.Context, class outbound.Class, hookURL string, secret logging.Secret) Result {
+	if secret != "" {
+		ctx = outbound.WithSecrets(ctx, secret)
+	}
 	r := c.call(ctx, clientKey{class: class}, http.MethodPost, "setWebhook", map[string]any{"url": hookURL,
 		"secret_token": string(secret), "allowed_updates": AllowedUpdates, "max_connections": 1}, nil)
 	if secret != "" {
@@ -388,7 +395,8 @@ func (c *Client) DryProbe(ctx context.Context, class outbound.Class) Result {
 		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(err.Error())}}
 	}
 	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: "/bot" + dryProbeToken + "/getMe",
-		Header: http.Header{"Accept": {"application/json"}}, Mapping: mapping, ClassifyBody: classifyBody})
+		Header: http.Header{"Accept": {"application/json"}}, Mapping: mapping, ClassifyBody: classifyBody,
+		Operation: "getMe"})
 	r := resultOf(res, err)
 	// A 429 to a token no bot has says nothing of the bot's budget: it must not hold the Connection's limiter, least
 	// of all when an unsaved base URL answered it.
@@ -399,7 +407,8 @@ func (c *Client) DryProbe(ctx context.Context, class outbound.Class) Result {
 }
 
 // call makes one call of method in the client k, with body as JSON unless it is nil, and reads the result of a
-// successful answer into out unless it is nil.
+// successful answer into out unless it is nil. The Request log names it by method and leaves out a getUpdates that
+// ended without updates.
 func (c *Client) call(ctx context.Context, k clientKey, httpMethod, method string, body, out any) Result {
 	if c.settings.Token == "" {
 		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(errNoToken.Error())}}
@@ -417,8 +426,13 @@ func (c *Client) call(ctx context.Context, k clientKey, httpMethod, method strin
 		}
 		header.Set("Content-Type", "application/json")
 	}
+	var skip func(int, []byte) bool
+	if method == "getUpdates" {
+		skip = noUpdates
+	}
 	res, err := oc.Do(ctx, outbound.Request{Method: httpMethod, URL: "/bot" + string(c.settings.Token) + "/" + method,
-		Header: header, Body: data, Mapping: mapping, ClassifyBody: classifyBody})
+		Header: header, Body: data, Mapping: mapping, ClassifyBody: classifyBody, Operation: method,
+		SkipRecord: skip})
 	r := resultOf(res, err)
 	r.Body = res.Body
 	if !r.OK() || out == nil {
@@ -430,6 +444,16 @@ func (c *Client) call(ctx context.Context, k clientKey, httpMethod, method strin
 			Error: outbound.Untrusted(method + ": the answer is not the expected JSON")}}
 	}
 	return r
+}
+
+// noUpdates reports whether the answer body of a getUpdates that succeeded carries no update, which the Request log
+// leaves out (C-23.FR-1): a long poll ends so every PollTimeout while nothing happens.
+func noUpdates(_ int, body []byte) bool {
+	var env struct {
+		OK     bool              `json:"ok"`
+		Result []json.RawMessage `json:"result"`
+	}
+	return json.Unmarshal(body, &env) == nil && env.OK && env.Result != nil && len(env.Result) == 0
 }
 
 // envelope is every Bot API answer: ok with a result, or an error_code, a description and parameters.

@@ -304,7 +304,7 @@ func TestCatalogueConstructed(t *testing.T) {
 var (
 	policyEntity = []string{"integration", "route", "destination"}
 	policyClosed = []string{"client", "outcome", "state", "route_pattern", "method", "code", "kind", "reason", "status",
-		"by", "command", "transport", "template", "table"}
+		"by", "command", "transport", "template", "table", "direction"}
 	policyForbidden = []string{"alertname", "severity", "user", "number", "org_id", "organization"}
 )
 

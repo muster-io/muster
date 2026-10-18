@@ -8,7 +8,7 @@ like code, and served by the binary at `/api/v1/openapi.yaml`. Generated code (`
 
 - **One file.** `paths` are grouped by tag, one tag per capability area: Sessions, Profile, Users, OIDC, Audit log, API
   tokens, Organization, Integrations, Ingest, Messenger callbacks, Routes, Alert groups, Live updates, Connections,
-  Destinations, Links, Templates, Account links, System, Health and metrics, Outgoing webhooks.
+  Destinations, Links, Templates, Account links, Request log, System, Health and metrics, Outgoing webhooks.
 - **Servers and listeners.** The default server is the app listener, `{public_url}/api/v1`. Operations on the other
   listeners carry their own `servers` entry: ingestion, Heartbeat and messenger callbacks use `{ingest_url}/api/v1`; health
   and metrics use the internal listener. Every operation also names its listener in `x-listener`.
@@ -77,6 +77,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `AK` | Account link | `account_links` |
 | `AR` | Account link request | `account_link_requests` |
 | `CN` | Connection | `connections` |
+| `CR` | Check run: the requests of one check or test share it (from S-089) | — (no table of its own) |
 | `DE` | Delivery event (a Timeline entry of the kind `delivery`) | `delivery_events` |
 | `DS` | Destination | `destinations` |
 | `KR` | Link rule | `link_rules` |
@@ -85,6 +86,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `NT` | Integration | `integrations` |
 | `PT` | Personal access token | `api_tokens` |
 | `RG` | Organization | `organizations` |
+| `RQ` | Record of the Request log | `request_log` |
 | `RT` | Route | `routes` |
 | `SA` | Service account | `service_accounts` |
 | `SN` | Session | `sessions` |

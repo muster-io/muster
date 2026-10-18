@@ -53,19 +53,22 @@ const DryProbePath = "/api/v4/system/ping"
 var errNoToken = errors.New("this client has no bot token: only the dry probe runs without one")
 
 // Network is what a Client needs besides its Connection: the outbound address policy, the logger, the real clock of
-// the outbound metrics and a resolver (nil: the system resolver).
+// the outbound metrics, a resolver (nil: the system resolver) and the Request log, nil for none (C-23.FR-1).
 type Network struct {
 	Policy   outbound.PolicySource
 	Log      *logging.Logger
 	Real     clock.Clock
 	Resolver outbound.Resolver
+	Recorder outbound.Recorder
 }
 
-// Settings are a Connection as its client needs it: the server URL, the bot token and the proxy, nil for none.
+// Settings are a Connection as its client needs it: the server URL, the bot token and the proxy, nil for none; and the
+// Connection whose Request log keeps its requests, none for a client that records nothing.
 type Settings struct {
 	ServerURL string
 	Token     logging.Secret
 	Proxy     *outbound.Proxy
+	Owner     outbound.Owner
 }
 
 // Client calls the REST API of one Mattermost Connection, in the interactive and the delivery client classes and, for
@@ -105,7 +108,7 @@ func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
 	s, n := c.settings, c.network
 	oc, err := outbound.New(outbound.Config{Class: class, ConnectTimeout: connectTimeout, Timeout: callTimeout,
 		Proxy: s.Proxy, Secrets: []logging.Secret{s.Token}, BaseURL: s.ServerURL, Policy: n.Policy, Logger: n.Log,
-		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
+		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err
 	}
@@ -189,13 +192,13 @@ type Channel struct {
 // Me reads the bot's own user: the check of its token.
 func (c *Client) Me(ctx context.Context, class outbound.Class) (User, Result) {
 	var u User
-	return u, c.get(ctx, class, "/api/v4/users/me", &u)
+	return u, c.get(ctx, class, "getMe", "/api/v4/users/me", &u)
 }
 
 // UserByUsername reads the user username, which Mattermost matches without case; an unknown one answers 404.
 func (c *Client) UserByUsername(ctx context.Context, class outbound.Class, username string) (User, Result) {
 	var u User
-	return u, c.get(ctx, class, "/api/v4/users/username/"+url.PathEscape(username), &u)
+	return u, c.get(ctx, class, "getUserByUsername", "/api/v4/users/username/"+url.PathEscape(username), &u)
 }
 
 // Grants reports whether the system roles of u grant permission, as the server decides it for u's requests (F-064):
@@ -207,7 +210,7 @@ func (c *Client) Grants(ctx context.Context, class outbound.Class, u User, permi
 		return false, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
 	}
 	var roles []Role
-	r := c.send(ctx, class, http.MethodPost, "/api/v4/roles/names", names, &roles)
+	r := c.send(ctx, class, "getRolesByNames", http.MethodPost, "/api/v4/roles/names", names, &roles)
 	return slices.ContainsFunc(roles, func(role Role) bool {
 		return role.DeleteAt == 0 && slices.Contains(role.Permissions, permission)
 	}), r
@@ -216,25 +219,26 @@ func (c *Client) Grants(ctx context.Context, class outbound.Class, u User, permi
 // Teams reads the teams the bot belongs to.
 func (c *Client) Teams(ctx context.Context, class outbound.Class) ([]Team, Result) {
 	var ts []Team
-	return ts, c.get(ctx, class, "/api/v4/users/me/teams", &ts)
+	return ts, c.get(ctx, class, "getTeamsForUser", "/api/v4/users/me/teams", &ts)
 }
 
 // Channels reads the channels of the team teamID that the bot is a member of.
 func (c *Client) Channels(ctx context.Context, class outbound.Class, teamID string) ([]Channel, Result) {
 	var cs []Channel
-	return cs, c.get(ctx, class, "/api/v4/users/me/teams/"+url.PathEscape(teamID)+"/channels", &cs)
+	return cs, c.get(ctx, class, "getChannelsForTeamForUser", "/api/v4/users/me/teams/"+url.PathEscape(teamID)+
+		"/channels", &cs)
 }
 
 // Team reads the team teamID.
 func (c *Client) Team(ctx context.Context, class outbound.Class, teamID string) (Team, Result) {
 	var t Team
-	return t, c.get(ctx, class, "/api/v4/teams/"+url.PathEscape(teamID), &t)
+	return t, c.get(ctx, class, "getTeam", "/api/v4/teams/"+url.PathEscape(teamID), &t)
 }
 
 // Channel reads the channel channelID.
 func (c *Client) Channel(ctx context.Context, class outbound.Class, channelID string) (Channel, Result) {
 	var ch Channel
-	return ch, c.get(ctx, class, "/api/v4/channels/"+url.PathEscape(channelID), &ch)
+	return ch, c.get(ctx, class, "getChannel", "/api/v4/channels/"+url.PathEscape(channelID), &ch)
 }
 
 // Member reads the bot's membership of the channel channelID; a channel without the bot answers 404 or 403.
@@ -242,12 +246,12 @@ func (c *Client) Member(ctx context.Context, class outbound.Class, channelID str
 	var m struct {
 		ChannelID string `json:"channel_id"`
 	}
-	return c.get(ctx, class, "/api/v4/channels/"+url.PathEscape(channelID)+"/members/me", &m)
+	return c.get(ctx, class, "getChannelMember", "/api/v4/channels/"+url.PathEscape(channelID)+"/members/me", &m)
 }
 
-// get reads path into out in the client class.
-func (c *Client) get(ctx context.Context, class outbound.Class, path string, out any) Result {
-	return c.send(ctx, class, http.MethodGet, path, nil, out)
+// get reads path into out in the client class, as the operation op.
+func (c *Client) get(ctx context.Context, class outbound.Class, op, path string, out any) Result {
+	return c.send(ctx, class, op, http.MethodGet, path, nil, out)
 }
 
 // DryProbe is `GET <server>/api/v4/system/ping` without the token (C-13.FR-2), which a Mattermost server answers to
@@ -260,7 +264,7 @@ func (c *Client) DryProbe(ctx context.Context, class outbound.Class) (Result, st
 			Error: outbound.Untrusted(err.Error())}}, ""
 	}
 	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: DryProbePath,
-		Header: http.Header{"Accept": {"application/json"}}, Mapping: mapping})
+		Header: http.Header{"Accept": {"application/json"}}, Mapping: mapping, Operation: "getPing"})
 	r := resultOf(res, err)
 	r.Body = res.Body
 	// A 429 to a request without a token says nothing of the bot's budget: it must not hold the Connection's limiter,
@@ -278,9 +282,9 @@ func (c *Client) DryProbe(ctx context.Context, class outbound.Class) (Result, st
 	return r, mt
 }
 
-// send makes one call of method on path in the client class, with body as JSON unless it is nil, and reads a
-// successful answer into out unless it is nil. A client without a token makes no call.
-func (c *Client) send(ctx context.Context, class outbound.Class, method, path string, body, out any) Result {
+// send makes one call of method on path in the client class, the operation op of the REST API, with body as JSON
+// unless it is nil, and reads a successful answer into out unless it is nil. A client without a token makes no call.
+func (c *Client) send(ctx context.Context, class outbound.Class, op, method, path string, body, out any) Result {
 	if c.settings.Token == "" {
 		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
 			Error: outbound.Untrusted(errNoToken.Error())}}
@@ -298,7 +302,8 @@ func (c *Client) send(ctx context.Context, class outbound.Class, method, path st
 		}
 		header.Set("Content-Type", "application/json")
 	}
-	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: path, Header: header, Body: data, Mapping: mapping})
+	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: path, Header: header, Body: data, Mapping: mapping,
+		Operation: op})
 	r := resultOf(res, err)
 	r.Body = res.Body
 	if !r.OK() || out == nil {
@@ -369,20 +374,20 @@ type patch struct {
 // from the delivery worker and the interactive path (lint 3).
 func (c *Client) createPost(ctx context.Context, class outbound.Class, p post) (post, Result) {
 	var out post
-	return out, c.send(ctx, class, http.MethodPost, "/api/v4/posts", p, &out)
+	return out, c.send(ctx, class, "createPost", http.MethodPost, "/api/v4/posts", p, &out)
 }
 
 // patchPost edits the post id to p, which never notifies anyone (F-029).
 func (c *Client) patchPost(ctx context.Context, class outbound.Class, id string, p patch) (post, Result) {
 	var out post
-	return out, c.send(ctx, class, http.MethodPut, "/api/v4/posts/"+url.PathEscape(id)+"/patch", p, &out)
+	return out, c.send(ctx, class, "patchPost", http.MethodPut, "/api/v4/posts/"+url.PathEscape(id)+"/patch", p, &out)
 }
 
 // getPost reads the post id with the plain read, which answers 404 for a deleted post; Muster never reads with
 // include_deleted, which may need the system admin role (F-058).
 func (c *Client) getPost(ctx context.Context, class outbound.Class, id string) Result {
 	var out post
-	return c.get(ctx, class, "/api/v4/posts/"+url.PathEscape(id), &out)
+	return c.get(ctx, class, "getPost", "/api/v4/posts/"+url.PathEscape(id), &out)
 }
 
 // ephemeralPost shows message to the user userID alone in the channel channelID: in the channel view without a
@@ -393,7 +398,7 @@ func (c *Client) ephemeralPost(ctx context.Context, class outbound.Class, userID
 		UserID string `json:"user_id"`
 		Post   post   `json:"post"`
 	}{UserID: userID, Post: post{ChannelID: channelID, RootID: rootID, Message: message}}
-	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/ephemeral", body, nil)
+	return c.send(ctx, class, "createPostEphemeral", http.MethodPost, "/api/v4/posts/ephemeral", body, nil)
 }
 
 // directPost posts message to the user userID in the direct channel of the bot botUserID and the user, which the bot
@@ -401,7 +406,8 @@ func (c *Client) ephemeralPost(ctx context.Context, class outbound.Class, userID
 // inside a DirectOp of the interactive path.
 func (c *Client) directPost(ctx context.Context, class outbound.Class, botUserID, userID, message string) Result {
 	var ch Channel
-	if r := c.send(ctx, class, http.MethodPost, "/api/v4/channels/direct", []string{botUserID, userID}, &ch); !r.OK() {
+	if r := c.send(ctx, class, "createDirectChannel", http.MethodPost, "/api/v4/channels/direct",
+		[]string{botUserID, userID}, &ch); !r.OK() {
 		return r
 	}
 	_, r := c.createPost(ctx, class, post{ChannelID: ch.ID, Message: message})
@@ -411,7 +417,7 @@ func (c *Client) directPost(ctx context.Context, class outbound.Class, botUserID
 // doAction presses the button actionID of the post postID as the bot (F-054): the server calls the button's
 // integration URL as for any press, and answers 400 with "Action integration error" when it could not (F-022).
 func (c *Client) doAction(ctx context.Context, class outbound.Class, postID, actionID string) Result {
-	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/"+url.PathEscape(postID)+"/actions/"+
+	return c.send(ctx, class, "doPostAction", http.MethodPost, "/api/v4/posts/"+url.PathEscape(postID)+"/actions/"+
 		url.PathEscape(actionID), struct{}{}, nil)
 }
 

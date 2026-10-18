@@ -331,6 +331,16 @@ func (a attempt) group() *int64 { return groupOf(a.row) }
 // storm is the Storm of a Storm summary, nil for an Alert Group.
 func (a attempt) storm() *int64 { return int8Of(a.row.StormID) }
 
+// linksOf are the links of the requests of a delivery to d about the Alert Group group, nil for a Storm summary: the
+// Request log shows them under d and the Alert Group (C-23.FR-2).
+func linksOf(d Destination, group *int64) outbound.Links {
+	l := outbound.Links{Destination: d.ID}
+	if group != nil {
+		l.AlertGroup = *group
+	}
+	return l
+}
+
 // groupOf is the Alert Group of a leased delivery, nil for a Storm summary.
 func groupOf(row dbgen.GetLeasedDeliveryRow) *int64 {
 	if row.StormID.Valid {
@@ -548,6 +558,7 @@ func publicationLoudness(loud pgtype.Bool, summary bool) (groups.Loudness, []gro
 // window is a Publication as its row of the Loud/Quiet table says, followed, once accepted, by the pointer reply under
 // the old Root message; a final edit past the window is a Thread reply with its own key.
 func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
+	ctx = outbound.WithLinks(ctx, linksOf(a.destination, a.group()))
 	c := Call{Class: outbound.ClassDelivery, Destination: a.destination, Loudness: groups.Quiet}
 	kind := a.kind()
 	if a.publication && !a.row.DesiredRetire {

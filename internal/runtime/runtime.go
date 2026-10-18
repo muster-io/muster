@@ -55,6 +55,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/partitions"
+	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
@@ -136,7 +137,8 @@ type database interface {
 	// their changes.
 	DeliveryStore() *delivery.Store
 	// MessagesDB is the main pool that previews and dry runs of templates read, and that Mention settings are read
-	// from; LinksStore serves Lookup tables and Link rules.
+	// from; the Request log is written through it, outside any transaction of the request it records, and read and
+	// pruned through it. LinksStore serves Lookup tables and Link rules.
 	MessagesDB() messages.DBTX
 	LinksStore() links.Store
 	DestinationsStore() destinations.Store
@@ -541,7 +543,9 @@ type process struct {
 	webhooks     *webhooks.Service
 	// requests sends the requests of outgoing webhooks in both modes, renders the Desired state of the template mode
 	// and previews request templates.
-	requests    *webhooks.Adapter
+	requests *webhooks.Adapter
+	// requestLog records the requests of the Connections and the outgoing webhooks (C-23.FR-1).
+	requestLog  *requestlog.Writer
 	sandbox     *templates.Sandbox
 	connections *connections.Service
 	// interactive is the interactive path and roles the Permissions of each Role, which the callback of Mattermost
@@ -882,10 +886,15 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// Outgoing webhooks keep their Secrets and Signing secrets through the Keyring and render their request templates in
 	// the sandbox (C-15, ADR-0011, ADR-0012); the bodies of their events are rendered when the events are queued.
 	p.sandbox = templates.New(p.clocks.Business, p.clocks.Real)
+	// The requests of the Connections and the outgoing webhooks are recorded in the Request log, one INSERT on the main
+	// pool after each attempt (C-23.FR-1, FR-4); OIDC, the outgoing heartbeat, muster doctor and muster bridge check
+	// build their clients without it.
+	p.requestLog = requestlog.NewWriter(requestlog.Config{OrgID: orgID, DB: p.db.MessagesDB(),
+		Business: p.clocks.Business, Log: p.log})
 	p.webhooks = webhooks.New(orgID, webhooks.Config{Store: p.db.WebhooksStore(), Writer: p.db.WebhooksWriter(),
 		Keyring: p.keyring, Audit: w, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String()})
 	p.requests = &webhooks.Adapter{Service: p.webhooks, Sandbox: p.sandbox,
-		Network: webhooks.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real}}
+		Network: webhooks.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real, Recorder: p.requestLog}}
 	p.renderer.SetRequests(p.requests)
 	// The dispatcher's re-render step sets the Desired state of each Root message — the rendered "update" request of an
 	// outgoing webhook in the template mode — and queues the events of outgoing webhooks (ADR-0005).
@@ -904,7 +913,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
 	conns := connections.New(connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
 		Audit: w, Clocks: p.clocks, Interactive: interactive, IngestURL: p.cfg.IngestURL, Log: p.log,
-		Network: mattermost.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real},
+		Network: mattermost.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real, Recorder: p.requestLog},
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
@@ -1023,6 +1032,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			},
 			Business: p.clocks.Business, LeaderAbsence: leader.AbsenceNotice, Version: buildinfo.Version,
 			Commit: buildinfo.Commit}),
+		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -1103,6 +1113,9 @@ func (p *process) newKeeper() *leader.Keeper {
 				return nil
 			}
 			return p.bridgePoller.Run(ctx)
+		},
+		RequestLogPruning: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+			return requestlog.Prune(ctx, p.db.MessagesDB(), orgID, now)
 		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},

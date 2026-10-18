@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -544,6 +545,33 @@ func TestBaseURLPathHiddenInErrors(t *testing.T) {
 	other.base.Path = "/"
 	if got := other.display(other.base.JoinPath("x")); got != srv.URL+"/x" {
 		t.Fatalf("display %q", got)
+	}
+}
+
+// TestDisplaySameOrigin: the base URL's path prefix is hidden in a URL on the base URL's origin whatever the case of
+// its scheme and host and with or without the default port of its scheme, and kept on another scheme or port.
+func TestDisplaySameOrigin(t *testing.T) {
+	for _, tt := range []struct{ base, u, want string }{
+		{"https://host.example/api/v4/", "HTTPS://HOST.EXAMPLE/api/v4/x", "https://HOST.EXAMPLE/[redacted]/x"},
+		{"https://Host.Example/api/v4", "https://host.example/api/v4/x", "https://host.example/[redacted]/x"},
+		{"https://host.example/api/v4", "https://host.example:443/api/v4/x", "https://host.example:443/[redacted]/x"},
+		{"https://host.example:443/api/v4", "https://host.example/api/v4", "https://host.example/[redacted]"},
+		{"http://host.example/api/v4", "http://HOST.example:80/api/v4/x", "http://HOST.example:80/[redacted]/x"},
+		{"http://[::1]:80/api/v4", "http://[::1]/api/v4/x", "http://[::1]/[redacted]/x"},
+		{"https://host.example/api/v4", "https://host.example:8443/api/v4/x", "https://host.example:8443/api/v4/x"},
+		{"https://host.example/api/v4", "http://host.example/api/v4/x", "http://host.example/api/v4/x"},
+		{"https://host.example/api/v4", "https://host.example:80/api/v4/x", "https://host.example:80/api/v4/x"},
+		{"http://host.example:8080/api/v4", "http://host.example/api/v4/x", "http://host.example/api/v4/x"},
+		{"https://host.example/api/v4", "https://other.example/api/v4/x", "https://other.example/api/v4/x"},
+	} {
+		c, _ := newTestClient(t, Config{BaseURL: tt.base})
+		u, err := url.Parse(tt.u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.display(u); got != tt.want {
+			t.Errorf("base %s: display(%s) = %q, want %q", tt.base, tt.u, got, tt.want)
+		}
 	}
 }
 

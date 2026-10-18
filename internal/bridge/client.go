@@ -110,22 +110,25 @@ func Segment(id string) string {
 }
 
 // Network is what a Client needs besides its Connection: the outbound address policy, the logger, the real clock of
-// the outbound metrics and of Retry-After dates, and a resolver (nil: the system resolver). Its fields are those of
-// mattermost.Network, so that one converts into the other.
+// the outbound metrics and of Retry-After dates, a resolver (nil: the system resolver) and the Request log, nil for
+// none (C-23.FR-1). Its fields are those of mattermost.Network, so that one converts into the other.
 type Network struct {
 	Policy   outbound.PolicySource
 	Log      *logging.Logger
 	Real     clock.Clock
 	Resolver outbound.Resolver
+	Recorder outbound.Recorder
 }
 
 // Settings are a Connection as its client needs it: the normalized base URL, the token, the push secret, which the
-// bridge knows too and is masked like the token, and the proxy, nil for none.
+// bridge knows too and is masked like the token, and the proxy, nil for none; and the Connection whose Request log
+// keeps its requests, none for a client that records nothing.
 type Settings struct {
 	BaseURL    string
 	Token      logging.Secret
 	PushSecret logging.Secret
 	Proxy      *outbound.Proxy
+	Owner      outbound.Owner
 }
 
 // Client calls the bridge of one Connection, in the interactive, delivery and background client classes; the
@@ -196,7 +199,7 @@ func (c *Client) client(k clientKey) (*outbound.Client, error) {
 	s, n := c.settings, c.network
 	oc, err := outbound.New(outbound.Config{Class: k.class, ConnectTimeout: connectTimeout, Timeout: k.timeout(),
 		Proxy: s.Proxy, Secrets: s.secrets(), BaseURL: s.BaseURL, Policy: n.Policy, Logger: n.Log,
-		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
+		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +277,7 @@ const maxChannelName = 200
 // other answer is a failed Result; a 200 without such a name is invalid.
 func (c *Client) CheckChannel(ctx context.Context, class outbound.Class, channelID string) (string, Result) {
 	var out gen.ChannelCheck
-	_, r := c.do(ctx, class, http.MethodPost, "channels/"+Segment(channelID)+"/check", nil, nil, &out)
+	_, r := c.do(ctx, class, "checkChannel", http.MethodPost, "channels/"+Segment(channelID)+"/check", nil, nil, &out)
 	if !r.OK() {
 		return "", r
 	}
@@ -298,7 +301,7 @@ func (c *Client) PostMessage(ctx context.Context, class outbound.Class, key stri
 func (c *Client) postMessage(ctx context.Context, class outbound.Class, key string, in gen.MessageInput) (
 	gen.MessagePosted, outbound.Result, Result) {
 	var out gen.MessagePosted
-	res, r := c.do(ctx, class, http.MethodPost, "messages", idempotency(key), in, &out)
+	res, r := c.do(ctx, class, "postMessage", http.MethodPost, "messages", idempotency(key), in, &out)
 	if r.OK() && (!validID(out.MessageId) || utf8.RuneCountInString(out.ThreadRef.GetOrEmpty()) > maxID) {
 		return gen.MessagePosted{}, res, notExpected(r.Status, "POST messages")
 	}
@@ -310,7 +313,7 @@ func (c *Client) postMessage(ctx context.Context, class outbound.Class, key stri
 func (c *Client) EditMessage(ctx context.Context, class outbound.Class, messageID string, in gen.MessageContent) (
 	gen.MessageEdited, Result) {
 	var out gen.MessageEdited
-	_, r := c.do(ctx, class, http.MethodPatch, "messages/"+Segment(messageID), nil, in, &out)
+	_, r := c.do(ctx, class, "editMessage", http.MethodPatch, "messages/"+Segment(messageID), nil, in, &out)
 	return out, r
 }
 
@@ -320,8 +323,8 @@ func (c *Client) EditMessage(ctx context.Context, class outbound.Class, messageI
 func (c *Client) ReplyInThread(ctx context.Context, class outbound.Class, messageID, key string,
 	in gen.ThreadReplyInput) (gen.ThreadReplyPosted, Result) {
 	var out gen.ThreadReplyPosted
-	_, r := c.do(ctx, class, http.MethodPost, "messages/"+Segment(messageID)+"/thread-replies", idempotency(key), in,
-		&out)
+	_, r := c.do(ctx, class, "replyInThread", http.MethodPost, "messages/"+Segment(messageID)+"/thread-replies",
+		idempotency(key), in, &out)
 	if r.OK() && (!validID(out.MessageId) || !validID(out.ThreadRef)) {
 		return gen.ThreadReplyPosted{}, notExpected(r.Status, "POST messages/{message_id}/thread-replies")
 	}
@@ -331,7 +334,7 @@ func (c *Client) ReplyInThread(ctx context.Context, class outbound.Class, messag
 // DeleteMessage calls deleteMessage in class: it deletes the message messageID of the bot, and a message that no
 // longer exists is a success too. Only the conformance check calls it (C-22.FR-21); Muster L1 never deletes a message.
 func (c *Client) DeleteMessage(ctx context.Context, class outbound.Class, messageID string) Result {
-	_, r := c.do(ctx, class, http.MethodDelete, "messages/"+Segment(messageID), nil, nil, nil)
+	_, r := c.do(ctx, class, "deleteMessage", http.MethodDelete, "messages/"+Segment(messageID), nil, nil, nil)
 	return r
 }
 
@@ -359,7 +362,7 @@ func (c *Client) PollEvents(ctx context.Context, cursor *string, wait time.Durat
 		Events     *[]json.RawMessage `json:"events"`
 		NextCursor *string            `json:"next_cursor"`
 	}
-	_, r := c.call(ctx, clientKey{class: outbound.ClassBackground, long: true}, http.MethodGet,
+	_, r := c.call(ctx, clientKey{class: outbound.ClassBackground, long: true}, "pollEvents", http.MethodGet,
 		"events?"+q.Encode(), nil, nil, &out)
 	if !r.OK() {
 		return Batch{}, r
@@ -379,7 +382,7 @@ const MaxAnswerLength = 500
 func (c *Client) AnswerEvent(ctx context.Context, class outbound.Class, eventID, text string) (gen.AnswerShown,
 	Result) {
 	var out gen.AnswerShown
-	_, r := c.do(ctx, class, http.MethodPost, "answers", idempotency("answer-"+eventID),
+	_, r := c.do(ctx, class, "answerEvent", http.MethodPost, "answers", idempotency("answer-"+eventID),
 		gen.AnswerInput{EventId: eventID, Text: cutText(text, MaxAnswerLength)}, &out)
 	if r.OK() && !out.ShownAs.Valid() {
 		return gen.AnswerShown{}, notExpected(r.Status, "POST answers")
@@ -397,7 +400,8 @@ func (c *Client) FindUsers(ctx context.Context, class outbound.Class, handle str
 	var out struct {
 		Items *[]json.RawMessage `json:"items"`
 	}
-	_, r := c.do(ctx, class, http.MethodGet, "users?"+url.Values{"handle": {handle}}.Encode(), nil, nil, &out)
+	_, r := c.do(ctx, class, "findUsers", http.MethodGet, "users?"+url.Values{"handle": {handle}}.Encode(), nil, nil,
+		&out)
 	if !r.OK() {
 		return gen.Person{}, false, r
 	}
@@ -421,7 +425,7 @@ func (c *Client) FindUsers(ctx context.Context, class outbound.Class, handle str
 func (c *Client) SendDirectMessage(ctx context.Context, class outbound.Class, key, externalID, body string) (
 	gen.DirectMessageSent, Result) {
 	var out gen.DirectMessageSent
-	_, r := c.do(ctx, class, http.MethodPost, "direct-messages", idempotency(key),
+	_, r := c.do(ctx, class, "sendDirectMessage", http.MethodPost, "direct-messages", idempotency(key),
 		gen.DirectMessageInput{UserExternalId: externalID, Body: cutText(body, MaxDirectMessageLength)}, &out)
 	if r.OK() && out.MessageId == "" {
 		return gen.DirectMessageSent{}, notExpected(r.Status, "POST direct-messages")
@@ -457,18 +461,19 @@ func notExpected(status int, call string) Result {
 		Error: outbound.Untrusted(call + ": the answer is not the expected JSON")}
 }
 
-// do makes one call of method on path below `<base>/v1/` in the client class, with body as JSON unless it is nil and
-// the extra header, such as Idempotency-Key, and reads a successful answer into out unless it is nil. It returns the
-// outbound result, whose body the caller may read, and how the call ended. Whether the request was written is traced
-// on the request's context: a call without an answer whose request was written may have reached the bridge.
-func (c *Client) do(ctx context.Context, class outbound.Class, method, path string, header http.Header, body,
+// do makes one call of the operation op of the protocol, method on path below `<base>/v1/` in the client class, with
+// body as JSON unless it is nil and the extra header, such as Idempotency-Key, and reads a successful answer into out
+// unless it is nil. It returns the outbound result, whose body the caller may read, and how the call ended. Whether the
+// request was written is traced on the request's context: a call without an answer whose request was written may have
+// reached the bridge.
+func (c *Client) do(ctx context.Context, class outbound.Class, op, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
-	return c.call(ctx, clientKey{class: class}, method, path, header, body, out)
+	return c.call(ctx, clientKey{class: class}, op, method, path, header, body, out)
 }
 
 // call is do through the outbound client k; a query of path is left out of the texts of its failures. A client without
-// a token makes no call.
-func (c *Client) call(ctx context.Context, k clientKey, method, path string, header http.Header, body,
+// a token makes no call. The Request log leaves out a pollEvents that ended without events.
+func (c *Client) call(ctx context.Context, k clientKey, op, method, path string, header http.Header, body,
 	out any) (outbound.Result, Result) {
 	if c.settings.Token == "" {
 		return outbound.Result{}, Result{Classification: Classification{Class: ClassInvalid},
@@ -500,8 +505,12 @@ func (c *Client) call(ctx context.Context, k clientKey, method, path string, hea
 			wrote.Store(true)
 		}
 	}})
+	var skip func(int, []byte) bool
+	if op == "pollEvents" {
+		skip = noEvents
+	}
 	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: "v1/" + path, Header: h, Body: data,
-		Mapping: mapping, ClassifyBody: problemText})
+		Mapping: mapping, ClassifyBody: problemText, Operation: op, SkipRecord: skip})
 	r := c.resultOf(res, err, wrote.Load())
 	if !r.OK() || out == nil {
 		return res, r
@@ -523,8 +532,17 @@ func (c *Client) dryProbe(ctx context.Context, class outbound.Class) (outbound.R
 	}
 	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: "v1/info",
 		Header: http.Header{"Accept": {"application/json, " + problemType}}, Mapping: mapping,
-		ClassifyBody: problemText})
+		ClassifyBody: problemText, Operation: "getInfo"})
 	return res, c.resultOf(res, err, false)
+}
+
+// noEvents reports whether the answer body of a pollEvents that succeeded carries no event, which the Request log
+// leaves out (C-23.FR-1): a long poll ends so every PollWait while nothing happens.
+func noEvents(_ int, body []byte) bool {
+	var b struct {
+		Events *[]json.RawMessage `json:"events"`
+	}
+	return json.Unmarshal(body, &b) == nil && b.Events != nil && len(*b.Events) == 0
 }
 
 // resultOf is the Result of an outbound call: without an answer it is transient — a request that could not be built
