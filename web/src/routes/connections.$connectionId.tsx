@@ -148,7 +148,7 @@ function EditForm({ current }: { current: Connection }) {
           it was made for. */}
       {canWrite && (
         <ConnectionCheck
-          key={base.etag}
+          key={`check ${base.etag}`}
           connectionId={base.id}
           type={base.type}
           draft={edited === undefined ? undefined : connectionDraft(edited, base)}

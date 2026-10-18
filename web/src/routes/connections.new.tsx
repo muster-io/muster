@@ -101,7 +101,8 @@ function NewConnection() {
       )}
       {kind !== undefined && values?.type === kind && (
         <ConnectionCheck
-          key={kind}
+          // A check per messenger, keyed apart from its form, a sibling.
+          key={`check ${kind}`}
           type={kind}
           draft={connectionDraft(values, undefined)}
           invalid={draftErrorText(t, values, undefined)}
