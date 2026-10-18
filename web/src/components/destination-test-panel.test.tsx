@@ -8,7 +8,8 @@
 // button press included; "Send test message" with the chosen source, disabled while it runs, the health of the result
 // taken by the page at once, and the refusal of an Alert Group that is no longer offered. The source selector offers
 // the example and the recent Alert Groups of the Destination's Routes. The hint of a Bridge Destination says what its
-// test sends instead of the outgoing webhook's. Both in English and Russian.
+// test sends instead of the outgoing webhook's. A test or a Destination check whose result names its run offers
+// "Requests of this check", which lists the requests of that run beside the Destination. Both in English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
@@ -20,6 +21,8 @@ import { render } from "vitest-browser-react";
 import { getGetDestinationQueryKey } from "../api/gen/endpoints/destinations/destinations";
 import type {
   BridgeDestination,
+  DestinationCheckResult,
+  MattermostDestination,
   DeliveryErrorClass,
   Destination,
   DestinationTestResult,
@@ -30,6 +33,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { DestinationCheck } from "./destination-check";
 import { DestinationTestPanel, TestResult } from "./destination-test-panel";
 import { readableBody } from "./rendered-request";
 import { defaultMentions } from "./mention-settings";
@@ -583,6 +587,137 @@ describe("DestinationTestPanel", () => {
     ]);
     expect(calls.some((c) => c.url.startsWith("/api/v1/alert-groups"))).toBe(false);
     expect(document.querySelector('input[type="search"]')).toBeNull();
+  });
+});
+
+const RUN = "CR0000000000R1";
+
+/** Answers the test or the check with the result and the Request log with one record of the run. */
+function serveRun(result: unknown, record: Record<string, unknown>): Record<string, string>[] {
+  const queries: Record<string, string>[] = [];
+  vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const [path = "", search = ""] = url.split("?");
+    if (path === "/api/v1/request-log") {
+      queries.push(Object.fromEntries(new URLSearchParams(search)));
+      return json(200, {
+        items: [
+          {
+            id: "RQ0000000000AA",
+            at: "2026-10-18T06:00:12Z",
+            direction: "outbound",
+            method: "POST",
+            url: "http://127.0.0.1:18093/hook/rl",
+            latency_ms: 4,
+            via: "direct",
+            attempt: 1,
+            error_class: null,
+            error_code: null,
+            check_run: RUN,
+            connection_id: null,
+            destination: null,
+            alert_group: null,
+            request_body_truncated: false,
+            response_body_truncated: false,
+            ...record,
+          },
+        ],
+        next_cursor: null,
+      });
+    }
+    if ((init?.method ?? "GET").toUpperCase() === "POST") {
+      return json(200, result);
+    }
+    if (url.startsWith("/api/v1/alert-groups")) {
+      return json(200, { items: [], next_cursor: null });
+    }
+    // Never answers: nothing else is read.
+    return new Promise<Response>(() => undefined);
+  });
+  return queries;
+}
+
+describe("the requests of a test or a check", () => {
+  test("opens the requests of the test's run beside the Destination", async () => {
+    const queries = serveRun(
+      {
+        steps: [step("event", "fatal", { response_status: 500 })],
+        health: DESTINATION.health,
+        request_log_run: RUN,
+      },
+      { operation: "event", status: 500, check: "test" },
+    );
+    const { ui } = providers(<Panel />);
+    await render(ui);
+    await page.getByRole("button", { name: "Send test message" }).click();
+    await expect.element(page.getByTestId("test-summary")).toHaveTextContent("Test failed");
+    await page.getByRole("button", { name: "Requests of this check" }).click();
+    const list = page.getByRole("dialog", { name: "Requests of this check" });
+    await expect.element(list.getByRole("button", { name: "event" })).toBeVisible();
+    await expect.element(list.getByTestId("request-status")).toHaveTextContent("500");
+    await expect.element(list.getByTestId("request-check")).toHaveTextContent("Test message");
+    expect(queries).toEqual([{ destination: ID, run: RUN }]);
+  });
+
+  test("offers no requests for a result without a run", async () => {
+    serveRun({ steps: [step("create", "none")], health: { state: "healthy" } }, {});
+    const { ui } = providers(<Panel />);
+    await render(ui);
+    await page.getByRole("button", { name: "Send test message" }).click();
+    await expect.element(page.getByTestId("test-summary")).toHaveTextContent("Test passed");
+    expect(page.getByRole("button", { name: "Requests of this check" }).elements()).toHaveLength(0);
+  });
+
+  test("opens the requests of a Destination check's run, and in Russian", async () => {
+    const mattermost: MattermostDestination = {
+      id: "DS0000000000MM",
+      type: "mattermost",
+      name: "alerts",
+      connection_id: "CN0000000000MM",
+      team_id: "team-dev",
+      channel_id: "ch-alerts",
+      channel_name: "alerts",
+      mentions: defaultMentions(),
+      limiter: { limit: 50, per_seconds: 1 },
+      health: { state: "healthy" },
+      routes: [],
+      created_at: "2026-10-17T09:30:00Z",
+      etag: '"1"',
+    };
+    const result: DestinationCheckResult = {
+      ok: true,
+      checks: [],
+      health: { state: "healthy" },
+      request_log_run: RUN,
+    };
+    const queries = serveRun(result, {
+      operation: "getChannel",
+      method: "GET",
+      status: 200,
+      check: "destination_check",
+      connection_id: "CN0000000000MM",
+    });
+    const { ui } = providers(<DestinationCheck destination={mattermost} dirty={false} />);
+    const screen = await render(ui);
+    await page.getByRole("button", { name: "Check", exact: true }).click();
+    await expect
+      .element(page.getByTestId("destination-check-summary"))
+      .toHaveTextContent("Check passed");
+    await page.getByRole("button", { name: "Requests of this check" }).click();
+    const list = page.getByRole("dialog", { name: "Requests of this check" });
+    await expect.element(list.getByTestId("request-check")).toHaveTextContent("Destination check");
+    expect(queries).toEqual([{ destination: "DS0000000000MM", run: RUN }]);
+    await screen.unmount();
+
+    await i18n.changeLanguage("ru");
+    await render(providers(<DestinationCheck destination={mattermost} dirty={false} />).ui);
+    await page.getByRole("button", { name: "Проверить", exact: true }).click();
+    await page.getByRole("button", { name: "Запросы этой проверки" }).click();
+    await expect
+      .element(
+        page.getByRole("dialog", { name: "Запросы этой проверки" }).getByTestId("request-check"),
+      )
+      .toHaveTextContent("Проверка места доставки");
   });
 });
 

@@ -88,6 +88,7 @@ nav:
   - Sign-in:
       - sign-in/oidc-keycloak.md
   - Operations:
+      - operations/request-log.md
       - Runbooks:
           - operations/runbooks/index.md
           - operations/runbooks/MusterDown.md

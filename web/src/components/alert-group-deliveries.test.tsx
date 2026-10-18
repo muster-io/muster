@@ -5,7 +5,9 @@
 // message past its bridge's edit window among them), a message link that opens only http and https addresses in a new
 // tab without the opener, the error of the messenger as text, a section that follows the alert-group hint instead of
 // polling, and a Destination's name whose tooltip and accessible description are its full label with destinations:read
-// (a deleted Destination keeps its name alone).
+// (a deleted Destination keeps its name alone). With destinations:read each row has "Requests", which opens the
+// requests of that Destination for that Alert Group in a dialog, and the row and the dialog's list, its status and
+// latency included, keep their layout at 360 px.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -25,6 +27,9 @@ import i18n from "../i18n";
 import { getListAlertGroupDeliveriesQueryKey } from "../api/gen/endpoints/alert-groups/alert-groups";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { applyHint } from "../lib/live";
+// The row and the dialog are laid out by their classes, as in the application.
+// oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for its side effect
+import "../styles.css";
 import { AlertGroupDeliveries, deliveryStateText, safeMessageUrl } from "./alert-group-deliveries";
 
 function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
@@ -75,6 +80,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  await page.viewport(414, 896);
   await i18n.changeLanguage("en");
 });
 
@@ -315,11 +321,149 @@ describe("the Delivery section", () => {
     await expect.element(gone).not.toHaveAttribute("aria-describedby");
   });
 
-  test("shows the name alone without destinations:read", async () => {
+  test("shows the name alone without destinations:read, and no requests", async () => {
     await renderLabelled(["alert-groups:read"], [delivery({})]);
     const name = page.getByTestId("delivery-destination");
     await expect.element(name).toHaveTextContent("alerts");
     await expect.element(name).not.toHaveAttribute("title");
     expect(page.getByRole("link", { name: "alerts", exact: true }).elements()).toHaveLength(0);
+    expect(page.getByRole("button", { name: "Requests" }).elements()).toHaveLength(0);
+  });
+});
+
+/** The section in a router, the Request log answering with one record; returns the queries of the Request log. */
+async function renderWithRequests(items: AlertGroupDelivery[]): Promise<Record<string, string>[]> {
+  const queries: Record<string, string>[] = [];
+  vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const [path = "", search = ""] = url.split("?");
+    const body =
+      path === "/api/v1/request-log"
+        ? {
+            items: [
+              {
+                id: "RQ0000000000AA",
+                at: "2026-10-18T06:00:12Z",
+                direction: "outbound",
+                operation: "createPost",
+                method: "POST",
+                url: "http://127.0.0.1:18065/api/v4/posts",
+                status: 201,
+                latency_ms: 12,
+                via: "direct",
+                attempt: 1,
+                error_class: null,
+                error_code: null,
+                check: null,
+                check_run: null,
+                connection_id: "CN000000000MMB",
+                destination: items[0]?.destination ?? null,
+                alert_group: { id: "AG0000000000AA", number: 42 },
+                request_body_truncated: false,
+                response_body_truncated: false,
+              },
+            ],
+            next_cursor: null,
+          }
+        : path === "/api/v1/destinations" || path === "/api/v1/connections"
+          ? { items: [], next_cursor: null }
+          : { items };
+    if (path === "/api/v1/request-log") {
+      queries.push(Object.fromEntries(new URLSearchParams(search)));
+    }
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const rootRoute = createRootRoute({
+    component: () => <AlertGroupDeliveries alertGroupId="AG0000000000AA" />,
+  });
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await render(
+    providers(<RouterProvider router={router} />, queryClient, [
+      "alert-groups:read",
+      "destinations:read",
+    ]),
+  );
+  return queries;
+}
+
+/** Whether the page scrolls sideways. */
+function scrollsSideways(): boolean {
+  return document.documentElement.scrollWidth > document.documentElement.clientWidth;
+}
+
+describe("the requests of a delivery", () => {
+  test("opens the requests of each Destination for this Alert Group", async () => {
+    const queries = await renderWithRequests([
+      delivery({}),
+      delivery({
+        destination: {
+          id: "DS0000000000AB",
+          name: "prod",
+          type: "webhook",
+          health: { state: "healthy" },
+        },
+      }),
+    ]);
+    // Each Destination's row has its own.
+    await expect
+      .element(page.getByTestId("delivery-row").nth(1).getByRole("button", { name: "Requests" }))
+      .toBeVisible();
+    const row = page.getByTestId("delivery-row").nth(0);
+    await row.getByRole("button", { name: "Requests", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Requests: alerts" });
+    await expect.element(dialog.getByRole("button", { name: "createPost" })).toBeVisible();
+    await expect.element(dialog.getByTestId("request-status")).toHaveTextContent("201");
+    expect(queries).toEqual([{ destination: "DS0000000000AA", alert_group: "AG0000000000AA" }]);
+  });
+
+  test("keeps the row without horizontal scrolling at 360 px in Russian, the dialog open or not", async () => {
+    await i18n.changeLanguage("ru");
+    await page.viewport(360, 740);
+    await renderWithRequests([
+      delivery({
+        destination: {
+          id: "DS0000000000AA",
+          name: "alerts-production-europe-west-primary",
+          type: "mattermost",
+          health: { state: "broken", since: "2026-10-18T06:00:00Z", reason: "Refused" },
+        },
+        state: "waiting_for_broken_destination",
+        thread_not_attached: true,
+      }),
+    ]);
+    const row = page.getByTestId("delivery-row");
+    const button = row.getByRole("button", { name: "Запросы", exact: true });
+    await expect.element(button).toBeVisible();
+    expect(scrollsSideways()).toBe(false);
+    const rowBox = row.element().getBoundingClientRect();
+    const buttonBox = button.element().getBoundingClientRect();
+    expect(buttonBox.right).toBeLessThanOrEqual(rowBox.right);
+    expect(buttonBox.left).toBeGreaterThanOrEqual(rowBox.left);
+
+    await button.click();
+    const dialog = page.getByRole("dialog", {
+      name: "Запросы: alerts-production-europe-west-primary",
+    });
+    await expect.element(dialog.getByRole("button", { name: "createPost" })).toBeVisible();
+    await expect.element(dialog.getByRole("img", { name: "Отправлен" })).toBeVisible();
+    expect(scrollsSideways()).toBe(false);
+    const content = dialog.element();
+    await expect.poll(() => content.getBoundingClientRect().left).toBe(0);
+    expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
+    // The status and the latency of the request stay in view, and the list's own box does not scroll sideways.
+    for (const id of ["request-status", "request-latency"]) {
+      const cell = dialog.getByTestId(id).element();
+      expect(cell.getBoundingClientRect().right, id).toBeLessThanOrEqual(360);
+    }
+    const box = dialog.getByRole("table").element().parentElement;
+    expect(box).not.toBeNull();
+    expect(box?.scrollWidth).toBeLessThanOrEqual(box?.clientWidth ?? 0);
   });
 });

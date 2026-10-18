@@ -36,7 +36,7 @@ const NAME_MAX = 200;
  * Copies text exactly: through the clipboard in a secure context, else (a plain-http installation) with the browser's
  * copy command on a hidden field that holds the text, since the block may show only part of it or another view of it.
  */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   if (window.isSecureContext) {
     return copyField(text, null);
   }

@@ -10,10 +10,11 @@
 // limiter.
 // The form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
-// with the offer to reload.
+// with the offer to reload. The tab "Request log" (C-23.FR-6) lists the Connection's requests, with the tab and its
+// filters in the URL; the form stays mounted behind it, so that its changes last.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -37,11 +38,14 @@ import {
   connectionDraft,
   draftErrorText,
 } from "../components/connection-form";
+import { RequestLogTabs } from "../components/request-log";
+import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
 
 export const Route = createFileRoute("/connections/$connectionId")({
+  validateSearch: requestLogSearchSchema,
   staticData: { shell: true },
   component: ConnectionPage,
 });
@@ -175,6 +179,10 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
   const canWrite = useCan("connections:write");
   const query = useGetConnection(connectionId);
   const connection = query.data;
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const onSearch = (patch: Partial<RequestLogSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -212,7 +220,9 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
           {query.isError ? problemText(t, query.error) : t("common.loading")}
         </p>
       ) : (
-        <EditForm current={connection} />
+        <RequestLogTabs search={search} onSearch={onSearch} scope={{ connection: connection.id }}>
+          <EditForm current={connection} />
+        </RequestLogTabs>
       )}
     </div>
   );

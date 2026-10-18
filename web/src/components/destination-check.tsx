@@ -6,7 +6,8 @@
 // as its detail — for Telegram "Channel exists", "Discussion group", "Bot rights in the channel" and "Bot rights in the
 // discussion group", for a Bridge "Channel" — and "Check passed" or "Check failed". A passing check ends the Broken
 // state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
-// answers 503 with Retry-After: "The messenger is busy; try again in N s."
+// answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and "Requests
+// of this check" opens the requests it made (C-23.FR-6).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -26,6 +27,7 @@ import type {
 } from "../api/gen/model";
 import { CheckDetail, checkCodeText, checkErrorText } from "./connection-check";
 import { unreachable } from "./destination-test-panel";
+import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -164,6 +166,15 @@ export function DestinationCheck({ destination, dirty }: DestinationCheckProps) 
           )}
           {check.isSuccess && <Result result={check.data} />}
         </div>
+        {check.isSuccess && check.data.request_log_run !== undefined && (
+          <div>
+            <RequestLogButton
+              scope={{ destination: destination.id, run: check.data.request_log_run }}
+              label={t("requestLog.ofThisCheck")}
+              title={t("requestLog.ofThisCheck")}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

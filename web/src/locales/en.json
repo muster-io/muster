@@ -1733,6 +1733,86 @@
     "type": "Type",
     "username": "Username"
   },
+  "requestLog": {
+    "checks": {
+      "connectionCheck": "Connection check",
+      "destinationCheck": "Destination check",
+      "draftCheck": "Check before saving",
+      "probe": "Broken probe",
+      "test": "Test message"
+    },
+    "columns": {
+      "at": "Time",
+      "operation": "Operation",
+      "status": "Status"
+    },
+    "dialogTitle": "Requests: {{name}}",
+    "direction": {
+      "inbound": "Received",
+      "outbound": "Sent"
+    },
+    "empty": "No requests in the last 7 days.",
+    "errorClasses": {
+      "blocked": "Blocked by the outbound address policy",
+      "fatal": "Refused",
+      "redirect": "Redirect, not followed",
+      "retryAfter": "Asked to wait",
+      "transient": "No answer or a server error",
+      "unknown": "Unexpected answer"
+    },
+    "filters": {
+      "anyDirection": "Any direction",
+      "anyStatus": "Any status",
+      "apply": "Apply",
+      "clear": "Clear filters",
+      "clearRun": "Show the requests of every check",
+      "direction": "Direction",
+      "label": "Request log filters",
+      "operation": "Operation",
+      "run": "Requests of one check",
+      "statusClass": "Status"
+    },
+    "latency": "{{ms}} ms",
+    "noAnswer": "No answer",
+    "ofThisCheck": "Requests of this check",
+    "open": "Requests",
+    "record": {
+      "alertGroup": "Alert Group",
+      "answer": "Answer",
+      "attempt": "Attempt",
+      "body": "Body",
+      "check": "Kind of check",
+      "copied": "Copied",
+      "copyBody": "Copy body",
+      "copyHeaders": "Copy headers",
+      "copyUrl": "Copy URL",
+      "destination": "Destination",
+      "direct": "Direct",
+      "direction": "Direction",
+      "error": "Error",
+      "errorClass": "Error class",
+      "errorCode": "What failed",
+      "forbidden": "Opening this request needs the permission to read Connections: it belongs to the Connection of this Destination.",
+      "headers": "Headers",
+      "latency": "Latency",
+      "noAnswer": "No answer.",
+      "noBody": "No body.",
+      "noHeaders": "No headers.",
+      "notKept": "Not kept: {{size}} KB, too large or not read to the end",
+      "proxy": "Through the proxy",
+      "request": "Request",
+      "status": "Status",
+      "truncated": "Cut at 16 KB of {{size}} KB",
+      "url": "URL",
+      "via": "Path"
+    },
+    "tabs": {
+      "label": "Sections of the page",
+      "requestLog": "Request log",
+      "settings": "Settings"
+    },
+    "title": "Request log"
+  },
   "roles": {
     "admin": "Admin",
     "none": "None",
