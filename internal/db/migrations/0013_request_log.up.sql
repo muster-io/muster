@@ -51,7 +51,7 @@ CREATE TABLE request_log (
     CONSTRAINT request_log_answer_check CHECK ((status IS NULL) = (response_headers IS NULL)
         AND (status IS NULL) = (response_body IS NULL)),
     -- The code names a failure without an answer.
-    CONSTRAINT request_log_error_code_check CHECK (error_code IS NULL OR status IS NULL)
+    CONSTRAINT request_log_code_without_answer_check CHECK (error_code IS NULL OR status IS NULL)
 );
 
 -- The list and the count bound of a Connection; of a Destination: an outgoing webhook's own records and the records of

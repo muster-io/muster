@@ -1124,37 +1124,36 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
 - **`rate_limit_buckets`** — token buckets of the limiters per Destination and per Connection, shared by all replicas
   so that two replicas do not double a messenger's rate; the interactive path takes its token from the same bucket,
   ahead of waiting deliveries. Limiter settings themselves are columns of `destinations` and `connections`.
-- **`request_log`** (migration 0013, C-23) — the Request log: one row per HTTP request Muster sent for a Connection
-  or an outgoing webhook Destination, each attempt a row of its own, and from S-089 per request that reached a
-  Connection's callbacks, with its answer. Columns: `public_id` (`RQ`), `at` on the business clock, `direction`
-  (`outbound`, `inbound`), `operation` as its protocol names it (1 to 64 characters), `check_kind` (one of the five
-  kinds of checks and tests) and `check_run` (a `CR` id) from S-089, `method`, `url` as errors show it, the request's
-  `request_headers` (a `jsonb` object of string arrays) and `request_body`, the answer's `status` (100 to 999),
-  `response_headers` and `response_body` — all three null for a request that got no answer
-  (`request_log_answer_check`) — each body's size as sent or received (`*_body_bytes`) and whether its text was cut
-  (`*_truncated`), `latency_ms` on the real clock, `via` (`direct`, `proxy`), `attempt`, and for a failed attempt
-  `error_class` (the outcomes of the outbound package), `error_code` (a check code, only without an answer:
-  `request_log_error_code_check`) and the masked `error`. Nothing secret is stored: the outbound package masks the
-  Secrets of the client and of the request and the values of `outbound.MaskedHeaders` before the record leaves it, and
-  `internal/requestlog` masks signed action ids, `/start` tokens and the token of an `account_link` event, cuts each
-  body to `request_log.body_max` at a character boundary and replaces bytes that are not UTF-8 and NUL; headers,
-  bodies and the error are untrusted text. The owner of a record is its `connection_id`, else its `destination_id` (an
-  outgoing webhook), else nobody (the checks before saving of new Connections, from S-089); a delivery request of a
-  Connection also names its messenger Destination in `destination_id`, and a request about an Alert Group its
-  `alert_group_id`, which has no foreign key and is kept by the single writer: records go long before their Alert
-  Group. The foreign keys to `connections` and `destinations` cascade on a hard deletion and take `FOR KEY SHARE`,
-  which a save of the Connection or Destination (`FOR NO KEY UPDATE`) does not wait for. Indexes:
-  `request_log_connection_idx (org_id, connection_id, at DESC, id DESC) WHERE connection_id IS NOT NULL` and
-  `request_log_destination_idx (org_id, destination_id, at DESC, id DESC) WHERE destination_id IS NOT NULL` for the
-  lists and the count bound — an outgoing webhook's own records and the records of a Connection that name a
-  messenger Destination — and `request_log_at_idx (org_id, at)` for the age bound. Every list reads at most the newest
-  `request_log.max_records` of an owner, chosen once in a materialized CTE, so its other filters scan no more than
-  that; a messenger Destination's view is its Connection's bounded set filtered by `destination_id`. Not partitioned:
-  its size is bounded per owner, so it is short-lived state removed by batched deletes (section 6); time partitions
-  would not spare the deletes the count bound needs, and ADR-0006 keeps partitions for tables whose size grows with
-  their retention period. Written by `internal/requestlog` only, one `INSERT` per attempt after its outcome, on the
-  main pool outside any transaction of the caller, under its own 2-second timeout; a write that fails is dropped,
-  logged (`request_log_write_failed`) and counted, and never fails the request it records.
+- **`request_log`** (migration 0013, C-23) — the Request log: one row per HTTP request Muster sent for a Connection or
+  an outgoing webhook Destination, each attempt a row of its own, and from S-089 per request that reached a Connection's
+  callbacks, with its answer. Columns: `public_id` (`RQ`), `at` on the business clock, `direction` (`outbound`,
+  `inbound`), `operation` as its protocol names it (1 to 64 characters), `check_kind` (one of the five kinds of checks
+  and tests) and `check_run` (a `CR` id) from S-089, `method`, `url` as errors show it, the request's `request_headers`
+  (a `jsonb` object of string arrays) and `request_body`, the answer's `status` (100 to 999), `response_headers` and
+  `response_body` — all three null for a request that got no answer (`request_log_answer_check`) — each body's size as
+  sent or received (`*_body_bytes`) and whether its text was cut (`*_truncated`), `latency_ms` on the real clock, `via`
+  (`direct`, `proxy`), `attempt`, and for a failed attempt `error_class` (the outcomes of the outbound package),
+  `error_code` (a check code, only without an answer: `request_log_code_without_answer_check`) and the masked `error`.
+  Nothing secret is stored: the outbound package masks the Secrets of the client and of the request and the values of
+  `outbound.MaskedHeaders` before the record leaves it, and `internal/requestlog` masks signed action ids, `/start`
+  tokens and the token of an `account_link` event, cuts each body to `request_log.body_max` at a character boundary and
+  replaces bytes that are not UTF-8 and NUL; headers, bodies and the error are untrusted text. The owner of a record is
+  its `connection_id`, else its `destination_id` (an outgoing webhook), else nobody (the checks before saving of new
+  Connections, from S-089); a delivery request of a Connection also names its messenger Destination in `destination_id`,
+  and a request about an Alert Group its `alert_group_id`, which has no foreign key and is kept by the single writer:
+  records go long before their Alert Group. The foreign keys to `connections` and `destinations` cascade on a hard
+  deletion and take `FOR KEY SHARE`, which a save of the Connection or Destination (`FOR NO KEY UPDATE`) does not wait
+  for. Indexes: `request_log_connection_idx (org_id, connection_id, at DESC, id DESC) WHERE connection_id IS NOT NULL`
+  and `request_log_destination_idx (org_id, destination_id, at DESC, id DESC) WHERE destination_id IS NOT NULL` for the
+  lists and the count bound — an outgoing webhook's own records and the records of a Connection that name a messenger
+  Destination — and `request_log_at_idx (org_id, at)` for the age bound. Every list reads at most the newest
+  `request_log.max_records` of an owner, chosen once in a materialized CTE, so its other filters scan no more than that;
+  a messenger Destination's view is its Connection's bounded set filtered by `destination_id`. Not partitioned: its size
+  is bounded per owner, so it is short-lived state removed by batched deletes (section 6); time partitions would not
+  spare the deletes the count bound needs, and ADR-0006 keeps partitions for tables whose size grows with their
+  retention period. Written by `internal/requestlog` only, one `INSERT` per attempt after its outcome, on the main pool
+  outside any transaction of the caller, under its own 2-second timeout; a write that fails is dropped, logged
+  (`request_log_write_failed`) and counted, and never fails the request it records.
   - *Notes (write volume)*: one row per request — each Publication, edit and Thread reply, answer, check and
     non-empty poll — typically a few thousand to a few tens of thousands a day per installation, at most the sum of
     the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection 15, a Bridge
