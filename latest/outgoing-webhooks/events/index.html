@@ -1905,7 +1905,7 @@ forward. Muster renders nothing for a chat here; for a chat with a REST API, use
   not check that the Secret exists. They are parsed and run on a dry run when you save; an error names the field, its
   line and its column.</li>
 <li>Muster sets <code>Content-Type</code>, <code>webhook-id</code>, <code>webhook-timestamp</code> and <code>webhook-signature</code> itself; a header template may
-  not name them.</li>
+  not name them. Every request also carries <code>User-Agent: Muster/&lt;version&gt;</code> unless a header template sets its own.</li>
 <li>The <strong>proxy</strong> is the Destination's own; the requests never read <code>HTTP_PROXY</code> or <code>HTTPS_PROXY</code>.</li>
 <li>The <strong>limiter</strong> defaults to 5 requests per second in the form (<code>destination.webhook.limiter</code>).</li>
 <li>An outgoing webhook has no Connection and no Destination check: checking it answers <code>422 check_not_supported</code>.</li>

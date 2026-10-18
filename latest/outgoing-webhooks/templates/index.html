@@ -1888,9 +1888,9 @@ is parsed and run on a dry run with a built-in example Alert Group, its Secrets 
 <code>example-&lt;name&gt;</code>; an error answers <code>422</code> at <code>/template/&lt;request&gt;/&lt;field&gt;</code> with its line and column. The URL must then be
 an absolute <code>http</code> or <code>https</code> URL.</p>
 <p>Muster sets <code>webhook-id</code>, <code>webhook-timestamp</code> and <code>webhook-signature</code> on every request, signed with the Destination's
-Signing secret as in the events mode, and <code>Content-Type: application/json</code> when a request has a body and no
-<code>Content-Type</code> header of its own. The requests go through Muster's outbound address policy and the Destination's
-proxy; redirects are never followed. The answers map to outcomes as in the <a href="../events/#how-the-answer-counts">events mode</a>.</p>
+Signing secret as in the events mode, <code>Content-Type: application/json</code> when a request has a body and no
+<code>Content-Type</code> header of its own, and <code>User-Agent: Muster/&lt;version&gt;</code> when it has no <code>User-Agent</code> of its own. The
+requests go through Muster's outbound address policy and the Destination's proxy; redirects are never followed. The answers map to outcomes as in the <a href="../events/#how-the-answer-counts">events mode</a>.</p>
 <h2 id="what-the-templates-read">What the templates read<a class="headerlink" href="#what-the-templates-read" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

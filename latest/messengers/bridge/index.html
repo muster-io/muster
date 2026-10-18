@@ -1858,7 +1858,8 @@ with a Personal access token of an Admin in <code>MUSTER_TOKEN</code>.</p>
 <p>From your bridge, you need:</p>
 <ul>
 <li>its <strong>base URL</strong>, an <code>http</code> or <code>https</code> address with an optional path prefix, such as
-  <code>https://bridge.example.org/muster</code>. Muster sends every request to <code>&lt;base URL&gt;/v1/…</code>, and only there;</li>
+  <code>https://bridge.example.org/muster</code>. Muster sends every request to <code>&lt;base URL&gt;/v1/…</code>, and only there, with
+  <code>User-Agent: Muster/&lt;version&gt;</code>;</li>
 <li>the <strong>token</strong> it gave your bot. Muster sends it as <code>Authorization: Bearer</code> on every request, stores it encrypted and
   never shows it again.</li>
 </ul>
