@@ -175,8 +175,8 @@ func (h *Harness) StartReplica(t testing.TB, opts ReplicaOptions) *Replica {
 type Replica struct {
 	App, Ingest, Internal string
 
-	// owner is the test that started the harness: its context bounds the process and its cleanup stops it. The
-	// methods report to the testing.TB they are given.
+	// owner is the test that started the harness: its cleanup stops the process. The methods report to the testing.TB
+	// they are given.
 	owner     *testing.T
 	binary    string
 	args      []string
@@ -220,13 +220,14 @@ func (r *Replica) Start(t testing.TB) {
 	if r.out != nil {
 		r.earlier.WriteString(r.out.String())
 	}
+	// The test's context ends before its cleanups run, so the process does not follow it: the cleanup of newReplica
+	// stops it after the cleanups registered later, which may still talk to it and to its fake servers.
 	//nolint:gosec // G204: the binary under test, from MUSTER_E2E_BINARY
-	cmd := exec.CommandContext(r.owner.Context(), r.binary, r.args...)
+	cmd := exec.CommandContext(context.WithoutCancel(r.owner.Context()), r.binary, r.args...)
 	cmd.Env = append(os.Environ(), r.env...)
 	r.out = &syncBuffer{}
 	cmd.Stdout, cmd.Stderr = r.out, r.out
-	// The end of the test interrupts the process like Stop does.
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	// Wait stops copying the output this long after the process exited.
 	cmd.WaitDelay = stopTimeout
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", r.name(), err)
