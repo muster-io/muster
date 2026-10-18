@@ -31,7 +31,7 @@ import { useCan } from "./app-shell";
 import { checkCodeText } from "./connection-check";
 import { unreachable } from "./destination-test-panel";
 import { copyText } from "./integration-token-dialog";
-import { CodeText, readableBody } from "./rendered-request";
+import { CodeText } from "./rendered-request";
 import { COPIED_MS } from "./setup-link-dialog";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -140,8 +140,15 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       <Button
         variant="outline"
         size="xs"
-        onClick={() => {
-          void copyText(text).then(setCopied);
+        onClick={(event) => {
+          const button = event.currentTarget;
+          void copyText(text).then((done) => {
+            // The hidden field of a plain-http copy took the focus with it; it comes back to the button.
+            if (document.activeElement === null || document.activeElement === document.body) {
+              button.focus();
+            }
+            setCopied(done);
+          });
         }}
       >
         {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
@@ -230,21 +237,62 @@ function hexUnit(text: string, index: number): number {
   return Number.parseInt(text.slice(index, index + 4), 16);
 }
 
+/** The whitespace JSON allows between its tokens. */
+const JSON_SPACE = " \t\n\r";
+
 /**
- * Valid JSON text without the whitespace between its tokens, its strings with \/ and the \uXXXX escapes of characters
- * that can be shown — a surrogate pair as the one character it encodes — written as the characters, except " and \.
- * Every other escape stays as it is: \\ is a backslash, never the start of an escape.
+ * Valid JSON text indented by two spaces token by token, so that its numbers, its keys and their order stay exactly as
+ * received: the whitespace between the tokens is dropped, an object or an array opens a level and an empty one stays
+ * {} or [], a comma ends a line, and a colon is followed by a space. In its strings \/ and the \uXXXX escapes of
+ * characters that can be shown — a surrogate pair as the one character it encodes — are written as the characters,
+ * except " and \, as a messenger may escape every character beyond ASCII. Every other escape stays as it is: \\ is a
+ * backslash, never the start of an escape.
  */
-function unescapedJson(text: string): string {
+function indentedJson(text: string): string {
   let out = "";
+  let depth = 0;
   let inString = false;
+  const newLine = () => `\n${"  ".repeat(depth)}`;
   for (let i = 0; i < text.length; i++) {
     const c = text.charAt(i);
     if (!inString) {
-      if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") {
-        out += c;
+      switch (c) {
+        case " ":
+        case "\t":
+        case "\n":
+        case "\r":
+          break;
+        case "{":
+        case "[": {
+          const close = c === "{" ? "}" : "]";
+          let next = i + 1;
+          while (next < text.length && JSON_SPACE.includes(text.charAt(next))) {
+            next++;
+          }
+          if (text.charAt(next) === close) {
+            out += c + close;
+            i = next;
+          } else {
+            depth++;
+            out += c + newLine();
+          }
+          break;
+        }
+        case "}":
+        case "]":
+          depth--;
+          out += newLine() + c;
+          break;
+        case ",":
+          out += `,${newLine()}`;
+          break;
+        case ":":
+          out += ": ";
+          break;
+        default:
+          out += c;
+          inString = c === '"';
       }
-      inString = c === '"';
       continue;
     }
     if (c !== "\\") {
@@ -276,23 +324,16 @@ function unescapedJson(text: string): string {
 }
 
 /**
- * A body as the record shows it: indented when it is JSON that reads back the same apart from its spacing and the
- * escapes of characters that can be shown, which a messenger may send for every character beyond ASCII; else as it
- * is, such as a number beyond the precision of JavaScript, 1.0, or a key given twice.
+ * A body as the record shows it: indented when it is JSON, which JSON.parse only checks, never writes again, so that a
+ * number beyond the precision of JavaScript, 1.0 or a key given twice is shown as it was received; else as it is.
  */
 function shownBody(body: string): string {
-  const readable = readableBody(body);
-  const trimmed = body.trim();
-  if (readable !== body || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
-    return readable;
-  }
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    JSON.parse(body);
   } catch {
     return body;
   }
-  return JSON.stringify(parsed) === unescapedJson(trimmed) ? JSON.stringify(parsed, null, 2) : body;
+  return indentedJson(body);
 }
 
 /**

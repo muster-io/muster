@@ -213,7 +213,7 @@ describe("the record of a request", () => {
     await expect.element(page.getByTestId("record-check")).toHaveTextContent("Connection check");
   });
 
-  test("indents JSON whose characters are escapes, keeps an escaped backslash, and leaves changed numbers as they are", async () => {
+  test("indents JSON whose characters are escapes, keeps an escaped backslash, and keeps numbers and keys as received", async () => {
     // A messenger may escape every character beyond ASCII.
     const telegram = String.raw`{"ok":true,"result":{"text":"\u041f\u0440\u0438\u0432\u0435\u0442 \ud83d\ude00","url":"https:\/\/t.me\/x"}}`;
     let record: RequestRecord = { ...RECORD, response_body: telegram };
@@ -243,18 +243,39 @@ describe("the record of a request", () => {
     );
     await backslash.unmount();
 
-    // Numbers that reading would change, and characters that cannot be shown, leave the body as it is.
-    for (const body of [
-      '{"id":12345678901234567890}',
-      String.raw`{"id":12345678901234567890,"text":"\u00e9"}`,
-      '{"value":1.0}',
-      String.raw`{"text":"\u202e"}`,
-    ]) {
+    // Numbers that reading would change and a key given twice are indented exactly as received; characters that
+    // cannot be shown, such as the joiner of an emoji sequence, stay escaped; an empty object or array stays {} or [].
+    for (const [body, shown] of [
+      ['{"id":12345678901234567890}', '{\n  "id": 12345678901234567890\n}'],
+      [
+        String.raw`{"id":12345678901234567890,"text":"\u00e9"}`,
+        '{\n  "id": 12345678901234567890,\n  "text": "\u00e9"\n}',
+      ],
+      ['{"value":1.0}', '{\n  "value": 1.0\n}'],
+      ['{"a":1,"a":2}', '{\n  "a": 1,\n  "a": 2\n}'],
+      [
+        String.raw`{"text":"\u202e"}`,
+        String.raw`{
+  "text": "\u202e"
+}`,
+      ],
+      [
+        String.raw`{"text":"\ud83d\udc68\u200d\ud83d\udcbb"}`,
+        // The two emoji as characters, the joiner between them as the six characters of its escape.
+        `{\n  "text": "\u{1F468}\\u200d\u{1F4BB}"\n}`,
+      ],
+      [
+        '{ "a" : { } , "b" : [ ] , "c" : [ 1 , [ ] ] }',
+        '{\n  "a": {},\n  "b": [],\n  "c": [\n    1,\n    []\n  ]\n}',
+      ],
+      [" [\n] ", "[]"],
+      ["{}", "{}"],
+    ] as const) {
       record = { ...RECORD, response_body: body };
-      const raw = await renderRecord();
+      const indented = await renderRecord();
       await expect.element(page.getByTestId("record-response-body")).toBeVisible();
-      expect(page.getByTestId("record-response-body").element().textContent).toBe(body);
-      await raw.unmount();
+      expect(page.getByTestId("record-response-body").element().textContent).toBe(shown);
+      await indented.unmount();
     }
   });
 
@@ -282,11 +303,16 @@ describe("the record of a request", () => {
       expect(request.getByTestId("record-request-body").element().textContent).toBe(
         '{\n  "text": "Привет"\n}',
       );
-      await request.getByRole("button", { name: "Copy body" }).click();
+      const copyBody = request.getByRole("button", { name: "Copy body" }).element();
+      await userEvent.click(copyBody);
       await expect.element(request.getByRole("button", { name: "Copied" })).toBeVisible();
       expect(copied).toEqual([body]);
-      await request.getByRole("button", { name: "Copy URL" }).click();
+      // The focus is back on the button, not lost with the hidden field.
+      expect(document.activeElement).toBe(copyBody);
+      const copyUrl = request.getByRole("button", { name: "Copy URL" }).element();
+      await userEvent.click(copyUrl);
       expect(copied).toEqual([body, "http://127.0.0.1:18065/api/v4/posts"]);
+      await expect.poll(() => document.activeElement).toBe(copyUrl);
       expect(writeText).not.toHaveBeenCalled();
       // The hidden field is gone.
       expect(document.querySelectorAll("body > textarea")).toHaveLength(0);

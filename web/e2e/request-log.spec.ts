@@ -154,10 +154,11 @@ async function expectPhoneWidth(page: Page): Promise<void> {
 
 /**
  * An open dialog at 360 px: the page's own width ignores it, so the dialog itself covers the phone from its left edge,
- * once it has moved into place, and does not scroll sideways.
+ * once it has moved into place, is no wider than the phone, and does not scroll sideways.
  */
 async function expectDialogPhoneWidth(dialog: Locator): Promise<void> {
   await expect.poll(async () => (await dialog.boundingBox())?.x).toBe(0);
+  expect((await dialog.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(360);
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 }
 
