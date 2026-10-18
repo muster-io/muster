@@ -37,6 +37,16 @@ import (
 // DefaultMaxBodyBytes is how much of an answer a client reads unless its configuration says otherwise.
 const DefaultMaxBodyBytes = 8 << 20
 
+// maxResponseHeaderBytes bounds the header of every answer, instead of the 10 MB net/http allows: an answer with a
+// larger header fails as a transport error like any other answer that cannot be read, and no record of the Request
+// log holds more of an answer's header than this.
+const maxResponseHeaderBytes = 64 << 10
+
+// minSecretPrefix is the length from which the path prefix of a base URL, without its slashes, is masked wherever a
+// record holds it, in its headers and bodies as in its URL: a shorter prefix, such as /api/v4 or /v1, is a route
+// rather than a secret, and replacing it everywhere would garble the bodies that name it.
+const minSecretPrefix = 16
+
 // userAgent is the User-Agent of every request that does not set its own, and of every CONNECT to a proxy: Muster and
 // its version, nothing else.
 var userAgent = userAgentOf(buildinfo.Version)
@@ -138,11 +148,14 @@ type Client struct {
 	http       *http.Client
 	transports *transports
 	resolver   Resolver
-	// secrets are those of the configuration and the proxy's password, which redactor replaces; a record adds the
-	// request's own.
+	// secrets are those of the configuration and the proxy's password, which redactor replaces.
 	secrets  []logging.Secret
 	redactor redactor
-	maxBody  int64
+	// recordSecrets are secrets and the base URL's path prefix of at least minSecretPrefix characters, which
+	// recordRedactor replaces in a record; a record adds the request's own.
+	recordSecrets  []logging.Secret
+	recordRedactor redactor
+	maxBody        int64
 	// sleep waits between the attempts of the background class, and jitter spreads its backoff; tests replace both.
 	sleep  func(context.Context, time.Duration) error
 	jitter func(time.Duration) time.Duration
@@ -159,6 +172,13 @@ func New(cfg Config) (*Client, error) {
 	if err := c.build(); err != nil {
 		return nil, errors.New(c.redact("outbound client: " + err.Error()))
 	}
+	c.recordSecrets = secrets
+	if c.base != nil {
+		if prefix := strings.Trim(c.base.Path, "/"); len(prefix) >= minSecretPrefix {
+			c.recordSecrets = append(slices.Clone(secrets), logging.Secret(prefix))
+		}
+	}
+	c.recordRedactor = newRedactor(c.recordSecrets)
 	return c, nil
 }
 
@@ -200,14 +220,15 @@ func (c *Client) build() error {
 	}
 	c.transports = newTransports(func() *http.Transport {
 		return &http.Transport{
-			DialContext:         d.DialContext,
-			Proxy:               proxy,
-			ProxyConnectHeader:  http.Header{"User-Agent": {userAgent}},
-			ForceAttemptHTTP2:   true,
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-			TLSHandshakeTimeout: cfg.ConnectTimeout,
-			IdleConnTimeout:     30 * time.Second,
-			MaxIdleConnsPerHost: 4,
+			DialContext:            d.DialContext,
+			Proxy:                  proxy,
+			ProxyConnectHeader:     http.Header{"User-Agent": {userAgent}},
+			ForceAttemptHTTP2:      true,
+			TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout:    cfg.ConnectTimeout,
+			IdleConnTimeout:        30 * time.Second,
+			MaxIdleConnsPerHost:    4,
+			MaxResponseHeaderBytes: maxResponseHeaderBytes,
 		}
 	})
 	c.http = &http.Client{

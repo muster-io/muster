@@ -102,9 +102,10 @@ func MaskHeaders(h http.Header, redact func(string) string) http.Header {
 }
 
 // Record is one attempt of a request, as the Recorder gets it: its URL as errors show it, its headers as sent and its
-// bodies, all masked of the client's and the request's Secrets and of MaskedHeaders. Status is 0, and the answer's
-// header and body nil, when the attempt got no answer; Outcome is ok for an attempt that succeeded, and Network and
-// Error say what failed otherwise.
+// bodies, all masked of the client's and the request's Secrets, of a base URL's path prefix of at least
+// minSecretPrefix characters and of MaskedHeaders, with Location and Content-Location shown as the URL is. Status is
+// 0, and the answer's header and body nil, when the attempt got no answer; Outcome is ok for an attempt that
+// succeeded, and Network and Error say what failed otherwise.
 type Record struct {
 	Owner          Owner
 	Links          Links
@@ -141,9 +142,10 @@ func (ex *exchange) answer(resp *http.Response, data []byte) {
 }
 
 // record hands the Recorder the record of attempt n of req to u, which ended with res and err after elapsed, masked
-// of the client's and the request's Secrets and of MaskedHeaders. Nothing is recorded without a Recorder or an Owner,
-// for an attempt that sent nothing, for one whose caller went away (context.Canceled) and for a successful one that
-// req.SkipRecord leaves out. Everything handed over is a copy, so that no Recorder can change the result.
+// of the client's and the request's Secrets, of a base URL's path prefix of at least minSecretPrefix characters and of
+// MaskedHeaders. Nothing is recorded without a Recorder or an Owner, for an attempt that sent nothing, for one whose
+// caller went away (context.Canceled) and for a successful one that req.SkipRecord leaves out. Everything handed over
+// is a copy, so that no Recorder can change the result.
 func (c *Client) record(ctx context.Context, req Request, u *url.URL, n int, res Result, ex exchange,
 	elapsed time.Duration, err error) {
 	switch {
@@ -152,9 +154,9 @@ func (c *Client) record(ctx context.Context, req Request, u *url.URL, n int, res
 	case err == nil && req.SkipRecord != nil && req.SkipRecord(res.Status, res.Body):
 		return
 	}
-	red := c.redactor
+	red := c.recordRedactor
 	if extra := secretsOf(ctx); len(extra) > 0 {
-		red = newRedactor(append(slices.Clone(c.secrets), extra...))
+		red = newRedactor(append(slices.Clone(c.recordSecrets), extra...))
 	}
 	r := Record{Owner: c.cfg.Owner, Links: LinksOf(ctx), Operation: req.Operation,
 		Method: cmp.Or(req.Method, http.MethodGet), URL: c.displayWith(red, u),
@@ -164,13 +166,31 @@ func (c *Client) record(ctx context.Context, req Request, u *url.URL, n int, res
 		r.Via = ViaProxy
 	}
 	if ex.answered {
-		r.Status, r.ResponseHeader, r.ResponseBody = ex.status, MaskHeaders(ex.respHeader, red.redact),
+		r.Status, r.ResponseHeader, r.ResponseBody = ex.status, c.answerHeader(red, u, ex.respHeader),
 			redactBytes(red, ex.body)
 	}
 	if e, ok := errors.AsType[*Error](err); ok {
 		r.Network, r.Error = e.Network, red.redact(e.msg)
 	}
 	c.cfg.Recorder.Record(ctx, r)
+}
+
+// urlHeaders are the answer's headers whose values are URLs, which a record shows as display shows a URL.
+var urlHeaders = []string{"Location", "Content-Location"}
+
+// answerHeader is the answer's header h to the request to u as a record shows it: the values of urlHeaders resolved
+// against u and shown with the secrets of red as display shows a URL, the base URL's path prefix [redacted] whatever
+// its length, and then masked by MaskHeaders.
+func (c *Client) answerHeader(red redactor, u *url.URL, h http.Header) http.Header {
+	h = h.Clone()
+	for _, name := range urlHeaders {
+		for i, v := range h[name] {
+			if l, err := u.Parse(v); err == nil {
+				h[name][i] = c.displayWith(red, l)
+			}
+		}
+	}
+	return MaskHeaders(h, red.redact)
 }
 
 // redactBytes is a copy of b with the secrets of red replaced, nil for nil.

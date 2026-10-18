@@ -4109,11 +4109,12 @@ func (s *probeRotationStore) Reencrypt(_ context.Context, _ string, _ int64, row
 // third the push secret of the Bridge Connection and the outgoing webhook's other Secret. Through them: getMe,
 // setWebhook and a getUpdates whose answer carries a `/start <token>` and a press of a signed action id; a Root
 // message with signed buttons through the adapter of each messenger; a pollEvents whose batch carries the token of an
-// account_link event and a press; the direct messages with the codes of a Mattermost and a Bridge Account link; and an
-// outgoing webhook event with its signature, Cookie and Proxy-Authorization headers, whose answer sets a cookie. The
-// signed action id, the tokens, the codes, the path prefixes of the base URLs and the values of those headers are not
-// planted secrets, so the probe looks for them in the stored values itself; it is incomplete when an operation it
-// drives left no record.
+// account_link event and a press; the direct messages with the codes of a Mattermost and a Bridge Account link; a
+// getTeam that the stand-in redirects to a Location below the Mattermost server URL's path prefix; and an outgoing
+// webhook event with its signature, Cookie and Proxy-Authorization headers, whose answer sets a cookie. The stand-in
+// echoes the request's path, base URL's path prefix included, in its answers. The signed action id, the tokens, the
+// codes, the path prefixes of the base URLs and the values of those headers are not planted secrets, so the probe looks
+// for them in the stored values itself; it is incomplete when an operation it drives left no record.
 func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
@@ -4194,6 +4195,8 @@ func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error
 			Connection: &conn}
 		_, _ = path.Do(ctx, delivery.Subject{Destination: &dest}, delivery.PublishOp(a, m))
 	}
+	// Mattermost: an answer that redirects below the server URL's path prefix and echoes it in its body.
+	_, _ = mm.Team(ctx, outbound.ClassInteractive, "t")
 	// Bridge: a batch with the token of an account_link event and a press.
 	_, _ = br.PollEvents(ctx, nil, 0)
 	// The codes of Account links in direct messages, which only the request knows as Secrets.
@@ -4289,10 +4292,11 @@ func (p probeRLTargets) BridgeInfo(ctx context.Context, conn bridge.Conn, class 
 }
 
 // probeRLServer is the stand-in Telegram, Mattermost, Bridge and outgoing webhook server of probeRequestLog, below the
-// path prefixes tg, mm and br and at /hook. It echoes the requests, their Authorization header and, from a messenger or
-// a bridge, the bot token where a remote side may; it answers getUpdates with a `/start` of the token start and a press of signed, and pollEvents with
-// an account_link event of the token link and a press of signed; it keeps the codes of the direct messages and the
-// signature, Cookie and Proxy-Authorization values of the webhook event, and sets the cookie setCookie.
+// path prefixes tg, mm and br and at /hook. It echoes the requests, their paths, their Authorization header and, from a
+// messenger or a bridge, the bot token where a remote side may; it answers getUpdates with a `/start` of the token
+// start and a press of signed, pollEvents with an account_link event of the token link and a press of signed, and
+// getTeam with a redirect below the prefix mm; it keeps the codes of the direct messages and the signature, Cookie and
+// Proxy-Authorization values of the webhook event, and sets the cookie setCookie.
 type probeRLServer struct {
 	tg, mm, br                          string
 	token, signed, start, link          string
@@ -4312,7 +4316,7 @@ func (p *probeRLServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	user := map[string]any{"id": 7001, "is_bot": false, "first_name": "Bob", "username": "bob"}
 	person := map[string]any{"external_id": "u-bob", "display_name": "Bob", "handle": "bob"}
-	echo := "echo " + string(body) + " " + r.Header.Get("Authorization") + " " + p.token
+	echo := "echo " + r.URL.Path + " " + string(body) + " " + r.Header.Get("Authorization") + " " + p.token
 	switch rest := r.URL.Path; {
 	case strings.HasPrefix(rest, "/"+p.tg+"/"):
 		switch rest[strings.LastIndex(rest, "/")+1:] {
@@ -4339,6 +4343,9 @@ func (p *probeRLServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			answer(http.StatusOK, map[string]any{"id": "bot", "username": "probe", "is_bot": true})
 		case "channels/direct":
 			answer(http.StatusCreated, map[string]any{"id": "dm", "type": "D"})
+		case "teams/t":
+			w.Header().Set("Location", "/"+p.mm+"/api/v4/teams/moved")
+			answer(http.StatusFound, map[string]any{"echo": r.URL.Path})
 		default:
 			var post struct {
 				ChannelID string `json:"channel_id"`
@@ -4360,7 +4367,8 @@ func (p *probeRLServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"limits":      map[string]any{"max_body_length": 4000, "edit_max_age_seconds": nil},
 				"user_lookup": "login", "event_delivery": []string{"poll"}})
 		case "messages":
-			answer(http.StatusCreated, map[string]any{"message_id": "m1", "truncated": false, "replayed": false})
+			answer(http.StatusCreated, map[string]any{"message_id": "m1", "truncated": false, "replayed": false,
+				"echo": r.URL.Path})
 		case "events":
 			at := "2026-10-18T12:00:00Z"
 			answer(http.StatusOK, map[string]any{"next_cursor": "c1", "events": []any{
@@ -4455,7 +4463,7 @@ func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
 	}
 	var missing []string
 	for _, op := range []string{"getMe", "setWebhook", "getUpdates", "sendMessage", "getInfo", "postMessage",
-		"pollEvents", "getUserByUsername", "createDirectChannel", "findUsers", "sendDirectMessage", "event"} {
+		"pollEvents", "getUserByUsername", "createDirectChannel", "getTeam", "findUsers", "sendDirectMessage", "event"} {
 		if ops[op] == 0 {
 			missing = append(missing, op)
 		}

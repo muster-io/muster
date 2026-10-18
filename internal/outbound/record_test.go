@@ -466,3 +466,101 @@ func TestRecordSkipsAndLinks(t *testing.T) {
 		t.Fatalf("records %+v", got)
 	}
 }
+
+// TestRecordBasePrefix: a base URL's path prefix of at least minSecretPrefix characters is [redacted] wherever a record
+// holds it — in Location and Content-Location, shown resolved as the URL is, and in a body that echoes the path — while
+// a shorter one, a route such as /v1, is left alone in bodies; Location shows any prefix as the URL does. Do's result
+// and error are those of a client without a Recorder.
+func TestRecordBasePrefix(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil
+		prefix, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/moved"):
+			w.Header().Set("Location", "/"+prefix+"/elsewhere")
+			w.Header().Add("Location", "sibling")
+			w.Header().Set("Content-Location", "%zz /"+prefix+"/raw")
+			w.WriteHeader(http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "no route "+r.URL.Path) //nolint:gosec // G705: a test server that echoes the path on purpose
+		}
+	}))
+	defer srv.Close()
+	const long = "s3cret-pr3fix-0123456789"
+	for _, tt := range []struct {
+		prefix, body, raw string
+	}{
+		{long, "no route /[redacted]/missing", "%zz /[redacted]/raw"},
+		{"v1", "no route /v1/missing", "%zz /v1/raw"},
+	} {
+		t.Run(tt.prefix, func(t *testing.T) {
+			cfg := Config{BaseURL: srv.URL + "/" + tt.prefix + "/"}
+			plain, _ := newTestClient(t, cfg)
+			c, rec := recording(t, cfg)
+			for _, path := range []string{"/moved", "/missing"} {
+				wantRes, wantErr := plain.Do(t.Context(), Request{URL: path})
+				res, err := c.Do(t.Context(), Request{URL: path})
+				if err == nil || !reflect.DeepEqual(res, wantRes) || !reflect.DeepEqual(err, wantErr) {
+					t.Fatalf("%s: with a Recorder %+v %v, without %+v %v", path, res, err, wantRes, wantErr)
+				}
+			}
+			got := rec.got()
+			if len(got) != 2 {
+				t.Fatalf("records %+v", got)
+			}
+			moved, missing := got[0], got[1]
+			if loc := moved.ResponseHeader.Values("Location"); !reflect.DeepEqual(loc,
+				[]string{srv.URL + "/[redacted]/elsewhere", srv.URL + "/[redacted]/sibling"}) {
+				t.Errorf("Location %q", loc)
+			}
+			if cl := moved.ResponseHeader.Get("Content-Location"); cl != tt.raw {
+				t.Errorf("Content-Location %q", cl)
+			}
+			if moved.URL != srv.URL+"/[redacted]/moved" || missing.URL != srv.URL+"/[redacted]/missing" ||
+				moved.Error != "redirect to "+srv.URL+"/[redacted]/elsewhere refused" {
+				t.Errorf("urls %q %q, error %q", moved.URL, missing.URL, moved.Error)
+			}
+			if string(missing.ResponseBody) != tt.body {
+				t.Errorf("body %q", missing.ResponseBody)
+			}
+			if tt.prefix == long {
+				for _, r := range got {
+					if text := fmt.Sprintf("%s %v %s %v %s %s", r.URL, r.RequestHeader, r.RequestBody,
+						r.ResponseHeader, r.ResponseBody, r.Error); strings.Contains(text, long) {
+						t.Errorf("the prefix in the record: %s", text)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestAnswerHeaderBound: an answer whose header is larger than maxResponseHeaderBytes fails as a transport error and
+// its record has no answer; one just below the bound is read.
+func TestAnswerHeaderBound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		size := maxResponseHeaderBytes - 4<<10
+		if r.URL.Path == "/large" {
+			size = maxResponseHeaderBytes + 1
+		}
+		w.Header().Set("X-Big", strings.Repeat("h", size))
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+	c, rec := recording(t, Config{})
+	if res, err := c.Do(t.Context(), Request{URL: srv.URL + "/small"}); err != nil || string(res.Body) != "ok" {
+		t.Fatalf("below the bound: %+v %v", res, err)
+	}
+	res, err := c.Do(t.Context(), Request{URL: srv.URL + "/large"})
+	e, ok := errors.AsType[*Error](err)
+	if !ok || res.Outcome != OutcomeTransient || res.Status != 0 || e.Network != NetworkConnect ||
+		!strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("above the bound: %+v %v", res, err)
+	}
+	got := rec.got()
+	if len(got) != 2 || got[0].Status != http.StatusOK || len(got[0].ResponseHeader.Get("X-Big")) == 0 ||
+		got[1].Status != 0 || got[1].ResponseHeader != nil || got[1].Outcome != OutcomeTransient {
+		t.Fatalf("records %+v", got)
+	}
+}
