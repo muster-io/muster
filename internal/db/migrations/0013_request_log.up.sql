@@ -55,11 +55,13 @@ CREATE TABLE request_log (
 );
 
 -- The list and the count bound of a Connection; of a Destination: an outgoing webhook's own records and the records of
--- a Connection that name a messenger Destination; and the age bound.
+-- a Connection that name a messenger Destination; the count bound of the records without an owner; and the age bound.
 CREATE INDEX request_log_connection_idx ON request_log (org_id, connection_id, at DESC, id DESC)
     WHERE connection_id IS NOT NULL;
 CREATE INDEX request_log_destination_idx ON request_log (org_id, destination_id, at DESC, id DESC)
     WHERE destination_id IS NOT NULL;
+CREATE INDEX request_log_unowned_idx ON request_log (org_id, at DESC, id DESC)
+    WHERE connection_id IS NULL AND destination_id IS NULL;
 CREATE INDEX request_log_at_idx ON request_log (org_id, at);
 
 COMMIT;

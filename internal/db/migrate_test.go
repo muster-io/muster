@@ -682,7 +682,7 @@ func TestIntegrationBridgeLinkRequests(t *testing.T) {
 // TestIntegrationRequestLog runs 0013: before it there is no request_log; after up the records of a Connection, of an
 // outgoing webhook Destination, of a Connection naming a messenger Destination and an Alert Group, and of no owner
 // without an answer are accepted, every CHECK refuses what it bounds, a public_id is unique in its Organization, an
-// owner must exist and the hard deletion of a Connection takes its records along; the three indexes exist. Down drops
+// owner must exist and the hard deletion of a Connection takes its records along; the four indexes exist. Down drops
 // the table; up again works.
 func TestIntegrationRequestLog(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
@@ -809,10 +809,11 @@ func TestIntegrationRequestLog(t *testing.T) {
 		indexes := func(t *testing.T) int {
 			t.Helper()
 			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'request_log'
-				AND indexname IN ('request_log_connection_idx', 'request_log_destination_idx', 'request_log_at_idx')`)
+				AND indexname IN ('request_log_connection_idx', 'request_log_destination_idx',
+					'request_log_unowned_idx', 'request_log_at_idx')`)
 		}
-		if got := indexes(t); got != 3 {
-			t.Errorf("after up: %d of the 3 indexes", got)
+		if got := indexes(t); got != 4 {
+			t.Errorf("after up: %d of the 4 indexes", got)
 		}
 
 		e.step(t, -1)
@@ -821,8 +822,8 @@ func TestIntegrationRequestLog(t *testing.T) {
 		}
 
 		e.step(t, 1)
-		if got := indexes(t); got != 3 {
-			t.Errorf("after up again: %d of the 3 indexes", got)
+		if got := indexes(t); got != 4 {
+			t.Errorf("after up again: %d of the 4 indexes", got)
 		}
 		if err := record(t, nil); err != nil {
 			t.Errorf("after up again: %v", err)
