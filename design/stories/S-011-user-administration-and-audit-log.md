@@ -242,3 +242,7 @@ curl -s -b jar 'localhost:8080/api/v1/audit-log?action=user.password_reset' | jq
 | C-03.AC-19 | full | |
 | C-03.AC-25 | full | |
 | C-02.FR-15 | partial | `muster admin reset-password` with `--actor` |
+
+NFR-13 is not an ID of a capability, so `covers` does not list it: the story serves its optimistic locking with `ETag`
+and `If-Match` and its cursor pagination without `OFFSET`, and [coverage.md](coverage.md#non-functional-requirements)
+lists it there.
