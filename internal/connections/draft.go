@@ -19,9 +19,6 @@ import (
 	"github.com/muster-io/muster/internal/telegram"
 )
 
-// CodeUnknownID is a connection_id of a draft that names no Connection of the draft's type.
-const CodeUnknownID = "unknown_id"
-
 // Draft is a Connection as its form holds it before it is saved (C-13.FR-14): its type and address — the server URL
 // of a Mattermost one, the Bot API base URL and update mode of a Telegram one, the base URL and event delivery mode of
 // a Bridge —, the bot token typed in the form, Keep when none is, its proxy, nil for no proxy on a new Connection and

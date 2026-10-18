@@ -149,6 +149,8 @@ const (
 	CodeTooLong       = "too_long"
 	CodeTooShort      = "too_short"
 	CodeUnsupported   = "unsupported"
+	// CodeUnknownID is a connection_id of a draft that names no Connection of the draft's type.
+	CodeUnknownID = "unknown_id"
 	// CodeWebhookCallFailed is a save of a Telegram Connection whose setWebhook or deleteWebhook failed; nothing was
 	// saved.
 	CodeWebhookCallFailed = "webhook_call_failed"

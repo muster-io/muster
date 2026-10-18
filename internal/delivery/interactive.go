@@ -158,14 +158,6 @@ func DirectOp(send func(ctx context.Context, c Call) Outcome) Op { return direct
 // worker. A Subject with NoLimiter calls op at once: it waits for no token, so never past the budget, and holds no
 // bucket.
 func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error) {
-	budget := i.Budget
-	if budget <= 0 {
-		budget = InteractiveBudget
-	}
-	sleep := i.Sleep
-	if sleep == nil {
-		sleep = sleepReal
-	}
 	switch {
 	case s.NoLimiter && (s.Destination != nil || s.Connection != nil):
 		return Outcome{}, errors.New("an interactive call without a limiter names no destination or connection")
@@ -173,6 +165,14 @@ func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error)
 		return op.call(ctx, Call{Class: outbound.ClassInteractive}), nil
 	case s.Destination == nil && s.Connection == nil:
 		return Outcome{}, errors.New("an interactive call needs a destination or a connection")
+	}
+	budget := i.Budget
+	if budget <= 0 {
+		budget = InteractiveBudget
+	}
+	sleep := i.Sleep
+	if sleep == nil {
+		sleep = sleepReal
 	}
 	sub := subject{connection: s.Connection}
 	c := Call{Class: outbound.ClassInteractive}
