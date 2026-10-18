@@ -289,7 +289,8 @@ func (a adapterOnly) Reply(ctx context.Context, c delivery.Call, r delivery.Root
 func (a adapterOnly) LengthLimit() int { return a.rec.LengthLimit() }
 
 // TestProbeWithoutCheck is C-11.FR-9 for a type without a Destination check: the probe marks the Destination, and its
-// next delivery that comes due is attempted at once as the probe.
+// next delivery that comes due is attempted at once as the probe, recorded with the kind probe and a run of its own
+// (C-23.FR-2): the claim of the Broken probes takes it, not the claim of due deliveries.
 func TestProbeWithoutCheck(t *testing.T) {
 	e := newEnv(t)
 	e.w.Adapters[delivery.TypeMattermost] = adapterOnly{rec: e.rec}
@@ -309,6 +310,9 @@ func TestProbeWithoutCheck(t *testing.T) {
 	if c := e.rec.Calls(); len(c) != 1 || c[0].Method != deliverytest.MethodPublish || c[0].Class != outbound.ClassDelivery ||
 		ds.health != "healthy" || e.only(t).state != "delivered" {
 		t.Errorf("the next delivery as the probe %+v %+v", c, ds)
+	}
+	if l := e.rec.Calls()[0].Links; l.Destination != destMM || l.Check != outbound.CheckProbe || !runRe.MatchString(l.Run) {
+		t.Errorf("the next delivery as the probe: links %+v", l)
 	}
 }
 
