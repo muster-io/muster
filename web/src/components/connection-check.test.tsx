@@ -66,6 +66,9 @@ function step(
   return { name, ok: true, via: "direct", ...extra };
 }
 
+/** The run of every check result; each result names one. */
+const RUN = "CR0000000000R1";
+
 /** The result of a draft whose dry probe ran alone, passed or failed, with the type's other steps skipped. */
 function probeOnly(type: Connection["type"], probe: Partial<ConnectionCheckStep> = {}) {
   const dry = step("dry_probe", { latency_ms: 2, ...probe });
@@ -73,6 +76,7 @@ function probeOnly(type: Connection["type"], probe: Partial<ConnectionCheckStep>
     ok: dry.ok,
     steps: [dry, ...TOKEN_STEPS[type].map((name) => step(name, { ok: false, skipped: true }))],
     warnings: [],
+    request_log_run: RUN,
   } satisfies ConnectionCheckResult;
 }
 
@@ -81,6 +85,7 @@ const CONNECTED: ConnectionCheckResult = {
   steps: [step("token", { latency_ms: 12 })],
   warnings: [],
   bot_name: "muster-dev-bot-b",
+  request_log_run: RUN,
 };
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -403,6 +408,61 @@ describe("the check in Russian", () => {
       .toHaveTextContent("Этого подключения больше нет. Обновите страницу.");
   });
 
+  test("shows the English message as the detail only when it says more than the text of its code", async () => {
+    await i18n.changeLanguage("ru");
+    const tokenRefused = {
+      ok: false,
+      steps: [
+        step("token", {
+          ok: false,
+          latency_ms: 4,
+          code: "token_invalid",
+          message: "The bot token is not valid.",
+        }),
+      ],
+      warnings: [],
+      request_log_run: RUN,
+    } satisfies ConnectionCheckResult;
+    answer(() => json(200, tokenRefused));
+    const screen = await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Проверить подключение" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("Токен бота недействителен.");
+    // The message is the English text of its code: no English repeats the Russian text.
+    await expect
+      .poll(stepTexts)
+      .toEqual(["Токен: ошибка 4 мс · напрямуюТокен бота недействителен."]);
+    expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
+
+    vi.restoreAllMocks();
+    answer(() =>
+      json(
+        200,
+        probeOnly("mattermost", {
+          ok: false,
+          code: "dns_failed",
+          message: "DNS lookup failed: mm.example.invalid",
+        }),
+      ),
+    );
+    await screen.rerender({
+      type: "mattermost",
+      draft: { ...NEW_MATTERMOST, server_url: "http://mm.example.invalid" },
+    });
+    await page.getByRole("button", { name: "Проверить подключение" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("Имя хоста не найдено.");
+    // A message that names the host says more, and stays as the detail, small and muted.
+    await expect
+      .element(page.getByTestId("connection-check-step-detail"))
+      .toHaveTextContent("Подробности: DNS lookup failed: mm.example.invalid");
+    expect(page.getByTestId("connection-check-step-detail").element().className).toContain(
+      "text-muted-foreground",
+    );
+  });
+
   test("names an address that is not a Mattermost server", async () => {
     await i18n.changeLanguage("ru");
     answer(() =>
@@ -417,54 +477,52 @@ describe("the check in Russian", () => {
   });
 });
 
+/** Answers the check with the result and the Request log with the record of its run; returns the list's queries. */
+function serveRun(result: ConnectionCheckResult): Record<string, string>[] {
+  const queries: Record<string, string>[] = [];
+  vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const [path = "", search = ""] = url.split("?");
+    if (path === "/api/v1/request-log") {
+      queries.push(Object.fromEntries(new URLSearchParams(search)));
+      return json(200, {
+        items: [
+          {
+            id: "RQ0000000000AA",
+            at: "2026-10-18T06:00:12Z",
+            direction: "outbound",
+            operation: "getInfo",
+            method: "GET",
+            url: "http://127.0.0.1:18094/v1/info",
+            status: 200,
+            latency_ms: 3,
+            via: "direct",
+            attempt: 1,
+            error_class: null,
+            error_code: null,
+            check: "draft_check",
+            check_run: RUN,
+            connection_id: null,
+            destination: null,
+            alert_group: null,
+            request_body_truncated: false,
+            response_body_truncated: false,
+          },
+        ],
+        next_cursor: null,
+      });
+    }
+    if (path === "/api/v1/sessions/current") {
+      return json(401, { title: "Unauthorized", status: 401 });
+    }
+    return json(200, result);
+  });
+  return queries;
+}
+
 describe("the requests of a check", () => {
-  const RUN = "CR0000000000R1";
-
-  /** Answers the check with the result and the Request log with the record of its run; returns the list's queries. */
-  function serveRun(result: ConnectionCheckResult): Record<string, string>[] {
-    const queries: Record<string, string>[] = [];
-    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const [path = "", search = ""] = url.split("?");
-      if (path === "/api/v1/request-log") {
-        queries.push(Object.fromEntries(new URLSearchParams(search)));
-        return json(200, {
-          items: [
-            {
-              id: "RQ0000000000AA",
-              at: "2026-10-18T06:00:12Z",
-              direction: "outbound",
-              operation: "getInfo",
-              method: "GET",
-              url: "http://127.0.0.1:18094/v1/info",
-              status: 200,
-              latency_ms: 3,
-              via: "direct",
-              attempt: 1,
-              error_class: null,
-              error_code: null,
-              check: "draft_check",
-              check_run: RUN,
-              connection_id: null,
-              destination: null,
-              alert_group: null,
-              request_body_truncated: false,
-              response_body_truncated: false,
-            },
-          ],
-          next_cursor: null,
-        });
-      }
-      if (path === "/api/v1/sessions/current") {
-        return json(401, { title: "Unauthorized", status: 401 });
-      }
-      return json(200, result);
-    });
-    return queries;
-  }
-
   test("opens the requests of the run of a check before saving", async () => {
-    const queries = serveRun({ ...probeOnly("bridge"), request_log_run: RUN });
+    const queries = serveRun(probeOnly("bridge"));
     await renderCheck({
       type: "bridge",
       draft: { ...NEW_DRAFTS.bridge, bot_token: "muster-dev-bridge-token-b" },
@@ -485,7 +543,7 @@ describe("the requests of a check", () => {
   });
 
   test("opens the requests of the run of a saved Connection's check", async () => {
-    const queries = serveRun({ ...CONNECTED, request_log_run: RUN });
+    const queries = serveRun(CONNECTED);
     await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
     await page.getByRole("button", { name: "Check connection" }).click();
     await expect
@@ -502,19 +560,9 @@ describe("the requests of a check", () => {
     expect(queries).toEqual([{ run: RUN }]);
   });
 
-  test("offers no requests for a result without a run", async () => {
-    serveRun(CONNECTED);
-    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
-    await page.getByRole("button", { name: "Check connection" }).click();
-    await expect
-      .element(page.getByTestId("connection-check-summary"))
-      .toHaveTextContent("Connected as muster-dev-bot-b");
-    expect(page.getByRole("button", { name: "Requests of this check" }).elements()).toHaveLength(0);
-  });
-
   test("reads in Russian", async () => {
     await i18n.changeLanguage("ru");
-    serveRun({ ...probeOnly("bridge"), request_log_run: RUN });
+    serveRun(probeOnly("bridge"));
     await renderCheck({ type: "bridge", draft: NEW_DRAFTS.bridge });
     await page.getByRole("button", { name: "Проверить подключение" }).click();
     await page.getByRole("button", { name: "Запросы этой проверки" }).click();

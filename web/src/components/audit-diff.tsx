@@ -166,15 +166,28 @@ function linkRuleField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
-/** The names of the changed fields of a Connection; the bot token and the proxy password are Secrets. */
+/**
+ * The names of the changed fields of a Connection of any type, as its form names them; the token, the push secret and
+ * the proxy password are Secrets. The diff does not say the Connection's type, so the token is named for all three.
+ */
 function connectionField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
     case "/name":
       return t("connections.fields.name");
     case "/server_url":
       return t("connections.fields.serverUrl");
+    case "/bot_api_base_url":
+      return t("connections.fields.botApiBaseUrl");
+    case "/update_mode":
+      return t("connections.fields.updateMode");
+    case "/base_url":
+      return t("connections.bridge.baseUrl");
+    case "/event_delivery":
+      return t("connections.bridge.eventDelivery");
+    case "/push_secret":
+      return t("connections.bridge.pushSecret");
     case "/bot_token":
-      return t("connections.fields.botToken");
+      return t("audit.fields.token");
     case "/limiter/limit":
       return t("audit.fields.limiterLimit");
     case "/limiter/per_seconds":

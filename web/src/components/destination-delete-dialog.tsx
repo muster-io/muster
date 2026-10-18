@@ -50,7 +50,18 @@ export function deleteDescription(t: TFunction, destination: Destination): strin
   }
 }
 
-export function DestinationDeleteDialog({ destination }: { destination: Destination }) {
+/**
+ * "Delete" with its dialog. The page stops reading the Destination through onDeletingChange from the moment the
+ * deletion starts, as a read once it is deleted, such as the one the live hint of the deletion starts, would answer
+ * 404; a refused deletion lets it read again.
+ */
+export function DestinationDeleteDialog({
+  destination,
+  onDeletingChange,
+}: {
+  destination: Destination;
+  onDeletingChange?: (deleting: boolean) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -58,6 +69,10 @@ export function DestinationDeleteDialog({ destination }: { destination: Destinat
   const remove = useMutation({
     mutationFn: () =>
       deleteDestination(destination.id, { headers: { "If-Match": destination.etag } }),
+    onMutate: async () => {
+      onDeletingChange?.(true);
+      await queryClient.cancelQueries({ queryKey: getGetDestinationQueryKey(destination.id) });
+    },
     onSuccess: async () => {
       await navigate({ to: "/destinations" });
       queryClient.removeQueries({ queryKey: getGetDestinationQueryKey(destination.id) });
@@ -65,6 +80,7 @@ export function DestinationDeleteDialog({ destination }: { destination: Destinat
       void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
     },
     onError: (err) => {
+      onDeletingChange?.(false);
       if (isStale(err)) {
         void queryClient.invalidateQueries({ queryKey: getGetDestinationQueryKey(destination.id) });
       }

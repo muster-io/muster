@@ -224,7 +224,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   await page.goto(`/admin/audit-log?resource_type=connection&resource_id=${connectionId}`);
   const updated = page.getByRole("row").filter({ hasText: "connection.updated" }).first();
   const diff = updated.getByTestId("audit-diff");
-  await expect(diff).toContainText("Bot token:");
+  await expect(diff).toContainText("Token:");
   await expect(diff).toContainText("changed");
   await expect(diff).not.toContainText("mm-dev-token");
   const created = page.getByRole("row").filter({ hasText: "connection.created" }).first();

@@ -38,6 +38,7 @@ import type {
   NullableDestinationCheckCode,
   TelegramUpdateMode,
 } from "../api/gen/model";
+import i18n from "../i18n";
 import { isApiError, problemText } from "../lib/api";
 import { draftAddress, draftFieldErrorText, serverErrors } from "./connection-form";
 import { unreachable } from "./destination-test-panel";
@@ -150,11 +151,11 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
 }
 
 /**
- * The server's English message as the detail of the text of its code, when it says more than that text — in another
- * language, or with a host, a status or a name; null without a code, which shows the message itself.
+ * The server's English message as the detail of the text of its code, when it says more than that code's English text,
+ * such as a host, a status or a name; null without a code, which shows the message itself. It is compared in English
+ * whatever the reader's language, so that no language repeats the code's text in English below its own.
  */
 export function checkDetail(
-  t: TFunction,
   code: CheckCode | null | undefined,
   message: string | null | undefined,
 ): string | null {
@@ -167,7 +168,7 @@ export function checkDetail(
   ) {
     return null;
   }
-  return message === checkCodeText(t, code) ? null : message;
+  return message === checkCodeText(i18n.getFixedT("en"), code) ? null : message;
 }
 
 /** The detail of a check's code: the server's English message, small and muted below the translated text. */
@@ -181,7 +182,7 @@ export function CheckDetail({
   testId: string;
 }) {
   const { t } = useTranslation();
-  const detail = checkDetail(t, code, message);
+  const detail = checkDetail(code, message);
   if (detail === null) {
     return null;
   }
@@ -588,7 +589,7 @@ export function ConnectionCheck({
             <Result result={check.data} type={type} mode={mode} updateMode={updateMode} />
           )}
         </div>
-        {shown && check.isSuccess && check.data.request_log_run !== undefined && (
+        {shown && check.isSuccess && (
           <div>
             <RequestLogButton
               scope={{ run: check.data.request_log_run }}

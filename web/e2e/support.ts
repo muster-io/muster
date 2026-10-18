@@ -431,6 +431,95 @@ export function watchCsp(page: Page): string[] {
   return violations;
 }
 
+/** What a page did once it deleted an entity. */
+export interface Deletion {
+  /** The requests to the entity's path that went out after its DELETE. */
+  reads: string[];
+  /** The console errors of the page, and a live hint of the deletion that never reached it. */
+  errors: string[];
+}
+
+/**
+ * Watches a page delete the entity at path, such as `/api/v1/connections/CN…`, whose live hint is {type, id}. The
+ * answer to the DELETE is held back until the hint of the deletion has reached the page, so that the page is still
+ * open when the hint invalidates the entity's query; every request to path after the DELETE and every console error
+ * is recorded. A page reads an entity no more once its deletion starts, as a read would answer 404.
+ */
+export async function watchDeletion(
+  page: Page,
+  path: string,
+  hint: { type: string; id: string },
+): Promise<Deletion> {
+  const deletion: Deletion = { reads: [], errors: [] };
+  let deleted = false;
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname !== path) {
+      return;
+    }
+    if (r.method() === "DELETE") {
+      deleted = true;
+    } else if (deleted) {
+      deletion.reads.push(`${r.method()} ${path}`);
+    }
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      deletion.errors.push(message.text());
+    }
+  });
+  await page.route(
+    (url) => url.pathname === path,
+    async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.fallback();
+        return;
+      }
+      // A stream of its own, open before the DELETE reaches the server, hears the hint of the deletion that the
+      // page's stream hears too.
+      const listener = await page.evaluateHandle(
+        ({ url, type, id }) =>
+          new Promise<{ heard: Promise<boolean> }>((opened, failed) => {
+            const source = new EventSource(url);
+            const heard = new Promise<boolean>((resolve) => {
+              const timer = setTimeout(() => {
+                source.close();
+                resolve(false);
+              }, 10_000);
+              source.addEventListener("hint", (event) => {
+                const data: unknown =
+                  typeof event.data === "string" ? JSON.parse(event.data) : null;
+                if (
+                  typeof data === "object" &&
+                  data !== null &&
+                  "type" in data &&
+                  "id" in data &&
+                  data.type === type &&
+                  data.id === id
+                ) {
+                  clearTimeout(timer);
+                  source.close();
+                  resolve(true);
+                }
+              });
+            });
+            source.addEventListener("open", () => opened({ heard }), { once: true });
+            source.addEventListener("error", () => failed(new Error("no live-updates stream")), {
+              once: true,
+            });
+          }),
+        { url: "/api/v1/live-updates", ...hint },
+      );
+      const response = await route.fetch();
+      if (!(await listener.evaluate((l) => l.heard))) {
+        deletion.errors.push(`no live hint ${hint.type} ${hint.id} within 10 s`);
+      }
+      await listener.dispose();
+      await route.fulfill({ response });
+    },
+  );
+  return deletion;
+}
+
 /** Signs in through the local form. */
 export async function signInLocally(page: Page, login: string, password: string): Promise<void> {
   await page.getByLabel("Login").fill(login);

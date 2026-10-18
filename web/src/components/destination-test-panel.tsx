@@ -376,7 +376,7 @@ export function DestinationTestPanel({
         </div>
       )}
       {test.isSuccess && <TestResult result={test.data} />}
-      {test.isSuccess && test.data.request_log_run !== undefined && (
+      {test.isSuccess && (
         <div>
           <RequestLogButton
             scope={{ destination: destination.id, run: test.data.request_log_run }}

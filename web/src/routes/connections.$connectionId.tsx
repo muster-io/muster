@@ -177,7 +177,9 @@ function EditForm({ current }: { current: Connection }) {
 function ConnectionView({ connectionId }: { connectionId: string }) {
   const { t } = useTranslation();
   const canWrite = useCan("connections:write");
-  const query = useGetConnection(connectionId);
+  // A Connection being deleted is read no more: the read would answer 404.
+  const [deleting, setDeleting] = useState(false);
+  const query = useGetConnection(connectionId, { query: { enabled: !deleting } });
   const connection = query.data;
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -211,7 +213,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
           </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && connection !== undefined && (
-            <ConnectionDeleteDialog connection={connection} />
+            <ConnectionDeleteDialog connection={connection} onDeletingChange={setDeleting} />
           )}
         </div>
       </div>
