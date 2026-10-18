@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/devmode"
 )
 
@@ -402,10 +403,11 @@ func TestBridgeExampleCheck(t *testing.T) {
 // Connection polls the example, and its Destination for the channel alerts posts each new Alert Group there as a Root
 // message #N. Alice, signed in to the web UI, starts an Account link and sends its token to the bot in her direct chat
 // on the page, which links her account; her press of Ack acknowledges the Alert Group with the Transport bridge and the
-// page shows the buttons of the acknowledged status. With the example restarted offering only thread_messages and the
-// Connection checked again, her `ack` in the Thread of a new Alert Group acknowledges it and is answered there. With
-// the Connection in push mode and the example pushing to its callback with the push secret, her press reaches Muster as
-// a signed push, recorded in the Request log. No secret reaches a log.
+// page shows the buttons of the acknowledged status. With the example restarted offering only thread_messages, the
+// Connection checked again and the development clock past bridge.info_max_age, so that every replica reads info again,
+// her `ack` in the Thread of a new Alert Group acknowledges it and is answered there. With the Connection in push mode
+// and the example pushing to its callback with the push secret, her press reaches Muster as a signed push, recorded in
+// the Request log. No secret reaches a log.
 func TestBridgeExampleFlows(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -466,6 +468,9 @@ func TestBridgeExampleFlows(t *testing.T) {
 	// Without buttons: ack written in the Thread of a new Alert Group.
 	x.restart(exampleRun{features: "thread_messages"})
 	e.check(b.conn)
+	// The check reads info again on the replica that runs it; another replica reads its copy in memory again only past
+	// bridge.info_max_age.
+	advance(t, r, int(bridge.DefaultInfoMaxAge/time.Second)+1)
 	g2 := b.start("e2", "ExampleTwo", "example", "two")
 	n2 := b.number(g2)
 	root = x.root(n2)
