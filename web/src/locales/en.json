@@ -1452,7 +1452,7 @@
     "tooLong": "A Note has at most {{max}} characters."
   },
   "notices": {
-    "noReplicaLeading": "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
+    "noReplicaLeading": "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused.",
     "recoveringAfterDowntime": "Muster is recovering after downtime. Data may be incomplete until {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster is recovering after downtime. Data may be incomplete for a while."
   },

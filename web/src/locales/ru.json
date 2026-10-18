@@ -1504,7 +1504,7 @@
     "tooLong": "В заметке не больше {{max}} символов."
   },
   "notices": {
-    "noReplicaLeading": "Нет ведущей реплики: опрос Telegram, проверки Heartbeat и Stale приостановлены.",
+    "noReplicaLeading": "Нет ведущей реплики: опрос Telegram и мостов, проверки Heartbeat и Stale приостановлены.",
     "recoveringAfterDowntime": "Muster восстанавливается после простоя. Данные могут быть неполными до {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster восстанавливается после простоя. Какое-то время данные могут быть неполными."
   },
