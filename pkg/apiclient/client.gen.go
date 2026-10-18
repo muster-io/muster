@@ -5236,7 +5236,7 @@ type NullableOutgoingHeartbeatErrorClass string
 // NullablePublicId A `public_id` in the format of `PublicId`, or null.
 type NullablePublicId = string
 
-// NullableRequestErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+// NullableRequestErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 type NullableRequestErrorClass string
 
 // NullableRequestErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
@@ -5811,7 +5811,7 @@ type RequestRecord struct {
 	// Error Why the attempt failed, masked; null for one that succeeded. Untrusted where it comes from the remote side.
 	Error nullable.Nullable[string] `json:"error"`
 
-	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 	ErrorClass nullable.Nullable[NullableRequestErrorClass] `json:"error_class"`
 
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
@@ -5828,7 +5828,7 @@ type RequestRecord struct {
 	// RequestBody The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text.
 	RequestBody string `json:"request_body"`
 
-	// RequestBodyBytes The full size of the request body.
+	// RequestBodyBytes The size of the request body as stored before truncation, after Secrets are masked.
 	RequestBodyBytes int `json:"request_body_bytes"`
 
 	// RequestBodyTruncated The request body is cut to `request_log.body_max` bytes.
@@ -5840,7 +5840,7 @@ type RequestRecord struct {
 	// ResponseBody The answer's body, masked and cut as the request body; null without an answer; untrusted text.
 	ResponseBody nullable.Nullable[string] `json:"response_body"`
 
-	// ResponseBodyBytes The full size of the answer's body, 0 without an answer.
+	// ResponseBodyBytes The size of the answer's body as stored before truncation, after Secrets are masked; for an answer larger than the client reads, the bytes read. 0 without an answer.
 	ResponseBodyBytes int `json:"response_body_bytes"`
 
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.
@@ -5885,7 +5885,7 @@ type RequestRecordSummary struct {
 	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
 	Direction RequestDirection `json:"direction"`
 
-	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 	ErrorClass nullable.Nullable[NullableRequestErrorClass] `json:"error_class"`
 
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
@@ -11216,7 +11216,7 @@ type ClientInterface interface {
 
 	// GetRequestRecord Read a record of the Request log
 	//
-	// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
+	// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record — even one listed through a messenger Destination with `destinations:read` — and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
 	//
 	// Corresponds with GET /request-log/{request_record_id} (the `GetRequestRecord` operationId).
 	GetRequestRecord(ctx context.Context, requestRecordId RequestRecordId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -14309,7 +14309,7 @@ func (c *Client) ListRequestLog(ctx context.Context, params *ListRequestLogParam
 
 // GetRequestRecord Read a record of the Request log
 //
-// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
+// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record — even one listed through a messenger Destination with `destinations:read` — and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
 //
 // Corresponds with GET /request-log/{request_record_id} (the `GetRequestRecord` operationId).
 func (c *Client) GetRequestRecord(ctx context.Context, requestRecordId RequestRecordId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -24231,7 +24231,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetRequestRecordWithResponse Read a record of the Request log
 	//
-	// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
+	// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record — even one listed through a messenger Destination with `destinations:read` — and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -39725,7 +39725,7 @@ func (c *ClientWithResponses) ListRequestLogWithResponse(ctx context.Context, pa
 
 // GetRequestRecordWithResponse Read a record of the Request log
 //
-// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
+// One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record — even one listed through a messenger Destination with `destinations:read` — and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
 //
 // Returns a wrapper object for the known response body format(s).
 //

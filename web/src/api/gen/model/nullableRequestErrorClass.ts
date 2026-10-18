@@ -19,7 +19,7 @@
  */
 
 /**
- * How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+ * How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
  * @nullable
  */
 export type NullableRequestErrorClass = typeof NullableRequestErrorClass[keyof typeof NullableRequestErrorClass] | null;

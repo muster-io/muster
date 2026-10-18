@@ -1130,8 +1130,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   `inbound`), `operation` as its protocol names it (1 to 64 characters), `check_kind` (one of the five kinds of checks
   and tests) and `check_run` (a `CR` id) from S-089, `method`, `url` as errors show it, the request's `request_headers`
   (a `jsonb` object of string arrays) and `request_body`, the answer's `status` (100 to 999), `response_headers` and
-  `response_body` — all three null for a request that got no answer (`request_log_answer_check`) — each body's size as
-  sent or received (`*_body_bytes`) and whether its text was cut (`*_truncated`), `latency_ms` on the real clock, `via`
+  `response_body` — all three null for a request that got no answer (`request_log_answer_check`) — each body's size
+  (`*_body_bytes`: the size of the body as stored before truncation, after Secrets are masked; for an answer larger than
+  the client reads, the bytes read) and whether its text was cut (`*_truncated`), `latency_ms` on the real clock, `via`
   (`direct`, `proxy`), `attempt`, and for a failed attempt `error_class` (the outcomes of the outbound package),
   `error_code` (a check code, only without an answer: `request_log_code_without_answer_check`) and the masked `error`.
   Nothing secret is stored: the outbound package masks the Secrets of the client and of the request and the values of
@@ -1146,19 +1147,21 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   for. Indexes: `request_log_connection_idx (org_id, connection_id, at DESC, id DESC) WHERE connection_id IS NOT NULL`
   and `request_log_destination_idx (org_id, destination_id, at DESC, id DESC) WHERE destination_id IS NOT NULL` for the
   lists and the count bound — an outgoing webhook's own records and the records of a Connection that name a messenger
-  Destination — and `request_log_at_idx (org_id, at)` for the age bound. Every list reads at most the newest
-  `request_log.max_records` of an owner, chosen once in a materialized CTE, so its other filters scan no more than that;
-  a messenger Destination's view is its Connection's bounded set filtered by `destination_id`. Not partitioned: its size
-  is bounded per owner, so it is short-lived state removed by batched deletes (section 6); time partitions would not
-  spare the deletes the count bound needs, and ADR-0006 keeps partitions for tables whose size grows with their
-  retention period. Written by `internal/requestlog` only, one `INSERT` per attempt after its outcome, on the main pool
-  outside any transaction of the caller, under its own 2-second timeout; a write that fails is dropped, logged
-  (`request_log_write_failed`) and counted, and never fails the request it records.
-  - *Notes (write volume)*: one row per request — each Publication, edit and Thread reply, answer, check and
-    non-empty poll — typically a few thousand to a few tens of thousands a day per installation, at most the sum of
-    the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection 15, a Bridge
-    Connection 10, an outgoing webhook 5); each row at most two bodies of `request_log.body_max` and their headers.
-    The table holds at most `request_log.max_records` rows per owner plus what arrived since the last pruning.
+  Destination — `request_log_unowned_idx (org_id, at DESC, id DESC) WHERE connection_id IS NULL AND destination_id IS
+  NULL` for the count bound of the records without an owner, and `request_log_at_idx (org_id, at)` for the age bound.
+  Every list reads at most the newest `request_log.max_records` of an owner, chosen once in a materialized CTE, so its
+  other filters scan no more than that; a messenger Destination's view is its Connection's bounded set filtered by
+  `destination_id`. Not partitioned: its size is bounded per owner, so it is short-lived state removed by batched
+  deletes (section 6); time partitions would not spare the deletes the count bound needs, and ADR-0006 keeps partitions
+  for tables whose size grows with their retention period. Written by `internal/requestlog` only, one `INSERT` per
+  attempt after its outcome, on the main pool outside any transaction of the caller, under its own 2-second timeout; a
+  write that fails is dropped, logged (`request_log_write_failed`) and counted, and never fails the request it records.
+  - *Notes (write volume)*: one row per request — each Publication, edit and Thread reply, answer, check and non-empty
+    poll — typically a few thousand to a few tens of thousands a day per installation, at most the sum of the limiters
+    at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection 15, a Bridge Connection 10, an
+    outgoing webhook 5); each row at most two bodies of `request_log.body_max`, the request headers and at most 64 KiB
+    of answer headers, the bound of the outbound package on an answer's header. The table holds at most
+    `request_log.max_records` rows per owner plus what arrived since the last pruning.
 
 ### 4.12 Link rules and Lookup tables
 

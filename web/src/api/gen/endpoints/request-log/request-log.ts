@@ -183,7 +183,7 @@ export const getGetRequestRecordUrl = (requestRecordId: string,) => {
 }
 
 /**
- * One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
+ * One record with its headers and bodies, masked. The caller needs the Permission of the record's owner, `connections:read` for a Connection's record — even one listed through a messenger Destination with `destinations:read` — and `destinations:read` for an outgoing webhook's (`403` otherwise). A record past `request_log.max_age` or past the newest `request_log.max_records` of its owner, or whose owner is deleted, is `404`, as it is in no list. Headers, bodies and the error are untrusted text.
  * @summary Read a record of the Request log
  */
 export const getRequestRecord = async (requestRecordId: string, options?: Parameters<typeof apiFetch>[1]): Promise<RequestRecord> => {

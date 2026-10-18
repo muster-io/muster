@@ -5234,7 +5234,7 @@ type NullableOutgoingHeartbeatErrorClass string
 // NullablePublicId A `public_id` in the format of `PublicId`, or null.
 type NullablePublicId = string
 
-// NullableRequestErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+// NullableRequestErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 type NullableRequestErrorClass string
 
 // NullableRequestErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
@@ -5809,7 +5809,7 @@ type RequestRecord struct {
 	// Error Why the attempt failed, masked; null for one that succeeded. Untrusted where it comes from the remote side.
 	Error nullable.Nullable[string] `json:"error"`
 
-	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 	ErrorClass nullable.Nullable[NullableRequestErrorClass] `json:"error_class"`
 
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
@@ -5826,7 +5826,7 @@ type RequestRecord struct {
 	// RequestBody The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text.
 	RequestBody string `json:"request_body"`
 
-	// RequestBodyBytes The full size of the request body.
+	// RequestBodyBytes The size of the request body as stored before truncation, after Secrets are masked.
 	RequestBodyBytes int `json:"request_body_bytes"`
 
 	// RequestBodyTruncated The request body is cut to `request_log.body_max` bytes.
@@ -5838,7 +5838,7 @@ type RequestRecord struct {
 	// ResponseBody The answer's body, masked and cut as the request body; null without an answer; untrusted text.
 	ResponseBody nullable.Nullable[string] `json:"response_body"`
 
-	// ResponseBodyBytes The full size of the answer's body, 0 without an answer.
+	// ResponseBodyBytes The size of the answer's body as stored before truncation, after Secrets are masked; for an answer larger than the client reads, the bytes read. 0 without an answer.
 	ResponseBodyBytes int `json:"response_body_bytes"`
 
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.
@@ -5883,7 +5883,7 @@ type RequestRecordSummary struct {
 	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
 	Direction RequestDirection `json:"direction"`
 
-	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error (`transient`), a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
+	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
 	ErrorClass nullable.Nullable[NullableRequestErrorClass] `json:"error_class"`
 
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.

@@ -29,7 +29,7 @@ export type RequestRecord = RequestRecordSummary & ({
   /** The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text. */
   request_body: string;
   /**
-     * The full size of the request body.
+     * The size of the request body as stored before truncation, after Secrets are masked.
      * @minimum 0
      */
   request_body_bytes: number;
@@ -40,7 +40,7 @@ export type RequestRecord = RequestRecordSummary & ({
      */
   response_body: string | null;
   /**
-     * The full size of the answer's body, 0 without an answer.
+     * The size of the answer's body as stored before truncation, after Secrets are masked; for an answer larger than the client reads, the bytes read. 0 without an answer.
      * @minimum 0
      */
   response_body_bytes: number;

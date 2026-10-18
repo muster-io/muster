@@ -139,14 +139,17 @@ issue: 266
   DELETE CASCADE`; a check's `FOR KEY SHARE` that a save of the Connection or Destination, `FOR NO KEY UPDATE`, does not
   wait for), `alert_group_id` (nullable, no foreign key, kept by the single writer: records go long before their Alert
   Group). Indexes: `request_log_connection_idx (org_id, connection_id, at DESC, id DESC) WHERE connection_id IS NOT
-  NULL`, `request_log_destination_idx (org_id, destination_id, at DESC, id DESC) WHERE destination_id IS NOT NULL` and
-  `request_log_at_idx (org_id, at)` for the age bound; every list reads at most the newest `request_log.max_records` of
-  an owner, so its other filters scan no more than that. The `org_id` of every query comes from a parameter (lint 1).
+  NULL`, `request_log_destination_idx (org_id, destination_id, at DESC, id DESC) WHERE destination_id IS NOT NULL`,
+  `request_log_unowned_idx (org_id, at DESC, id DESC) WHERE connection_id IS NULL AND destination_id IS NULL` for the
+  count bound of the records without an owner, and `request_log_at_idx (org_id, at)` for the age bound; every list
+  reads at most the newest `request_log.max_records` of an owner, so its other filters scan no more than that. The
+  `org_id` of every query comes from a parameter (lint 1).
 - **Write volume** (the Notes of `schema.md` §4.11): one row per request — each Publication, edit and Thread reply,
   answer, check and non-empty poll — typically a few thousand to a few tens of thousands a day per installation, at
   most the sum of the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection 15, a
-  Bridge Connection 10, an outgoing webhook 5); each row at most two bodies of `request_log.body_max` and their
-  headers. The table holds at most `request_log.max_records` rows per owner plus what arrived since the last pruning.
+  Bridge Connection 10, an outgoing webhook 5); each row at most two bodies of `request_log.body_max`, the request
+  headers and at most 64 KiB of answer headers, the bound every outbound transport sets on an answer's header. The
+  table holds at most `request_log.max_records` rows per owner plus what arrived since the last pruning.
 - **Recording** (`internal/outbound/record.go`, `client.go`):
   - A client whose `Config` has a `Recorder` and an owner — a Connection or an outgoing webhook Destination, by
     internal id, or, from S-089, no owner for the checks before saving of new Connections, whose records the
@@ -158,6 +161,12 @@ issue: 266
     text. Clients without a `Recorder` — OIDC,
     the outgoing heartbeat, `muster doctor`, `muster bridge check`, and until S-089 the clients of checks before
     saving — record nothing.
+  - Not recorded on purpose: the `setWebhook` that creating a Telegram Connection in the webhook mode makes
+    (`internal/connections/telegram.go` gives that client no owner), as it runs inside the transaction that inserts the
+    Connection and the record's foreign key would wait on that uncommitted row for the `Writer`'s 2-second timeout —
+    S-089 may record it after the commit; and an attempt whose caller's context was cancelled (`context.Canceled` — a
+    shutdown, a lost Leader stopping a long poll), whose outcome nobody waits for, while an attempt that ran past a
+    deadline (`context.DeadlineExceeded`) is recorded.
   - Each `Request` names its `Operation`. Operations are named as their protocol names them: Telegram the Bot API
     method; Bridge the `operationId` of `api/bridge.yaml`; Mattermost the operation of its REST API reference in lower
     camel case (`getMe`, `getUserByUsername`, `getPing`, `getRolesByNames`, `getTeamsForUser`, `getTeam`,
@@ -175,6 +184,13 @@ issue: 266
     headers and both bodies, in every escaped form the redactor knows; the values of `Authorization`,
     `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token`, `webhook-signature` and the
     outgoing webhook's signature header (`outbound.MaskedHeaders`, which S-089 reuses) are replaced whatever they hold.
+    The base URL's path prefix is `[redacted]` in the URL and in the answer's `Location` and `Content-Location`, which
+    a record shows as the URL, resolved against the request's; a prefix of at least 16 characters without its slashes
+    is also `[redacted]` wherever else the record holds it, such as a body that echoes the request path, while a
+    shorter one, such as `/api/v4` or `/v1`, is a route rather than a secret and bodies keep it.
+  - Every outbound transport reads at most 64 KiB of an answer's header (`MaxResponseHeaderBytes`, instead of the
+    10 MB of `net/http`); an answer with a larger header fails as a transport error, like any answer that cannot be
+    read.
   - Recording never fails, retries or delays the request beyond its own write: the `Recorder` gets the record after
     the attempt has its outcome.
 - **Writing** (`internal/requestlog/requestlog.go`, `mask.go`): `Writer.Record` applies the shape masking, truncates,
@@ -183,8 +199,9 @@ issue: 266
   text: every string that `buttons.LooksSigned` recognizes as a signed action id — the structure of an action id,
   checked without its key — a 43-character base64url word after `/start `, and the `token` member of an `account_link`
   event; then each body is cut to `request_log.body_max` bytes at a UTF-8 boundary, invalid bytes replaced, with its
-  full size and the truncated mark. A failed write is logged as `request_log_write_failed` (WARN: direction,
-  operation, the owner's `public_id` and the database error, never a header or a body) and counted.
+  size (`*_body_bytes`: the size of the body as stored before truncation, after Secrets are masked; for an answer larger
+  than the client reads, the bytes read) and the truncated mark. A failed write is logged as `request_log_write_failed`
+  (WARN: direction, operation, the owner's `public_id` and the database error, never a header or a body) and counted.
 - **Reading** (`requestlog.go`, `query.sql`): newest first by `(at, id)`, cursor pagination; only records newer than
   `request_log.max_age` and among the newest `request_log.max_records` of their owner; a messenger Destination's view
   within its Connection's bound.
@@ -201,12 +218,14 @@ issue: 266
   `muster_request_log_records_total` (counter, `direction`), `muster_request_log_write_failures_total` (counter,
   `direction`), `muster_request_log_pruned_total` (counter), added to the catalogue of `reference.md` (C-23) with the
   generated pages.
-- **Secrets** (lint 5): the probe `request_log` sends, through clients of each type with a recording `Writer`,
-  requests that carry each secret of the acceptance statement; an in-memory stand-in of the database keeps every value
-  the `Writer`'s INSERT stores — the lint job runs without a database — and the probe searches each value of a text and
-  `jsonb` column, and the log, for the secret's value. Values that are not planted secrets — signed action ids, the
-  tokens of `/start` and `account_link`, the codes of direct messages, the path prefixes of base URLs and the values of
-  the masked headers — the probe searches for itself, and it is incomplete when an operation it drives left no record.
+- **Secrets** (lint 5): the probe `request_log` sends, through clients of each type with a recording `Writer`, requests
+  that carry each secret of the acceptance statement — its stand-in server echoes the request path in its answers and
+  redirects a `getTeam` below the Mattermost server URL's path prefix; an in-memory stand-in of the database keeps every
+  value the `Writer`'s INSERT stores — the lint job runs without a database — and the probe searches each value of a
+  text and `jsonb` column, and the log, for the secret's value. Values that are not planted secrets — signed action ids,
+  the tokens of `/start` and `account_link`, the codes of direct messages, the path prefixes of base URLs and the values
+  of the masked headers — the probe searches for itself, and it is incomplete when an operation it drives left no
+  record.
 - **Architecture** (`design/architecture.md`): the Request log in the components of §3.1 and the data model of §6.3.
 - **Defaults**: `request_log.max_records`, `request_log.max_age`, `request_log.body_max` (provisional, P-55 to P-57).
 
@@ -315,6 +334,23 @@ None.
   `getUserByUsername` and `getTeam`, which the client also calls, join the list; and the Verification looks for the
   development Telegram token in every record instead of `/bot[0-9]` in the URLs, since the dry probe of a Telegram base
   URL calls the published placeholder `/bot0:x/getMe`, which is no secret.
+- Contract corrections made in review, each a deliberate departure with its reason:
+  - The `setWebhook` that creating a Telegram Connection in the webhook mode makes is not recorded
+    (`internal/connections/telegram.go` gives that client no owner): it runs inside the transaction that inserts the
+    Connection, and the record's foreign key would wait on that uncommitted row for the `Writer`'s 2-second timeout.
+    S-089 may record it after the commit (Contracts → Recording).
+  - An attempt whose caller's context was cancelled (`context.Canceled` — a shutdown, a lost Leader stopping a long
+    poll) is not recorded, as nobody waits for its outcome; one that ran past a deadline (`context.DeadlineExceeded`)
+    is (Contracts → Recording).
+  - Every outbound transport bounds an answer's header to 64 KiB: `net/http`'s default of 10 MB would let each row
+    carry megabytes of answer headers (Contracts → Recording and Write volume).
+  - The base URL's path prefix is `[redacted]` in `Location` and `Content-Location` too and, from 16 characters, in
+    every header and body of the record: a redirect or a body echoing the request path stored it otherwise. A shorter
+    prefix is a route, not a secret, and replacing it everywhere would garble bodies (Contracts → Recording, Secrets).
+  - `request_log_unowned_idx` joins the indexes: no index served the count bound of the records without an owner
+    (`CountNewerUnowned`, `PruneUnownedExcess`), which scanned the Organization's whole table (Contracts → Schema).
+  - `*_body_bytes` is the size of the body as stored before truncation, after Secrets are masked, and for an answer
+    larger than the client reads the bytes read, not the size as sent or received (Contracts → Writing).
 
 ## Coverage
 
