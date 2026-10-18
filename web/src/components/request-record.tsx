@@ -6,8 +6,9 @@
 // direction, latency, path and attempt, the kind of check, what failed, and the links to the Destination, the Alert
 // Group and the requests of its check. The server masks every secret before a record is written; headers, bodies and
 // URLs are untrusted text and are shown as text only, a JSON body indented to be read, a cut body marked with its full
-// size, and each has a copy button. A record of a Connection needs the permission to read Connections, which a
-// Destination's list does not: the dialog then says so instead of the record.
+// size, and each has a copy button, which copies the raw text also on a plain-http installation. A record of a
+// Connection needs the permission to read Connections, which a Destination's list does not: the dialog then says so
+// instead of the record.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -29,14 +30,15 @@ import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { checkCodeText } from "./connection-check";
 import { unreachable } from "./destination-test-panel";
+import { copyText } from "./integration-token-dialog";
 import { CodeText, readableBody } from "./rendered-request";
-import { COPIED_MS, copyField } from "./setup-link-dialog";
+import { COPIED_MS } from "./setup-link-dialog";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
 /** The accessible name of a direction: "Sent" for a request Muster made, "Received" for one that reached it. */
-export function directionText(t: TFunction, direction: RequestDirection): string {
+function directionText(t: TFunction, direction: RequestDirection): string {
   switch (direction) {
     case "outbound":
       return t("requestLog.direction.outbound");
@@ -112,13 +114,18 @@ export function useRecordTime(): (iso: string) => string {
   }, [locale, timeZone]);
 }
 
-/** A size in bytes as kilobytes of 1024 bytes, with at most one decimal. */
-export function sizeKb(bytes: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / 1024);
+/**
+ * A size in bytes as kilobytes of 1024 bytes, rounded up to one decimal, so that a body cut at 16 KB never reads as
+ * being of 16 KB itself.
+ */
+function sizeKb(bytes: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(
+    Math.ceil((bytes * 10) / 1024) / 10,
+  );
 }
 
-/** A button that copies a text and says "Copied" for a moment. */
-export function CopyButton({ text, label }: { text: string; label: string }) {
+/** A button that copies a text exactly and says "Copied" for a moment. */
+function CopyButton({ text, label }: { text: string; label: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -134,7 +141,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
         variant="outline"
         size="xs"
         onClick={() => {
-          void copyField(text, null).then(setCopied);
+          void copyText(text).then(setCopied);
         }}
       >
         {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
@@ -215,9 +222,82 @@ function Headers({
   );
 }
 
+/** Characters a body shows only as their escapes: controls, format characters, surrogates, private and unassigned. */
+const HIDDEN = /[\p{C}\p{Zl}\p{Zp}]/u;
+
+/** The UTF-16 unit of the four hexadecimal digits at an index. */
+function hexUnit(text: string, index: number): number {
+  return Number.parseInt(text.slice(index, index + 4), 16);
+}
+
+/**
+ * Valid JSON text without the whitespace between its tokens, its strings with \/ and the \uXXXX escapes of characters
+ * that can be shown — a surrogate pair as the one character it encodes — written as the characters, except " and \.
+ * Every other escape stays as it is: \\ is a backslash, never the start of an escape.
+ */
+function unescapedJson(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charAt(i);
+    if (!inString) {
+      if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") {
+        out += c;
+      }
+      inString = c === '"';
+      continue;
+    }
+    if (c !== "\\") {
+      out += c;
+      inString = c !== '"';
+      continue;
+    }
+    const next = text.charAt(i + 1);
+    if (next !== "u") {
+      out += next === "/" ? "/" : c + next;
+      i++;
+      continue;
+    }
+    const unit = hexUnit(text, i + 2);
+    let length = 6;
+    let char = String.fromCharCode(unit);
+    if (unit >= 0xd800 && unit <= 0xdbff && text.startsWith("\\u", i + 6)) {
+      const low = hexUnit(text, i + 8);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        length = 12;
+        char = String.fromCharCode(unit, low);
+      }
+    }
+    // A lone surrogate is a character of its own to the expression, and hidden.
+    out += char === '"' || char === "\\" || HIDDEN.test(char) ? text.slice(i, i + length) : char;
+    i += length - 1;
+  }
+  return out;
+}
+
+/**
+ * A body as the record shows it: indented when it is JSON that reads back the same apart from its spacing and the
+ * escapes of characters that can be shown, which a messenger may send for every character beyond ASCII; else as it
+ * is, such as a number beyond the precision of JavaScript, 1.0, or a key given twice.
+ */
+function shownBody(body: string): string {
+  const readable = readableBody(body);
+  const trimmed = body.trim();
+  if (readable !== body || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+    return readable;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return body;
+  }
+  return JSON.stringify(parsed) === unescapedJson(trimmed) ? JSON.stringify(parsed, null, 2) : body;
+}
+
 /**
  * A body as one block of text: indented when it is JSON, else as it is; a cut body says how large it was, and an
- * inbound body that was not kept says why.
+ * inbound body that was not kept says why. Copying copies the body as it was recorded.
  */
 function Body({
   text,
@@ -232,7 +312,7 @@ function Body({
 }) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage ?? "en";
-  const readable = useMemo(() => readableBody(text), [text]);
+  const readable = useMemo(() => shownBody(text), [text]);
   return (
     <Labelled
       label={t("requestLog.record.body")}
@@ -351,12 +431,17 @@ const LINK = "text-primary underline-offset-4 hover:underline focus-visible:unde
 /** Where the requests of the record's check are listed: its owner's tab, filtered by the run. */
 function RunLink({ record, onNavigate }: { record: RequestRecordSummary; onNavigate: () => void }) {
   const { t } = useTranslation();
+  const canConnections = useCan("connections:read");
   const run = record.check_run;
   if (run === null) {
     return null;
   }
   const search = { tab: "request-log" as const, run };
   if (record.connection_id !== null) {
+    // A Connection's tab needs the permission to read Connections; without it there is nothing to follow.
+    if (!canConnections) {
+      return null;
+    }
     return (
       <Link
         to="/connections/$connectionId"

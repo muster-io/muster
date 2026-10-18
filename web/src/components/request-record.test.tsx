@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // A record of the Request log in a real browser (C-23.FR-6, AC-6): the request and the answer with their headers as two
-// columns and their bodies, a JSON body indented and any other as it is, a cut body with its full size, an inbound body
-// that was not kept, the kind of check, latency, path and attempt, the links to the Destination, the Alert Group and the
-// requests of its check, the copy buttons, and the time in the user's time zone. Headers, bodies and URLs are text:
-// markup in them is shown, never rendered, and [redacted] stays as it is. A record of a Connection that the reader may
-// not open says why. The request and the answer stand side by side from 1024 px. English and Russian.
+// columns and their bodies, a JSON body indented — also one whose characters are escapes — and any other as it is, a
+// cut body with its full size rounded up, an inbound body that was not kept, the kind of check, latency, path and
+// attempt, the links to the Destination, the Alert Group and the requests of its check, the copy buttons, also on a
+// plain-http installation, and the time in the user's time zone. Headers, bodies and URLs are text: markup in them is
+// shown, never rendered, and [redacted] stays as it is. A record of a Connection that the reader may not open says why.
+// The request and the answer stand side by side from 1024 px. English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -212,6 +213,92 @@ describe("the record of a request", () => {
     await expect.element(page.getByTestId("record-check")).toHaveTextContent("Connection check");
   });
 
+  test("indents JSON whose characters are escapes, keeps an escaped backslash, and leaves changed numbers as they are", async () => {
+    // A messenger may escape every character beyond ASCII.
+    const telegram = String.raw`{"ok":true,"result":{"text":"\u041f\u0440\u0438\u0432\u0435\u0442 \ud83d\ude00","url":"https:\/\/t.me\/x"}}`;
+    let record: RequestRecord = { ...RECORD, response_body: telegram };
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    serve(() => json(200, record));
+    const screen = await renderRecord();
+    const answer = page.getByRole("region", { name: "Answer", exact: true });
+    await expect.element(answer.getByTestId("record-response-body")).toBeVisible();
+    expect(page.getByTestId("record-response-body").element().textContent).toBe(
+      '{\n  "ok": true,\n  "result": {\n    "text": "Привет 😀",\n    "url": "https://t.me/x"\n  }\n}',
+    );
+    await expect.element(answer.getByText("Привет", { exact: false })).toBeVisible();
+    // Copying copies the body as it was recorded.
+    await answer.getByRole("button", { name: "Copy body" }).click();
+    expect(writeText).toHaveBeenLastCalledWith(telegram);
+    await screen.unmount();
+
+    // An escaped backslash before u0041 is a backslash and the text u0041, not the letter A.
+    record = { ...RECORD, response_body: String.raw`{"a":"\\u0041","b":"\u00e9"}` };
+    const backslash = await renderRecord();
+    await expect.element(page.getByTestId("record-response-body")).toBeVisible();
+    expect(page.getByTestId("record-response-body").element().textContent).toBe(
+      String.raw`{
+  "a": "\\u0041",
+  "b": "é"
+}`,
+    );
+    await backslash.unmount();
+
+    // Numbers that reading would change, and characters that cannot be shown, leave the body as it is.
+    for (const body of [
+      '{"id":12345678901234567890}',
+      String.raw`{"id":12345678901234567890,"text":"\u00e9"}`,
+      '{"value":1.0}',
+      String.raw`{"text":"\u202e"}`,
+    ]) {
+      record = { ...RECORD, response_body: body };
+      const raw = await renderRecord();
+      await expect.element(page.getByTestId("record-response-body")).toBeVisible();
+      expect(page.getByTestId("record-response-body").element().textContent).toBe(body);
+      await raw.unmount();
+    }
+  });
+
+  test("copies the body as it was recorded on a plain-http installation", async () => {
+    const secure = Object.getOwnPropertyDescriptor(window, "isSecureContext");
+    Object.defineProperty(window, "isSecureContext", { value: false, configurable: true });
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    // What the browser's copy command would copy: the selection of the focused field.
+    const copied: string[] = [];
+    vi.spyOn(document, "execCommand").mockImplementation((command) => {
+      const field = document.activeElement;
+      copied.push(
+        command === "copy" && field instanceof HTMLTextAreaElement
+          ? field.value.slice(field.selectionStart, field.selectionEnd)
+          : "",
+      );
+      return true;
+    });
+    try {
+      const body = String.raw`{"text":"\u041f\u0440\u0438\u0432\u0435\u0442"}`;
+      serve(() => json(200, { ...RECORD, request_body: body }));
+      await renderRecord();
+      const request = page.getByRole("region", { name: "Request", exact: true });
+      await expect.element(request.getByTestId("record-request-body")).toBeVisible();
+      expect(request.getByTestId("record-request-body").element().textContent).toBe(
+        '{\n  "text": "Привет"\n}',
+      );
+      await request.getByRole("button", { name: "Copy body" }).click();
+      await expect.element(request.getByRole("button", { name: "Copied" })).toBeVisible();
+      expect(copied).toEqual([body]);
+      await request.getByRole("button", { name: "Copy URL" }).click();
+      expect(copied).toEqual([body, "http://127.0.0.1:18065/api/v4/posts"]);
+      expect(writeText).not.toHaveBeenCalled();
+      // The hidden field is gone.
+      expect(document.querySelectorAll("body > textarea")).toHaveLength(0);
+    } finally {
+      if (secure === undefined) {
+        Reflect.deleteProperty(window, "isSecureContext");
+      } else {
+        Object.defineProperty(window, "isSecureContext", secure);
+      }
+    }
+  });
+
   test("marks a cut body with its full size, an inbound body that was not kept, and a request without an answer", async () => {
     const large = "x".repeat(64 * 1024);
     let record: RequestRecord = {
@@ -232,6 +319,14 @@ describe("the record of a request", () => {
     const pre = page.getByTestId("record-request-body").element();
     expect(getComputedStyle(pre).overflowY).toBe("auto");
     await screen.unmount();
+
+    // The size is rounded up, so that a body a little over 16 KB never reads as 16 KB.
+    record = { ...record, request_body: "x".repeat(16 * 1024), request_body_bytes: 16_400 };
+    const over = await renderRecord({ ...SUMMARY, request_body_truncated: true });
+    await expect
+      .element(page.getByTestId("record-request-body-cut"))
+      .toHaveTextContent("Cut at 16 KB of 16.1 KB");
+    await over.unmount();
 
     record = {
       ...RECORD,
@@ -399,10 +494,12 @@ describe("the record of a request", () => {
       .toHaveTextContent(
         "Opening this request needs the permission to read Connections: it belongs to the Connection of this Destination.",
       );
-    // The dialog still names the request it was opened for.
+    // The dialog still names the request it was opened for, and offers no Connection's tab it could not open.
     await expect
       .element(dialog().getByRole("heading", { level: 2 }))
       .toHaveTextContent("→createPost");
+    await expect.element(page.getByTestId("record-check")).toHaveTextContent("Connection check");
+    expect(page.getByRole("link", { name: "Requests of this check" }).elements()).toHaveLength(0);
     expect(reads()).toBe(1);
     await screen.unmount();
 
