@@ -2308,6 +2308,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#request_log_pruned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>request_log_pruned</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request_log_write_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>request_log_write_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#schema_dirty" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3639,6 +3661,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#request_log_pruned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>request_log_pruned</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request_log_write_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>request_log_write_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#schema_dirty" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4216,6 +4260,12 @@ the event.</p>
 <h3 id="replicas_pruned"><code>replicas_pruned</code><a class="headerlink" href="#replicas_pruned" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>replicas</code> · C-02</p>
 <p>The Leader removed the records of replicas that had not refreshed them for replica.prune_after.</p>
+<h3 id="request_log_pruned"><code>request_log_pruned</code><a class="headerlink" href="#request_log_pruned" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>rows</code> · C-23</p>
+<p>The Leader task request_log_pruning deleted, in batches, records of the Request log older than request_log.max_age or past the newest request_log.max_records of their Connection, of their outgoing webhook Destination or of the records without an owner: rows is how many it deleted in one run. Not logged when a run deleted nothing.</p>
+<h3 id="request_log_write_failed"><code>request_log_write_failed</code><a class="headerlink" href="#request_log_write_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>direction</code>, <code>operation</code>, <code>owner</code>, <code>error</code> · C-23</p>
+<p>A record of the Request log could not be written — the database refused it, or its write ran past its 2 s timeout — and was dropped; the request it records went on unchanged. direction and operation are the record's, owner the public_id of its Connection or outgoing webhook Destination, empty without one, and error the database error. The headers and bodies of the record are never logged; muster_request_log_write_failures_total counts the dropped records.</p>
 <h3 id="schema_dirty"><code>schema_dirty</code><a class="headerlink" href="#schema_dirty" title="Permanent link">&para;</a></h3>
 <p>ERROR · fields: <code>database_version</code> · C-02</p>
 <p>A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations.</p>
