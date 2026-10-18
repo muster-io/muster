@@ -103,9 +103,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   sign-out, failed or refused sign-in, token issued or revoked, TOTP enrolled, removed or reset, OIDC identity linked or
   refused, account converted to local, user refused by the IdP at a background re-check, Account link created, removed
   or rejected) and every command of people and automation on Alert Groups, with the actor, the Personal access token or
-  Service account token used, and the Transport (`ui`, `api`, `mattermost`, `telegram`, or `cli` for the `--actor` CLI
-  commands). Each capability adds its own entry types. The Audit log is append-only, kept for `retention.audit_log`, and
-  every entry is also written to stdout as a registered log event.
+  Service account token used, and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, or `cli` for the
+  `--actor` CLI commands). Each capability adds its own entry types. The Audit log is append-only, kept for
+  `retention.audit_log`, and every entry is also written to stdout as a registered log event.
 - **C-03.FR-15** The Audit log page lists entries newest first, filtered by time range, actor, action type and resource.
 - **C-03.FR-16** The SPA is served with a Content Security Policy and the usual security headers.
 - **C-03.FR-17** The documentation contains a complete Keycloak walkthrough (client, groups mapper, claim, and the

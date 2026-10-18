@@ -53,7 +53,7 @@ acceptance:
   - "[C-03.AC-2] With \"TOTP required: everyone\", a new local user who signs in reaches only the TOTP enrolment page: every other address leads back to it until the enrolment is confirmed."
   - "[C-03.FR-10] The enrolment page shows a QR code and the secret, accepts a code and shows the recovery codes once; a user with TOTP is asked for a code or a recovery code after the password."
   - "[C-03.FR-26] The password setup page reads the token from the URL fragment, sets the password, and shows its texts for an expired and a used link."
-  - "[C-03.FR-18, C-03.AC-9] While the recovery notice is active every page shows \"Muster is recovering after downtime. Data may be incomplete until HH:MM.\" with the time in the user's time zone, and the banner disappears without a reload when the notice ends; Admins also see \"No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.\" while it applies."
+  - "[C-03.FR-18, C-03.AC-9] While the recovery notice is active every page shows \"Muster is recovering after downtime. Data may be incomplete until HH:MM.\" with the time in the user's time zone, and the banner disappears without a reload when the notice ends; Admins also see \"No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused.\" while it applies."
   - "[C-03.FR-18] The navigation shows only the entries whose Permission the user holds."
   - "[C-03.FR-12] The profile shows and edits the name, time zone and language (English or Russian; the UI switches at once), changes the password, lists sessions with \"Sign out everywhere\", manages TOTP and shows the sign-in method."
   - "[C-03.FR-29, C-03.AC-20] For an account with a password, \"Link OIDC\" first shows \"After linking you will sign in only through OIDC; your password will be removed.\"; after linking, the profile shows the sign-in method OIDC."
@@ -199,3 +199,6 @@ component tests (`make test-web`).
 | C-03.AC-9 | full | |
 | C-03.AC-20 | full | together with S-013 and S-062 |
 | C-03.AC-22 | partial | the SPA part, after the re-checks of S-062; the token part is S-016 |
+
+NFR-8 is not an ID of a capability, so `covers` does not list it: the story serves the UI in English and Russian with
+plural forms and the lint for missing keys, and [coverage.md](coverage.md#non-functional-requirements) lists it there.

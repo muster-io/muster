@@ -1112,7 +1112,7 @@ stateDiagram-v2
 | Transition | Trigger | Transport | Lifecycle event, loudness, Mentions |
 |---|---|---|---|
 | start → Firing | a newly firing Alert with no open Alert Group of its Route and Group key values, and no Reopen; also Alerts still firing when the Grace period after a manual resolve ends | system | `created`, Loud, `new_alert_group` |
-| Firing → Acknowledged | Acknowledge | `ui`, `api`, `mattermost`, `telegram` | `acknowledged`, Quiet |
+| Firing → Acknowledged | Acknowledge | `ui`, `api`, `mattermost`, `telegram`, `bridge` | `acknowledged`, Quiet |
 | Snoozed → Acknowledged | Acknowledge, which ends the Snooze | people | `acknowledged`, Quiet |
 | Acknowledged → Acknowledged | Acknowledge by another user: Takeover, Reminders start over; by the Owner: no change, no event | people | `takeover`, Loud, `previous_owner` |
 | Acknowledged → Firing | Unacknowledge, by any user with the Permission | people | `unacknowledged`, Quiet |
