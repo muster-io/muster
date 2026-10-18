@@ -416,6 +416,10 @@ func TestList(t *testing.T) {
 		len(page.Records) != 0 || page.Records == nil || len(q.connArgs) != 0 {
 		t.Errorf("an Alert Group that is no public_id: %+v, %v, %d queries", page, err, len(q.connArgs))
 	}
+	if _, err := r.List(ctx, Filter{Connection: "CN0000000000ZZ", AlertGroup: "not-an-id"}); !errors.Is(err,
+		ErrNotFound) {
+		t.Errorf("an unknown Connection with an Alert Group that is no public_id: %v", err)
+	}
 
 	q.connArgs = nil
 	if _, err := r.List(ctx, Filter{Destination: "DS0000000000M1"}); err != nil || len(q.connArgs) != 1 ||

@@ -12,6 +12,7 @@
 package requestlog
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -136,11 +137,11 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 	body, size, cut := textOf(r.RequestBody)
 	p := dbgen.InsertRecordParams{
 		OrgID: w.orgID, PublicID: publicid.New(publicid.RequestRecord), At: w.business.Now(), Direction: direction,
-		Operation: r.Operation, Method: or(r.Method, http.MethodGet), Url: clean(r.URL),
+		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: clean(r.URL),
 		RequestHeaders: headersOf(r.RequestHeader), RequestBody: body, RequestBodyBytes: size,
-		RequestBodyTruncated: cut, LatencyMs: clamp32(r.Latency.Milliseconds()), Via: or(r.Via, outbound.ViaDirect),
+		RequestBodyTruncated: cut, LatencyMs: clamp32(r.Latency.Milliseconds()), Via: cmp.Or(r.Via, outbound.ViaDirect),
 		Attempt: clamp32(int64(max(r.Attempt, 1))), ConnectionID: id(r.Owner.Connection),
-		DestinationID: id(or(r.Owner.Destination, r.Links.Destination)), AlertGroupID: id(r.Links.AlertGroup),
+		DestinationID: id(cmp.Or(r.Owner.Destination, r.Links.Destination)), AlertGroupID: id(r.Links.AlertGroup),
 	}
 	if r.Status != 0 {
 		body, size, cut := textOf(r.ResponseBody)
@@ -175,19 +176,8 @@ func headersOf(h map[string][]string) []byte {
 			out[name] = []string{}
 		}
 	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		return []byte("{}")
-	}
+	b, _ := json.Marshal(out) // a map of strings always encodes
 	return b
-}
-
-func or[T comparable](v, fallback T) T {
-	var zero T
-	if v == zero {
-		return fallback
-	}
-	return v
 }
 
 func id(v int64) pgtype.Int8 { return pgtype.Int8{Int64: v, Valid: v != 0} }
@@ -332,22 +322,26 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 	default:
 		return Page{}, fmt.Errorf("list the request log: unknown status class %q", f.StatusClass)
 	}
-	if f.AlertGroup != "" {
-		g, err := publicid.Parse(publicid.AlertGroup, f.AlertGroup)
-		if errors.Is(err, publicid.ErrInvalid) {
-			return Page{Records: []Summary{}}, nil
-		}
-		p.AlertGroup = text(g)
-	}
 	if f.After != nil {
 		p.AfterAt = pgtype.Timestamptz{Time: f.After.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: f.After.ID, Valid: true}
 	}
-	rows, err := r.list(ctx, f, p)
+	hook, err := r.owner(ctx, f, &p)
 	if err != nil {
 		return Page{}, err
 	}
-	page := Page{Records: make([]Summary, 0, min(len(rows), limit))}
+	page := Page{Records: []Summary{}}
+	if f.AlertGroup != "" {
+		g, err := publicid.Parse(publicid.AlertGroup, f.AlertGroup)
+		if errors.Is(err, publicid.ErrInvalid) {
+			return page, nil
+		}
+		p.AlertGroup = text(g)
+	}
+	rows, err := r.rows(ctx, hook, p)
+	if err != nil {
+		return Page{}, fmt.Errorf("list the request log: %w", err)
+	}
 	for i, row := range rows {
 		if i == limit {
 			last := page.Records[limit-1]
@@ -359,56 +353,55 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 	return page, nil
 }
 
-// list finds the owner f names and reads the rows of its bounded set: a Connection's, a messenger Destination's
-// within its Connection's, or an outgoing webhook's.
-func (r *Reader) list(ctx context.Context, f Filter, p dbgen.ListConnectionRecordsParams) (
-	[]dbgen.ListConnectionRecordsRow, error) {
+// owner finds the owner f names and sets it in p: a Connection, or a messenger Destination within its Connection's
+// set; for an outgoing webhook it returns its id instead.
+func (r *Reader) owner(ctx context.Context, f Filter, p *dbgen.ListConnectionRecordsParams) (hook int64, err error) {
 	if f.Connection != "" {
 		pub, err := publicid.Parse(publicid.Connection, f.Connection)
 		if err != nil {
-			return nil, ErrNotFound
+			return 0, ErrNotFound
 		}
 		p.ConnectionID, err = r.q.FindConnection(ctx, dbgen.FindConnectionParams{OrgID: r.orgID, PublicID: pub})
-		if err != nil {
-			return nil, notFound("find the connection", err)
-		}
-		return wrap(r.q.ListConnectionRecords(ctx, p))
+		return 0, notFound("find the connection", err)
 	}
 	pub, err := publicid.Parse(publicid.Destination, f.Destination)
 	if err != nil {
-		return nil, ErrNotFound
+		return 0, ErrNotFound
 	}
 	d, err := r.q.FindDestination(ctx, dbgen.FindDestinationParams{OrgID: r.orgID, PublicID: pub})
-	if err != nil {
-		return nil, notFound("find the destination", err)
-	}
-	if d.ConnectionID.Valid {
+	switch {
+	case err != nil:
+		return 0, notFound("find the destination", err)
+	case d.ConnectionID.Valid:
 		p.ConnectionID, p.DestinationID = d.ConnectionID.Int64, pgtype.Int8{Int64: d.ID, Valid: true}
-		return wrap(r.q.ListConnectionRecords(ctx, p))
+		return 0, nil
+	}
+	return d.ID, nil
+}
+
+// rows reads the bounded set p names, or that of the outgoing webhook hook.
+func (r *Reader) rows(ctx context.Context, hook int64, p dbgen.ListConnectionRecordsParams) (
+	[]dbgen.ListConnectionRecordsRow, error) {
+	if hook == 0 {
+		return r.q.ListConnectionRecords(ctx, p)
 	}
 	rows, err := r.q.ListDestinationRecords(ctx, dbgen.ListDestinationRecordsParams{OrgID: r.orgID,
-		DestinationID: d.ID, NotBefore: p.NotBefore, MaxRecords: p.MaxRecords, Direction: p.Direction,
+		DestinationID: hook, NotBefore: p.NotBefore, MaxRecords: p.MaxRecords, Direction: p.Direction,
 		NoAnswer: p.NoAnswer, StatusFrom: p.StatusFrom, StatusTo: p.StatusTo, Operation: p.Operation,
 		AlertGroup: p.AlertGroup, AfterAt: p.AfterAt, AfterID: p.AfterID, PageSize: p.PageSize})
-	if err != nil {
-		return nil, fmt.Errorf("list the request log: %w", err)
-	}
 	out := make([]dbgen.ListConnectionRecordsRow, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, dbgen.ListConnectionRecordsRow(row))
 	}
-	return out, nil
+	return out, err
 }
 
-func wrap(rows []dbgen.ListConnectionRecordsRow, err error) ([]dbgen.ListConnectionRecordsRow, error) {
-	if err != nil {
-		return nil, fmt.Errorf("list the request log: %w", err)
-	}
-	return rows, nil
-}
-
+// notFound is err of what, ErrNotFound for no row, nil for nil.
 func notFound(what string, err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, pgx.ErrNoRows):
 		return ErrNotFound
 	}
 	return fmt.Errorf("%s: %w", what, err)
