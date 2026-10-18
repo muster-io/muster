@@ -141,7 +141,7 @@ func (s *Server) GetRequestRecord(ctx context.Context, req gen.GetRequestRecordR
 		ResponseBodyBytes: int(rec.ResponseBodyBytes), Error: nullableString(rec.Error),
 	}
 	if rec.ResponseHeaders != nil {
-		out.ResponseHeaders.Set(headersOf(rec.ResponseHeaders))
+		out.ResponseHeaders.Set(gen.NullableHttpHeaders(rec.ResponseHeaders))
 	} else {
 		out.ResponseHeaders.SetNull()
 	}

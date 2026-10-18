@@ -289,6 +289,7 @@ export * from './nullableAlertGroupStatus';
 export * from './nullableCheckKind';
 export * from './nullableConnectionCheckCode';
 export * from './nullableDestinationCheckCode';
+export * from './nullableHttpHeaders';
 export * from './nullableLanguage';
 export * from './nullableOutgoingHeartbeatErrorClass';
 export * from './nullablePublicId';

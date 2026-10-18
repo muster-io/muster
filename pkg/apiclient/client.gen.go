@@ -5224,6 +5224,9 @@ type NullableConnectionCheckCode string
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 type NullableDestinationCheckCode string
 
+// NullableHttpHeaders HTTP headers by name, each with its values, masked, or null. Untrusted text.
+type NullableHttpHeaders map[string][]string
+
 // NullableLanguage UI or template language; null follows the default.
 type NullableLanguage string
 
@@ -5843,8 +5846,8 @@ type RequestRecord struct {
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.
 	ResponseBodyTruncated bool `json:"response_body_truncated"`
 
-	// ResponseHeaders The answer's headers, null without an answer.
-	ResponseHeaders nullable.Nullable[HttpHeaders] `json:"response_headers"`
+	// ResponseHeaders HTTP headers by name, each with its values, masked, or null. Untrusted text.
+	ResponseHeaders nullable.Nullable[NullableHttpHeaders] `json:"response_headers"`
 
 	// Status The status of the answer, null when the attempt got no answer.
 	Status nullable.Nullable[int] `json:"status"`

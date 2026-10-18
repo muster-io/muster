@@ -9,9 +9,11 @@ covers: [C-23.FR-1, C-23.FR-2, C-23.FR-3, C-23.FR-4, C-23.FR-5, C-23.FR-7, C-23.
 files_touched:
   - api/openapi.yaml
   - api/README.md
+  - sqlc.yaml
   - internal/db/migrations/0013_request_log.up.sql
   - internal/db/migrations/0013_request_log.down.sql
   - internal/db/migrate_test.go
+  - internal/db/db_test.go
   - design/db/schema.md
   - design/architecture.md
   - design/prd/l1/reference.md
@@ -21,34 +23,52 @@ files_touched:
   - internal/requestlog/mask.go
   - internal/requestlog/mask_test.go
   - internal/requestlog/requestlog_integration_test.go
+  - internal/publicid/publicid.go
+  - internal/publicid/publicid_test.go
   - internal/outbound/client.go
+  - internal/outbound/redact.go
   - internal/outbound/record.go
   - internal/outbound/record_test.go
   - internal/buttons/buttons.go
   - internal/buttons/buttons_test.go
   - internal/mattermost/client.go
   - internal/telegram/client.go
+  - internal/telegram/client_test.go
   - internal/bridge/client.go
+  - internal/bridge/client_test.go
+  - internal/bridge/info.go
   - internal/webhooks/adapter.go
+  - internal/webhooks/testevent.go
   - internal/connections/connections.go
   - internal/connections/telegram.go
   - internal/connections/bridge.go
   - internal/accountlinks/mattermost.go
   - internal/accountlinks/bridge.go
   - internal/delivery/worker.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/storm_test.go
+  - internal/delivery/threads.go
+  - internal/delivery/threads_test.go
+  - internal/delivery/webhookevents.go
+  - internal/delivery/webhookevents_test.go
+  - internal/delivery/deliverytest/recorder.go
   - internal/api/requestlog.go
   - internal/api/requestlog_test.go
+  - internal/api/server.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/runtime/runtime.go
   - internal/logging/events.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics_test.go
   - internal/archlint/secretleak.go
   - test/e2e/request_log_test.go
+  - test/e2e/self_observation_test.go
 acceptance:
   - "[C-23.FR-1, C-23.FR-2, C-23.AC-1] A Publication to the fake Mattermost server writes one outbound record: the operation `createPost`, `POST` and the URL, the request headers and the body Muster sent, the status `201`, the headers and body the fake answered, the latency, the path `direct`, the attempt `1`, the Connection, the Destination and the Alert Group; `listRequestLog?connection=` lists it first, `listRequestLog?destination=&alert_group=` lists it, and `getRequestRecord` returns it with its bodies (`request_log_test.go`, the Verification)."
   - "[C-23.FR-1, C-23.AC-2] A Telegram `getUpdates` whose answer carries an update is recorded with that answer; one that ends without updates is not, and neither is a Bridge `pollEvents` without events; a failed poll is recorded, each attempt of the background class as a record of its own (`record_test.go`, `request_log_test.go`)."
   - "[C-23.FR-1, C-23.AC-5] An outgoing webhook Destination whose fake endpoint answers `500` with a body has one record per attempt, each with that body and the error class `transient`, under the Destination; a request that got no answer has no status and carries the code of `delivery.FailureCode` and the masked error text (`record_test.go`, `request_log_test.go`)."
-  - "[C-23.FR-3, C-23.AC-3] No record holds a secret (`mask_test.go`, `record_test.go`, and the probe `request_log` of `secretleak.go`, which drives each case through the outbound package into the database and searches every stored column for the secret): the Telegram token, in the URL path too; an outgoing webhook's Secret in a header and in the URL's query; the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and the webhook's signature header whatever they hold; the Telegram webhook's secret token in `setWebhook`; the signed action ids of a Mattermost post, a Telegram keyboard and a Bridge envelope; a `/start <token>` in a `getUpdates` answer; the code of an Account link in a Mattermost or Bridge direct message — each stored as `[redacted]`; the path prefix of a base URL is `[redacted]` in the URL as in errors."
+  - "[C-23.FR-3, C-23.AC-3] No record holds a secret (`mask_test.go`, `record_test.go`, and the probe `request_log` of `secretleak.go`, which drives each case through the outbound package into a recording `Writer`, keeps every value its INSERT would store in an in-memory stand-in — the lint job has no database — and searches them all for the secret): the Telegram token, in the URL path too; an outgoing webhook's Secret in a header and in the URL's query; the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and the webhook's signature header whatever they hold; the Telegram webhook's secret token in `setWebhook`; the signed action ids of a Mattermost post, a Telegram keyboard and a Bridge envelope; a `/start <token>` in a `getUpdates` answer; the code of an Account link in a Mattermost or Bridge direct message — each stored as `[redacted]`; the path prefix of a base URL is `[redacted]` in the URL as in errors."
   - "[C-23.FR-4, C-23.AC-4] With 510 records of one Connection, `listRequestLog` returns the newest 500 over all its pages and `request_log_pruning` leaves 500 rows; records of an outgoing webhook Destination and of no owner are bounded alike; after the business clock moves 8 days no older record is listed, and the task, woken by the move, deletes them; a 40 KB body is stored as the first 16 KB, cut at a character boundary, marked truncated with its full size, and a body that is not UTF-8 is stored with its bytes replaced (`requestlog_integration_test.go` on PostgreSQL 14 and 17, `mask_test.go`)."
   - "[C-23.FR-4] A record that cannot be written — the database refuses it, or its write runs past its timeout — leaves the request it records unchanged, is logged as `request_log_write_failed` without its content and counted in `muster_request_log_write_failures_total`; a written one is counted in `muster_request_log_records_total` (`requestlog_test.go`); `make load-test` stays within its thresholds with the Request log on."
   - "[C-23.FR-5] `listRequestLog` takes exactly one of `connection` and `destination` (`422` `one_of_required` otherwise), answers `404` for an unknown or deleted owner, needs `connections:read` or `destinations:read` for the owner it names, pages by cursor newest first without `OFFSET`, and filters by `direction`, `status_class` (`2xx`, `3xx`, `4xx`, `5xx`, `none`), `operation` and `alert_group`; `getRequestRecord` answers `404` for a record past either bound and checks the Permission of the record's owner (`internal/api/requestlog_test.go`)."
@@ -140,10 +160,10 @@ issue: 266
     saving — record nothing.
   - Each `Request` names its `Operation`. Operations are named as their protocol names them: Telegram the Bot API
     method; Bridge the `operationId` of `api/bridge.yaml`; Mattermost the operation of its REST API reference in lower
-    camel case (`getMe`, `getPing`, `getRolesByNames`, `getTeamsForUser`, `getChannelsForTeamForUser`, `getChannel`,
-    `getChannelMember`, `createDirectChannel`, `createPost`, `createPostEphemeral`, `patchPost`, `getPost`,
-    `doPostAction`); an outgoing webhook `event`, or the template request `create`, `update`, `open_thread` or
-    `reply_in_thread`.
+    camel case (`getMe`, `getUserByUsername`, `getPing`, `getRolesByNames`, `getTeamsForUser`, `getTeam`,
+    `getChannelsForTeamForUser`, `getChannel`, `getChannelMember`, `createDirectChannel`, `createPost`,
+    `createPostEphemeral`, `patchPost`, `getPost`, `doPostAction`); an outgoing webhook `event`, or the template
+    request `create`, `update`, `open_thread` or `reply_in_thread`.
   - A `Request` may carry a test of its answer that skips the record: `getUpdates` skips an answer whose `result` is
     empty, `pollEvents` one whose `events` are empty; a failed poll is recorded.
   - The context of a request carries its links (`outbound.WithLinks`): the delivery worker sets the Destination and the
@@ -181,9 +201,12 @@ issue: 266
   `muster_request_log_records_total` (counter, `direction`), `muster_request_log_write_failures_total` (counter,
   `direction`), `muster_request_log_pruned_total` (counter), added to the catalogue of `reference.md` (C-23) with the
   generated pages.
-- **Secrets** (lint 5): the probe `request_log` sends, through clients of each type with a recording `Writer` on the
-  development database, requests that carry each secret of the acceptance statement, then searches every text and
-  `jsonb` column of `request_log` and the log for the secret's value.
+- **Secrets** (lint 5): the probe `request_log` sends, through clients of each type with a recording `Writer`,
+  requests that carry each secret of the acceptance statement; an in-memory stand-in of the database keeps every value
+  the `Writer`'s INSERT stores — the lint job runs without a database — and the probe searches each value of a text and
+  `jsonb` column, and the log, for the secret's value. Values that are not planted secrets — signed action ids, the
+  tokens of `/start` and `account_link`, the codes of direct messages, the path prefixes of base URLs and the values of
+  the masked headers — the probe searches for itself, and it is incomplete when an operation it drives left no record.
 - **Architecture** (`design/architecture.md`): the Request log in the components of §3.1 and the data model of §6.3.
 - **Defaults**: `request_log.max_records`, `request_log.max_age`, `request_log.body_max` (provisional, P-55 to P-57).
 
@@ -226,11 +249,12 @@ curl -s -b jar "$API/request-log/$R" | grep -c 'muster-dev-mattermost-token'    
 curl -s -b jar "$API/request-log/$R" | jq -r .request_body | jq -r '[.. | .context?.action? // empty] | unique[]'
 # [redacted]
 
-# C-23.AC-2: Telegram polls without updates leave no record, and no record shows the token in its URL
+# C-23.AC-2: Telegram polls without updates leave no record, and no record shows the token, in its URL or anywhere
 TG=$(curl -s -b jar "$API/connections?type=telegram" | jq -r '.items[] | select(.name=="Dev Telegram") | .id')
 curl -s -b jar "$API/request-log?connection=$TG&operation=getUpdates" | jq '.items | length'
 # the number of polls that returned updates — 0 on an idle fake, never one per long poll
-curl -s -b jar "$API/request-log?connection=$TG" | jq -r '.items[].url' | grep -c '/bot[0-9]' || true          # 0
+for R in $(curl -s -b jar "$API/request-log?connection=$TG" | jq -r '.items[].id'); do
+  curl -s -b jar "$API/request-log/$R"; done | grep -c 'dev-telegram-token' || true                             # 0
 
 # C-23.FR-5: refusals
 curl -s -b jar "$API/request-log" | jq -c '[.status, .errors[0].code]'                                         # [422,"one_of_required"]
@@ -264,6 +288,33 @@ None.
   in its body: a Viewer who could read one could forge a press. `buttons.LooksSigned` checks the structure only, so a
   string that merely looks like one is masked too — the safe side.
 - The Request log keeps headers as sent, so `User-Agent: Muster/<version>` of #264 is visible in each record.
+- Files added during implementation, beyond the first list, each hand-written and forced by the contract:
+  - `sqlc.yaml`: the entry of `internal/requestlog/query.sql`, so that `make generate` writes its queries.
+  - `internal/db/db_test.go`: the migration count and the known schema version move from 12 to 13.
+  - `internal/publicid/publicid.go`, `publicid_test.go`: the prefixes `RQ` and `CR` of `api/README.md` as constants,
+    under the pattern and distinctness tests.
+  - `internal/outbound/redact.go`: a Secret is also masked in the escaped forms a JSON string gives it, as bodies hold
+    it.
+  - `internal/telegram/client_test.go`, `internal/bridge/client_test.go`: the empty-poll skip, the operation names and
+    the secret token of `setWebhook` — "the adapters' tests" of Step 3.
+  - `internal/bridge/info.go`: `getInfo` names its operation through the client's call, like the other operations.
+  - `internal/webhooks/testevent.go`: the requests of a Destination test name their operation and go through the
+    recording client of the Destination.
+  - `internal/delivery/threads.go`, `internal/delivery/webhookevents.go`: the links of Thread replies and of outgoing
+    webhook events, which the delivery worker sends from these files.
+  - `internal/delivery/deliverytest/recorder.go`, `worker_test.go`, `storm_test.go`, `threads_test.go`,
+    `webhookevents_test.go`: the recording fakes and the assertions of those links.
+  - `internal/metrics/metrics_test.go`: `direction` joins the closed labels of the label policy.
+  - `test/e2e/self_observation_test.go`: its label-policy check allows the closed label `direction`.
+  - `internal/api/server.go`: the Request log reader in the API's configuration and the two operations among those
+    implemented.
+  - `internal/leader/leader_test.go`: the closed task list gains `request_log_pruning`, and the tests that took the last
+    task for `bridge_polling` name it by its index.
+- Contract corrections made during implementation: the probe of lint 5 keeps the stored values in memory, as the lint
+  job has no database (Contracts → Secrets and the acceptance of C-23.FR-3); the Mattermost operations
+  `getUserByUsername` and `getTeam`, which the client also calls, join the list; and the Verification looks for the
+  development Telegram token in every record instead of `/bot[0-9]` in the URLs, since the dry probe of a Telegram base
+  URL calls the published placeholder `/bot0:x/getMe`, which is no secret.
 
 ## Coverage
 

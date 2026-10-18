@@ -18,6 +18,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HttpHeaders } from './httpHeaders';
+import type { NullableHttpHeaders } from './nullableHttpHeaders';
 import type { RequestRecordSummary } from './requestRecordSummary';
 
 /**
@@ -32,8 +33,7 @@ export type RequestRecord = RequestRecordSummary & ({
      * @minimum 0
      */
   request_body_bytes: number;
-  /** The answer's headers, null without an answer. */
-  response_headers: HttpHeaders | null;
+  response_headers: NullableHttpHeaders | null;
   /**
      * The answer's body, masked and cut as the request body; null without an answer; untrusted text.
      * @nullable

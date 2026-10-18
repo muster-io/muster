@@ -13951,6 +13951,15 @@ components:
         type: array
         items:
           type: string
+    NullableHttpHeaders:
+      type:
+      - object
+      - 'null'
+      description: HTTP headers by name, each with its values, masked, or null. Untrusted text.
+      additionalProperties:
+        type: array
+        items:
+          type: string
     NullableRequestErrorClass:
       type:
       - string
@@ -14104,10 +14113,7 @@ components:
             minimum: 0
             description: The full size of the request body.
           response_headers:
-            description: The answer's headers, null without an answer.
-            oneOf:
-            - $ref: '#/components/schemas/HttpHeaders'
-            - type: 'null'
+            $ref: '#/components/schemas/NullableHttpHeaders'
           response_body:
             type:
             - string

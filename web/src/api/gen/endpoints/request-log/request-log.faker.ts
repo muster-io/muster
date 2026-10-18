@@ -30,7 +30,6 @@ import {
 import type {
   AlertGroupRef,
   DestinationRef,
-  HttpHeaders,
   RequestLogList,
   RequestRecord
 } from '../../model';
@@ -46,11 +45,9 @@ export const getGetRequestRecordResponseDestinationRefMock = (overrideResponse: 
 
 export const getGetRequestRecordResponseAlertGroupRefMock = (overrideResponse: Partial<AlertGroupRef> = {}): AlertGroupRef => ({...{id: faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), number: faker.number.int()}, ...overrideResponse});
 
-export const getGetRequestRecordResponseHttpHeadersMock = (overrideResponse: Partial<HttpHeaders> = {}): HttpHeaders => ({...{
-        [faker.string.alphanumeric(5)]: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}})))
-      }, ...overrideResponse});
-
 export const getGetRequestRecordResponseMock = (): RequestRecord => ({...{id: faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), at: faker.date.past().toISOString().slice(0, 19) + 'Z', direction: faker.helpers.arrayElement(Object.values(RequestDirection)), operation: faker.string.alpha({length: {min: 10, max: 20}}), method: faker.string.alpha({length: {min: 10, max: 20}}), url: faker.string.alpha({length: {min: 10, max: 20}}), status: faker.helpers.arrayElement([faker.number.int(), null]), latency_ms: faker.number.int({min: 0}), via: faker.helpers.arrayElement(Object.values(ConnectionPath)), attempt: faker.number.int({min: 1}), error_class: faker.helpers.arrayElement([faker.helpers.arrayElement(['retry_after','transient','fatal','unknown','blocked','redirect'] as const), null]), error_code: faker.helpers.arrayElement([faker.helpers.arrayElement(['dns_failed','connect_failed','tls_failed','timeout','proxy_refused','blocked','request_failed'] as const), null]), check: faker.helpers.arrayElement([faker.helpers.arrayElement(['connection_check','draft_check','destination_check','test','probe'] as const), null]), check_run: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), null]), connection_id: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), null]), destination: faker.helpers.arrayElement([{...getGetRequestRecordResponseDestinationRefMock()},null,]), alert_group: faker.helpers.arrayElement([{...getGetRequestRecordResponseAlertGroupRefMock()},null,]), request_body_truncated: faker.datatype.boolean(), response_body_truncated: faker.datatype.boolean()},...{request_headers: {
         [faker.string.alphanumeric(5)]: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}})))
-      }, request_body: faker.string.alpha({length: {min: 10, max: 20}}), request_body_bytes: faker.number.int({min: 0}), response_headers: faker.helpers.arrayElement([{...getGetRequestRecordResponseHttpHeadersMock()},null,]), response_body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), response_body_bytes: faker.number.int({min: 0}), error: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},})
+      }, request_body: faker.string.alpha({length: {min: 10, max: 20}}), request_body_bytes: faker.number.int({min: 0}), response_headers: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}})))
+      },null,]), response_body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), response_body_bytes: faker.number.int({min: 0}), error: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])},})
 
