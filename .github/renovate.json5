@@ -6,6 +6,17 @@
   extends: ["config:best-practices"],
   rangeStrategy: "pin",
   postUpdateOptions: ["gomodTidy"],
+  // config:best-practices ignores every test/ directory; test/ holds the end-to-end tests, whose image pins below are
+  // the only dependencies there. The rest of its list stays.
+  ignorePaths: [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+  ],
   dependencyDashboard: true,
   // Version policy: routine updates arrive once a week, grouped per ecosystem, and merge themselves when every
   // required check passes. Major updates never open a pull request on their own: they wait in the Dependency
@@ -23,6 +34,15 @@
       managerFilePatterns: ["/^Makefile$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       matchStrings: [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION(?: :=|:) (?<currentValue>\\S+)",
+      ],
+    },
+    // An image pinned by digest on the line under a `// renovate:` comment in the end-to-end tests:
+    // `const name = "image:tag@sha256:…"`.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^test/e2e/[^/]+\\.go$/"],
+      matchStrings: [
+        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*const \\w+ = \"[^\":]+:(?<currentValue>[^\"@]+)@(?<currentDigest>sha256:[0-9a-f]{64})\"",
       ],
     },
   ],
@@ -79,6 +99,15 @@
     {
       matchDepTypes: ["engines"],
       enabled: false,
+    },
+    // The example bridge that the end-to-end tests run (ADR-0017): a pull request of its own, so that a red run names
+    // the image that broke. A new digest of its edge tag has no release date, which minimumReleaseAge would wait for
+    // forever.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["ghcr.io/muster-io/muster-example-bridge"],
+      groupName: "example bridge image",
+      minimumReleaseAge: "0 days",
     },
     // release-please sets the Muster image tag in the compose example on every release.
     {

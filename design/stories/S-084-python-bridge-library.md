@@ -57,7 +57,7 @@ acceptance:
   - "[C-22.FR-25, C-22.AC-25] `make spec-check` compares `api/bridge.yaml` with the one on Muster's `master` and fails naming the difference — a copy with one byte changed fails it — and `make generate-check` fails when `src/muster_bridge/models.py` is not what datamodel-code-generator makes of the copy; the CI jobs `spec` and `generate` run them on every pull request, on every push to `master` and daily."
   - "[C-22.AC-25] `make conformance` builds the wheel, installs it with `pip install` into a fresh virtual environment beside uvicorn, runs `examples/memory_bridge.py` from it with `python -I`, and runs `muster bridge check` from `ghcr.io/muster-io/muster:edge` against it three times, each exiting 0: with every feature and `--no-interactive`, every step passes but press and push, which are skipped; with `BRIDGE_FEATURES=thread_messages`, buttons, user_lookup, direct_message and delete are skipped too; interactively, with the example pushing to the check's listener, a script presses the button named by the `WAIT press` line through the example's `/demo/press`, and press, push and answer pass. The CI job `conformance` runs it on every pull request, on every push to `master` and daily."
   - "[C-22.FR-25] CI runs `lint` (ruff, the format check, mypy in strict mode, the header check), `test` (pytest with a coverage gate of 90 % on every Python release from 3.11 to the newest stable one), `generate`, `spec`, `licenses`, `build` and `conformance`, joined in the check `ci`; release-please keeps a release pull request with `0.x` versions, and a release builds the sdist and the wheel and publishes them to PyPI by trusted publishing from the environment `pypi`, with attestations and no stored token; Renovate, CodeQL and OpenSSF Scorecard run as in Muster's repository; every Action is pinned by commit SHA."
-  - "[C-22.FR-25] After the maintainer's PyPI setup, merging the first release pull request publishes `muster-bridge` 0.1.0, and `pip install muster-bridge==0.1.0` in a fresh virtual environment imports `muster_bridge` with `__version__` `0.1.0` (Notes)."
+  - "[C-22.FR-25] The first release pull request stays open until L1 is complete, when the maintainer releases the libraries (D366): after the maintainer's PyPI setup, merging it publishes `muster-bridge` 0.1.0, and `pip install muster-bridge==0.1.0` in a fresh virtual environment imports `muster_bridge` with `__version__` `0.1.0` (Notes)."
 verify: "make ci conformance"
 operator_attention: true
 issue: 257
@@ -226,8 +226,8 @@ None.
   3. As for S-083: install the release-please GitHub App and give the repository `RELEASE_PLEASE_APP_CLIENT_ID` and
      `RELEASE_PLEASE_APP_PRIVATE_KEY`; enable Renovate; after the first push, a ruleset on `master` that requires the
      check `ci` and pull requests; private vulnerability reporting.
-  4. Merge the release pull request that release-please opens after this story: it tags `v0.1.0` and publishes
-     `muster-bridge` 0.1.0; then run the last check of Verification.
+  4. Leave the release pull request that release-please opens after this story open until L1 is complete (D366);
+     merging it then tags `v0.1.0` and publishes `muster-bridge` 0.1.0; then run the last check of Verification.
 - The repository was created empty by the maintainer (D343); nothing is pushed to it before this story.
 - The library follows S-083's design so that a bridge author can move between the two, and is written for Python, not
   translated: `async` methods, `typing.Protocol`, exceptions for problems. Muster's code is AGPL and is never copied.

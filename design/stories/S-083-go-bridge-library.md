@@ -298,8 +298,8 @@ None.
   repository, and give the repository the variable `RELEASE_PLEASE_APP_CLIENT_ID` and the secret
   `RELEASE_PLEASE_APP_PRIVATE_KEY` (or allow the organization's to it); enable Renovate for the repository; after the
   first push, add a ruleset on `master` that requires the check `ci` and pull requests; turn on private vulnerability
-  reporting. Leave the first release pull request open: `v0.1.0` follows S-085, so that it carries the example and its
-  image.
+  reporting. Leave the first release pull request open until L1 is complete, when the maintainer releases the
+  libraries (D366); `v0.1.0` then carries the example and its image.
 - The repository was created empty by the maintainer (D343); nothing is pushed to it before this story.
 - As merged (muster-io/muster-bridge-go#1, D355): the first commit is `chore: add the licence` with `LICENSE` and a
   README stub, the branch was `feat-bridge-library`, and the names of the Contracts are those of the code; this file was

@@ -25,6 +25,8 @@ files_touched:
   - .dockerignore
   - Makefile
   - README.md
+  - AGENTS.md
+  - CONTRIBUTING.md
   - .github/workflows/ci.yml
   - .github/workflows/image.yml
   - .github/workflows/codeql.yml
@@ -51,8 +53,8 @@ issue: 258
 
 **OUT**
 
-- The library and the minimal example (S-083); Muster's end-to-end test against a released image of this example,
-  which covers C-22.AC-23 (S-086); the Python library (S-084).
+- The library and the minimal example (S-083); Muster's end-to-end test against the image of this example, pinned by
+  digest, which covers C-22.AC-23 (S-086); the Python library (S-084).
 
 ## Contracts
 
@@ -63,11 +65,13 @@ issue: 258
   the bot is not in, `bridge.ForbiddenError`), people from `-users` (default `alice:Alice Smith,bob:Bob Brown`, found by
   login), messages with their edits and Threads, buttons rendered with their style hints, direct messages between a
   person and the bot, and an event log, all in memory. The page (`index.html`, `app.js`, `app.css`, embedded in the
-  binary) polls the example's JSON API under `/chat/api/` — `GET messages?channel=`, `GET direct-messages?user=`, `POST
-  press` `{message_id, user, button}`, `POST thread` `{message_id, user, text}`, `POST direct-message` `{user, text}` —
-  and lets the viewer pick who they are. The page and its API have no authentication: the README says to put them behind
-  some before exposing them. Muster's end-to-end test (S-086) and this repository's CI drive the same API as a person
-  would.
+  binary) polls the example's JSON API under `/chat/api/` — `GET state`, `GET messages?channel=`,
+  `GET direct-messages?user=`, `POST press` `{message_id, user, button}`, where `button` is the zero-based index of the
+  message's buttons, the first when left out, `POST thread` `{message_id, user, text}`, `POST direct-message`
+  `{user, text}` and `POST delete` `{message_id, user}` — and lets the viewer pick who they are. Every `POST` takes a
+  JSON body with `Content-Type: application/json` and answers `415` to anything else. The page and its API have no
+  authentication: the README says to put them behind some before exposing them. Muster's end-to-end test (S-086) and
+  this repository's CI drive the same API as a person would.
 - **Messenger** (`messenger.go`, `render.go`): implements `bridge.Messenger`, `UserFinder`, `DirectMessenger` and
   `Deleter` over the chat, failing with the library's constructors (`ForbiddenError`, `GoneError`, `InvalidError`,
   S-083). The envelope is rendered to HTML by a small renderer of its own for the CommonMark Muster
@@ -95,11 +99,11 @@ issue: 258
   through `POST /chat/api/press`, and expects PASS for press, push and answer.
 - **Image** (`Dockerfile`, `.dockerignore`, `image.yml`): a two-stage build from the module root — the Go image of the
   module's newest supported release, then `gcr.io/distroless/static-debian12:nonroot`, both pinned by digest, which
-  Renovate updates — that runs `/example-bridge` as the user 65532 and listens on `:8095`. `image.yml` builds it with
-  Buildx for linux/amd64 and linux/arm64 and pushes `ghcr.io/muster-io/muster-example-bridge` with `sha-<7 hex digits>`
-  and `edge` on each push to `master`, and `vX.Y.Z` on each release tag, which release-please creates with the App
-  token of S-083 so that the tag starts the workflow. The images are not signed; Muster pins the one it tests by digest
-  (S-086).
+  Renovate updates — that runs `/example-bridge -listen :8095` as the user 65532: arguments given to the image are
+  appended, and the last flag wins, so `-listen 127.0.0.1:18095` moves it. `image.yml` builds it with Buildx for
+  linux/amd64 and linux/arm64 and pushes `ghcr.io/muster-io/muster-example-bridge` with `sha-<7 hex digits>` and `edge`
+  on each push to `master`, and `vX.Y.Z` on each release tag, which release-please creates with the App token of S-083
+  so that the tag starts the workflow. The images are not signed; Muster pins the one it tests by digest (S-086).
 - **CodeQL** (`codeql.yml`): adds JavaScript for the page's script.
 - **README** (`README.md`, `examples/chat/README.md`): the example's section — what it shows, the
   `docker run -p 8095:8095 -e BRIDGE_TOKEN=… ghcr.io/muster-io/muster-example-bridge:<version>` line, the Bridge
@@ -114,9 +118,8 @@ issue: 258
 3. Add the interactive conformance run, the Dockerfile and the image workflow. Check: `make conformance`; the image
    builds and answers `-help`.
 4. Update the READMEs and CodeQL. Check: the pull request's checks, all green.
-5. Hand over to the maintainer (Notes). Check: after the release,
-   `docker pull ghcr.io/muster-io/muster-example-bridge:v0.1.0` succeeds without signing in and prints the digest that
-   S-086 pins.
+5. Hand over to the maintainer (Notes). Check: `docker pull ghcr.io/muster-io/muster-example-bridge:edge` succeeds
+   without signing in and prints the digest that S-086 pins; after the release, `:v0.1.0` does the same.
 
 ## Verification
 
@@ -148,13 +151,14 @@ None.
 
 - Suggested commit: `feat: add the example bridge and its image`.
 - **Maintainer** (operator attention): after the first publication, make the package `muster-example-bridge` on GitHub
-  Container Registry public and link it to this repository; merge the release pull request, which tags `v0.1.0` and
-  publishes the image `v0.1.0` that S-086 pins; deploy the example on the test environment next to Muster with a token
-  and, for the push mode, the callback address and a push secret; create a Bridge Connection and a Destination there,
-  and check by eye that a new Alert Group, a press of Ack on the example's page, `ack` written in a Thread with buttons
-  switched off, and an Account link by token work. On the test environment the example usually runs at an address
-  inside the cluster: when the Organization's outbound address policy denies private addresses, the maintainer allows
-  the example's address there, and puts its page behind the cluster's authentication, as its README asks.
+  Container Registry public and link it to this repository; once L1 is complete (D366), merge the release pull request,
+  which tags `v0.1.0` and publishes the image `v0.1.0`, to which S-086's pin then moves from `edge`; deploy the example
+  on the test environment next to Muster with a token and, for the push mode, the callback address and a push secret;
+  create a Bridge Connection and a Destination there, and check by eye that a new Alert Group, a press of Ack on the
+  example's page, `ack` written in a Thread with buttons switched off, and an Account link by token work. On the test
+  environment the example usually runs at an address inside the cluster: when the Organization's outbound address policy
+  denies private addresses, the maintainer allows the example's address there, and puts its page behind the cluster's
+  authentication, as its README asks.
 - The example is a reference, not a product: it keeps everything in memory and has no authentication of its own.
 - It lived in Muster's repository as `examples/bridge/` in the earlier contract of S-078; it never existed there, so
   nothing moves but the contract.
@@ -163,5 +167,5 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-22.FR-22 | partial | the example, its image and its conformance here; Muster's test against its released image in S-086 |
+| C-22.FR-22 | partial | the example, its image and its conformance here; Muster's test against its image, pinned by digest, in S-086 |
 | C-22.AC-25 | partial | the example bridge passes in the Go library's CI; the minimal example and the copy check in S-083, Python in S-084 |

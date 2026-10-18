@@ -366,7 +366,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-089](S-089-request-log-of-inbound-requests-and-the-runs-of-checks.md) | C-23 | Request log of inbound requests at the callbacks, and the kinds and runs of checks and tests (BE) | be | S-088 |
 | [S-090](S-090-request-log-tab-record-view-and-links.md) | C-23 | Request log tab, the record view, and the links from the Alert Group page and the check panels (FE) | fe | S-089 |
 | [S-085](S-085-example-bridge-on-the-go-library.md) | C-22 | The example bridge on the Go bridge library, with its chat page and image (BE) — in `muster-io/muster-bridge-go` | be | S-083 |
-| [S-086](S-086-end-to-end-test-against-the-released-example-bridge.md) | C-22 | End-to-end test against the released image of the example bridge | infra | S-085 |
+| [S-086](S-086-end-to-end-test-against-the-released-example-bridge.md) | C-22 | End-to-end test against the example bridge's image, pinned by digest | infra | S-085 |
 | [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-086 |
 | [S-084](S-084-python-bridge-library.md) | C-22 | The Python bridge library `muster-bridge` with its CI and PyPI releases (BE) — in `muster-io/muster-bridge-python` | be | S-079 |
 | [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079, S-084 |
@@ -430,10 +430,11 @@ repositories of their own under MIT without a CLA, do the protocol's part of a b
 moves into the Go library's repository (D343). S-078 keeps `muster bridge check`, tested against the fake bridge, and
 its file name; it comes first, because the libraries' CI runs the check from Muster's development image. S-083 builds
 the Go library and S-085 the example bridge on it, both in `muster-io/muster-bridge-go` and split because together they
-touched about 46 files; S-086 then runs Muster's end-to-end test against the example's released image, pinned by
-digest, which completes C-22.AC-22 and covers C-22.AC-23. S-079 follows with Write a bridge, which leads with the Go
-library; S-084, the Python library in `muster-io/muster-bridge-python`, comes after S-079 as the maintainer ordered,
-and S-060, which follows it, adds the Python library's section of Write a bridge.
+touched about 46 files; S-086 then runs Muster's end-to-end test against the example's image, pinned by digest —
+`edge` until the libraries are released with L1, then the release (D366) — which completes C-22.AC-22 and covers
+C-22.AC-23. S-079 follows with Write a bridge, which leads with the Go library; S-084, the Python library in
+`muster-io/muster-bridge-python`, comes after S-079 as the maintainer ordered, and S-060, which follows it, adds the
+Python library's section of Write a bridge.
 
 S-087 to S-090 were added after S-083 merged, when the maintainer tried a Bridge on the test environment (D353, D354).
 S-087 adds the check of a Connection before saving it, for every Connection type, with a dry probe for Mattermost and
