@@ -6,11 +6,12 @@
 // with the second bot's token, Telegram and the Bridge with their second bots — and a draft without a token gets the
 // dry probe alone, its other steps asking for the token; nothing is saved: the Connections and the Audit log stay as
 // they were. On the pages of "Dev Mattermost", "Dev Telegram" and "Dev Bridge" the form's changes are checked as a
-// draft: another server URL gets only the ping, without a token; another path prefix fails the dry probe and the fake
-// records no request with a token under it; only the proxy changed gets the dry probe through the proxy and asks for the
-// token again, which, typed, runs every step; a base URL that is not a bridge fails with its text, and the stored token
-// reaches no fake but the saved address. An Admin reading Russian sees the same at phone width. No page scrolls sideways
-// at 360 px, on the create and the edit page, in English and Russian; no Content Security Policy violation.
+// draft, which never changes the bot the page names: another server URL gets only the ping, without a token; another
+// path prefix fails the dry probe and the fake records no request with a token under it; only the proxy changed gets
+// the dry probe through the proxy and asks for the token again, which, typed, runs every step; a base URL that is not a
+// bridge fails with its text, and the stored token reaches no fake but the saved address. An Admin reading Russian sees
+// the same at phone width. No page scrolls sideways at 360 px, on the create and the edit page, in English and Russian;
+// no Content Security Policy violation.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -233,7 +234,8 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     // Dev Mattermost with another server URL: only the ping there, without a token.
     const mm = await connectionNamed(admin, "Dev Mattermost");
     await page.goto(`/connections/${mm}`);
-    await expect(page.getByTestId("connection-bot")).toHaveText("Bot: muster-dev-bot");
+    await expect(page.getByTestId("connection-bot")).toHaveText(/^Bot: /);
+    const mmBot = (await page.getByTestId("connection-bot").textContent()) ?? "";
     await expect(page.getByTestId("connection-check-draft")).toHaveCount(0);
     await forget(FMM2);
     await page.getByRole("textbox", { name: "Server URL" }).fill(MM2_URL);
@@ -256,7 +258,7 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     await typeToken(page, MM_SECOND_TOKEN);
     await checkButton(page).click();
     await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
-    await expect(page.getByTestId("connection-bot")).toHaveText("Bot: muster-dev-bot");
+    await expect(page.getByTestId("connection-bot")).toHaveText(mmBot);
     expect((await recorded(FMM2)).filter((r) => carries(r, MM_TOKEN)).map((r) => r.path)).toEqual(
       [],
     );
@@ -266,6 +268,8 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     await page.goto(`/connections/${tg}`);
     const baseUrl = page.getByRole("textbox", { name: "Bot API base URL" });
     await expect(baseUrl).toHaveValue(TG_URL);
+    await expect(page.getByTestId("connection-bot")).toHaveText(/^Bot: /);
+    const tgBot = (await page.getByTestId("connection-bot").textContent()) ?? "";
     await forget(FTG);
     await baseUrl.fill(`${TG_URL}/other/`);
     await checkButton(page).click();
@@ -304,7 +308,7 @@ test("checks the changes of saved Connections as drafts, the stored token only a
       /^getMe: ok · \d+ ms · through the proxy · Bot: @muster_dev_b_bot$/,
       /^getWebhookInfo: ok · \d+ ms · through the proxy/,
     ]);
-    await expect(page.getByTestId("connection-bot")).toHaveText("Bot: @muster_dev_bot");
+    await expect(page.getByTestId("connection-bot")).toHaveText(tgBot);
 
     // Dev Bridge pointed at the fake Mattermost server: not a bridge, and its token never goes there.
     const br = await connectionNamed(admin, "Dev Bridge");
