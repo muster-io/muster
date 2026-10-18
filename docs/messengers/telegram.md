@@ -26,6 +26,34 @@ each and whether it went through the proxy:
 2. `getMe` with your token, which names the bot;
 3. `getWebhookInfo`, which says whether a webhook is set and how many updates wait.
 
+## Check before saving
+
+**Check connection** also works in the form, before anything is saved: in the form of a new Connection, and on the
+page of a saved one while the form holds changes. It checks the values in the form — the Bot API base URL, the update
+mode, the proxy and the bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets
+no entry.
+
+- With the bot token typed in the form, the check runs its three steps against the base URL in the form, through the
+  proxy in the form, with that token.
+- Without a token typed, the page of a saved Connection uses its stored token only when the base URL — a trailing `/`
+  aside — and the proxy are the saved ones: the stored token is sent only to the saved address, through the saved
+  proxy, since a proxy you have not saved would see it in the path of an `http` base URL. After a change of the base
+  URL or of the proxy, the check makes only the dry probe there, `GET <base>/bot0:x/getMe` without your token, and
+  `getMe` and `getWebhookInfo` ask you to type the bot token again to check the new address, or to save first. A new
+  Connection without a token gets the dry probe alone too.
+
+The check is `POST /api/v1/connections/checks`, which needs `connections:write`; with a Personal access token of an
+Admin in `MUSTER_TOKEN`:
+
+```sh
+curl -X POST https://muster.example.org/api/v1/connections/checks \
+  -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"telegram","bot_api_base_url":"https://api.telegram.org","update_mode":"long_polling",
+       "bot_token":"123456789:AA…"}'
+```
+
+Add `"connection_id":"CN…"` to check the changes of a saved Connection, whose stored token the rule above may use.
+
 ## Enable comments on the channel
 
 A Telegram Destination is a channel **with comments**. Comments on a channel post live in the channel's discussion

@@ -7,14 +7,16 @@
 // the limiter, which a Bridge Connection may take from the rate its bridge declares (C-22.FR-18). The bot token and the
 // push secret are never shown: a read gives only whether they are set and when they changed, and a save sends them only
 // when they were replaced. The stored token is sent only to the address it was entered for, so a new server URL or base
-// URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog refuses a
-// Connection that Destinations use (in_use).
+// URL needs the token again. The form reports its values as they are typed, which the check of a Connection sends as a
+// draft before anything is saved (C-13.FR-14): the type's address, the proxy, the token only when one is typed, and the
+// saved Connection an edit holds. Without connections:write the form only shows the Connection. The delete dialog
+// refuses a Connection that Destinations use (in_use).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -27,6 +29,7 @@ import type {
   BridgeEventDelivery,
   BridgeInfo,
   Connection,
+  ConnectionDraft,
   ConnectionInput,
   TelegramUpdateMode,
 } from "../api/gen/model";
@@ -185,6 +188,56 @@ export function connectionInput(v: ConnectionValues): ConnectionInput {
   return input;
 }
 
+/**
+ * The draft that the check of the form's values sends (C-13.FR-14): the type's address as a save sends it, the proxy, the
+ * bot token only when one is typed, and the saved Connection of an edit, whose stored token the server uses only for its
+ * saved address and proxy.
+ */
+export function connectionDraft(
+  v: ConnectionValues,
+  stored: Connection | undefined,
+): ConnectionDraft {
+  const common: { proxy: ConnectionDraft["proxy"]; bot_token?: string; connection_id?: string } = {
+    proxy: proxyInput(v.proxy),
+  };
+  if (v.bot_token.mode === "replace" && v.bot_token.value !== "") {
+    common.bot_token = v.bot_token.value;
+  }
+  if (stored !== undefined) {
+    common.connection_id = stored.id;
+  }
+  switch (v.type) {
+    case "telegram":
+      return {
+        type: "telegram",
+        bot_api_base_url: v.bot_api_base_url.trim(),
+        update_mode: v.update_mode,
+        ...common,
+      };
+    case "bridge":
+      return {
+        type: "bridge",
+        base_url: v.base_url.trim(),
+        event_delivery: v.event_delivery,
+        ...common,
+      };
+    default:
+      return { type: "mattermost", server_url: v.server_url.trim(), ...common };
+  }
+}
+
+/** The address a draft calls: the server URL, the Bot API base URL or the base URL of its type. */
+export function draftAddress(draft: ConnectionDraft): string {
+  switch (draft.type) {
+    case "telegram":
+      return draft.bot_api_base_url;
+    case "bridge":
+      return draft.base_url;
+    default:
+      return draft.server_url;
+  }
+}
+
 /** An absolute http or https URL without user information, query or fragment, as the server checks it. */
 export function isServerUrl(text: string): boolean {
   const value = text.trim();
@@ -301,6 +354,74 @@ export function connectionErrors(
     errors[`/limiter/${field}`] = code;
   }
   return errors;
+}
+
+/** The pointer of the address of a type. */
+function addressPointer(type: ConnectionType): string {
+  switch (type) {
+    case "telegram":
+      return "/bot_api_base_url";
+    case "bridge":
+      return "/base_url";
+    default:
+      return "/server_url";
+  }
+}
+
+/**
+ * The errors of connectionErrors that a check of the form's values would be refused for: the type's address and the
+ * proxy. The name, the limiter and a token the new address needs again are left to the save.
+ */
+export function draftErrors(v: ConnectionValues, stored: Connection | undefined): ConnectionErrors {
+  const address = addressPointer(v.type);
+  return Object.fromEntries(
+    Object.entries(connectionErrors(v, stored)).filter(
+      ([pointer]) => pointer === address || pointer.startsWith("/proxy/"),
+    ),
+  );
+}
+
+/** The name of a field the check of the form's values names in a refusal; undefined for a field it does not send. */
+export function draftFieldLabel(
+  t: TFunction,
+  pointer: string,
+  kind: ConnectionType,
+): string | undefined {
+  if (pointer.startsWith("/proxy/")) {
+    return t("proxy.title");
+  }
+  switch (pointer) {
+    case "/server_url":
+      return t("connections.fields.serverUrl");
+    case "/bot_api_base_url":
+      return t("connections.fields.botApiBaseUrl");
+    case "/base_url":
+      return kind === "bridge" ? t("connections.bridge.baseUrl") : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** The text of a field error of the check of the form's values, after the name of its field. */
+export function draftFieldErrorText(
+  t: TFunction,
+  pointer: string,
+  code: string,
+  kind: ConnectionType,
+): string {
+  const error = connectionErrorText(t, code, undefined, kind);
+  const field = draftFieldLabel(t, pointer, kind);
+  return field === undefined ? error : t("connections.check.fieldError", { field, error });
+}
+
+/** The text of the first problem of the form's values that the check would be refused for; undefined for none. */
+export function draftErrorText(
+  t: TFunction,
+  v: ConnectionValues,
+  stored: Connection | undefined,
+): string | undefined {
+  const first = Object.entries(draftErrors(v, stored))[0];
+  return first === undefined ? undefined : draftFieldErrorText(t, first[0], first[1], v.type);
 }
 
 /**
@@ -423,8 +544,8 @@ export interface ConnectionFormProps {
    * without being mounted again, so that the focus stays on "Save".
    */
   save: (input: ConnectionInput) => Promise<Connection | undefined>;
-  /** The Bot API base URL in the form of a Telegram Connection, as it is typed: the check explains an unsaved one. */
-  onBaseUrlChange?: (value: string) => void;
+  /** The values in the form, as they are typed: the check of the Connection sends them as a draft. */
+  onValuesChange?: (values: ConnectionValues) => void;
   /** The info the last check of a Bridge Connection read, whose rate the limiter proposal halves. */
   info?: BridgeInfo | null;
   /** A newer version of the Connection was read; a save would be refused. */
@@ -447,7 +568,7 @@ export function ConnectionForm({
   onDirtyChange,
   saved = false,
   onCancel,
-  onBaseUrlChange,
+  onValuesChange,
   info,
 }: ConnectionFormProps) {
   const { t } = useTranslation();
@@ -456,12 +577,17 @@ export function ConnectionForm({
   const kind = defaultValues.type;
   const [errors, setErrors] = useState<ConnectionErrors>({});
   const [details, setDetails] = useState<Record<string, string>>({});
-  const baseUrl = useWatch({ control: form.control, name: "bot_api_base_url" });
+  // The values as they are typed, and after a reset: a save, or a newer version.
   useEffect(() => {
-    if (kind === "telegram") {
-      onBaseUrlChange?.(baseUrl);
+    if (onValuesChange === undefined) {
+      return undefined;
     }
-  }, [kind, baseUrl, onBaseUrlChange]);
+    onValuesChange(form.getValues());
+    return form.subscribe({
+      formState: { values: true },
+      callback: () => onValuesChange(form.getValues()),
+    });
+  }, [form, onValuesChange]);
   const formElement = useRef<HTMLFormElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   // The refusal of the last save was shown on the fields; it is not shown again as a whole once they are edited.

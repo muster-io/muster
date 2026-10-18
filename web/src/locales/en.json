@@ -641,22 +641,29 @@
     },
     "check": {
       "bot": "Bot: {{bot}}",
-      "bridgeHint": "Reads the bridge's info with the saved token, then checks that the bridge offers this Connection's event delivery mode.",
+      "bridgeHint": "Reads the bridge's info with the token, then checks that the bridge offers the event delivery mode. Before saving, the check uses the values in the form; a saved token is sent only to the saved address through the saved proxy.",
       "busy": "The messenger is busy; try again in {{seconds}} s.",
       "connectedAs": "Connected as {{bot}}",
       "direct": "direct",
+      "draft": "The check uses the values in the form and saves nothing.",
       "failed": "failed",
       "failedSummary": "The check failed.",
-      "hint": "Checks the saved bot token on the Mattermost server and shows the bot's name.",
+      "fieldError": "{{field}}: {{error}}",
+      "hint": "Checks the bot token on the Mattermost server and shows the bot's name. Before saving, the check uses the values in the form; a saved token is sent only to the saved address through the saved proxy.",
       "latency": "{{ms}} ms",
       "ok": "ok",
       "passed": "The check passed.",
       "pendingUpdates_one": "{{count}} pending update",
       "pendingUpdates_other": "{{count}} pending updates",
-      "probePassed": "The address answers as a Bot API. Save it to check the bot token there.",
+      "probePassed": {
+        "bridge": "The address answers as a bridge.",
+        "mattermost": "The address answers as a Mattermost server.",
+        "telegram": "The address answers as a Bot API."
+      },
       "running": "Checking…",
       "skippedEarlier": "Skipped: an earlier step failed",
-      "skippedUnsaved": "Skipped: save the address first",
+      "skippedNoToken": "Skipped: type the bot token to check it",
+      "skippedRetype": "Skipped: type the bot token again to check the new address, or save first",
       "start": "Check connection",
       "steps": {
         "dryProbe": "Dry probe without the token",
@@ -667,11 +674,10 @@
         "token": "Token"
       },
       "stepsLabel": "Steps of the check",
-      "telegramHint": "Checks the Bot API step by step: a dry probe without the token, then getMe and getWebhookInfo with the saved token.",
+      "telegramHint": "Checks the Bot API step by step: a dry probe without the token, then getMe and getWebhookInfo with the bot token. Before saving, the check uses the values in the form; a saved token is sent only to the saved address through the saved proxy.",
       "title": "Connection check",
+      "unknownConnection": "This Connection no longer exists. Reload the page.",
       "unknownError": "No details.",
-      "unsaved": "The check uses the saved settings: save your changes first.",
-      "unsavedAddress": "The address is not saved: the check makes only the dry probe against it, without the token.",
       "viaProxy": "through the proxy",
       "warnings": {
         "pressAnswersInThread": "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the <code>create_post_ephemeral</code> permission, for example the system admin role, to show them in the channel."

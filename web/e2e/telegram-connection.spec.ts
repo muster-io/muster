@@ -3,9 +3,10 @@
 
 // The Telegram Connection pages against `muster dev` and its fake Telegram server: Verification steps 1 to 4 of their
 // story. The Admin creates "tg" on the fake through http, which shows the warning about the token in clear text;
-// checks it in three steps with the bot, a webhook that is set and the warning it gets; checks an unsaved address,
-// which gets only the dry probe while the fake records no request with the token there; and checks an address that
-// refuses connections, whose message does not carry the token. The update mode explains each mode. An Admin reading
+// checks it in three steps with the bot, a webhook that is set and the warning it gets; checks the form's values with
+// another path prefix before saving them, whose dry probe fails there and skips the other steps while the fake records
+// no request with the token there; and checks an address that refuses connections, whose message does not carry the
+// token. The update mode explains each mode. An Admin reading
 // Russian sees the same at phone width. No page scrolls sideways at 360 px; no Content Security Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
@@ -34,7 +35,8 @@ const HTTP_WARNING =
 const HTTP_WARNING_RU =
   "По http токен бота передаётся открытым текстом. Используйте https, если только этот путь не проходит по частной сети или туннелю.";
 const WEBHOOK_SET = "A webhook is set: long polling fails with 409 while it stays.";
-const SKIPPED = "Skipped: save the address first";
+const EARLIER = "Skipped: an earlier step failed";
+const DRAFT = "The check uses the values in the form and saves nothing.";
 
 interface Named {
   id: string;
@@ -98,7 +100,7 @@ test.afterAll(async () => {
   }
 });
 
-test("creates a Telegram Connection and checks it step by step, an unsaved address with the dry probe only", async ({
+test("creates a Telegram Connection and checks it step by step, an unsaved path prefix before saving it", async ({
   page,
 }) => {
   test.setTimeout(180_000);
@@ -174,18 +176,16 @@ test("creates a Telegram Connection and checks it step by step, an unsaved addre
   );
   await expect(page.getByTestId("connection-check-warning")).toHaveCount(0);
 
-  // 3. An unsaved base URL with a wrong path prefix → only the dry probe runs there, the other steps are skipped, and
-  // the fake records no request with the token under that prefix.
+  // 3. An unsaved base URL with a wrong path prefix → the check of the form's values makes the dry probe there, which
+  // fails, the other steps are skipped, and the fake records no request with the token under that prefix.
   await baseUrl.fill(`${FTG}/other/`);
-  await expect(page.getByTestId("connection-check-unsaved")).toHaveText(
-    "The address is not saved: the check makes only the dry probe against it, without the token.",
-  );
+  await expect(page.getByTestId("connection-check-draft")).toHaveText(DRAFT);
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText("The check failed.");
   await expect(steps(page)).toHaveText([
     /^Dry probe without the token: failed \d+ ms · directWrong path prefix: the server answered 404\.$/,
-    `getMe: ${SKIPPED}`,
-    `getWebhookInfo: ${SKIPPED}`,
+    `getMe: ${EARLIER}`,
+    `getWebhookInfo: ${EARLIER}`,
   ]);
   await shot(page, "telegram-connection-unsaved");
   const underOther = (await recorded()).filter((r) => r.path.startsWith("/other/"));
@@ -206,7 +206,7 @@ test("creates a Telegram Connection and checks it step by step, an unsaved addre
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByTestId("connection-status")).toHaveText("Saved.");
   await expect(baseUrl).toHaveValue("http://127.0.0.1:1");
-  await expect(page.getByTestId("connection-check-unsaved")).toHaveCount(0);
+  await expect(page.getByTestId("connection-check-draft")).toHaveCount(0);
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText("The check failed.");
   await expect(steps(page).first()).toContainText("Dry probe without the token: failed");
@@ -279,8 +279,8 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(steps(page)).toHaveText([
     /^Пробный запрос без токена: ошибка \d+ мс · напрямуюНеверный префикс пути: сервер ответил 404\.Подробности: Wrong path prefix: the server answered 404\.$/,
-    "getMe: Пропущен: сначала сохраните адрес",
-    "getWebhookInfo: Пропущен: сначала сохраните адрес",
+    "getMe: Пропущен: предыдущий шаг не прошёл",
+    "getWebhookInfo: Пропущен: предыдущий шаг не прошёл",
   ]);
   await expectNoHorizontalScroll(page);
   for (const id of ["telegram-base-url-hint", "telegram-http-warning"]) {

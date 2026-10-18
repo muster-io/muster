@@ -8,9 +8,9 @@ bot. Muster posts one **Root message** per Alert Group to a channel of that mess
 changes, and replies in its **Thread** for what happens later, as it does for Mattermost and Telegram.
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_INGEST_URL` is
-`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The web UI has no form for
-Bridge Connections and Bridge Destinations yet, so the examples create them through the [API](../reference/api.md),
-with a Personal access token of an Admin in `MUSTER_TOKEN`.
+`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The examples use the
+[API](../reference/api.md), with a Personal access token of an Admin in `MUSTER_TOKEN`; the web UI has the same forms
+under **Connections** and **Destinations**.
 
 ## Create the Connection
 
@@ -77,6 +77,30 @@ A failed step names its cause with a code:
 | `timeout`, `connect_failed`, `dns_failed`, `tls_failed` | Muster got no answer from the bridge. |
 | `blocked` | The outbound address policy does not allow the bridge's address. |
 | `request_failed` | The bridge answered with another error; the message names its class and the bridge's text. |
+
+## Check before saving
+
+The check above reads a saved Connection. **Check connection** in the form of a new Connection, or on the page of a
+saved one while the form holds changes, checks the values in the form before anything is saved, with
+`POST /api/v1/connections/checks`. It saves nothing: the `info` it reads is returned, not stored, and the Audit log
+gets no entry.
+
+- With the token typed, the steps `info` and `event_delivery` run against the base URL in the form, through the proxy in
+  the form, with that token.
+- Without one, a saved Connection (`connection_id`) uses its stored token only when the base URL — a trailing `/`
+  aside — and the proxy are the saved ones: the stored token is sent only to the saved address, through the saved
+  proxy. After a change of the base URL or of the proxy, the check makes only a dry probe, `GET <base>/v1/info` without
+  the token, which a bridge answers with `401` and a problem (`application/problem+json`). An address that answers
+  otherwise fails with `not_bridge`, a `404` with `wrong_path_prefix`, another status with a problem with
+  `unexpected_status`; after a dry probe that passes, `info` and `event_delivery` ask you to type the token again to
+  check the new address, or to save first. A new Connection without a token gets the dry probe alone too.
+
+```sh
+curl -X POST https://muster.example.org/api/v1/connections/checks \
+  -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"bridge","base_url":"https://bridge.example.org/muster","event_delivery":"poll",
+       "bot_token":"the-token-of-the-bot"}'
+```
 
 ## Add a Destination
 

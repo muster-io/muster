@@ -3,7 +3,9 @@
 
 // The Mattermost Connection form in a real browser: the request a save sends, with the bot token only when it was
 // replaced and never shown; the checks it repeats, a new server URL that needs the token again included; the refusals
-// it puts on its fields; the read-only form; the limiter; the connection check with its steps, path, latency, warning
+// it puts on its fields; the read-only form; the limiter; the values it reports as they are typed and the draft the
+// check sends of them — the token only when one is typed, the saved Connection only on an edit —, with the problems of
+// the address and the proxy named before anything is sent; the connection check with its steps, path, latency, warning
 // and busy messenger; the callback address with its hint; and the in_use refusal of "Delete" in its plural forms. For a
 // Bridge, the request with the push secret only in push mode, the checks of the base URL and the push secret, and the
 // refusals of /base_url and /push_secret; its fields are in bridge-connection-fields.test.tsx.
@@ -37,13 +39,18 @@ import {
   BRIDGE_BASE_URL_FORMAT,
   ConnectionDeleteDialog,
   ConnectionForm,
+  type ConnectionValues,
   PUSH_SECRET_FORMAT,
   TOKEN_FOR_NEW_SERVER,
   addressChanged,
+  connectionDraft,
   connectionErrorText,
   connectionErrors,
   connectionInput,
   connectionValues,
+  draftAddress,
+  draftErrorText,
+  draftErrors,
   inUseText,
   isServerUrl,
   serverErrors,
@@ -218,6 +225,121 @@ describe("the request of a save", () => {
         bot_token: "muster-dev-bridge-token",
       }),
     );
+  });
+});
+
+describe("the draft of a check", () => {
+  test("sends the address as a save does, the proxy, and the token only when one is typed", () => {
+    const fresh = {
+      ...connectionValues(undefined),
+      name: "mm",
+      server_url: " http://127.0.0.1:18066 ",
+    };
+    expect(connectionDraft(fresh, undefined)).toEqual({
+      type: "mattermost",
+      server_url: "http://127.0.0.1:18066",
+      proxy: { enabled: false, type: "http", username: null },
+    });
+    // An empty token input is no token.
+    expect(
+      "bot_token" in
+        connectionDraft({ ...fresh, bot_token: { mode: "replace", value: "" } }, undefined),
+    ).toBe(false);
+    expect(
+      connectionDraft({ ...fresh, bot_token: { mode: "replace", value: "mm-typed" } }, undefined),
+    ).toEqual(expect.objectContaining({ bot_token: "mm-typed" }));
+  });
+
+  test("names the saved Connection of an edit, and sends its proxy as the form holds it", () => {
+    const edited: ConnectionValues = {
+      ...connectionValues(CONNECTION),
+      name: "renamed",
+      proxy: {
+        enabled: true,
+        type: "socks5",
+        address: " 127.0.0.1:18092 ",
+        username: "",
+        password: { mode: "replace", value: "pw" },
+      },
+    };
+    expect(connectionDraft(edited, CONNECTION)).toEqual({
+      type: "mattermost",
+      server_url: "http://127.0.0.1:18065",
+      proxy: {
+        enabled: true,
+        type: "socks5",
+        address: "127.0.0.1:18092",
+        username: null,
+        password: "pw",
+      },
+      connection_id: "CN0000000000AA",
+    });
+    const bridge = connectionDraft(
+      { ...connectionValues(BRIDGE), base_url: "http://127.0.0.1:18065/" },
+      BRIDGE,
+    );
+    expect(bridge).toEqual({
+      type: "bridge",
+      base_url: "http://127.0.0.1:18065/",
+      event_delivery: "push",
+      proxy: { enabled: false, type: "http", username: null },
+      connection_id: "CN0000000000BR",
+    });
+    expect(draftAddress(bridge)).toBe("http://127.0.0.1:18065/");
+  });
+
+  test("names the problems of the address and the proxy only, after the name of their field", () => {
+    const fresh = connectionValues(undefined);
+    // The name and the token are the save's business; an empty address keeps the check's button disabled.
+    expect(draftErrors(fresh, undefined)).toEqual({ "/server_url": "required" });
+    expect(
+      draftErrors({ ...connectionValues(CONNECTION), name: "", server_url: "chat" }, CONNECTION),
+    ).toEqual({ "/server_url": "invalid_format" });
+    const proxied = {
+      ...connectionValues(CONNECTION),
+      proxy: { ...connectionValues(CONNECTION).proxy, enabled: true },
+    };
+    expect(draftErrors(proxied, CONNECTION)).toEqual({ "/proxy/address": "required" });
+    expect(draftErrorText(i18n.t, proxied, CONNECTION)).toBe("Proxy: Fill in this field.");
+    expect(
+      draftErrorText(i18n.t, { ...connectionValues(CONNECTION), server_url: "chat" }, CONNECTION),
+    ).toBe("Server URL: This value has the wrong format.");
+    expect(
+      draftErrorText(i18n.t, { ...connectionValues(BRIDGE), base_url: "bridge" }, BRIDGE),
+    ).toBe(
+      "Base URL: Enter an absolute http or https URL without user information, query or fragment, such as https://bridge.example.org. A path prefix is allowed.",
+    );
+    // A new address without the token again is the save's refusal, not the check's.
+    expect(
+      draftErrorText(
+        i18n.t,
+        { ...connectionValues(CONNECTION), server_url: "http://127.0.0.1:18066" },
+        CONNECTION,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("reports the values as they are typed", async () => {
+    const values: ConnectionValues[] = [];
+    await render(
+      providers(
+        <ConnectionForm
+          connection={CONNECTION}
+          submitLabel="Save"
+          save={() => Promise.resolve(undefined)}
+          onValuesChange={(v) => values.push(v)}
+        />,
+        WRITE,
+      ),
+    );
+    await expect.poll(() => values.at(-1)?.server_url).toBe("http://127.0.0.1:18065");
+    await userEvent.fill(page.getByLabelText("Server URL"), "http://127.0.0.1:18066");
+    await expect.poll(() => values.at(-1)?.server_url).toBe("http://127.0.0.1:18066");
+    await page.getByRole("button", { name: "Replace" }).click();
+    await userEvent.fill(page.getByLabelText("Bot token"), "mm-typed");
+    await expect
+      .poll(() => values.at(-1)?.bot_token)
+      .toEqual({ mode: "replace", value: "mm-typed" });
   });
 });
 
@@ -572,7 +694,7 @@ const TOKEN_REFUSED: ConnectionCheckResult = {
 
 async function runCheck(response: Response, button = "Check connection") {
   const fetch = vi.spyOn(window, "fetch").mockResolvedValue(response);
-  await render(providers(<ConnectionCheck connectionId="CN0000000000AA" dirty={false} />, WRITE));
+  await render(providers(<ConnectionCheck connectionId="CN0000000000AA" />, WRITE));
   await page.getByRole("button", { name: button }).click();
   return fetch;
 }
