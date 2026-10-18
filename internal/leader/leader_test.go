@@ -325,7 +325,8 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
-		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling"}
+		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling",
+		"request_log_pruning"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -370,8 +371,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		t.Errorf("re-render after a rotation without a re-render")
 	}
 	// Without a poller of Bridge events the task does nothing and nothing wakes it.
-	if last := tasks[len(tasks)-1]; last.Every != BridgePollingInterval || last.Wake != nil || last.Run(t.Context()) != nil {
+	if bridge := tasks[17]; bridge.Every != BridgePollingInterval || bridge.Wake != nil || bridge.Run(t.Context()) != nil {
 		t.Errorf("bridge polling without a poller")
+	}
+	// Without a pruning of the Request log the task does nothing, and outside development mode nothing wakes it.
+	if last := tasks[len(tasks)-1]; last.Every != RequestLogPruningInterval || last.Wake != nil ||
+		last.Run(t.Context()) != nil {
+		t.Errorf("request log pruning without a pruning")
 	}
 }
 
@@ -602,7 +608,7 @@ func TestTelegramPollingTask(t *testing.T) {
 
 // TestBridgePollingTask covers C-22.FR-11 and C-02.FR-10 (ADR-0007): the Leader polls the events of the Bridge
 // Connections of every Organization at once until its context ends, with the Organization passed to each, and
-// returns their errors; the task is the last of the list and runs again after BridgePollingInterval.
+// returns their errors; the task runs again after BridgePollingInterval.
 func TestBridgePollingTask(t *testing.T) {
 	failed := errors.New("list failed")
 	var mu sync.Mutex
@@ -621,7 +627,7 @@ func TestBridgePollingTask(t *testing.T) {
 		},
 	}
 	tasks := Tasks(work)()
-	task := tasks[len(tasks)-1]
+	task := tasks[17]
 	if task.Name != "bridge_polling" || task.Every != BridgePollingInterval || task.Wake != nil {
 		t.Fatalf("task %s every %v", task.Name, task.Every)
 	}
@@ -637,13 +643,82 @@ func TestBridgePollingTask(t *testing.T) {
 	orgsErr := errors.New("down")
 	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
 	tasks = Tasks(work)()
-	if err := tasks[len(tasks)-1].Run(t.Context()); !errors.Is(err, orgsErr) ||
+	if err := tasks[17].Run(t.Context()); !errors.Is(err, orgsErr) ||
 		err.Error() != "list the organizations to poll bridge events for: down" {
 		t.Fatalf("organizations = %v", err)
 	}
 	tasks = Tasks(Work{})()
-	if err := tasks[len(tasks)-1].Run(t.Context()); err != nil {
+	if err := tasks[17].Run(t.Context()); err != nil {
 		t.Fatalf("unwired = %v", err)
+	}
+}
+
+// TestRequestLogPruningTask covers C-23.FR-4 and C-02.FR-10 (ADR-0007): the Leader prunes the Request log of every
+// Organization at one business now, goes on past one that fails and returns its error, logs request_log_pruned with
+// the rows and counts them only when it deleted anything, so that a second run that finds nothing says nothing; it
+// runs every minute and, in development mode, when the development clock moves.
+func TestRequestLogPruningTask(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	type call struct {
+		org int64
+		now time.Time
+	}
+	var calls []call
+	var log bytes.Buffer
+	failed := errors.New("locked")
+	deleted := map[int64]int64{1: 7}
+	moved := &Wakes{}
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		Log:           logging.New(&log, logging.LevelInfo),
+		RequestLogPruning: func(_ context.Context, org int64, at time.Time) (int64, error) {
+			calls = append(calls, call{org, at})
+			n := deleted[org]
+			deleted[org] = 0
+			if org == 2 {
+				return 0, failed
+			}
+			return n, nil
+		},
+		ClockMoved: moved,
+	}
+	before := metrics.RequestLogPruned.With().Get()
+	tasks := Tasks(w)()
+	task := tasks[len(tasks)-1]
+	if task.Name != "request_log_pruning" || task.Every != time.Minute || task.Wake == nil {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	if err := task.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(calls, []call{{1, now}, {2, now}}) {
+		t.Fatalf("calls %v, err %v", calls, err)
+	}
+	if got := metrics.RequestLogPruned.With().Get() - before; got != 7 {
+		t.Errorf("counted %d", got)
+	}
+	if !strings.Contains(log.String(), `"event":"request_log_pruned","rows":7`) ||
+		strings.Count(log.String(), "request_log_pruned") != 1 {
+		t.Errorf("log: %s", log.String())
+	}
+	// A second run finds nothing more to delete: it logs and counts nothing.
+	log.Reset()
+	if err := task.Run(t.Context()); !errors.Is(err, failed) || log.Len() != 0 {
+		t.Errorf("second run: err %v, log %s", err, log.String())
+	}
+	if got := metrics.RequestLogPruned.With().Get() - before; got != 7 {
+		t.Errorf("counted %d after the second run", got)
+	}
+	moved.Wake()
+	select {
+	case <-task.Wake:
+	default:
+		t.Error("a move of the development clock did not wake the task")
+	}
+	orgsErr := errors.New("down")
+	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	tasks = Tasks(w)()
+	if err := tasks[len(tasks)-1].Run(t.Context()); !errors.Is(err, orgsErr) ||
+		err.Error() != "list the organizations to prune the request log of: down" {
+		t.Errorf("organizations = %v", err)
 	}
 }
 

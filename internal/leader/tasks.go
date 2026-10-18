@@ -54,6 +54,9 @@ const OIDCSecretExpiryInterval = 5 * time.Minute
 // outgoing_heartbeat.interval on the business clock, so the poll only bounds how late a send is.
 const OutgoingHeartbeatPoll = 5 * time.Second
 
+// RequestLogPruningInterval is how often the Leader prunes the Request log to its bounds (C-23.FR-4).
+const RequestLogPruningInterval = time.Minute
+
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
 const PruneBatch = 1000
@@ -176,10 +179,14 @@ type Work struct {
 	// until ctx ends (C-22.FR-11): it stops every poll before it returns, and a failed read of the Connections returns
 	// early.
 	BridgePolling func(ctx context.Context, orgID int64) error
+	// RequestLogPruning deletes, in batches, the records of the Request log of the Organization orgID older than
+	// request_log.max_age at now or past the newest request_log.max_records of their owner, and returns how many it
+	// deleted (C-23.FR-4).
+	RequestLogPruning func(ctx context.Context, orgID int64, now time.Time) (int64, error)
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
 	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
-	// secret expiry check and the outgoing heartbeat when the development clock moved, so that the alive mark keeps up
-	// with the business clock and the Leader is not taken for absent; nil otherwise.
+	// secret expiry check, the outgoing heartbeat and the pruning of the Request log when the development clock moved, so
+	// that the alive mark keeps up with the business clock and the Leader is not taken for absent; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -241,16 +248,17 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
 // Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open
-// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated, and the polling of the
-// events of Bridge Connections in poll mode (C-22.FR-11). Later capabilities add theirs at the end of the list. The
-// Keeper calls the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it,
-// so that it measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
+// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated, the polling of the events of
+// Bridge Connections in poll mode (C-22.FR-11) and the pruning of the Request log (C-23.FR-4). Later capabilities add
+// theirs at the end of the list. The Keeper calls the result at every leadership, so each one starts with a takeover;
+// the Heartbeat check waits for it, so that it measures the timeouts from the end of a downtime the takeover records
+// (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	shortLivedWake := w.ClockMoved.channel()
 	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
-	aliveWake := w.ClockMoved.channel()
+	aliveWake, requestLogWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	keyringWake := w.KeyringChanged.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
@@ -303,6 +311,8 @@ func Tasks(w Work) func() []Task {
 					return w.perOrganization(ctx, "the re-render after a key rotation", w.RerenderAfterRotation)
 				}},
 			{Name: "bridge_polling", Every: BridgePollingInterval, Run: w.bridgePolling},
+			{Name: "request_log_pruning", Every: RequestLogPruningInterval, Wake: requestLogWake,
+				Run: w.requestLogPruning},
 		}
 	}
 }
@@ -490,6 +500,32 @@ func (w Work) telegramPolling(ctx context.Context) error {
 // polled twice is handled once by its id, and a cursor stored late only makes the bridge send events again.
 func (w Work) bridgePolling(ctx context.Context) error {
 	return w.everyOrganizationAtOnce(ctx, "poll bridge events for", w.BridgePolling)
+}
+
+// requestLogPruning prunes the Request log of every Organization at the same now, on the business clock, and logs and
+// counts what it deleted; a failed Organization does not stop the others. It deletes only what is past a bound, so
+// running it twice, or on a frozen old Leader and its successor at once, deletes nothing more.
+func (w Work) requestLogPruning(ctx context.Context) error {
+	if w.RequestLogPruning == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations to prune the request log of: %w", err)
+	}
+	now := w.Business.Now()
+	var errs []error
+	var rows int64
+	for _, org := range orgs {
+		n, err := w.RequestLogPruning(ctx, org, now)
+		rows += n
+		errs = append(errs, err)
+	}
+	if rows > 0 {
+		metrics.RequestLogPruned.With().AddInt64(rows)
+		w.Log.Log(ctx, logging.RequestLogPruned, logging.F("rows", rows))
+	}
+	return errors.Join(errs...)
 }
 
 // everyOrganizationAtOnce runs f for every Organization at once and waits for each to return; a nil f does nothing.

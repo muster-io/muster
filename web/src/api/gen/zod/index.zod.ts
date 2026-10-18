@@ -13,6 +13,7 @@ export * from './messenger-callbacks/messenger-callbacks.zod';
 export * from './oidc/oidc.zod';
 export * from './organization/organization.zod';
 export * from './profile/profile.zod';
+export * from './request-log/request-log.zod';
 export * from './routes/routes.zod';
 export * from './sessions/sessions.zod';
 export * from './system/system.zod';

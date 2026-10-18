@@ -13,6 +13,7 @@ export * from './messenger-callbacks/messenger-callbacks';
 export * from './oidc/oidc';
 export * from './organization/organization';
 export * from './profile/profile';
+export * from './request-log/request-log';
 export * from './routes/routes';
 export * from './sessions/sessions';
 export * from './system/system';

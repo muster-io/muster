@@ -137,8 +137,8 @@ type database interface {
 	// their changes.
 	DeliveryStore() *delivery.Store
 	// MessagesDB is the main pool that previews and dry runs of templates read, and that Mention settings are read
-	// from; the Request log is written through it, outside any transaction of the request it records. LinksStore
-	// serves Lookup tables and Link rules.
+	// from; the Request log is written through it, outside any transaction of the request it records, and read and
+	// pruned through it. LinksStore serves Lookup tables and Link rules.
 	MessagesDB() messages.DBTX
 	LinksStore() links.Store
 	DestinationsStore() destinations.Store
@@ -1032,6 +1032,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			},
 			Business: p.clocks.Business, LeaderAbsence: leader.AbsenceNotice, Version: buildinfo.Version,
 			Commit: buildinfo.Commit}),
+		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -1112,6 +1113,9 @@ func (p *process) newKeeper() *leader.Keeper {
 				return nil
 			}
 			return p.bridgePoller.Run(ctx)
+		},
+		RequestLogPruning: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+			return requestlog.Prune(ctx, p.db.MessagesDB(), orgID, now)
 		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
