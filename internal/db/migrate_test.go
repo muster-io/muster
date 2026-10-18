@@ -692,15 +692,17 @@ func TestIntegrationRequestLog(t *testing.T) {
 			SELECT id, c.public_id, 'mattermost', c.public_id, 'http://mm', '\x00', 'k1', '2026-10-05', 1, 1,
 				'2026-10-05', '2026-10-05'
 			FROM organizations, (VALUES ('CN0000000000M1'), ('CN0000000000M2')) AS c (public_id)`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000W1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-10-05', '{}', 1, 1,
+				'healthy', '2026-10-05', '2026-10-05'
+			FROM organizations`)
 		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, connection_id, mattermost_team_id,
-			mattermost_channel_id, webhook_mode, webhook_events_config, signing_secret_ciphertext, signing_secret_key_id,
-			signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
-			SELECT o.id, 'DS0000000000W1', 'webhook', 'hook', NULL, NULL, NULL, 'events', '{}', '\x00', 'k1',
-				'2026-10-05', '{}', 1, 1, 'healthy', '2026-10-05', '2026-10-05' FROM organizations o
-			UNION ALL
-			SELECT o.id, 'DS0000000000M1', 'mattermost', 'alerts', c.id, 't1', 'ch1', NULL, NULL, NULL, NULL, NULL,
-				'{}', 1, 1, 'healthy', '2026-10-05', '2026-10-05'
-			FROM organizations o JOIN connections c ON c.public_id = 'CN0000000000M1'`)
+			mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			SELECT c.org_id, 'DS0000000000M1', 'mattermost', 'alerts', c.id, 't1', 'ch1', '{}', 1, 1, 'healthy',
+				'2026-10-05', '2026-10-05'
+			FROM connections c WHERE c.public_id = 'CN0000000000M1'`)
 		if got := e.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'request_log'`); got != 0 {
 			t.Fatal("before 0013: request_log exists")
 		}
