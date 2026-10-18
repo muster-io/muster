@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/publicid"
 )
 
 // The Commands a button carries.
@@ -195,6 +196,36 @@ func keyPrefix(keyID string) ([]byte, error) {
 		return nil, fmt.Errorf("the key id %q is not hex: %w", keyID, err)
 	}
 	return b, nil
+}
+
+// LooksSigned reports whether s has the structure of an action id — its length in the compact form, the version, a
+// known subject and Command, and a public_id of the right alphabet — without its signature, which needs the key: the
+// Request log masks every such string, a forged one too (C-23.FR-3).
+func LooksSigned(s string) bool {
+	if len(s) != base64.RawURLEncoding.EncodedLen(actionLen) {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || len(raw) != actionLen || raw[0] != version {
+		return false
+	}
+	subject, command := false, false
+	for _, c := range subjectCodes {
+		subject = subject || c == raw[1]
+	}
+	for _, c := range commandCodes {
+		command = command || c == raw[2+publicIDLen]
+	}
+	if !subject || !command {
+		return false
+	}
+	id := raw[2 : 2+publicIDLen]
+	for i, c := range id {
+		if i < 2 && (c < 'A' || c > 'Z') || i >= 2 && !strings.ContainsRune(publicid.Alphabet, rune(c)) {
+			return false
+		}
+	}
+	return true
 }
 
 // Verify reads an action id and checks its signature with the key of the Keyring its prefix names; keyID, when

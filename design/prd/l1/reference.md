@@ -231,6 +231,9 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_destination_info` | gauge | `destination`, `name` | C-11 |
 | `muster_template_errors_total` | counter | `route`, `destination` (one of them empty), `template` (`root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request`) | C-12 |
 | `muster_template_render_duration_seconds` | histogram | `template` (as above) | C-12 |
+| `muster_request_log_records_total` | counter | `direction` (`outbound`, `inbound`) — records written to the Request log | C-23 |
+| `muster_request_log_write_failures_total` | counter | `direction` (`outbound`, `inbound`) — records that could not be written and were dropped | C-23 |
+| `muster_request_log_pruned_total` | counter | — (records the Leader deleted past `request_log.max_records` or `request_log.max_age`, `request_log_pruning`) | C-23 |
 
 ## Chart rules
 

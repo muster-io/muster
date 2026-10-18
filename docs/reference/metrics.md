@@ -305,6 +305,28 @@ Background re-checks of OIDC users at the identity provider, by outcome.
 
 - `outcome`: `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider
 
+### `muster_request_log_pruned_total`
+
+counter · no labels · C-23 · exported by every replica
+
+Records of the Request log that the Leader deleted, older than request_log.max_age or past the newest request_log.max_records of their owner.
+
+### `muster_request_log_records_total`
+
+counter · labels: `direction` · C-23 · exported by every replica
+
+Records written to the Request log, one per request, by direction.
+
+- `direction`: `outbound`, `inbound` — whether Muster sent the request or received it
+
+### `muster_request_log_write_failures_total`
+
+counter · labels: `direction` · C-23 · exported by every replica
+
+Records of the Request log that could not be written — the database refused them or their write ran past its timeout — and were dropped, by direction; the requests they record went on unchanged.
+
+- `direction`: `outbound`, `inbound` — whether Muster sent the request or received it
+
 ### `muster_route_info`
 
 gauge · labels: `route`, `name` · C-08 · exported by every replica

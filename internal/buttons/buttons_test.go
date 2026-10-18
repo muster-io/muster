@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,6 +193,58 @@ func TestExpired(t *testing.T) {
 	for _, bad := range []string{"", "!!", id[:20]} {
 		if _, err := buttons.Verify(other, bad, ""); !errors.Is(err, buttons.ErrInvalid) {
 			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
+// TestLooksSigned: every action id Sign makes, of every subject and Command, has the structure of one, and so has one
+// whose MAC is wrong; a string of another length, not base64url, of another version, subject or Command, or naming no
+// public_id, does not.
+func TestLooksSigned(t *testing.T) {
+	k := active(t, 'a')
+	var id string
+	for _, s := range []buttons.Subject{buttons.SubjectRoot, buttons.SubjectReply, buttons.SubjectTest} {
+		for _, c := range []string{buttons.CommandAcknowledge, buttons.CommandUnacknowledge, buttons.CommandResolve,
+			buttons.CommandSnooze, buttons.CommandUnsnooze, buttons.CommandStillOnIt} {
+			signed, _, err := buttons.Sign(k, buttons.Action{Subject: s, PublicID: "AGK7M3QX9P2RTA", Command: c,
+				Argument: 255})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !buttons.LooksSigned(signed) {
+				t.Errorf("%s %s: %q does not look signed", s, c, signed)
+			}
+			id = signed
+		}
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(id)
+	edit := func(i int, b ...byte) string {
+		out := bytes.Clone(raw)
+		copy(out[i:], b)
+		return base64.RawURLEncoding.EncodeToString(out)
+	}
+	if !buttons.LooksSigned(edit(len(raw)-1, raw[len(raw)-1]^0x01)) {
+		t.Error("an action id with a wrong MAC does not look signed")
+	}
+	for name, s := range map[string]string{
+		"50 characters":         id[:50],
+		"52 characters":         id + "A",
+		"not base64url":         id[:50] + "+",
+		"padded":                id[:49] + "==",
+		"version 2":             edit(0, 2),
+		"an unknown subject":    edit(1, 'x'),
+		"an unknown Command":    edit(16, 'x'),
+		"a lower-case prefix":   edit(2, 'a'),
+		"a digit in the prefix": edit(3, '1'),
+		"U in the public_id":    edit(10, 'U'),
+		"a byte in the id":      edit(5, 0),
+		"random base64url":      strings.Repeat("Q", 51),
+		"the empty string":      "",
+		"a 43-character token":  base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+		"38 bytes of version 1": base64.RawURLEncoding.EncodeToString(append([]byte{1}, make([]byte, 37)...)),
+	} {
+		if buttons.LooksSigned(s) {
+			t.Errorf("%s: %q looks signed", name, s)
 		}
 	}
 }

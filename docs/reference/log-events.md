@@ -470,6 +470,18 @@ INFO · fields: `replicas` · C-02
 
 The Leader removed the records of replicas that had not refreshed them for replica.prune_after.
 
+### `request_log_pruned`
+
+INFO · fields: `rows` · C-23
+
+The Leader task request_log_pruning deleted, in batches, records of the Request log older than request_log.max_age or past the newest request_log.max_records of their Connection, of their outgoing webhook Destination or of the records without an owner: rows is how many it deleted in one run. Not logged when a run deleted nothing.
+
+### `request_log_write_failed`
+
+WARN · fields: `direction`, `operation`, `owner`, `error` · C-23
+
+A record of the Request log could not be written — the database refused it, or its write ran past its 2 s timeout — and was dropped; the request it records went on unchanged. direction and operation are the record's, owner the public_id of its Connection or outgoing webhook Destination, empty without one, and error the database error. The headers and bodies of the record are never logged; muster_request_log_write_failures_total counts the dropped records.
+
 ### `schema_dirty`
 
 ERROR · fields: `database_version` · C-02
