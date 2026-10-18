@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/webhooks"
 )
 
@@ -68,7 +69,8 @@ type PushConfig struct {
 // id is not webhook-id are answered 400, and the bridge drops them. Otherwise the event goes to Events, which waits for
 // a free slot, handles it once by its id and answers the person before the 204; an event whose handling failed is
 // answered 500 and is not recorded, so that the bridge sends it again. Each refusal logs bridge_event_rejected with its
-// reason, never the signature, the secret, the headers or the body.
+// reason, never the signature, the secret, the headers or the body. Every request for a known Connection is in its
+// Request log, refused ones included, through the annotation of requestlog.Inbound (C-23.FR-1).
 func NewPush(cfg PushConfig) http.Handler {
 	if cfg.Tolerance <= 0 {
 		cfg.Tolerance = PushTolerance
@@ -94,16 +96,21 @@ func (h *push) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		named = ""
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, h.cfg.BodyLimit+1))
+	body, readErr := io.ReadAll(io.LimitReader(r.Body, h.cfg.BodyLimit+1))
+	// The Connection is read before any refusal, so that every request for a known one is in its Request log
+	// (C-23.FR-1); the answers keep their order, so that the endpoint still tells nothing about which Connections exist.
+	conn, mode, err := h.cfg.Connections.PushConnection(ctx, path)
+	if err == nil {
+		requestlog.Annotate(ctx, requestlog.Links{Connection: conn.ID, ConnectionID: conn.PublicID})
+	}
 	switch {
-	case err != nil:
+	case readErr != nil:
 		h.badRequest(ctx, w, named, reasonNotAnEvent, "The body is not an event of the Bridge protocol.")
 		return
 	case int64(len(body)) > h.cfg.BodyLimit:
 		h.badRequest(ctx, w, named, reasonTooLarge, "The body is larger than an event of the Bridge protocol.")
 		return
 	}
-	conn, mode, err := h.cfg.Connections.PushConnection(ctx, path)
 	switch {
 	case errors.Is(err, ErrNoConnection):
 		h.unauthorized(ctx, w, named, reasonUnknownConnection)

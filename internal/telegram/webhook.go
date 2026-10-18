@@ -18,6 +18,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/requestlog"
 )
 
 // The webhook endpoint of Telegram Connections on the ingest listener, telegramWebhook (C-14.AC-11): Telegram posts
@@ -42,11 +43,12 @@ func NewSecret() (logging.Secret, error) {
 	return logging.Secret(base64.RawURLEncoding.EncodeToString(b)), nil
 }
 
-// ErrNoWebhook is a webhook request for a Connection that does not exist, is deleted, is not a Telegram one or is not
-// in the webhook mode.
-var ErrNoWebhook = errors.New("no telegram connection in the webhook mode")
+// ErrNoWebhook is a webhook request for a Connection that does not exist, is deleted or is not a Telegram one.
+var ErrNoWebhook = errors.New("no such telegram connection")
 
-// Hooks find the Connection of a webhook request and its secret token; *connections.Service implements it.
+// Hooks find the Connection of a webhook request and its secret token; a Telegram Connection that is not in the webhook
+// mode, or has no secret token, is returned with an empty one, which the endpoint refuses; one that is unknown, deleted
+// or not a Telegram one is ErrNoWebhook. *connections.Service implements it.
 type Hooks interface {
 	Hooked(ctx context.Context, publicID string) (Conn, logging.Secret, error)
 }
@@ -67,7 +69,8 @@ type WebhookConfig struct {
 // NewWebhook is the webhook endpoint (C-14.FR-1, AC-11): it answers 401 and changes nothing unless the Connection
 // exists, is in the webhook mode and the header X-Telegram-Bot-Api-Secret-Token equals its secret token, compared in
 // constant time; otherwise it hands the update to the router and answers 200. A body that is not an update is 400; a
-// router that failed is 500, and Telegram sends the update again.
+// router that failed is 500, and Telegram sends the update again. A request for a known Connection is in its Request
+// log, refused ones included, through the annotation of requestlog.Inbound (C-23.FR-1).
 //
 // In the webhook mode a quiet period is no gap: Telegram posts each update as it comes. Only Muster not running is
 // (C-14.FR-4, journal D293): an update that reaches this replica before any other of its Connection, within
@@ -137,6 +140,7 @@ func (h *webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.failed(w, r, publicID, err)
 		return
 	}
+	requestlog.Annotate(ctx, requestlog.Links{Connection: conn.ID, ConnectionID: conn.PublicID})
 	given := r.Header.Get(SecretTokenHeader)
 	if secret == "" || subtle.ConstantTimeCompare([]byte(given), []byte(secret)) != 1 {
 		unauthorized(w)

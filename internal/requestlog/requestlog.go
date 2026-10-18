@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // Package requestlog is the Request log (C-23): the recent HTTP requests Muster sent for a Connection or an outgoing
-// webhook Destination — from S-089 also those that reached a Connection's callbacks — each with its answer. The
-// outbound package hands each attempt to the Writer already masked of the Secrets of its client and request; the Writer
-// applies the shape masking — signed action ids, `/start` tokens, the token of an account_link event — and the
-// truncation of mask.go, and inserts one row with the business time on the main pool, outside any transaction of the
-// caller, never failing or retrying the request it records. A record's owner is its Connection, else its outgoing
+// webhook Destination, and the requests that reached a Connection's callbacks, each with its answer. The outbound
+// package hands each attempt to the Writer already masked of the Secrets of its client and request, and Inbound each
+// request of a callback masked of the values of outbound.MaskedHeaders; the Writer applies the shape masking — signed
+// action ids, `/start` tokens, the token of an account_link event — and the truncation of mask.go, and inserts one row
+// with the business time on the main pool, outside any transaction of the caller, never failing or retrying the
+// request it records. A record's owner is its Connection, else its outgoing
 // webhook Destination, else nobody. The Reader shows only the records newer than request_log.max_age among the newest
 // request_log.max_records of their owner, and Prune deletes the rest.
 package requestlog
@@ -90,7 +91,8 @@ type Config struct {
 	Timeout time.Duration
 }
 
-// Writer writes the records of the Request log of one Organization; it is the outbound package's Recorder.
+// Writer writes the records of the Request log of one Organization; it is the outbound package's Recorder and the
+// InboundRecorder of the callbacks.
 type Writer struct {
 	orgID    int64
 	q        Queries
@@ -120,16 +122,51 @@ func (w *Writer) Record(ctx context.Context, r outbound.Record) {
 }
 
 func (w *Writer) write(ctx context.Context, direction string, r outbound.Record) {
-	p := w.paramsOf(direction, r)
+	w.insert(ctx, direction, r.Operation, r.Owner.PublicID, w.paramsOf(direction, r))
+}
+
+// insert writes the row p of the record of operation whose owner is owner, by public_id.
+func (w *Writer) insert(ctx context.Context, direction, operation, owner string, p dbgen.InsertRecordParams) {
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.timeout)
 	defer cancel()
 	if err := w.q.InsertRecord(wctx, p); err != nil {
 		metrics.RequestLogWriteFailures.With(direction).Inc()
 		w.log.Log(ctx, logging.RequestLogWriteFailed, logging.F("direction", direction),
-			logging.F("operation", r.Operation), logging.F("owner", r.Owner.PublicID), logging.F("error", err.Error()))
+			logging.F("operation", operation), logging.F("owner", owner), logging.F("error", err.Error()))
 		return
 	}
 	metrics.RequestLogRecords.With(direction).Inc()
+}
+
+var _ InboundRecorder = (*Writer)(nil)
+
+// maxMethod is the longest method a record stores.
+const maxMethod = 16
+
+// RecordInbound writes the record of a request that reached a callback (C-23.FR-1 to FR-4): the direction inbound, the
+// path direct, the attempt 1, no error, Muster's answer as its status, shape-masked and cut as an outbound record; a
+// body that Inbound did not keep whole is stored empty, marked truncated, with its size, and a method longer than a
+// record stores is cut. Like Record it fails nothing; a nil Writer records nothing.
+func (w *Writer) RecordInbound(ctx context.Context, r InboundRecord) {
+	if w == nil {
+		return
+	}
+	p := w.paramsOf(DirectionInbound, outbound.Record{
+		Owner:     outbound.Owner{Connection: r.Links.Connection, PublicID: r.Links.ConnectionID},
+		Links:     outbound.Links{Destination: r.Links.Destination, AlertGroup: r.Links.AlertGroup},
+		Operation: r.Operation, Method: r.Method[:min(len(r.Method), maxMethod)], URL: r.URL,
+		RequestHeader: r.RequestHeader, RequestBody: r.Request.Data, Status: cmp.Or(r.Status, http.StatusOK),
+		ResponseHeader: r.ResponseHeader, ResponseBody: r.Response.Data, Latency: r.Latency, Via: outbound.ViaDirect,
+		Attempt: 1})
+	p.RequestBodyBytes = r.Request.Size
+	if !r.Request.Whole {
+		p.RequestBody, p.RequestBodyTruncated = "", true
+	}
+	p.ResponseBodyBytes = r.Response.Size
+	if !r.Response.Whole {
+		p.ResponseBody, p.ResponseBodyTruncated = pgtype.Text{Valid: true}, true
+	}
+	w.insert(ctx, DirectionInbound, r.Operation, r.Links.ConnectionID, p)
 }
 
 // paramsOf is the row of r: masked, cut, and linked to its owner, its Destination and its Alert Group.

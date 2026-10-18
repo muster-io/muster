@@ -267,19 +267,20 @@ func (s *Service) Polling(ctx context.Context) ([]telegram.Polled, error) {
 	return out, nil
 }
 
-// Hooked is the Telegram Connection publicID of a webhook request with its secret token (telegram.Hooks); a Connection
-// that is unknown, deleted, not a Telegram one, not in the webhook mode or without a secret token is
-// telegram.ErrNoWebhook.
+// Hooked is the Telegram Connection publicID of a webhook request with its secret token (telegram.Hooks); a Telegram
+// Connection not in the webhook mode or without a secret token is returned without a client or a secret token; one
+// that is unknown, deleted or not a Telegram one is telegram.ErrNoWebhook.
 func (s *Service) Hooked(ctx context.Context, publicID string) (telegram.Conn, logging.Secret, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, ErrNotFound) || err == nil && row.Type != TypeTelegram {
 		return telegram.Conn{}, "", telegram.ErrNoWebhook
 	}
 	if err != nil {
 		return telegram.Conn{}, "", err
 	}
-	if row.Type != TypeTelegram || row.TelegramUpdateMode.String != ModeWebhook || !storedHook(row).Set() {
-		return telegram.Conn{}, "", telegram.ErrNoWebhook
+	if row.TelegramUpdateMode.String != ModeWebhook || !storedHook(row).Set() {
+		// The endpoint refuses it as it refuses a wrong secret token, and records the refusal (C-23.FR-1).
+		return telegram.Conn{ID: row.ID, PublicID: row.PublicID}, "", nil
 	}
 	secret, err := s.cfg.Keyring.OpenSecret(fieldWebhookSecret, storedHook(row))
 	if err != nil {

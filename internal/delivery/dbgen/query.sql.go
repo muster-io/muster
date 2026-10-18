@@ -1574,7 +1574,8 @@ func (q *Queries) GetPostDestination(ctx context.Context, arg GetPostDestination
 
 const getPressBinding = `-- name: GetPressBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds,
+       g.id AS alert_group_id
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1599,11 +1600,13 @@ type GetPressBindingRow struct {
 	ChannelID              string
 	Language               string
 	SnoozeDurationsSeconds []int64
+	AlertGroupID           int64
 }
 
 // GetPressBinding reads what a button press on the Root message message_id of the Alert Group group_public_id is bound
 // to (C-13.FR-4): the delivery of that Alert Group to a Mattermost Destination of the Connection that is not deleted
-// and whose Root message is message_id, with the Destination's channel and the Route's language and Snooze durations.
+// and whose Root message is message_id, with the Destination's channel, the Route's language and Snooze durations, and
+// the Alert Group's internal id for the Request log.
 func (q *Queries) GetPressBinding(ctx context.Context, arg GetPressBindingParams) (GetPressBindingRow, error) {
 	row := q.db.QueryRow(ctx, getPressBinding,
 		arg.OrgID,
@@ -1619,6 +1622,7 @@ func (q *Queries) GetPressBinding(ctx context.Context, arg GetPressBindingParams
 		&i.ChannelID,
 		&i.Language,
 		&i.SnoozeDurationsSeconds,
+		&i.AlertGroupID,
 	)
 	return i, err
 }
@@ -1626,7 +1630,7 @@ func (q *Queries) GetPressBinding(ctx context.Context, arg GetPressBindingParams
 const getReplyPressBinding = `-- name: GetReplyPressBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        coalesce(ds.mattermost_channel_id, '')::text AS channel_id, coalesce(d.message_id, '')::text AS root_message_id,
-       r.language, r.snooze_durations_seconds
+       r.language, r.snooze_durations_seconds, g.id AS alert_group_id
 FROM deliveries d
 JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
@@ -1654,12 +1658,13 @@ type GetReplyPressBindingRow struct {
 	RootMessageID          string
 	Language               string
 	SnoozeDurationsSeconds []int64
+	AlertGroupID           int64
 }
 
 // GetReplyPressBinding reads what a press on the Reminder message_id of the Alert Group group_public_id is bound to
 // (C-13.FR-4): a sent Reminder of that Alert Group to a Mattermost Destination of the Connection that is not deleted,
-// with the Destination's channel, the Root message the Reminder replies to and the Route's language and Snooze
-// durations.
+// with the Destination's channel, the Root message the Reminder replies to, the Route's language and Snooze durations,
+// and the Alert Group's internal id for the Request log.
 func (q *Queries) GetReplyPressBinding(ctx context.Context, arg GetReplyPressBindingParams) (GetReplyPressBindingRow, error) {
 	row := q.db.QueryRow(ctx, getReplyPressBinding,
 		arg.OrgID,
@@ -1676,6 +1681,7 @@ func (q *Queries) GetReplyPressBinding(ctx context.Context, arg GetReplyPressBin
 		&i.RootMessageID,
 		&i.Language,
 		&i.SnoozeDurationsSeconds,
+		&i.AlertGroupID,
 	)
 	return i, err
 }

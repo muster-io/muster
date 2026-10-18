@@ -134,7 +134,8 @@ func TestTelegramValidation(t *testing.T) {
 }
 
 // TestTelegramWebhookMode covers C-14.FR-1 and AC-11: the webhook mode sets the webhook at MUSTER_INGEST_URL with a new
-// secret token, which Hooked gives the webhook endpoint; leaving it deletes the webhook; a failed call saves nothing.
+// secret token, which Hooked gives the webhook endpoint; leaving it deletes the webhook and the secret token, which
+// Hooked then gives no more; a failed call saves nothing.
 func TestTelegramWebhookMode(t *testing.T) {
 	e := newTGEnv(t)
 	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeWebhook))
@@ -181,8 +182,11 @@ func TestTelegramWebhookMode(t *testing.T) {
 	if _, ok := e.tg.Webhooks()[tgOtherToken]; ok {
 		t.Fatal("the webhook is still set")
 	}
-	if _, _, err := e.svc.Hooked(t.Context(), c.PublicID); !errors.Is(err, telegram.ErrNoWebhook) {
-		t.Fatalf("hooked in long polling = %v", err)
+	// The Connection is still known to the endpoint, which refuses its requests without a secret token and records
+	// them (C-23.FR-1).
+	if conn, secret, err := e.svc.Hooked(t.Context(), c.PublicID); err != nil || secret != "" || conn.ID != c.ID ||
+		conn.PublicID != c.PublicID || conn.Client != nil {
+		t.Fatalf("hooked in long polling = %+v, %v", conn, err)
 	}
 	if e.store.rows[c.ID].row.TelegramWebhookSecretCiphertext != nil {
 		t.Fatal("the secret token is still stored")

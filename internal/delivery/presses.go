@@ -30,6 +30,9 @@ type Binding struct {
 	RootMessageID string
 	Language      string
 	SnoozeSeconds []int64
+	// AlertGroup is the internal id of the bound delivery's Alert Group, for the Request log (C-23.FR-2); 0 where the
+	// binding does not read it.
+	AlertGroup int64
 }
 
 // PressBinding reads the binding of a press on the post postID of the Connection connectionID that names the Alert
@@ -48,7 +51,7 @@ func (s *Service) PressBinding(ctx context.Context, connectionID int64, groupPub
 	}
 	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
 		Name: r.DestinationName, Type: TypeMattermost, Connection: &connectionID}, ChannelID: r.ChannelID,
-		Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
+		Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds, AlertGroup: r.AlertGroupID}, nil
 }
 
 // ReplyBinding reads the binding of a press on the post postID of the Connection connectionID that names the Alert
@@ -67,7 +70,8 @@ func (s *Service) ReplyBinding(ctx context.Context, connectionID int64, groupPub
 	}
 	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
 		Name: r.DestinationName, Type: TypeMattermost, Connection: &connectionID}, ChannelID: r.ChannelID,
-		RootMessageID: r.RootMessageID, Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
+		RootMessageID: r.RootMessageID, Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds,
+		AlertGroup: r.AlertGroupID}, nil
 }
 
 // TelegramReplyBinding reads the binding of a press on the message messageID of the chat chatID of the Telegram
