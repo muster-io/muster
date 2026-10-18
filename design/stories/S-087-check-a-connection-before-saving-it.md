@@ -58,7 +58,7 @@ acceptance:
   - "Every new text exists in English and Russian, the Connection forms show no horizontal scrolling at 360 px wide in either language, and no Content Security Policy violation is reported (`connection-checks.spec.ts`)."
 verify: "make ci e2e"
 operator_attention: true
-issue: null
+issue: 265
 ---
 
 # S-087. Check a Connection before saving it, for Mattermost, Telegram and Bridge Connections (BE)

@@ -34,7 +34,7 @@ acceptance:
   - "Every new text exists in English and Russian, the pages of the acceptance statements stay usable at 360 px wide, and no Content Security Policy violation is reported (`request-log.spec.ts`)."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 268
 ---
 
 # S-090. Request log tab, the record view, and the links from the Alert Group page and the check panels (FE)

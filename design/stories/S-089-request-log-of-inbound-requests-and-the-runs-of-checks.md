@@ -43,7 +43,7 @@ acceptance:
   - "[C-23.FR-2, C-23.FR-5, C-23.AC-5] Checks and tests carry their kind and run: `checkConnection` records `connection_check` and returns the run as `request_log_run`; `checkConnectionDraft` with a `connection_id` records `draft_check` under that Connection, and without one records `draft_check` with no owner, listed by `listRequestLog?run=`; `checkDestination` and the check of a Destination being saved record `destination_check` with the Destination, `testDestination` records `test`, and each Broken probe records `probe` with a run of its own; `listRequestLog?run=` alone needs `connections:read` and lists only that run (`draft_test.go`, `internal/api/requestlog_test.go`, `request_log_test.go`)."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 267
 ---
 
 # S-089. Request log of inbound requests at the callbacks, and the kinds and runs of checks and tests (BE)

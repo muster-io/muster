@@ -55,7 +55,7 @@ acceptance:
   - "[C-23.FR-7] The log events `request_log_write_failed` and `request_log_pruned` and the metrics `muster_request_log_records_total` (`direction`), `muster_request_log_write_failures_total` (`direction`) and `muster_request_log_pruned_total` are registered, in the catalogue of reference.md, and on their generated reference pages."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 266
 ---
 
 # S-088. Request log of outbound requests: recording in the outbound package, masking, pruning and the API (BE)
