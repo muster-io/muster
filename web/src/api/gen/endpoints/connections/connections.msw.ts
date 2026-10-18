@@ -33,6 +33,7 @@ import type {
 } from '../../model';
 
 import {
+  getCheckConnectionDraftResponseMock,
   getCheckConnectionResponseMock,
   getCreateConnectionResponseMock,
   getGetConnectionResponseMock,
@@ -41,7 +42,7 @@ import {
   getUpdateConnectionResponseMock
 } from './connections.faker';
 
-export { getListConnectionsResponseMock, getCreateConnectionResponseMock, getGetConnectionResponseMock, getUpdateConnectionResponseMock, getCheckConnectionResponseMock, getListConnectionChannelsResponseMock } from './connections.faker';
+export { getListConnectionsResponseMock, getCreateConnectionResponseMock, getCheckConnectionDraftResponseMock, getGetConnectionResponseMock, getUpdateConnectionResponseMock, getCheckConnectionResponseMock, getListConnectionChannelsResponseMock } from './connections.faker';
 
 
 export const getListConnectionsMockHandler = (overrideResponse?: ConnectionList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<ConnectionList> | ConnectionList), options?: RequestHandlerOptions) => {
@@ -64,6 +65,18 @@ export const getCreateConnectionMockHandler = (overrideResponse?: Connection | (
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getCreateConnectionResponseMock(),
       { status: 201
+      })
+  }, options)
+}
+
+export const getCheckConnectionDraftMockHandler = (overrideResponse?: ConnectionCheckResult | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<ConnectionCheckResult> | ConnectionCheckResult), options?: RequestHandlerOptions) => {
+  return http.post('*/connections/checks', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCheckConnectionDraftResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -128,6 +141,7 @@ export const getListConnectionChannelsMockHandler = (overrideResponse?: Mattermo
 export const getConnectionsMock = () => [
   getListConnectionsMockHandler(),
   getCreateConnectionMockHandler(),
+  getCheckConnectionDraftMockHandler(),
   getGetConnectionMockHandler(),
   getUpdateConnectionMockHandler(),
   getDeleteConnectionMockHandler(),

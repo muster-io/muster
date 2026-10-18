@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create connection" (C-13.FR-1, C-14.FR-1, C-22.FR-1): the choice of the messenger — Mattermost, Telegram or a
-// Bridge — then its form; the new Connection's page opens after it is created, with "Check connection" and, for
-// Mattermost and a Bridge in push mode, its callback address.
+// "Create connection" (C-13.FR-1, FR-14, C-14.FR-1, C-22.FR-1): the choice of the messenger — Mattermost, Telegram or a
+// Bridge — then its form and "Check connection", which checks the form's values before anything is saved and saves
+// nothing; the new Connection's page opens after it is created, with its own check and, for Mattermost and a Bridge in
+// push mode, its callback address.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -17,7 +18,14 @@ import {
   getListConnectionsQueryKey,
 } from "../api/gen/endpoints/connections/connections";
 import { RequirePermission } from "../components/app-shell";
-import { ConnectionForm, type ConnectionType } from "../components/connection-form";
+import { ConnectionCheck } from "../components/connection-check";
+import {
+  ConnectionForm,
+  type ConnectionType,
+  type ConnectionValues,
+  connectionDraft,
+  draftErrorText,
+} from "../components/connection-form";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/connections/new")({
@@ -36,6 +44,8 @@ function NewConnection() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [kind, setKind] = useState<ConnectionType>();
+  // The values in the form as they are typed, which the check sends as a draft.
+  const [values, setValues] = useState<ConnectionValues>();
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -86,6 +96,17 @@ function NewConnection() {
             return undefined;
           }}
           onCancel={() => void navigate({ to: "/connections" })}
+          onValuesChange={setValues}
+        />
+      )}
+      {kind !== undefined && values?.type === kind && (
+        <ConnectionCheck
+          // A check per messenger, keyed apart from its form, a sibling.
+          key={`check ${kind}`}
+          type={kind}
+          draft={connectionDraft(values, undefined)}
+          invalid={draftErrorText(t, values, undefined)}
+          updateMode={kind === "telegram" ? values.update_mode : undefined}
         />
       )}
     </div>

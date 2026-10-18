@@ -363,3 +363,69 @@ func TestInteractiveAdapterOps(t *testing.T) {
 		t.Errorf("a webhook op %v %+v", err, e.rec.Calls())
 	}
 }
+
+// TestInteractiveNoLimiter is C-13.FR-14: the check of a draft of a new Connection has no limiter; with NoLimiter the
+// call is made at once in the interactive client class, takes no token even when every bucket is empty, and a
+// RetryAfter it answers is returned as is and holds no bucket. NoLimiter with a Destination or a Connection is refused
+// without a call, and the zero Subject stays an error.
+func TestInteractiveNoLimiter(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 60
+	conn := int64(connID)
+	dest := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Type: delivery.TypeMattermost,
+		Connection: &conn}
+	in := e.interactive()
+	ok := delivery.ReadOp(func(context.Context, delivery.Call) delivery.Outcome {
+		return delivery.Outcome{Kind: delivery.OutcomeOK}
+	})
+	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, ok); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string]int{}
+	for _, name := range []string{"EnsureBuckets", "TakeTokens", "HoldBucket"} {
+		before[name] = e.db.calls[name]
+	}
+	businessAt, realAt := e.business.Now(), e.real.Now()
+	calls := 0
+	out, err := in.Do(t.Context(), delivery.Subject{NoLimiter: true}, delivery.ReadOp(
+		func(_ context.Context, c delivery.Call) delivery.Outcome {
+			calls++
+			if c.Class != "interactive" || c.Destination != (delivery.Destination{}) {
+				t.Errorf("call %+v", c)
+			}
+			return delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 30 * time.Second,
+				Scope: delivery.ScopeConnection}
+		}))
+	if err != nil || calls != 1 || out.Kind != delivery.OutcomeRetryAfter || out.RetryAfter != 30*time.Second {
+		t.Fatalf("no limiter = %+v, %v after %d calls", out, err, calls)
+	}
+	for name, n := range before {
+		if e.db.calls[name] != n {
+			t.Errorf("%s ran %d times without a limiter", name, e.db.calls[name]-n)
+		}
+	}
+	if !e.business.Now().Equal(businessAt) || !e.real.Now().Equal(realAt) {
+		t.Error("a call without a limiter waited")
+	}
+	if b := e.db.buckets[bucketKey{"connection", connID}]; b != nil && b.refilled.After(business0) {
+		t.Errorf("a call without a limiter held the connection bucket %+v", b)
+	}
+	e.db.fail["TakeTokens"] = errBoom
+	if _, err := in.Do(t.Context(), delivery.Subject{NoLimiter: true}, ok); err != nil {
+		t.Errorf("a call without a limiter read the limiters: %v", err)
+	}
+	delete(e.db.fail, "TakeTokens")
+	for name, s := range map[string]delivery.Subject{
+		"destination": {NoLimiter: true, Destination: &dest},
+		"connection":  {NoLimiter: true, Connection: &conn},
+		"zero":        {},
+	} {
+		called := false
+		if _, err := in.Do(t.Context(), s, delivery.ReadOp(func(context.Context, delivery.Call) delivery.Outcome {
+			called = true
+			return delivery.Outcome{Kind: delivery.OutcomeOK}
+		})); err == nil || called {
+			t.Errorf("%s: err %v, called %v", name, err, called)
+		}
+	}
+}

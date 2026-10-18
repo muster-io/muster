@@ -274,15 +274,22 @@ func (s *Service) checkBridge(ctx context.Context, row dbgen.GetConnectionRow, b
 	if stored != nil {
 		return CheckResult{}, stored
 	}
-	step := Step{Name: StepInfo, OK: r.OK(), Latency: latency, Via: c.Via()}
+	return bridgeResult(info, r, latency, c.Via(), row.BridgeEventDelivery.String), nil
+}
+
+// bridgeResult is the result of the check of a Bridge Connection in the event delivery mode mode from its step info —
+// the info read, how the read ended, its latency and path via —: the step event_delivery checks that the bridge offers
+// mode, and is skipped when info failed, whose failure carries the code the protocol names or that of
+// delivery.FailureCode, with the bridge's masked text.
+func bridgeResult(info bridge.Info, r bridge.Result, latency time.Duration, via, mode string) CheckResult {
+	step := Step{Name: StepInfo, OK: r.OK(), Latency: latency, Via: via}
 	if !r.OK() {
 		step.Message, step.Code = string(r.Error), r.CheckCode()
-		return CheckResult{Bridge: true, Steps: []Step{step, {Name: StepEventDelivery, Skipped: true,
-			Via: c.Via()}}}, nil
+		return CheckResult{Bridge: true, Steps: []Step{step, {Name: StepEventDelivery, Skipped: true, Via: via}}}
 	}
-	ok, code, message := bridge.EventDeliveryStep(info, row.BridgeEventDelivery.String)
+	ok, code, message := bridge.EventDeliveryStep(info, mode)
 	return CheckResult{OK: ok, Bridge: true, Info: info.Raw, Steps: []Step{step, {Name: StepEventDelivery, OK: ok,
-		Via: c.Via(), Message: message, Code: code}}}, nil
+		Via: via, Message: message, Code: code}}}
 }
 
 // CheckBridgeChannel runs the Destination check of a Bridge Destination being saved or checked, for the Destination

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -470,4 +472,225 @@ func TestAppErrorText(t *testing.T) {
 		!strings.Contains(string(r.Outcome.Error), "[redacted]") {
 		t.Errorf("app error = %+v", r)
 	}
+}
+
+// newTokenless is a client without a token, as the check of a draft builds it for the dry probe.
+func newTokenless(t *testing.T, n mattermost.Network, serverURL string, proxy *outbound.Proxy) *mattermost.Client {
+	t.Helper()
+	c, err := mattermost.NewClient(n, mattermost.Settings{ServerURL: serverURL, Proxy: proxy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// wantProbeRequest fails the test unless the fake recorded only the dry probe, without an Authorization header.
+func wantProbeRequest(t *testing.T, f *fakemattermost.Fake) {
+	t.Helper()
+	reqs := f.Requests()
+	if len(reqs) != 1 || reqs[0].Method != http.MethodGet || reqs[0].Path != mattermost.DryProbePath ||
+		len(reqs[0].Headers["Authorization"]) != 0 {
+		t.Errorf("requests %+v", reqs)
+	}
+}
+
+// TestDryProbe covers C-13.FR-2 and AC-17: the dry probe is GET /api/v4/system/ping without an Authorization header,
+// on a client without a token and on one with a token alike; it passes on the 200 JSON answer whose status is OK and
+// names every other answer in the order of the PRD, with its latency on the real clock it is given.
+func TestDryProbe(t *testing.T) {
+	f := startFake(t)
+	clients := []*mattermost.Client{newTokenless(t, network(t, &bytes.Buffer{}, "127.0.0.0/8"), f.URL(), nil),
+		newClient(t, f.URL(), nil)}
+	for _, tc := range []struct {
+		name    string
+		fault   fakeserver.Fault
+		message string
+		code    string
+	}{
+		{name: "the answer of a Mattermost server"},
+		{name: "200 with another status", fault: fakeserver.Fault{Status: 200, Body: `{"status":"DOWN"}`},
+			message: "The address answered 200 with JSON whose status is not OK.", code: mattermost.CodeNotMattermost},
+		{name: "200 with a status that is not text", fault: fakeserver.Fault{Status: 200, Body: `{"status":true}`},
+			message: "The address answered 200 with JSON whose status is not OK.", code: mattermost.CodeNotMattermost},
+		{name: "200 HTML", fault: fakeserver.Fault{Status: 200, ContentType: "text/html; charset=utf-8",
+			Body: "<html>OK</html>"}, message: "The address answered 200 with text/html, not as a Mattermost server.",
+			code: mattermost.CodeNotMattermost},
+		{name: "200 JSON that is not an object", fault: fakeserver.Fault{Status: 200, Body: `["OK"]`},
+			message: "The address answered 200 with application/json, not as a Mattermost server.",
+			code:    mattermost.CodeNotMattermost},
+		{name: "500 HTML", fault: fakeserver.Fault{Status: 500, ContentType: "text/html", Body: "<p>down</p>"},
+			message: "The address answered 500 with text/html, not as a Mattermost server.",
+			code:    mattermost.CodeNotMattermost},
+		{name: "a redirect", fault: fakeserver.Fault{Status: 302, Location: "https://example.org/"},
+			message: "The address answered 302 with text/plain, not as a Mattermost server.",
+			code:    mattermost.CodeNotMattermost},
+		{name: "404", fault: fakeserver.Fault{Status: 404, Body: "404 page not found"},
+			message: mattermost.MessageWrongPrefix, code: mattermost.CodeWrongPrefix},
+		{name: "404 JSON", fault: fakeserver.Fault{Status: 404, Body: `{"id":"api.context.404.app_error"}`},
+			message: mattermost.MessageWrongPrefix, code: mattermost.CodeWrongPrefix},
+		{name: "503 JSON", fault: fakeserver.Fault{Status: 503, Body: `{"status":"DOWN"}`},
+			message: "The server answered 503 instead of 200 with JSON whose status is OK.",
+			code:    mattermost.CodeUnexpectedStatus},
+		{name: "407", fault: fakeserver.Fault{Status: 407, Body: "proxy"},
+			message: mattermost.MessageProxyRefused, code: delivery.CodeProxyRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.fault.Status != 0 {
+				tc.fault.Path = mattermost.DryProbePath
+				fault(t, f, tc.fault)
+			}
+			for i, c := range clients {
+				f.ResetRequests()
+				p, err := mattermost.RunDryProbe(t.Context(), c, interactive, clock.NewManual(t0))
+				if err != nil || p.OK != (tc.code == "") || p.Message != tc.message || p.Code != tc.code {
+					t.Errorf("client %d: probe = %+v, %v", i, p, err)
+				}
+				wantProbeRequest(t, f)
+			}
+		})
+	}
+
+	realClock := clock.NewManual(t0)
+	seen := make(chan http.Header, 1)
+	standIn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Clone()
+		realClock.Advance(42 * time.Millisecond)
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write([]byte("OK"))
+	}))
+	t.Cleanup(standIn.Close)
+	c := newTokenless(t, network(t, &bytes.Buffer{}, "127.0.0.0/8"), standIn.URL+"/mm/", nil)
+	p, err := mattermost.RunDryProbe(t.Context(), c, interactive, realClock)
+	if err != nil || p.OK || p.Latency != 42*time.Millisecond || p.Code != mattermost.CodeNotMattermost ||
+		p.Message != "The address answered 200 with no content type, not as a Mattermost server." {
+		t.Errorf("probe without a content type = %+v, %v", p, err)
+	}
+	if h := <-seen; h.Get("Authorization") != "" {
+		t.Errorf("the probe carried Authorization: %v", h)
+	}
+
+	boom := errors.New("limiter down")
+	if _, err := mattermost.RunDryProbe(t.Context(), c, func(context.Context,
+		func(context.Context, delivery.Call) delivery.Outcome) (delivery.Outcome, error) {
+		return delivery.Outcome{}, boom
+	}, realClock); !errors.Is(err, boom) {
+		t.Errorf("the runner's error = %v", err)
+	}
+}
+
+// failingResolver answers every lookup with a DNS error.
+type failingResolver struct{}
+
+func (failingResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+// TestDryProbeWithoutAnswer covers C-13.FR-2: a dry probe without an answer has the code of delivery.FailureCode — an
+// unknown name, a refused connection, an address the outbound address policy refuses — and a proxy that refuses the
+// credentials, SOCKS5 or HTTP, is proxy_refused; nothing reaches the server.
+func TestDryProbeWithoutAnswer(t *testing.T) {
+	f := startFake(t)
+	proxies := map[fakeproxy.Kind]string{}
+	for _, kind := range []fakeproxy.Kind{fakeproxy.SOCKS5, fakeproxy.HTTP} {
+		p, err := fakeproxy.Start(t.Context(), kind, "127.0.0.1:0", fakeproxy.Options{Username: "u", Password: "right"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = p.Close() })
+		proxies[kind] = p.Addr()
+	}
+	loopback := network(t, &bytes.Buffer{}, "127.0.0.0/8")
+	dns := network(t, &bytes.Buffer{}, "127.0.0.0/8")
+	dns.Resolver = failingResolver{}
+	for _, tc := range []struct {
+		name      string
+		n         mattermost.Network
+		serverURL string
+		proxy     *outbound.Proxy
+		code      string
+		message   string
+	}{
+		{name: "dns", n: dns, serverURL: "http://mattermost.invalid", code: delivery.CodeDNSFailed},
+		{name: "refused", n: loopback, serverURL: "http://127.0.0.1:1", code: delivery.CodeConnectFailed},
+		{name: "blocked", n: network(t, &bytes.Buffer{}), serverURL: f.URL(), code: delivery.CodeBlocked},
+		{name: "socks5 refused the credentials", n: loopback, serverURL: f.URL(), proxy: &outbound.Proxy{
+			Type: outbound.ProxySOCKS5, Address: proxies[fakeproxy.SOCKS5], Username: "u", Password: "wrong"},
+			code: delivery.CodeProxyRefused, message: mattermost.MessageProxyRefused},
+		{name: "http proxy 407", n: loopback, serverURL: f.URL(), proxy: &outbound.Proxy{
+			Type: outbound.ProxyHTTP, Address: proxies[fakeproxy.HTTP], Username: "u", Password: "wrong"},
+			code: delivery.CodeProxyRefused, message: mattermost.MessageProxyRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTokenless(t, tc.n, tc.serverURL, tc.proxy)
+			p, err := mattermost.RunDryProbe(t.Context(), c, interactive, clock.NewManual(t0))
+			if err != nil || p.OK || p.Code != tc.code || p.Message == "" ||
+				(tc.message != "" && p.Message != tc.message) || strings.Contains(p.Message, "wrong") {
+				t.Errorf("probe = %+v, %v", p, err)
+			}
+		})
+	}
+	c := newTokenless(t, loopback, f.URL(), nil)
+	p, err := mattermost.RunDryProbe(t.Context(), c, mattermost.Direct(delivery.Call{Class: outbound.ClassHeartbeat}),
+		clock.NewManual(t0))
+	if err != nil || p.OK || p.Code != delivery.CodeRequestFailed || p.Message != "the Mattermost client has no "+
+		"heartbeat class" {
+		t.Errorf("a class the client has not = %+v, %v", p, err)
+	}
+	if reqs := f.Requests(); len(reqs) != 0 {
+		t.Errorf("requests %+v", reqs)
+	}
+}
+
+// TestDryProbeNeverWaits: a 429 to the dry probe reaches the runner as Transient, without a delay or a scope, so that a
+// request without a token never holds the limiter of the Connection whose limiter token the check took; Mattermost's
+// 429 is plain text (F-031), which is not a Mattermost server's answer to the probe.
+func TestDryProbeNeverWaits(t *testing.T) {
+	f := startFake(t)
+	c := newTokenless(t, network(t, &bytes.Buffer{}, "127.0.0.0/8"), f.URL(), nil)
+	fault(t, f, fakeserver.Fault{Path: mattermost.DryProbePath, Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 30, ContentType: "text/plain", Body: "limit exceeded"})
+	var got delivery.Outcome
+	run := func(ctx context.Context, fn func(context.Context, delivery.Call) delivery.Outcome) (delivery.Outcome,
+		error) {
+		got = fn(ctx, delivery.Call{Class: outbound.ClassInteractive})
+		return got, nil
+	}
+	p, err := mattermost.RunDryProbe(t.Context(), c, run, clock.NewManual(t0))
+	if err != nil || p.OK || p.Code != mattermost.CodeNotMattermost || got.Kind != delivery.OutcomeTransient ||
+		got.RetryAfter != 0 || got.Scope != "" {
+		t.Errorf("probe = %+v, %v, outcome %+v", p, err, got)
+	}
+	wantProbeRequest(t, f)
+}
+
+// TestClientWithoutToken: a client built without a token refuses every call that would carry one before any request,
+// and makes only the dry probe.
+func TestClientWithoutToken(t *testing.T) {
+	f := startFake(t)
+	c := newTokenless(t, network(t, &bytes.Buffer{}, "127.0.0.0/8"), f.URL(), nil)
+	ctx, class := t.Context(), outbound.ClassInteractive
+	refused := func(what string, r mattermost.Result) {
+		t.Helper()
+		if r.OK() || r.Status != 0 || r.Outcome.Kind != delivery.OutcomeFatal ||
+			string(r.Outcome.Error) != "this client has no bot token: only the dry probe runs without one" {
+			t.Errorf("%s = %+v", what, r)
+		}
+	}
+	_, r := c.Me(ctx, class)
+	refused("Me", r)
+	_, r = c.Teams(ctx, class)
+	refused("Teams", r)
+	_, r = c.Grants(ctx, class, mattermost.User{Roles: "system_user"}, mattermost.PermissionEphemeralPosts)
+	refused("Grants", r)
+	res, err := mattermost.CheckDestination(ctx, c, interactive, fakemattermost.TeamID, fakemattermost.ChannelAlerts)
+	if err != nil || res.OK() || len(res.Steps) != 1 || res.Steps[0].Name != mattermost.StepToken {
+		t.Errorf("check = %+v, %v", res, err)
+	}
+	if reqs := f.Requests(); len(reqs) != 0 {
+		t.Fatalf("a client without a token made requests: %+v", reqs)
+	}
+	if p, err := mattermost.RunDryProbe(ctx, c, interactive, clock.NewManual(t0)); err != nil || !p.OK {
+		t.Errorf("probe = %+v, %v", p, err)
+	}
+	wantProbeRequest(t, f)
 }

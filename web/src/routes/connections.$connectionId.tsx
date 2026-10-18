@@ -3,9 +3,11 @@
 
 // A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1, FR-2, FR-18): its form, read-only without
 // connections:write; for Mattermost the callback address with its hint, for a Bridge in push mode the same in its form;
-// "Check connection" and "Delete" with connections:write. A Telegram Connection's check takes the base URL in the form:
-// an unsaved one gets only the dry probe, without the token. A Bridge Connection shows what its bridge offers, from the
-// info the last check read, which a check refreshes, and its form proposes half of the bridge's rate as the limiter.
+// "Check connection" and "Delete" with connections:write. The check reads the saved Connection while the form holds no
+// changes, and checks the form's values as a draft while it does (C-13.FR-14), which saves nothing: the server sends
+// the stored token only to the saved address through the saved proxy. A Bridge Connection shows what its bridge offers,
+// from the info the last check of the saved Connection read, and its form proposes half of the bridge's rate as the
+// limiter.
 // The form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload.
@@ -28,8 +30,13 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { BridgeInfoPanel } from "../components/bridge-connection-fields";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
-import { ConnectionDeleteDialog, ConnectionForm } from "../components/connection-form";
-import { normalizeBaseUrl } from "../components/telegram-connection-fields";
+import {
+  ConnectionDeleteDialog,
+  ConnectionForm,
+  type ConnectionValues,
+  connectionDraft,
+  draftErrorText,
+} from "../components/connection-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -60,14 +67,9 @@ function EditForm({ current }: { current: Connection }) {
   const [saved, setSaved] = useState(false);
   const [replaced, setReplaced] = useState(false);
   const [reloadError, setReloadError] = useState<unknown>(null);
-  // The base URL in the form of a Telegram Connection, as it is typed.
-  const [baseUrl, setBaseUrl] = useState<string>();
-  const unsavedBaseUrl =
-    base.type === "telegram" &&
-    baseUrl !== undefined &&
-    normalizeBaseUrl(baseUrl) !== base.bot_api_base_url
-      ? baseUrl
-      : undefined;
+  // The values in the form as they are typed; while the form holds changes, the check sends them as a draft.
+  const [values, setValues] = useState<ConnectionValues>();
+  const edited = dirty && values !== undefined && values.type === base.type ? values : undefined;
   // The form is mounted again only for a version it did not save itself: a newer one or a reload.
   const [formKey, setFormKey] = useState(0);
   // A newer version (another Admin, another tab) replaces an untouched form, which says so.
@@ -99,7 +101,7 @@ function EditForm({ current }: { current: Connection }) {
         stale={current.etag !== base.etag}
         saved={saved}
         onDirtyChange={setDirty}
-        onBaseUrlChange={setBaseUrl}
+        onValuesChange={setValues}
         info={current.type === "bridge" ? current.info : undefined}
         save={async (input) => {
           setSaving(true);
@@ -142,16 +144,22 @@ function EditForm({ current }: { current: Connection }) {
         }}
       />
       {current.type === "mattermost" && <CallbackHint callbackUrl={current.callback_url} />}
-      {/* A saved change of the address or the bot token makes an earlier result stale, and so does another unsaved
-          address: a result belongs to the address it was made for. */}
+      {/* A saved change makes an earlier result stale, and so does a change of the form: a result belongs to the values
+          it was made for. */}
       {canWrite && (
         <ConnectionCheck
-          key={`${base.etag} ${unsavedBaseUrl ?? ""}`}
+          key={`check ${base.etag}`}
           connectionId={base.id}
           type={base.type}
-          dirty={dirty}
-          unsavedBaseUrl={unsavedBaseUrl}
-          updateMode={base.type === "telegram" ? base.update_mode : undefined}
+          draft={edited === undefined ? undefined : connectionDraft(edited, base)}
+          invalid={edited === undefined ? undefined : draftErrorText(t, edited, base)}
+          updateMode={
+            base.type !== "telegram"
+              ? undefined
+              : edited === undefined
+                ? base.update_mode
+                : edited.update_mode
+          }
         />
       )}
       {/* The stored info, which a check refreshes without a new version of the Connection. */}

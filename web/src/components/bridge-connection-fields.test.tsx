@@ -475,9 +475,7 @@ function step(
 
 async function runCheck(result: ConnectionCheckResult, button = "Check connection") {
   const fetch = vi.spyOn(window, "fetch").mockResolvedValue(json(200, result));
-  await render(
-    providers(<ConnectionCheck connectionId="CN0000000000BR" type="bridge" dirty={false} />),
-  );
+  await render(providers(<ConnectionCheck connectionId="CN0000000000BR" type="bridge" />));
   await page.getByRole("button", { name: button }).click();
   return fetch;
 }
@@ -533,7 +531,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
     await expect
       .element(
         page.getByText(
-          "Reads the bridge's info with the saved token, then checks that the bridge offers this Connection's event delivery mode.",
+          "Reads the bridge's info with the token, then checks that the bridge offers the event delivery mode. Before saving, the check uses the values in the form; a saved token is sent only to the saved address through the saved proxy.",
         ),
       )
       .toBeVisible();
@@ -612,7 +610,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
         .poll(stepTexts)
         .toEqual([
           `Сведения о мосте: ошибка 3 мс · напрямую${reasonRu}Подробности: ${message}`,
-          "Доставка событий: Пропущен: предыдущий шаг не прошёл",
+          "Доставка событий: Пропущено: предыдущий шаг не прошёл",
         ]);
     },
   );

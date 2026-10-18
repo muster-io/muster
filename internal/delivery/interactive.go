@@ -36,9 +36,12 @@ type Interactive struct {
 const pollStep = 10 * time.Millisecond
 
 // Subject is what an interactive call is limited by: a Destination with its Connection, or a Connection alone.
+// NoLimiter says explicitly that the call has no limiter, as the check of a draft of a Connection that is not saved
+// (C-13.FR-14); it names neither, and the zero Subject stays an error.
 type Subject struct {
 	Destination *Destination
 	Connection  *int64
+	NoLimiter   bool
 }
 
 // LimitedError is an interactive call that found no limiter token within the budget: nothing was sent, and a token
@@ -152,8 +155,17 @@ func DirectOp(send func(ctx context.Context, c Call) Outcome) Op { return direct
 
 // Do makes op once a token of s is taken, in the interactive client class. When no token frees within the budget it
 // returns a *LimitedError and calls nothing. A RetryAfter the call answers holds the bucket of its scope, as for the
-// worker.
+// worker. A Subject with NoLimiter calls op at once: it waits for no token, so never past the budget, and holds no
+// bucket.
 func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error) {
+	switch {
+	case s.NoLimiter && (s.Destination != nil || s.Connection != nil):
+		return Outcome{}, errors.New("an interactive call without a limiter names no destination or connection")
+	case s.NoLimiter:
+		return op.call(ctx, Call{Class: outbound.ClassInteractive}), nil
+	case s.Destination == nil && s.Connection == nil:
+		return Outcome{}, errors.New("an interactive call needs a destination or a connection")
+	}
 	budget := i.Budget
 	if budget <= 0 {
 		budget = InteractiveBudget
@@ -161,9 +173,6 @@ func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error)
 	sleep := i.Sleep
 	if sleep == nil {
 		sleep = sleepReal
-	}
-	if s.Destination == nil && s.Connection == nil {
-		return Outcome{}, errors.New("an interactive call needs a destination or a connection")
 	}
 	sub := subject{connection: s.Connection}
 	c := Call{Class: outbound.ClassInteractive}

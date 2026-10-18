@@ -4,8 +4,9 @@
 // The Telegram Connection in a real browser: the base URL with its hint and the warning of an http address, from the
 // server's warnings for the saved address and at once for a typed one; the update mode with its hints; the request a
 // save sends and the checks it repeats; the refusals at /bot_api_base_url and /update_mode; and the step-by-step check
-// with the bot, the pending updates, the webhook warning in the long-polling mode, the unsaved address that gets only
-// the dry probe with the other steps skipped, the steps skipped after a failed dry probe, and a busy messenger.
+// with the bot, the pending updates, the webhook warning in the long-polling mode, the draft of a changed address whose
+// other steps ask for the token again after its dry probe, the steps skipped after a failed dry probe, an address the
+// server would refuse named before anything is sent, and a busy messenger.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -16,6 +17,7 @@ import { render } from "vitest-browser-react";
 
 import type {
   ConnectionCheckResult,
+  ConnectionDraft,
   ConnectionInput,
   Permission,
   Session,
@@ -24,15 +26,18 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { ConnectionCheck, checkErrorText } from "./connection-check";
+import { ConnectionCheck, connectionCheckErrorText } from "./connection-check";
 import {
   BASE_URL_FORMAT,
   ConnectionForm,
   TOKEN_FOR_NEW_SERVER,
+  type ConnectionValues,
   addressChanged,
+  connectionDraft,
   connectionErrors,
   connectionInput,
   connectionValues,
+  draftErrorText,
   serverDetails,
   serverErrors,
 } from "./connection-form";
@@ -309,14 +314,14 @@ describe("TelegramConnectionFields", () => {
 describe("ConnectionForm of a Telegram Connection", () => {
   test("creates a Connection with the default base URL, the token, the update mode and the limiter", async () => {
     const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
-    const baseUrls: string[] = [];
+    const values: ConnectionValues[] = [];
     await render(
       providers(
         <ConnectionForm
           type="telegram"
           submitLabel="Save"
           save={save}
-          onBaseUrlChange={(v) => baseUrls.push(v)}
+          onValuesChange={(v) => values.push(v)}
         />,
       ),
     );
@@ -342,7 +347,8 @@ describe("ConnectionForm of a Telegram Connection", () => {
       proxy: { enabled: false, type: "http", username: null },
       limiter: { limit: 15, per_seconds: 1 },
     });
-    expect(baseUrls.at(-1)).toBe("http://127.0.0.1:18081");
+    expect(values.at(-1)?.bot_api_base_url).toBe("http://127.0.0.1:18081");
+    expect(values.at(-1)?.update_mode).toBe("webhook");
     expect(document.body.textContent).not.toContain("777010:ui-token");
   });
 
@@ -431,9 +437,17 @@ const PASSED: ConnectionCheckResult = {
   pending_updates: 0,
 };
 
+/** The draft of the form of CONNECTION with the base URL changed to baseUrl, as the page sends it. */
+function draftAt(baseUrl: string): ConnectionDraft {
+  return connectionDraft(
+    { ...connectionValues(CONNECTION), bot_api_base_url: baseUrl },
+    CONNECTION,
+  );
+}
+
 async function runCheck(
   response: Response,
-  props: { unsavedBaseUrl?: string; updateMode?: TelegramUpdateMode } = {},
+  props: { draft?: ConnectionDraft; invalid?: string; updateMode?: TelegramUpdateMode } = {},
   button = "Check connection",
 ) {
   const fetch = vi.spyOn(window, "fetch").mockResolvedValue(response);
@@ -442,8 +456,8 @@ async function runCheck(
       <ConnectionCheck
         connectionId="CN0000000000TG"
         type="telegram"
-        dirty={props.unsavedBaseUrl !== undefined}
-        unsavedBaseUrl={props.unsavedBaseUrl}
+        draft={props.draft}
+        invalid={props.invalid}
         updateMode={props.updateMode ?? "long_polling"}
       />,
     ),
@@ -512,7 +526,8 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect.element(page.getByTestId("connection-check-warning")).not.toBeInTheDocument();
   });
 
-  test("sends an unsaved address alone and shows the other steps as skipped", async () => {
+  test("checks a draft of another path prefix, whose failed dry probe skips the other steps", async () => {
+    const draft = draftAt(" http://127.0.0.1:18081/other/ ");
     const fetch = await runCheck(
       json(200, {
         ok: false,
@@ -530,22 +545,28 @@ describe("ConnectionCheck of a Telegram Connection", () => {
         ],
         warnings: [],
       }),
-      { unsavedBaseUrl: " http://127.0.0.1:18081/other/ " },
+      { draft },
     );
     await expect
-      .element(page.getByTestId("connection-check-unsaved"))
-      .toHaveTextContent(
-        "The address is not saved: the check makes only the dry probe against it, without the token.",
-      );
+      .element(page.getByTestId("connection-check-draft"))
+      .toHaveTextContent("The check uses the values in the form and saves nothing.");
     await expect
       .poll(stepTexts)
       .toEqual([
         "Dry probe without the token: failed 2 ms · directWrong path prefix: the server answered 404.",
-        "getMe: Skipped: save the address first",
-        "getWebhookInfo: Skipped: save the address first",
+        "getMe: Skipped: an earlier step failed",
+        "getWebhookInfo: Skipped: an earlier step failed",
       ]);
-    const init = fetch.mock.calls[0]?.[1];
-    expect(init?.body).toBe(JSON.stringify({ base_url: "http://127.0.0.1:18081/other/" }));
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(url).toBe("/api/v1/connections/checks");
+    // The address as a save sends it, the saved Connection, the proxy, and no token: none was typed.
+    expect(typeof init?.body === "string" ? JSON.parse(init.body) : init?.body).toEqual({
+      type: "telegram",
+      bot_api_base_url: "http://127.0.0.1:18081/other/",
+      update_mode: "long_polling",
+      proxy: { enabled: false, type: "http", username: null },
+      connection_id: "CN0000000000TG",
+    });
     // A step that never ran does not look like one that passed.
     const icons = page
       .getByTestId("connection-check-step")
@@ -554,7 +575,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     expect(icons).toEqual(["", "skipped", "skipped"]);
   });
 
-  test("says that a dry probe of an unsaved address passed", async () => {
+  test("asks for the token again when only the dry probe of a changed address ran", async () => {
     await runCheck(
       json(200, {
         ok: true,
@@ -565,14 +586,18 @@ describe("ConnectionCheck of a Telegram Connection", () => {
         ],
         warnings: [],
       }),
-      { unsavedBaseUrl: "https://bot-api.example.org" },
+      { draft: draftAt("https://bot-api.example.org") },
     );
     await expect
       .element(page.getByTestId("connection-check-summary"))
-      .toHaveTextContent("The address answers as a Bot API. Save it to check the bot token there.");
+      .toHaveTextContent("The address answers as a Bot API.");
     await expect
-      .poll(() => stepTexts()[0])
-      .toBe("Dry probe without the token: ok · 2 ms · through the proxy");
+      .poll(stepTexts)
+      .toEqual([
+        "Dry probe without the token: ok · 2 ms · through the proxy",
+        "getMe: Skipped: type the bot token again to check the new address or proxy, or save first",
+        "getWebhookInfo: Skipped: type the bot token again to check the new address or proxy, or save first",
+      ]);
   });
 
   test("skips the token's steps after a failed dry probe of the saved address", async () => {
@@ -606,24 +631,29 @@ describe("ConnectionCheck of a Telegram Connection", () => {
       ]);
   });
 
-  test("refuses an unsaved address that is not a URL before sending anything", async () => {
-    const fetch = await runCheck(json(200, PASSED), { unsavedBaseUrl: "telegram" });
+  test("refuses an address that is not a URL before sending anything", async () => {
+    const values = { ...connectionValues(CONNECTION), bot_api_base_url: "telegram" };
+    const fetch = await runCheck(json(200, PASSED), {
+      draft: connectionDraft(values, CONNECTION),
+      invalid: draftErrorText(i18n.t, values, CONNECTION),
+    });
     await expect
       .element(page.getByTestId("connection-check-error"))
-      .toHaveTextContent(BASE_URL_TEXT);
+      .toHaveTextContent(`Bot API base URL: ${BASE_URL_TEXT}`);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("names the refusal of an unsaved address and the wait of a busy messenger", async () => {
+  test("names the refusal of a base URL and the wait of a busy messenger", async () => {
     expect(
-      checkErrorText(
+      connectionCheckErrorText(
         i18n.t,
         refusal(422, {
           code: "validation_failed",
-          errors: [{ pointer: "/base_url", code: "invalid_format" }],
+          errors: [{ pointer: "/bot_api_base_url", code: "invalid_format" }],
         }),
+        "telegram",
       ),
-    ).toBe(BASE_URL_TEXT);
+    ).toBe(`Bot API base URL: ${BASE_URL_TEXT}`);
     await runCheck(
       json(
         503,
@@ -648,16 +678,22 @@ describe("ConnectionCheck of a Telegram Connection", () => {
         ],
         warnings: [],
       }),
-      { unsavedBaseUrl: "http://127.0.0.1:18081/other/" },
+      { draft: draftAt("http://127.0.0.1:18082") },
       "Проверить подключение",
     );
+    await expect
+      .element(page.getByTestId("connection-check-summary"))
+      .toHaveTextContent("По этому адресу отвечает Bot API.");
     await expect
       .poll(stepTexts)
       .toEqual([
         "Пробный запрос без токена: успешно · 2 мс · напрямую",
-        "getMe: Пропущен: сначала сохраните адрес",
-        "getWebhookInfo: Пропущен: сначала сохраните адрес",
+        "getMe: Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения",
+        "getWebhookInfo: Пропущено: введите токен бота заново, чтобы проверить новый адрес или прокси, или сохраните изменения",
       ]);
+    await expect
+      .element(page.getByTestId("connection-check-draft"))
+      .toHaveTextContent("Проверка берёт значения из формы и ничего не сохраняет.");
   });
 
   test("translates a failed dry probe into Russian, with the server's English message as the detail", async () => {

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11; C-22.FR-2): each step with "ok" or what failed,
-// translated by its code with the server's English message below as its detail, its latency and the path it took,
-// directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the
-// check, each with its hint. Telegram works in steps — the dry probe without the token, getMe with the bot,
-// getWebhookInfo with the pending updates — and a set webhook in the long-polling mode gets its warning. While the form
-// holds an unsaved base URL, the check sends it as base_url: the server makes only the dry probe against it, never with
-// the token, and the other steps read "Skipped: save the address first". A Bridge has two steps, "Bridge info" and
-// "Event delivery"; the info it reads is stored on the Connection, whose page shows it. The check runs on the
-// interactive path, so a busy messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
+// "Check connection" of a Connection (C-13.FR-2, FR-14, AC-16, AC-17; C-14.FR-11, AC-20; C-22.FR-2, AC-26): each step
+// with "ok" or what failed, translated by its code with the server's English message below as its detail, its latency
+// and the path it took, directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that
+// do not fail the check, each with its hint. Telegram works in steps — the dry probe without the token, getMe with the
+// bot, getWebhookInfo with the pending updates — and a set webhook in the long-polling mode gets its warning. A Bridge
+// has two steps, "Bridge info" and "Event delivery"; the info a check of the saved Connection reads is stored on it,
+// whose page shows it. The form's values are checked before they are saved: the create form always sends them as a
+// draft, and the edit form while it holds changes, with the saved Connection's id; without changes it checks the saved
+// Connection. A draft stores nothing. The server decides which token goes where: a typed token goes to the typed
+// address, the stored one only to the saved address through the saved proxy, and otherwise only the dry probe runs —
+// the skipped steps then ask for the token, which the panel reads from the result, never deciding it itself. A change of
+// the form makes an earlier result stale, and the panel hides it. The check runs on the interactive path, so a busy
+// messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -20,6 +24,7 @@ import { Trans, useTranslation } from "react-i18next";
 import {
   getGetConnectionQueryKey,
   useCheckConnection,
+  useCheckConnectionDraft,
 } from "../api/gen/endpoints/connections/connections";
 import type {
   Connection,
@@ -27,13 +32,14 @@ import type {
   ConnectionCheckResultWarningsItem,
   ConnectionCheckStep,
   ConnectionCheckStepName,
+  ConnectionDraft,
   NullableConnectionCheckCode,
   NullableDestinationCheckCode,
   TelegramUpdateMode,
 } from "../api/gen/model";
 import { isApiError, problemText } from "../lib/api";
+import { draftAddress, draftFieldErrorText, serverErrors } from "./connection-form";
 import { unreachable } from "./destination-test-panel";
-import { isBaseUrl } from "./telegram-connection-fields";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -132,6 +138,10 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
       return t("checks.codes.protocolMismatch");
     case "event_delivery_not_offered":
       return t("checks.codes.eventDeliveryNotOffered");
+    case "not_mattermost":
+      return t("checks.codes.notMattermost");
+    case "not_bridge":
+      return t("checks.codes.notBridge");
     default:
       return unreachable(code);
   }
@@ -213,8 +223,85 @@ export function checkErrorText(t: TFunction, err: unknown): string {
   return problemText(t, err);
 }
 
-/** Why a step was skipped: the address is not saved yet, or an earlier step failed, so the token stays put. */
-type SkipReason = "unsaved" | "earlier";
+/**
+ * The text of a refused check of a Connection: a busy messenger names its wait, a draft that names a Connection that is
+ * gone asks for a reload, a value of the form the server refuses names its field, anything else as every form shows
+ * it.
+ */
+export function connectionCheckErrorText(
+  t: TFunction,
+  err: unknown,
+  type: Connection["type"],
+): string {
+  if (isApiError(err) && err.status === 503) {
+    return t("connections.check.busy", { seconds: Math.max(1, err.retry_after_seconds ?? 1) });
+  }
+  if (isApiError(err) && err.status === 422) {
+    const items = err.errors ?? [];
+    if (items.some((e) => e.pointer === "/connection_id" && e.code === "unknown_id")) {
+      return t("connections.check.unknownConnection");
+    }
+    const first = Object.entries(serverErrors(err, false))[0];
+    if (first !== undefined) {
+      return draftFieldErrorText(t, first[0], first[1], type);
+    }
+  }
+  return problemText(t, err);
+}
+
+/**
+ * Why a step was skipped: only the dry probe ran, for want of a token — a new Connection's draft has none typed, and an
+ * edited one has a changed address or proxy that the stored token never goes to —, or an earlier step failed.
+ */
+type SkipReason = "noToken" | "retype" | "earlier";
+
+/** Whether the check was made from the create form or from the page of a saved Connection. */
+type CheckMode = "new" | "edit";
+
+/**
+ * The reason of each skipped step, read from the result: a step skipped right after a dry probe that passed was skipped
+ * for want of a token, any other after a step that failed.
+ */
+function skipReasons(result: ConnectionCheckResult, mode: CheckMode): (SkipReason | undefined)[] {
+  let last: ConnectionCheckStep | undefined;
+  return result.steps.map((step) => {
+    if (step.skipped !== true) {
+      last = step;
+      return undefined;
+    }
+    if (last?.name === "dry_probe" && last.ok) {
+      return mode === "new" ? "noToken" : "retype";
+    }
+    return "earlier";
+  });
+}
+
+function skipText(t: TFunction, reason: SkipReason): string {
+  switch (reason) {
+    case "noToken":
+      return t("connections.check.skippedNoToken");
+    case "retype":
+      return t("connections.check.skippedRetype");
+    case "earlier":
+      return t("connections.check.skippedEarlier");
+    default:
+      return unreachable(reason);
+  }
+}
+
+/** The summary of a check whose dry probe passed and whose other steps want a token: what the address answers as. */
+function probePassedText(t: TFunction, type: Connection["type"]): string {
+  switch (type) {
+    case "mattermost":
+      return t("connections.check.probePassed.mattermost");
+    case "telegram":
+      return t("connections.check.probePassed.telegram");
+    case "bridge":
+      return t("connections.check.probePassed.bridge");
+    default:
+      return unreachable(type);
+  }
+}
 
 function Step({
   step,
@@ -223,7 +310,7 @@ function Step({
   pendingUpdates,
 }: {
   step: ConnectionCheckStep;
-  skipReason: SkipReason;
+  skipReason?: SkipReason;
   bot?: string;
   pendingUpdates?: number;
 }) {
@@ -231,11 +318,7 @@ function Step({
   const skipped = step.skipped === true;
   const details: string[] = [];
   if (skipped) {
-    details.push(
-      skipReason === "unsaved"
-        ? t("connections.check.skippedUnsaved")
-        : t("connections.check.skippedEarlier"),
-    );
+    details.push(skipText(t, skipReason ?? "earlier"));
   } else if (step.ok) {
     details.push(t("connections.check.ok"));
   }
@@ -308,23 +391,24 @@ function Step({
 function Result({
   result,
   type,
-  skipReason,
+  mode,
   updateMode,
 }: {
   result: ConnectionCheckResult;
   type: Connection["type"];
-  skipReason: SkipReason;
+  mode: CheckMode;
   updateMode?: TelegramUpdateMode;
 }) {
   const { t } = useTranslation();
   const name = result.bot_name ?? "";
   // Telegram names bots by their @username; Mattermost by its username alone.
   const bot = name === "" ? undefined : type === "telegram" ? `@${name}` : name;
+  const reasons = skipReasons(result, mode);
   let summary: string;
   if (!result.ok) {
     summary = t("connections.check.failedSummary");
-  } else if (skipReason === "unsaved") {
-    summary = t("connections.check.probePassed");
+  } else if (reasons.some((r) => r === "noToken" || r === "retype")) {
+    summary = probePassedText(t, type);
   } else if (bot !== undefined) {
     summary = t("connections.check.connectedAs", { bot });
   } else {
@@ -348,7 +432,7 @@ function Result({
           <Step
             key={`${step.name}-${index}`}
             step={step}
-            skipReason={skipReason}
+            skipReason={reasons[index]}
             bot={bot}
             pendingUpdates={result.pending_updates ?? undefined}
           />
@@ -386,37 +470,62 @@ function Result({
 }
 
 export interface ConnectionCheckProps {
-  connectionId: string;
+  /** The saved Connection of an edit, which the check reads while the form holds no changes; none for a new one. */
+  connectionId?: string;
   type?: Connection["type"];
-  /** The form has unsaved changes; the check uses the saved Connection. */
-  dirty: boolean;
   /**
-   * The Bot API base URL in the form of a Telegram Connection when it differs from the saved one: the check makes only
-   * the dry probe against it, without the token.
+   * The form's values, to check before they are saved: always in the create form, and in the edit form while it holds
+   * changes, with the saved Connection's id.
    */
-  unsavedBaseUrl?: string;
-  /** The saved update mode of a Telegram Connection. */
+  draft?: ConnectionDraft;
+  /** The text of the first value of the draft that the server would refuse: the check names it and sends nothing. */
+  invalid?: string;
+  /** The update mode of a Telegram Connection, as the form holds it. */
   updateMode?: TelegramUpdateMode;
+}
+
+/** What a check was made of: the draft as it was sent, or the saved Connection. */
+function subjectOf(connectionId: string | undefined, draft: ConnectionDraft | undefined): string {
+  return draft === undefined ? `saved ${connectionId ?? ""}` : JSON.stringify(draft);
 }
 
 export function ConnectionCheck({
   connectionId,
   type = "mattermost",
-  dirty,
-  unsavedBaseUrl,
+  draft,
+  invalid,
   updateMode,
 }: ConnectionCheckProps) {
   const { t } = useTranslation();
-  // An unsaved address the server would refuse is named before anything is sent.
-  const [badAddress, setBadAddress] = useState(false);
+  const mode: CheckMode = connectionId === undefined ? "new" : "edit";
   const queryClient = useQueryClient();
-  // A successful check records the bot's name, or the info of a bridge, on the Connection, which the page shows.
-  const check = useCheckConnection({
+  // A check of the saved Connection records the bot's name, or the info of a bridge, on it, which the page shows.
+  const saved = useCheckConnection({
     mutation: {
-      onSuccess: () =>
-        void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey(connectionId) }),
+      onSuccess: () => {
+        if (connectionId !== undefined) {
+          void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey(connectionId) });
+        }
+      },
     },
   });
+  // A draft's check stores nothing.
+  const drafted = useCheckConnectionDraft();
+  // What the shown result or refusal was made of; a change of the form makes it stale, and it is no longer shown.
+  const current = subjectOf(connectionId, draft);
+  const [checked, setChecked] = useState<string | null>(null);
+  // A value the server would refuse, named before anything is sent.
+  const [refused, setRefused] = useState<string>();
+  if (checked !== null && checked !== current) {
+    setChecked(null);
+    setRefused(undefined);
+  }
+  const check = draft === undefined ? saved : drafted;
+  const pending = saved.isPending || drafted.isPending;
+  const disabled =
+    pending ||
+    (draft === undefined ? connectionId === undefined : draftAddress(draft).trim() === "");
+  const shown = checked === current;
   return (
     <Card>
       <CardHeader>
@@ -429,60 +538,52 @@ export function ConnectionCheck({
         <div className="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
-            disabled={check.isPending}
+            disabled={disabled}
             onClick={() => {
-              if (unsavedBaseUrl !== undefined && !isBaseUrl(unsavedBaseUrl)) {
-                check.reset();
-                setBadAddress(true);
+              saved.reset();
+              drafted.reset();
+              setChecked(current);
+              if (draft === undefined) {
+                setRefused(undefined);
+                if (connectionId !== undefined) {
+                  saved.mutate({ connectionId });
+                }
                 return;
               }
-              setBadAddress(false);
-              check.mutate(
-                unsavedBaseUrl === undefined
-                  ? { connectionId }
-                  : { connectionId, data: { base_url: unsavedBaseUrl.trim() } },
-              );
+              setRefused(invalid);
+              if (invalid === undefined) {
+                drafted.mutate({ data: draft });
+              }
             }}
           >
-            {check.isPending ? t("connections.check.running") : t("connections.check.start")}
+            {pending ? t("connections.check.running") : t("connections.check.start")}
           </Button>
-          {unsavedBaseUrl !== undefined ? (
-            <span className="text-sm text-muted-foreground" data-testid="connection-check-unsaved">
-              {t("connections.check.unsavedAddress")}
+          {draft !== undefined && (
+            <span className="text-sm text-muted-foreground" data-testid="connection-check-draft">
+              {t("connections.check.draft")}
             </span>
-          ) : (
-            dirty && (
-              <span className="text-sm text-muted-foreground">
-                {t("connections.check.unsaved")}
-              </span>
-            )
           )}
         </div>
         {/* One live region, which stays mounted, announces the result or the refusal once. */}
         <div role="status" aria-live="polite" className="flex flex-col gap-3 empty:hidden">
-          {badAddress && (
+          {shown && refused !== undefined && (
             <div
-              className="rounded-lg border border-destructive/40 px-4 py-2.5 text-sm text-destructive"
+              className="rounded-lg border border-destructive/40 px-4 py-2.5 text-sm wrap-anywhere text-destructive"
               data-testid="connection-check-error"
             >
-              {t("connections.errors.baseUrlFormat")}
+              {refused}
             </div>
           )}
-          {check.isError && (
+          {shown && check.isError && (
             <div
-              className="rounded-lg border border-destructive/40 px-4 py-2.5 text-sm text-destructive"
+              className="rounded-lg border border-destructive/40 px-4 py-2.5 text-sm wrap-anywhere text-destructive"
               data-testid="connection-check-error"
             >
-              {checkErrorText(t, check.error)}
+              {connectionCheckErrorText(t, check.error, type)}
             </div>
           )}
-          {check.isSuccess && (
-            <Result
-              result={check.data}
-              type={type}
-              skipReason={check.variables.data?.base_url ? "unsaved" : "earlier"}
-              updateMode={updateMode}
-            />
+          {shown && check.isSuccess && (
+            <Result result={check.data} type={type} mode={mode} updateMode={updateMode} />
           )}
         </div>
       </CardContent>

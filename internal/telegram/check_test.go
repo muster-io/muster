@@ -196,6 +196,52 @@ func TestCheckUnsavedBaseURL(t *testing.T) {
 	}
 }
 
+// TestCheckProbeOnly covers C-13.FR-14 and C-14.AC-20: without a client with a token the check makes only the dry
+// probe, through the probe's proxy, and reports the other steps skipped on the probe's path; a dry probe that fails
+// skips them too. The probe carries no token, neither in the path nor in a header.
+func TestCheckProbeOnly(t *testing.T) {
+	f := startFake(t)
+	socks, err := fakeproxy.Start(t.Context(), fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = socks.Close() })
+	probe := newClient(t, Settings{BaseURL: f.URL(), Proxy: &outbound.Proxy{Type: outbound.ProxySOCKS5,
+		Address: socks.Addr()}})
+	res, err := RunCheck(t.Context(), nil, probe, direct, clock.NewManual(time.Time{}))
+	if err != nil || !res.OK() || names(res) != "dry_probe:ok get_me:skip get_webhook_info:skip" || res.Bot != nil ||
+		res.Webhook != nil {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	for _, s := range res.Steps {
+		if s.Via != ViaProxy {
+			t.Errorf("step %s via %s", s.Name, s.Via)
+		}
+	}
+	reqs := f.Requests()
+	if len(reqs) != 1 || reqs[0].Path != "/bot0:x/getMe" || len(reqs[0].Headers["Authorization"]) != 0 ||
+		len(socks.Connections()) != 1 {
+		t.Fatalf("requests %+v, proxy %+v", reqs, socks.Connections())
+	}
+
+	f.ResetRequests()
+	res, err = RunCheck(t.Context(), nil, newClient(t, Settings{BaseURL: f.URL() + "/other"}), direct,
+		clock.NewManual(time.Time{}))
+	if err != nil || res.OK() || names(res) != "dry_probe:fail get_me:skip get_webhook_info:skip" ||
+		res.Steps[0].Code != CodeWrongPrefix {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	for _, s := range res.Steps {
+		if s.Via != ViaDirect {
+			t.Errorf("step %s via %s", s.Name, s.Via)
+		}
+	}
+	if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Path != "/other/bot0:x/getMe" ||
+		len(reqs[0].Headers["Authorization"]) != 0 {
+		t.Fatalf("requests %+v", reqs)
+	}
+}
+
 // TestCheckTokenRefused: getMe that answers 401 fails with "The bot token is not valid." and skips getWebhookInfo; any
 // other failure shows its masked text.
 func TestCheckTokenRefused(t *testing.T) {

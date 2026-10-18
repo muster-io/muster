@@ -303,6 +303,13 @@ any age; an admin can set a limit, and what an edit of an older post then gets w
 `EnableUserAccessTokens` off, its default. — _2026-10-04 · the server configuration; calls with the bot token ·
 Mattermost 11.2.2_ · Used in C-13.FR-4, C-13.FR-7, [L1 open question 12](prd/L1.md#52-other-questions).
 
+### Requests without a token
+
+**F-069. The system ping answers without a token.** `GET /api/v4/system/ping` without an `Authorization` header answers
+`200` with `Content-Type: application/json` and an object whose `status` is `OK`, with other fields such as
+`ActiveSearchBackend`; `GET /api/v4/users/me` without a token answers `401`. — _2026-10-18 · both Mattermost servers of
+the test stand, without a token · Mattermost 11.2_ · Used in C-13.FR-2.
+
 ### Post length and deleted posts
 
 **F-057. The post length limit.** The server's longest post `message` is 16,383 characters; it reports the limit as
@@ -469,9 +476,6 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
-  What `GET /api/v4/system/ping` answers without a token — `200` with JSON whose `status` is `OK`, as Mattermost's API
-  reference describes it, through a reverse proxy too — on which the dry probe of a Mattermost Connection relies
-  (C-13.FR-2); to check on the test stand and record as a fact before S-087 merges.
 - **Mattermost 12.** Mattermost 12.0.0 draws message attachments as Mattermost Blocks; whether Root messages, their
   colour and the button styles of F-068 look the same is to be checked once the test stand is upgraded from 11.2.2.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair

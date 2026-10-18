@@ -4,9 +4,14 @@
 package mattermost
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -171,4 +176,84 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 	out.TeamName, out.ChannelName = team.Name, ch.Name
 	out.Outcome = delivery.Outcome{Kind: delivery.OutcomeOK}
 	return out, nil
+}
+
+// The step of the dry probe of a Mattermost Connection (C-13.FR-2) and the messages of what answered it.
+const (
+	StepDryProbe = "dry_probe"
+
+	MessageWrongPrefix   = "Wrong path prefix: the server answered 404."
+	MessageProxyRefused  = "The proxy refused the connection (407)"
+	messageNotMattermost = "The address answered %d with %s, not as a Mattermost server."
+	messageStatusNotOK   = "The address answered 200 with JSON whose status is not OK."
+	messageOtherStatus   = "The server answered %d instead of 200 with JSON whose status is OK."
+	noContentType        = "no content type"
+)
+
+// The codes of the dry probe that reached no Mattermost server (ConnectionCheckStep.code); a probe without an answer
+// has the code of delivery.FailureCode.
+const (
+	CodeNotMattermost    = "not_mattermost"
+	CodeWrongPrefix      = "wrong_path_prefix"
+	CodeUnexpectedStatus = "unexpected_status"
+)
+
+// Probe is the result of a dry probe: whether it passed, its latency on the real clock, and when it failed what
+// answered, in English, with its code, which clients translate.
+type Probe struct {
+	OK      bool
+	Latency time.Duration
+	Message string
+	Code    string
+}
+
+// RunDryProbe makes the dry probe of c through run (C-13.FR-2): `GET <server>/api/v4/system/ping` without the token,
+// timed on the real clock, on a client that may have none. It passes on a 200 JSON answer whose status is OK and
+// otherwise names what answered. Its error is the runner's own.
+func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (Probe, error) {
+	var r Result
+	var mediaType string
+	var latency time.Duration
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		start := realClock.Now()
+		r, mediaType = c.DryProbe(ctx, call.Class)
+		latency = realClock.Now().Sub(start)
+		return r.Outcome
+	}); err != nil {
+		return Probe{}, err
+	}
+	p := probeVerdict(r, mediaType)
+	p.Latency = latency
+	return p, nil
+}
+
+// probeVerdict says whether the answer to the dry probe is a Mattermost server's, in the order of C-13.FR-2: no answer
+// has the code of Result.FailureCode, a proxy that refused the credentials proxy_refused, 404 wrong_path_prefix, an
+// answer that is not a JSON object not_mattermost with its status and media type, a 200 whose status is OK passes and
+// any other 200 is not_mattermost, and another status with JSON unexpected_status.
+func probeVerdict(r Result, mediaType string) Probe {
+	if r.Status == 0 {
+		if r.Network == outbound.NetworkProxyAuth {
+			return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
+		}
+		return Probe{Message: string(r.Outcome.Error), Code: r.FailureCode()}
+	}
+	var answer map[string]json.RawMessage
+	isObject := json.Unmarshal(r.Body, &answer) == nil && answer != nil
+	var status string
+	_ = json.Unmarshal(answer["status"], &status) // a status that is not a string is not OK
+	switch {
+	case r.Status == http.StatusProxyAuthRequired:
+		return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
+	case r.Status == http.StatusNotFound:
+		return Probe{Message: MessageWrongPrefix, Code: CodeWrongPrefix}
+	case !isObject:
+		return Probe{Message: fmt.Sprintf(messageNotMattermost, r.Status, cmp.Or(mediaType, noContentType)),
+			Code: CodeNotMattermost}
+	case r.Status == http.StatusOK && status == "OK":
+		return Probe{OK: true}
+	case r.Status == http.StatusOK:
+		return Probe{Message: messageStatusNotOK, Code: CodeNotMattermost}
+	}
+	return Probe{Message: fmt.Sprintf(messageOtherStatus, r.Status), Code: CodeUnexpectedStatus}
 }

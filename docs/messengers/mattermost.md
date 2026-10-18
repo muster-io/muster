@@ -25,6 +25,32 @@ the check reads the bot's own user with the token and shows the bot's name. Then
 channel; saving it checks that the bot is a member of the channel and refuses the Destination otherwise, naming the
 failing check.
 
+## Check before saving
+
+**Check connection** also works in the form, before anything is saved: in the form of a new Connection, and on the
+page of a saved one while the form holds changes. It checks the values in the form — the server URL, the proxy and the
+bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets no entry.
+
+- With the bot token typed in the form, the check reads the bot's own user at the server URL in the form, through the
+  proxy in the form, and shows the bot's name.
+- Without a token typed, the page of a saved Connection uses its stored token only when the server URL and the proxy
+  are the saved ones: the stored token is sent only to the saved address, through the saved proxy. After a change of
+  the server URL or of the proxy, the check makes only a dry probe: `GET <server>/api/v4/system/ping` without a token,
+  which a Mattermost server answers to anyone with `200` and `"status":"OK"`. It tells a wrong address, a wrong path
+  prefix (`404`) and a server that is not Mattermost apart, and the step **Token** asks you to type the bot token again
+  to check the new address or proxy, or to save first. A new Connection without a token gets the dry probe alone too.
+
+The check is `POST /api/v1/connections/checks`, which needs `connections:write`; with a Personal access token of an
+Admin in `MUSTER_TOKEN`:
+
+```sh
+curl -X POST https://muster.example.org/api/v1/connections/checks \
+  -H "Authorization: Bearer $MUSTER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"mattermost","server_url":"https://chat.example.org","bot_token":"the-bot-token"}'
+```
+
+Add `"connection_id":"CN…"` to check the changes of a saved Connection, whose stored token the rule above may use.
+
 ## Direct messages
 
 Account links send a person a direct message from the bot: the bot opens the direct channel with the person's user id

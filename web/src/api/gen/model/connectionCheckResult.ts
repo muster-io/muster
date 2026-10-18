@@ -38,6 +38,6 @@ export interface ConnectionCheckResult {
   webhook_set?: boolean | null;
   /** @nullable */
   pending_updates?: number | null;
-  /** Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types. */
+  /** Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types. */
   info?: BridgeInfo | null;
 }

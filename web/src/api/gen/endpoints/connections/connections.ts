@@ -42,6 +42,7 @@ import type {
   Connection,
   ConnectionCheckRequest,
   ConnectionCheckResult,
+  ConnectionDraft,
   ConnectionInput,
   ConnectionList,
   ForbiddenResponse,
@@ -273,6 +274,94 @@ export const useCreateConnection = <TError = BadRequestResponse | UnauthorizedRe
         TContext
       > => {
       return useMutation(getCreateConnectionMutationOptions(options), queryClient);
+    }
+    export const getCheckConnectionDraftUrl = () => {
+
+
+
+
+  return `/api/v1/connections/checks`
+}
+
+/**
+ * Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only when the draft's address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a `connection_id` takes its limiter token from that Connection, and when none is free within `delivery.interactive_budget` the answer is `503` with `Retry-After`; a draft of a new Connection has no limiter and waits for none.
+ * @summary Check a Connection before saving it
+ */
+export const checkConnectionDraft = async (connectionDraft: ConnectionDraft, options?: Parameters<typeof apiFetch>[1]): Promise<ConnectionCheckResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<ConnectionCheckResult>(getCheckConnectionDraftUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(connectionDraft)
+  }
+);}
+
+
+
+
+
+export const getCheckConnectionDraftMutationKey = () => ['checkConnectionDraft'] as const;
+
+export const getCheckConnectionDraftMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnectionDraft>>, TError,CheckConnectionDraftMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof checkConnectionDraft>>, TError,CheckConnectionDraftMutationVariables, TContext> => {
+
+const mutationKey = getCheckConnectionDraftMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkConnectionDraft>>, CheckConnectionDraftMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  checkConnectionDraft(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CheckConnectionDraftMutationResult = NonNullable<Awaited<ReturnType<typeof checkConnectionDraft>>>
+    export type CheckConnectionDraftMutationBody = ConnectionDraft
+    export type CheckConnectionDraftMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
+    export type CheckConnectionDraftMutationVariables = {data: ConnectionDraft}
+
+    /**
+ * @summary Check a Connection before saving it
+ */
+export const useCheckConnectionDraft = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnectionDraft>>, TError,CheckConnectionDraftMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof checkConnectionDraft>>,
+        TError,
+        CheckConnectionDraftMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCheckConnectionDraftMutationOptions(options), queryClient);
     }
     export const getGetConnectionUrl = (connectionId: string,) => {
 
@@ -546,7 +635,7 @@ export const useDeleteConnection = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnection = async (connectionId: string,

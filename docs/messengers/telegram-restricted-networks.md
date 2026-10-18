@@ -26,7 +26,8 @@ identity provider, outgoing webhooks — keeps its own path. On the Connection p
 Leave the **Bot API base URL** at `https://api.telegram.org`: the HTTPS connection to Telegram runs through the proxy
 end to end, so the proxy never sees the bot token in the request path. Press **Check connection**: every step shows
 its latency and whether it went "through the proxy" or "direct", and a proxy that refuses Muster's credentials is
-named as such.
+named as such. Pressed before you save a new proxy, the check sends the stored token nowhere and makes only the dry
+probe through it, unless you type the bot token again (see [Check before saving](telegram.md#check-before-saving)).
 
 The proxy's own address is checked by the Organization's outbound address policy (**Outbound addresses**,
 `/admin/organization/outbound`) like any other target: the standard policy allows private addresses and blocks
@@ -55,8 +56,9 @@ The reverse proxy must:
 
 Then set the Connection's **Bot API base URL** to the reverse proxy, with the prefix:
 `https://tg.muster.example.org/8f1c2e…`. Muster sends its requests to `<base>/bot<token>/<method>`. A new base URL
-needs the bot token again, so that the stored token never reaches an address you did not mean; enter it, save, and
-press **Check connection**. Pressed before you save, the check makes only the dry probe against the new address. Its
+needs the bot token again, so that the stored token never reaches an address you did not mean; type it again and press
+**Check connection** before you save: the check runs its three steps against the new address with the typed token;
+without the token it makes only the dry probe there (see [Check before saving](telegram.md#check-before-saving)). Its
 first step is a dry probe, `GET <base>/bot0:x/getMe` without your token, which
 `api.telegram.org` answers with `401` and JSON: it tells a wrong host, a wrong path prefix or a server that is not a
 Bot API apart before your token goes anywhere. Use an `https` base URL; with `http`, Muster warns that the token

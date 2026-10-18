@@ -283,3 +283,230 @@ func TestCheckChannelRunners(t *testing.T) {
 		t.Fatalf("a class the client has not = %+v, %v", res, err)
 	}
 }
+
+// wantProbeOnly fails the test unless the stand-in got only the dry probe, without an Authorization header.
+func wantProbeOnly(t *testing.T, b *standIn) {
+	t.Helper()
+	got := b.seen()
+	if len(got) != 1 || got[0].Method != http.MethodGet || got[0].Path != "/v1/info" ||
+		got[0].Header.Get("Authorization") != "" {
+		t.Errorf("requests %+v", got)
+	}
+}
+
+// TestDryProbe covers C-22.FR-2 and AC-26: the dry probe is GET <base>/v1/info without an Authorization header, on a
+// client without a token and on one with a token alike; it passes on 401 with a problem and names every other answer
+// in the order of the PRD, with its latency on the real clock it is given.
+func TestDryProbe(t *testing.T) {
+	f := startFake(t)
+	for i, c := range []*Client{newClient(t, network(t, nil), Settings{BaseURL: f.URL()}),
+		newClient(t, network(t, nil), Settings{BaseURL: f.URL(), Token: testToken})} {
+		f.ResetRequests()
+		p, err := RunDryProbe(t.Context(), c, direct, clock.NewManual(time.Time{}))
+		if err != nil || !p.OK || p.Message != "" || p.Code != "" {
+			t.Errorf("client %d: probe of the fake bridge = %+v, %v", i, p, err)
+		}
+		if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Method != http.MethodGet || reqs[0].Path != "/v1/info" ||
+			len(reqs[0].Headers["Authorization"]) != 0 || reqs[0].Status != http.StatusUnauthorized {
+			t.Errorf("client %d: requests %+v", i, reqs)
+		}
+	}
+
+	noContentType := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header()["Content-Type"] = nil
+		_, _ = w.Write([]byte("OK"))
+	}
+	for _, tc := range []struct {
+		name    string
+		answer  http.HandlerFunc
+		message string
+		code    string
+	}{
+		{name: "401 with a problem", answer: answerJSON(http.StatusUnauthorized, problemJSON+"; charset=utf-8",
+			`{"title":"Unauthorized","class":"forbidden"}`)},
+		{name: "200 HTML", answer: answerJSON(http.StatusOK, "text/html; charset=utf-8", "<p>hi</p>"),
+			message: "The address answered 200 with text/html, not with a problem of the Bridge protocol.",
+			code:    CodeNotBridge},
+		{name: "200 JSON", answer: answerJSON(http.StatusOK, "application/json", `{"protocol_version":"1"}`),
+			message: "The address answered 200 with application/json, not with a problem of the Bridge protocol.",
+			code:    CodeNotBridge},
+		{name: "401 JSON", answer: answerJSON(http.StatusUnauthorized, "application/json", `{"title":"Unauthorized"}`),
+			message: "The address answered 401 with application/json, not with a problem of the Bridge protocol.",
+			code:    CodeNotBridge},
+		{name: "401 problem that is not JSON", answer: answerJSON(http.StatusUnauthorized, problemJSON, "no"),
+			message: "The address answered 401 with application/problem+json, not with a problem of the Bridge " +
+				"protocol.", code: CodeNotBridge},
+		{name: "500 JSON", answer: answerJSON(http.StatusInternalServerError, "application/json",
+			`{"class":"transient"}`),
+			message: "The address answered 500 with application/json, not with a problem of the Bridge protocol.",
+			code:    CodeNotBridge},
+		{name: "no content type", answer: noContentType,
+			message: "The address answered 200 with no content type, not with a problem of the Bridge protocol.",
+			code:    CodeNotBridge},
+		{name: "404 problem", answer: answerJSON(http.StatusNotFound, problemJSON, `{"title":"Not Found"}`),
+			message: MessageWrongPrefix, code: CodeWrongPrefix},
+		{name: "404 HTML", answer: answerJSON(http.StatusNotFound, "text/html", "<p>no</p>"),
+			message: MessageWrongPrefix, code: CodeWrongPrefix},
+		{name: "500 problem", answer: answerJSON(http.StatusInternalServerError, problemJSON,
+			`{"class":"transient","detail":"down"}`), message: "The bridge answered 500 instead of 401 with a problem.",
+			code: CodeUnexpectedStatus},
+		{name: "200 problem", answer: answerJSON(http.StatusOK, problemJSON, `{"title":"OK"}`),
+			message: "The bridge answered 200 instead of 401 with a problem.", code: CodeUnexpectedStatus},
+		{name: "407 of the server", answer: answerJSON(http.StatusProxyAuthRequired, "text/plain", "auth"),
+			message: MessageProxyRefused, code: delivery.CodeProxyRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := startStandIn(t, tc.answer)
+			p, err := RunDryProbe(t.Context(), newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL}), direct,
+				clock.NewManual(time.Time{}))
+			if err != nil || p.OK != (tc.code == "") || p.Message != tc.message || p.Code != tc.code {
+				t.Errorf("probe = %+v, %v", p, err)
+			}
+			wantProbeOnly(t, b)
+		})
+	}
+
+	realClock := clock.NewManual(time.Time{})
+	b := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		realClock.Advance(42 * time.Millisecond)
+		answerJSON(http.StatusOK, "text/x-"+testToken, "x")(w, r)
+	})
+	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL + "/pfx", Token: testToken})
+	p, err := RunDryProbe(t.Context(), c, direct, realClock)
+	if err != nil || p.Latency != 42*time.Millisecond || p.Code != CodeNotBridge ||
+		p.Message != "The address answered 200 with text/x-[redacted], not with a problem of the Bridge protocol." {
+		t.Errorf("probe = %+v, %v", p, err)
+	}
+	if got := b.seen(); len(got) != 1 || got[0].Path != "/pfx/v1/info" || got[0].Header.Get("Authorization") != "" {
+		t.Errorf("requests %+v", got)
+	}
+	boom := errors.New("limiter down")
+	if _, err := RunDryProbe(t.Context(), c, func(context.Context,
+		func(context.Context, delivery.Call) delivery.Outcome) (delivery.Outcome, error) {
+		return delivery.Outcome{}, boom
+	}, realClock); !errors.Is(err, boom) {
+		t.Errorf("the runner's error = %v", err)
+	}
+}
+
+// TestDryProbeWithoutAnswer covers C-22.FR-2: a dry probe without an answer has the code of delivery.FailureCode — a
+// refused connection, an unknown name, an address the outbound address policy refuses — and a proxy that refuses the
+// credentials, SOCKS5 or HTTP, is proxy_refused; nothing reaches the bridge.
+func TestDryProbeWithoutAnswer(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := "http://" + ln.Addr().String()
+	_ = ln.Close()
+	b := startStandIn(t, answerJSON(http.StatusUnauthorized, problemJSON, `{"title":"Unauthorized"}`))
+	strict, err := outbound.ParsePolicy("standard", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := network(t, nil)
+	blocked.Policy = outbound.StaticPolicy(strict)
+	dns := network(t, nil)
+	dns.Resolver = failingResolver{}
+	proxies := map[fakeproxy.Kind]string{}
+	for _, kind := range []fakeproxy.Kind{fakeproxy.SOCKS5, fakeproxy.HTTP} {
+		p, err := fakeproxy.Start(t.Context(), kind, "127.0.0.1:0", fakeproxy.Options{Username: "u", Password: "right"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = p.Close() })
+		proxies[kind] = p.Addr()
+	}
+	for _, tc := range []struct {
+		name    string
+		n       Network
+		base    string
+		proxy   *outbound.Proxy
+		code    string
+		message string
+	}{
+		{name: "refused", n: network(t, nil), base: refused, code: delivery.CodeConnectFailed},
+		{name: "dns", n: dns, base: "http://bridge.invalid", code: delivery.CodeDNSFailed},
+		{name: "blocked", n: blocked, base: b.srv.URL, code: delivery.CodeBlocked},
+		{name: "socks5 refused the credentials", n: network(t, nil), base: b.srv.URL, proxy: &outbound.Proxy{
+			Type: outbound.ProxySOCKS5, Address: proxies[fakeproxy.SOCKS5], Username: "u", Password: "wrong"},
+			code: delivery.CodeProxyRefused, message: MessageProxyRefused},
+		{name: "http proxy 407", n: network(t, nil), base: b.srv.URL, proxy: &outbound.Proxy{
+			Type: outbound.ProxyHTTP, Address: proxies[fakeproxy.HTTP], Username: "u", Password: "wrong"},
+			code: delivery.CodeProxyRefused, message: MessageProxyRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newClient(t, tc.n, Settings{BaseURL: tc.base, Proxy: tc.proxy})
+			p, err := RunDryProbe(t.Context(), c, direct, clock.NewManual(time.Time{}))
+			if err != nil || p.OK || p.Code != tc.code || p.Message == "" ||
+				(tc.message != "" && p.Message != tc.message) || strings.Contains(p.Message, "wrong") {
+				t.Errorf("probe = %+v, %v", p, err)
+			}
+		})
+	}
+	p, err := RunDryProbe(t.Context(), newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL}),
+		Direct(delivery.Call{Class: outbound.ClassHeartbeat}), clock.NewManual(time.Time{}))
+	if err != nil || p.OK || p.Code != delivery.CodeRequestFailed || p.Message != "the Bridge client has no heartbeat "+
+		"class" {
+		t.Errorf("a class the client has not = %+v, %v", p, err)
+	}
+	if got := b.seen(); len(got) != 0 {
+		t.Errorf("requests %+v", got)
+	}
+	if p := probeVerdict(outbound.Result{}, Result{Classification: Classification{Class: ClassTransient}}, ""); p.OK ||
+		p.Message != checkFailed || p.Code != delivery.CodeRequestFailed {
+		t.Errorf("a failure without text = %+v", p)
+	}
+}
+
+// TestDryProbeNeverWaits: a rate_limited answer to the dry probe reaches the runner as Transient, without a delay or a
+// scope, so that a request without a token never holds the limiter of the Connection whose limiter token the check
+// took.
+func TestDryProbeNeverWaits(t *testing.T) {
+	for _, scope := range []string{"channel", "bot"} {
+		b := startStandIn(t, answerJSON(http.StatusTooManyRequests, problemJSON,
+			`{"title":"Too Many Requests","class":"rate_limited","scope":"`+scope+`"}`, "Retry-After", "30"))
+		c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL})
+		var got delivery.Outcome
+		run := func(ctx context.Context, fn func(context.Context, delivery.Call) delivery.Outcome) (delivery.Outcome,
+			error) {
+			got = fn(ctx, delivery.Call{Class: outbound.ClassInteractive})
+			return got, nil
+		}
+		p, err := RunDryProbe(t.Context(), c, run, clock.NewManual(time.Time{}))
+		if err != nil || p.OK || p.Code != CodeUnexpectedStatus || got.Kind != delivery.OutcomeTransient ||
+			got.RetryAfter != 0 || got.Scope != "" {
+			t.Errorf("scope %s: probe = %+v, %v, outcome %+v", scope, p, err, got)
+		}
+		wantProbeOnly(t, b)
+	}
+}
+
+// TestClientWithoutToken: a client built without a token refuses every call that would carry one before any request,
+// and makes only the dry probe.
+func TestClientWithoutToken(t *testing.T) {
+	b := startStandIn(t, answerJSON(http.StatusUnauthorized, problemJSON, `{"title":"Unauthorized"}`))
+	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL})
+	ctx, class := t.Context(), outbound.ClassInteractive
+	refused := func(what string, r Result) {
+		t.Helper()
+		if r.OK() || r.Status != 0 || r.Classification.Class != ClassInvalid ||
+			string(r.Error) != "this client has no bot token: only the dry probe runs without one" {
+			t.Errorf("%s = %+v", what, r)
+		}
+	}
+	_, r := c.GetInfo(ctx, class)
+	refused("GetInfo", r)
+	_, r = c.CheckChannel(ctx, class, "ch-1")
+	refused("CheckChannel", r)
+	_, r = c.PollEvents(ctx, nil, time.Second)
+	refused("PollEvents", r)
+	refused("DeleteMessage", c.DeleteMessage(ctx, class, "m-1"))
+	if got := b.seen(); len(got) != 0 {
+		t.Fatalf("a client without a token made requests: %+v", got)
+	}
+	if p, err := RunDryProbe(ctx, c, direct, clock.NewManual(time.Time{})); err != nil || !p.OK {
+		t.Errorf("probe = %+v, %v", p, err)
+	}
+	wantProbeOnly(t, b)
+}
