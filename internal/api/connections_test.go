@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -138,17 +139,26 @@ func (f *fakeConnections) Delete(_ context.Context, r connections.Requester, id 
 	return nil
 }
 
+// checkRun is the check run of a fake's result that names none, as every check and test names one.
+const checkRun = "CRAAAAAAAAAAA1"
+
 func (f *fakeConnections) Check(_ context.Context, id string, baseURL *string) (connections.CheckResult, error) {
 	f.baseURLs = append(f.baseURLs, baseURL)
 	if f.find(id) < 0 {
 		return connections.CheckResult{}, connections.ErrNotFound
 	}
-	return f.check, f.err
+	return f.checked(), f.err
 }
 
 func (f *fakeConnections) CheckDraft(_ context.Context, d connections.Draft) (connections.CheckResult, error) {
 	f.drafts = append(f.drafts, d)
-	return f.check, f.err
+	return f.checked(), f.err
+}
+
+func (f *fakeConnections) checked() connections.CheckResult {
+	res := f.check
+	res.Run = cmp.Or(res.Run, checkRun)
+	return res
 }
 
 func (f *fakeConnections) Channels(_ context.Context, id, team, q string) ([]connections.Channel, error) {
@@ -774,7 +784,7 @@ func TestBridgeConnectionAPI(t *testing.T) {
 	if info, err := res.Info.Get(); a.status != http.StatusOK || !res.Ok || err != nil ||
 		info.Messenger.Name != "Fake chat" || len(res.Steps) != 2 || res.Steps[0].Name != "info" ||
 		res.Steps[0].LatencyMs.MustGet() != 9 || *res.Steps[0].Via != "proxy" || res.Steps[1].Name != "event_delivery" ||
-		!res.Steps[1].Code.IsNull() {
+		!res.Steps[1].Code.IsNull() || !res.Steps[1].LatencyMs.IsNull() || *res.Steps[1].Skipped {
 		t.Fatalf("check = %d %s", a.status, a.body)
 	}
 	for _, tc := range []struct {
@@ -805,6 +815,9 @@ func TestBridgeConnectionAPI(t *testing.T) {
 			}
 		} else {
 			failed = res.Steps[1]
+			if !failed.LatencyMs.IsNull() {
+				t.Errorf("event_delivery has a latency: %s", a.body)
+			}
 		}
 		if a.status != http.StatusOK || res.Ok || failed.Code.MustGet() != tc.code ||
 			failed.Message.MustGet() == "" {

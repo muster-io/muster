@@ -42,5 +42,5 @@ export interface ConnectionCheckResult {
   /** Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types. */
   info?: BridgeInfo | null;
   /** The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them. */
-  request_log_run?: PublicId;
+  request_log_run: PublicId;
 }

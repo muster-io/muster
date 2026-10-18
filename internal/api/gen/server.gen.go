@@ -4205,7 +4205,7 @@ type ConnectionCheckResult struct {
 	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
 
 	// RequestLogRun The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.
-	RequestLogRun *PublicId             `json:"request_log_run,omitempty"`
+	RequestLogRun PublicId              `json:"request_log_run"`
 	Steps         []ConnectionCheckStep `json:"steps"`
 
 	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
@@ -4221,10 +4221,12 @@ type ConnectionCheckResultWarnings string
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
 	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
-	Code      nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
-	LatencyMs nullable.Nullable[int]                         `json:"latency_ms,omitempty"`
+	Code nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 
-	// Message What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.
+	// LatencyMs How long the step's request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.
+	LatencyMs nullable.Nullable[int] `json:"latency_ms,omitempty"`
+
+	// Message What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code's text.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 	Name    ConnectionCheckStepName   `json:"name"`
 	Ok      bool                      `json:"ok"`
@@ -4278,7 +4280,7 @@ type DestinationCheckItem struct {
 	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
 
-	// Message Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.
+	// Message Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail where it says more than the code's text.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 
 	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
@@ -4296,7 +4298,7 @@ type DestinationCheckResult struct {
 	Ok     bool                   `json:"ok"`
 
 	// RequestLogRun The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them.
-	RequestLogRun *PublicId `json:"request_log_run,omitempty"`
+	RequestLogRun PublicId `json:"request_log_run"`
 }
 
 // DestinationCreated defines model for DestinationCreated.
@@ -4408,7 +4410,7 @@ type DestinationTestResult struct {
 	Health DestinationHealth `json:"health"`
 
 	// RequestLogRun The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.
-	RequestLogRun *PublicId `json:"request_log_run,omitempty"`
+	RequestLogRun PublicId `json:"request_log_run"`
 
 	// Steps The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires.
 	Steps []TestStep `json:"steps"`
