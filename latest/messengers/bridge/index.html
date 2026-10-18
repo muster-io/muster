@@ -566,6 +566,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check before saving
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#add-a-destination" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1747,6 +1758,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check before saving
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#add-a-destination" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1851,9 +1873,9 @@ envelope in its messenger. A <strong>Bridge Connection</strong> is one bot of yo
 bot. Muster posts one <strong>Root message</strong> per Alert Group to a channel of that messenger, edits it as the Alert Group
 changes, and replies in its <strong>Thread</strong> for what happens later, as it does for Mattermost and Telegram.</p>
 <p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code>, <code>MUSTER_INGEST_URL</code> is
-<code>https://ingest.muster.example.org</code> and the bridge listens on <code>https://bridge.example.org</code>. The web UI has no form for
-Bridge Connections and Bridge Destinations yet, so the examples create them through the <a href="../../reference/api/">API</a>,
-with a Personal access token of an Admin in <code>MUSTER_TOKEN</code>.</p>
+<code>https://ingest.muster.example.org</code> and the bridge listens on <code>https://bridge.example.org</code>. The examples use the
+<a href="../../reference/api/">API</a>, with a Personal access token of an Admin in <code>MUSTER_TOKEN</code>; the web UI has the same forms
+under <strong>Connections</strong> and <strong>Destinations</strong>.</p>
 <h2 id="create-the-connection">Create the Connection<a class="headerlink" href="#create-the-connection" title="Permanent link">&para;</a></h2>
 <p>From your bridge, you need:</p>
 <ul>
@@ -1941,6 +1963,27 @@ proxy:</p>
 </tr>
 </tbody>
 </table>
+<h2 id="check-before-saving">Check before saving<a class="headerlink" href="#check-before-saving" title="Permanent link">&para;</a></h2>
+<p>The check above reads a saved Connection. <strong>Check connection</strong> in the form of a new Connection, or on the page of a
+saved one while the form holds changes, checks the values in the form before anything is saved, with
+<code>POST /api/v1/connections/checks</code>. It saves nothing: the <code>info</code> it reads is returned, not stored, and the Audit log
+gets no entry.</p>
+<ul>
+<li>With the token typed, the steps <code>info</code> and <code>event_delivery</code> run against the base URL in the form, through the proxy in
+  the form, with that token.</li>
+<li>Without one, a saved Connection (<code>connection_id</code>) uses its stored token only when the base URL — a trailing <code>/</code>
+  aside — and the proxy are the saved ones: the stored token is sent only to the saved address, through the saved
+  proxy. After a change of the base URL or of the proxy, the check makes only a dry probe, <code>GET &lt;base&gt;/v1/info</code> without
+  the token, which a bridge answers with <code>401</code> and a problem (<code>application/problem+json</code>). An address that answers
+  otherwise fails with <code>not_bridge</code>, a <code>404</code> with <code>wrong_path_prefix</code>, another status with a problem with
+  <code>unexpected_status</code>; after a dry probe that passes, <code>info</code> and <code>event_delivery</code> ask you to type the token again to
+  check the new address or proxy, or to save first. A new Connection without a token gets the dry probe alone too.</li>
+</ul>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/connections/checks<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"type":"bridge","base_url":"https://bridge.example.org/muster","event_delivery":"poll",</span>
+<span class="s1">       "bot_token":"the-token-of-the-bot"}'</span>
+</code></pre></div>
 <h2 id="add-a-destination">Add a Destination<a class="headerlink" href="#add-a-destination" title="Permanent link">&para;</a></h2>
 <p>A <strong>Bridge Destination</strong> is one channel of the messenger, named by its <strong>channel id</strong> — the channel as your messenger
 names it, which the bridge's documentation explains how to find. Its <strong>Mention settings</strong> take nobody or chosen

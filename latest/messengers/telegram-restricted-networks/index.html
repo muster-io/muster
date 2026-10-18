@@ -1826,7 +1826,8 @@ identity provider, outgoing webhooks — keeps its own path. On the Connection p
 <p>Leave the <strong>Bot API base URL</strong> at <code>https://api.telegram.org</code>: the HTTPS connection to Telegram runs through the proxy
 end to end, so the proxy never sees the bot token in the request path. Press <strong>Check connection</strong>: every step shows
 its latency and whether it went "through the proxy" or "direct", and a proxy that refuses Muster's credentials is
-named as such.</p>
+named as such. Pressed before you save a new proxy, the check sends the stored token nowhere and makes only the dry
+probe through it, unless you type the bot token again (see <a href="../telegram/#check-before-saving">Check before saving</a>).</p>
 <p>The proxy's own address is checked by the Organization's outbound address policy (<strong>Outbound addresses</strong>,
 <code>/admin/organization/outbound</code>) like any other target: the standard policy allows private addresses and blocks
 loopback; the strict policy blocks a proxy on a private address unless an allowed network covers it. <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and <code>NO_PROXY</code> are never
@@ -1851,8 +1852,9 @@ a reverse proxy on it, under a name of your installation's own domain such as <c
 </ul>
 <p>Then set the Connection's <strong>Bot API base URL</strong> to the reverse proxy, with the prefix:
 <code>https://tg.muster.example.org/8f1c2e…</code>. Muster sends its requests to <code>&lt;base&gt;/bot&lt;token&gt;/&lt;method&gt;</code>. A new base URL
-needs the bot token again, so that the stored token never reaches an address you did not mean; enter it, save, and
-press <strong>Check connection</strong>. Pressed before you save, the check makes only the dry probe against the new address. Its
+needs the bot token again, so that the stored token never reaches an address you did not mean; type it again and press
+<strong>Check connection</strong> before you save: the check runs its three steps against the new address with the typed token;
+without the token it makes only the dry probe there (see <a href="../telegram/#check-before-saving">Check before saving</a>). Its
 first step is a dry probe, <code>GET &lt;base&gt;/bot0:x/getMe</code> without your token, which
 <code>api.telegram.org</code> answers with <code>401</code> and JSON: it tells a wrong host, a wrong path prefix or a server that is not a
 Bot API apart before your token goes anywhere. Use an <code>https</code> base URL; with <code>http</code>, Muster warns that the token

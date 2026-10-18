@@ -501,6 +501,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check before saving
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#enable-comments-on-the-channel" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1714,6 +1725,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check before saving
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#enable-comments-on-the-channel" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1824,6 +1846,29 @@ each and whether it went through the proxy:</p>
 <li><code>getMe</code> with your token, which names the bot;</li>
 <li><code>getWebhookInfo</code>, which says whether a webhook is set and how many updates wait.</li>
 </ol>
+<h2 id="check-before-saving">Check before saving<a class="headerlink" href="#check-before-saving" title="Permanent link">&para;</a></h2>
+<p><strong>Check connection</strong> also works in the form, before anything is saved: in the form of a new Connection, and on the
+page of a saved one while the form holds changes. It checks the values in the form — the Bot API base URL, the update
+mode, the proxy and the bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets
+no entry.</p>
+<ul>
+<li>With the bot token typed in the form, the check runs its three steps against the base URL in the form, through the
+  proxy in the form, with that token.</li>
+<li>Without a token typed, the page of a saved Connection uses its stored token only when the base URL — a trailing <code>/</code>
+  aside — and the proxy are the saved ones: the stored token is sent only to the saved address, through the saved
+  proxy, since a proxy you have not saved would see it in the path of an <code>http</code> base URL. After a change of the base
+  URL or of the proxy, the check makes only the dry probe there, <code>GET &lt;base&gt;/bot0:x/getMe</code> without your token, and
+  <code>getMe</code> and <code>getWebhookInfo</code> ask you to type the bot token again to check the new address or proxy, or to save
+  first. A new Connection without a token gets the dry probe alone too.</li>
+</ul>
+<p>The check is <code>POST /api/v1/connections/checks</code>, which needs <code>connections:write</code>; with a Personal access token of an
+Admin in <code>MUSTER_TOKEN</code>:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/connections/checks<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"type":"telegram","bot_api_base_url":"https://api.telegram.org","update_mode":"long_polling",</span>
+<span class="s1">       "bot_token":"123456789:AA…"}'</span>
+</code></pre></div>
+<p>Add <code>"connection_id":"CN…"</code> to check the changes of a saved Connection, whose stored token the rule above may use.</p>
 <h2 id="enable-comments-on-the-channel">Enable comments on the channel<a class="headerlink" href="#enable-comments-on-the-channel" title="Permanent link">&para;</a></h2>
 <p>A Telegram Destination is a channel <strong>with comments</strong>. Comments on a channel post live in the channel's discussion
 group, and Muster writes everything about an Alert Group after its Root message there.</p>
