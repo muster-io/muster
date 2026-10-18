@@ -442,7 +442,11 @@ func TestConnectionDrafts(t *testing.T) {
 				t.Errorf("draft %s = %d %s, want 422 %s at %s", c.body, a.status, a.body, c.code, c.pointer)
 			}
 		}
-		reader := e.api(t).json(http.MethodPost, "/api/v1/me/personal-access-tokens",
+		session := newAgent(t, e.base)
+		if a := session.signIn(devmode.AdminEmail, devmode.AdminPassword); a.status != http.StatusCreated {
+			t.Fatalf("sign in = %d %s", a.status, a.body)
+		}
+		reader := session.json(http.MethodPost, "/api/v1/me/personal-access-tokens",
 			`{"name":"reader","permissions":["connections:read"]}`, http.StatusCreated)["value"].(string)
 		a := patClient{t: t, base: e.base, token: reader}.do(http.MethodPost, "/api/v1/connections/checks",
 			`{"type":"mattermost","server_url":"`+h.Fakes.MattermostSecond+`"}`)
