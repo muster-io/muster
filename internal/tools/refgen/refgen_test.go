@@ -19,12 +19,14 @@ import (
 const (
 	referencePath = "../../../design/prd/l1/reference.md"
 	chartPath     = "../../../deploy/helm/muster"
+	bridgePath    = "../../../api/bridge.yaml"
 )
 
 func TestRunWritesPages(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "reference")
 	var stderr bytes.Buffer
-	if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath}, &stderr); code != 0 {
+	if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath, "-bridge", bridgePath},
+		&stderr); code != 0 {
 		t.Fatalf("run = %d: %s", code, stderr.String())
 	}
 	tests := map[string][]string{
@@ -36,8 +38,14 @@ func TestRunWritesPages(t *testing.T) {
 			"### `database.sessionPort`\n\ninteger or null · default: `null`\n\n",
 			"### `podDisruptionBudget.maxUnavailable`\n\ninteger or string · default: `1`\n\n",
 			"### `database`\n\nobject\n\n"},
-		apiPage:       {"DO NOT EDIT", "[API reference](api/spec/index.html)", "`/api/v1/openapi.yaml`"},
-		indexPage:     {"DO NOT EDIT", "# Reference"},
+		apiPage: {"DO NOT EDIT", "[API reference](api/spec/index.html)", "`/api/v1/openapi.yaml`"},
+		bridgeProtocolPage: {"DO NOT EDIT", "# Bridge protocol\n", "This is version `",
+			"[Bridge protocol reference](bridge/spec/index.html)",
+			"[`api/bridge.yaml` on `master`](https://raw.githubusercontent.com/muster-io/muster/master/api/bridge.yaml)",
+			"[Write a bridge](../messengers/write-a-bridge.md)"},
+		indexPage: {"DO NOT EDIT", "# Reference",
+			"- [API](api.md): the conventions of the HTTP API and its reference, rendered from the specification.\n" +
+				"- [Bridge protocol](bridge-protocol.md): the HTTP protocol between Muster and a bridge, "},
 		logEventsPage: {"DO NOT EDIT", "### `process_started`\n\nINFO · fields: `version`, `commit` · C-02\n\n"},
 		metricsPage: {"DO NOT EDIT",
 			"### `muster_build_info`\n\ngauge · labels: `version`, `commit` · C-02 · exported by every replica\n\n",
@@ -76,14 +84,21 @@ func TestRunErrors(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code := run([]string{"-out", filepath.Join(file, "reference"), "-chart", chartPath}, &stderr); code != 1 {
+	if code := run([]string{"-out", filepath.Join(file, "reference"), "-chart", chartPath, "-bridge", bridgePath},
+		&stderr); code != 1 {
 		t.Errorf("an output directory under a file: run = %d", code)
 	}
 	stderr.Reset()
-	if code := run([]string{"-out", t.TempDir(), "-catalogue", filepath.Join(file, "none"), "-chart", chartPath},
-		&stderr); code != 1 ||
+	if code := run([]string{"-out", t.TempDir(), "-catalogue", filepath.Join(file, "none"), "-chart", chartPath,
+		"-bridge", bridgePath}, &stderr); code != 1 ||
 		!strings.Contains(stderr.String(), "none") {
 		t.Errorf("a missing catalogue: run = %d: %s", code, stderr.String())
+	}
+	stderr.Reset()
+	if code := run([]string{"-out", t.TempDir(), "-catalogue", referencePath, "-chart", chartPath,
+		"-bridge", filepath.Join(file, "bridge.yaml")}, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "bridge.yaml") {
+		t.Errorf("a missing Bridge protocol specification: run = %d: %s", code, stderr.String())
 	}
 }
 
@@ -104,7 +119,8 @@ func TestRunFailsOnCatalogueMismatch(t *testing.T) {
 	}
 	dir := t.TempDir()
 	var stderr bytes.Buffer
-	if code := run([]string{"-out", dir, "-catalogue", path, "-chart", chartPath}, &stderr); code != 1 {
+	if code := run([]string{"-out", dir, "-catalogue", path, "-chart", chartPath, "-bridge", bridgePath},
+		&stderr); code != 1 {
 		t.Fatalf("run = %d: %s", code, stderr.String())
 	}
 	if want := `metric "muster_leader": type: counter in the catalogue, gauge in the registry`; !strings.Contains(
@@ -354,7 +370,8 @@ func TestRunIsDeterministic(t *testing.T) {
 	dirs := []string{t.TempDir(), t.TempDir()}
 	for _, dir := range dirs {
 		var stderr bytes.Buffer
-		if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath}, &stderr); code != 0 {
+		if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath, "-bridge", bridgePath},
+			&stderr); code != 0 {
 			t.Fatalf("run = %d: %s", code, stderr.String())
 		}
 	}
@@ -386,6 +403,54 @@ func TestIndexListsEveryPage(t *testing.T) {
 		if want := "- [" + p.title + "](" + p.file + "): "; !strings.Contains(index, want) {
 			t.Errorf("the index lacks %q", want)
 		}
+	}
+}
+
+func writeBridgeSpec(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bridge.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestBridgeProtocolMarkdown covers C-22.FR-20: the page names the version of the specification and its major in the
+// paths, and links to the rendered reference and to the specification on master; a specification without a
+// major.minor.patch version fails.
+func TestBridgeProtocolMarkdown(t *testing.T) {
+	page, err := bridgeProtocolMarkdown(writeBridgeSpec(t, "openapi: 3.1.2\ninfo:\n  title: T\n  version: 2.3.4\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"<!-- Code generated by internal/tools/refgen from api/bridge.yaml. DO NOT EDIT. -->\n\n# Bridge protocol\n\n",
+		"This is version `2.3.4` of the protocol. Every path is under `/v2/`, ",
+		"`protocol_version`\n`\"2\"` in its answer to `GET /v2/info`. ",
+		"keep version 2; ",
+		"under the MIT licence",
+		"[Bridge protocol reference](bridge/spec/index.html) is rendered from `api/bridge.yaml`",
+		"[`api/bridge.yaml` on `master`](https://raw.githubusercontent.com/muster-io/muster/master/api/bridge.yaml)",
+		"[Write a bridge](../messengers/write-a-bridge.md)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q:\n%s", want, page)
+		}
+	}
+	for name, spec := range map[string]string{
+		"invalid":    "info: [\n",
+		"no info":    "openapi: 3.1.2\n",
+		"no version": "info:\n  title: T\n",
+		"a prefix":   "info:\n  version: v1.0.0\n",
+		"two parts":  "info:\n  version: '1.0'\n",
+		"major 0":    "info:\n  version: 0.1.0\n",
+	} {
+		if _, err := bridgeProtocolMarkdown(writeBridgeSpec(t, spec)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := bridgeProtocolMarkdown(filepath.Join(t.TempDir(), "none.yaml")); err == nil {
+		t.Error("a missing specification: no error")
 	}
 }
 
@@ -466,7 +531,8 @@ func TestChartValuesErrors(t *testing.T) {
 		}
 	}
 	var stderr bytes.Buffer
-	if code := run([]string{"-out", t.TempDir(), "-catalogue", referencePath, "-chart", dir}, &stderr); code != 1 ||
+	if code := run([]string{"-out", t.TempDir(), "-catalogue", referencePath, "-chart", dir, "-bridge", bridgePath},
+		&stderr); code != 1 ||
 		!strings.Contains(stderr.String(), "a.b has no description") {
 		t.Errorf("run = %d: %s", code, stderr.String())
 	}
