@@ -1743,8 +1743,6 @@
     },
     "columns": {
       "at": "Time",
-      "direction": "Direction",
-      "latency": "Latency",
       "operation": "Operation",
       "status": "Status"
     },

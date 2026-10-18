@@ -11,7 +11,8 @@
 // the outgoing webhook "rl-hook", whose endpoint answers 500, lists its event with 500 and the endpoint's body under
 // "Requests of this check" and in the Destination's own tab; the check of a new Bridge Connection before saving lists
 // its getInfo as "Check before saving". A reader of Russian reads the tab, a record and the Alert Group page at phone
-// width. No page scrolls sideways at 360 px; no Content Security Policy violation.
+// width. At 360 px no page and no open dialog scrolls sideways, and the lists show the status and the latency without
+// scrolling their own box; no Content Security Policy violation.
 
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 
@@ -144,11 +145,29 @@ async function dialogShot(page: Page, name: string): Promise<void> {
   }
 }
 
-/** Nothing is wider than the 360 px of the phone. */
+/** Nothing on the page, with no dialog open, is wider than the 360 px of the phone. */
 async function expectPhoneWidth(page: Page): Promise<void> {
   await expectNoHorizontalScroll(page);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width, `scrollWidth ${width}`).toBeLessThanOrEqual(360);
+}
+
+/**
+ * An open dialog at 360 px: the page's own width ignores it, so the dialog itself covers the phone from its left edge,
+ * once it has moved into place, and does not scroll sideways.
+ */
+async function expectDialogPhoneWidth(dialog: Locator): Promise<void> {
+  await expect.poll(async () => (await dialog.boundingBox())?.x).toBe(0);
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+}
+
+/** The first row's status and latency are wholly in view, and the list's own box does not scroll sideways. */
+async function expectListFits(table: Locator): Promise<void> {
+  const first = rows(table).first();
+  await expect(first.getByTestId("request-status")).toBeInViewport({ ratio: 1 });
+  await expect(first.getByTestId("request-latency")).toBeInViewport({ ratio: 1 });
+  const box = table.locator("xpath=..");
+  expect(await box.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 }
 
 test.beforeAll(async () => {
@@ -336,10 +355,12 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
   await dialogShot(page, "request-log-alert-group");
 
-  // At 360 px: the Alert Group page with the dialog open and closed, the tab and the record scroll vertically only.
+  // At 360 px: the Alert Group page with the dialog open and closed, the tab and the record scroll vertically only,
+  // and the lists show the status and the latency.
   await page.setViewportSize({ width: 360, height: 740 });
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
-  await expectPhoneWidth(page);
+  await expectDialogPhoneWidth(dialog);
+  await expectListFits(dialog.getByRole("table", { name: "Request log" }));
   await dialogShot(page, "request-log-alert-group-360");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
@@ -349,10 +370,11 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await page.goto(`/connections/${ids.connection}?tab=request-log`);
   await expect(rows(table).first().getByTestId("request-operation")).toBeVisible();
   await expectPhoneWidth(page);
+  await expectListFits(table);
   await shot(page, "request-log-connection-360");
   await table.getByRole("button", { name: "createPost", exact: true }).first().click();
   await expect(request.getByTestId("record-request-body")).toBeVisible();
-  await expectPhoneWidth(page);
+  await expectDialogPhoneWidth(record);
   await dialogShot(page, "request-log-record-360");
   expect(csp).toEqual([]);
 });
@@ -460,6 +482,7 @@ async function russianViewer(browser: Browser): Promise<void> {
   const table = page.getByRole("table", { name: "Журнал запросов" });
   await expect(table.getByRole("img", { name: "Отправлен", exact: true }).first()).toBeVisible();
   await expectPhoneWidth(page);
+  await expectListFits(table);
   await shot(page, "request-log-ru-360");
   const filters = page.getByRole("search", { name: "Фильтры журнала запросов" });
   await filters.getByLabel("Направление").selectOption({ label: "Получен" });
@@ -474,7 +497,7 @@ async function russianViewer(browser: Browser): Promise<void> {
   await expect(
     record.getByRole("region", { name: "Запрос" }).getByRole("button", { name: "Копировать тело" }),
   ).toBeVisible();
-  await expectPhoneWidth(page);
+  await expectDialogPhoneWidth(record);
   await dialogShot(page, "request-log-record-ru-360");
   await page.keyboard.press("Escape");
   await expect(record).toHaveCount(0);
@@ -491,7 +514,8 @@ async function russianViewer(browser: Browser): Promise<void> {
   await requests.click();
   const dialog = page.getByRole("dialog", { name: "Запросы: alerts" });
   await expect(dialog.getByRole("button", { name: "createPost", exact: true })).toBeVisible();
-  await expectPhoneWidth(page);
+  await expectDialogPhoneWidth(dialog);
+  await expectListFits(dialog.getByRole("table", { name: "Журнал запросов" }));
   await dialogShot(page, "request-log-alert-group-ru-360");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);

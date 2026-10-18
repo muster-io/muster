@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // The Request log in a real browser (C-23.FR-6, AC-6): the records newest first with the time in the user's time zone,
-// the arrow named "Sent" or "Received", the operation in a monospace font with the kind of check below it, the status
-// or what failed, and the latency; "Load more" with the cursor; the filters by direction, status class and operation,
-// which change the request and the caller's filters; the run of one check as a filter that can be cleared; the empty
-// list; the dialog of "Requests" with exactly its scope, and a record opened over it; and the tabs of the pages, which
-// keep the settings mounted behind the Request log. English and Russian.
+// the arrow named "Sent" or "Received" before the operation in a monospace font with the kind of check below it, the
+// status or what failed with the latency below it, in three columns that fit 360 px; "Load more" with the cursor; the
+// filters by direction, status class and operation, which change the request and the caller's filters; the run of one
+// check as a filter that can be cleared; the empty list; the dialog of "Requests" with exactly its scope, and a record
+// opened over it; and the tabs of the pages, which keep the settings mounted behind the Request log. English and
+// Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -164,13 +165,26 @@ function Stateful({
   );
 }
 
-/** The cells of each row of the table, as text. */
+const TABLE = 'table[aria-label="Request log"], table[aria-label="Журнал запросов"]';
+
+/** Each row of the table as its time, direction, operation, status and latency, as text. */
 function rows(): string[][] {
-  return Array.from(
-    document.querySelectorAll(
-      'table[aria-label="Request log"] tbody tr, table[aria-label="Журнал запросов"] tbody tr',
-    ),
-  ).map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent ?? ""));
+  return Array.from(document.querySelectorAll(`:is(${TABLE}) tbody tr`)).map((tr) =>
+    [
+      tr.querySelector("time"),
+      tr.querySelector('[data-testid="request-direction"]'),
+      tr.querySelector('[data-testid="request-operation"]'),
+      tr.querySelector('[data-testid="request-status"]'),
+      tr.querySelector('[data-testid="request-latency"]'),
+    ].map((cell) => cell?.textContent ?? ""),
+  );
+}
+
+/** The headers of the table's columns. */
+function headers(): string[] {
+  return Array.from(document.querySelectorAll(`:is(${TABLE}) thead th`)).map(
+    (th) => th.textContent ?? "",
+  );
 }
 
 beforeEach(async () => {
@@ -179,6 +193,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  await page.viewport(414, 896);
   await i18n.changeLanguage("en");
 });
 
@@ -194,6 +209,14 @@ describe("the Request log", () => {
       // Without an answer, what failed, translated as the checks name it.
       ["Oct 18, 2026, 14:58:00", "→", "updatePost", "No answer in time.", "10000 ms"],
     ]);
+    // The arrow stands before the operation, the latency under the status.
+    expect(headers()).toEqual(["Time", "Operation", "Status"]);
+    const arrow = page.getByTestId("request-direction").first().element().getBoundingClientRect();
+    const name = page.getByTestId("request-operation").first().element().getBoundingClientRect();
+    expect(arrow.right).toBeLessThanOrEqual(name.left);
+    const status = page.getByTestId("request-status").first().element().getBoundingClientRect();
+    const latency = page.getByTestId("request-latency").first().element().getBoundingClientRect();
+    expect(latency.top).toBeGreaterThanOrEqual(status.bottom);
     const arrows = page.getByTestId("request-direction");
     await expect.element(arrows.nth(0)).toHaveAccessibleName("Sent");
     await expect.element(arrows.nth(1)).toHaveAccessibleName("Received");
@@ -376,6 +399,49 @@ describe("the Request log", () => {
         run: undefined,
       },
     ]);
+  });
+
+  test("fits 360 px in Russian: the status and the latency stay in view, nothing scrolls sideways", async () => {
+    await i18n.changeLanguage("ru");
+    await page.viewport(360, 740);
+    serve(() => ({
+      items: [
+        summary({ operation: "createPostEphemeral", check: "connection_check" }),
+        summary({
+          id: "RQ0000000000AC",
+          operation: "createPostEphemeral",
+          status: null,
+          error_class: "transient",
+          error_code: "timeout",
+          latency_ms: 10000,
+        }),
+      ],
+      next_cursor: null,
+    }));
+    await renderIn(<Stateful scope={{ connection: CONNECTION }} />);
+    const table = page.getByRole("table", { name: "Журнал запросов" });
+    await expect.poll(() => rows().length).toBe(2);
+    expect(rows()).toEqual([
+      // The date and the time of day stand on two lines and read as one time.
+      ["18 окт. 2026 г., 15:00:12", "→", "createPostEphemeral", "201", "12 мс"],
+      [
+        "18 окт. 2026 г., 15:00:12",
+        "→",
+        "createPostEphemeral",
+        "Нет ответа за отведённое время.",
+        "10000 мс",
+      ],
+    ]);
+    for (const id of ["request-status", "request-latency"]) {
+      for (const cell of table.getByTestId(id).elements()) {
+        expect(cell.getBoundingClientRect().right, id).toBeLessThanOrEqual(360);
+      }
+    }
+    // The table's own box does not scroll sideways either.
+    const box = table.element().parentElement;
+    expect(box).not.toBeNull();
+    expect(box?.scrollWidth).toBeLessThanOrEqual(box?.clientWidth ?? 0);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(360);
   });
 
   test("reads in Russian", async () => {

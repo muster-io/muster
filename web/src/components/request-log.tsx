@@ -3,10 +3,11 @@
 
 // The Request log (C-23.FR-6): the records of a Connection, of a Destination, of an Alert Group's deliveries to one
 // Destination or of one check run, newest first and page by page with "Load more" — when each was made in the user's
-// time zone, a named arrow for its direction, the operation in a monospace font with the kind of check below it, the
-// status or, without an answer, what failed, and the latency — filtered by direction, status class and operation. The
-// pages keep the filters in the URL, so that a link to a filtered list can be shared; the dialogs of the Alert Group
-// page and the check panels keep them while they are open. A record opens in a dialog of its own.
+// time zone, a named arrow for its direction before the operation in a monospace font with the kind of check below it,
+// and the status or, without an answer, what failed, with the latency below it — filtered by direction, status class
+// and operation. Three columns fit 360 px (NFR-15), the date and the time of day on two lines there. The pages keep the
+// filters in the URL, so that a link to a filtered list can be shared; the dialogs of the Alert Group page and the
+// check panels keep them while they are open. A record opens in a dialog of its own.
 
 import type { TFunction } from "i18next";
 import { XIcon } from "lucide-react";
@@ -24,6 +25,7 @@ import {
   type RequestRecordSummary,
 } from "../api/gen/model";
 import { SHEET } from "../lib/commands";
+import { useTimeFormat } from "../lib/time";
 import { checkCodeText } from "./connection-check";
 import { type DataColumn, DataTable, useCursorList } from "./data-table";
 import {
@@ -57,7 +59,7 @@ const DIRECTIONS = Object.values(RequestDirection);
 const STATUS_CLASSES = Object.values(ListRequestLogStatusClass);
 
 /** The status of a record, or without an answer what failed: its error code, else its error class. */
-export function statusText(t: TFunction, record: RequestRecordSummary): string {
+function statusText(t: TFunction, record: RequestRecordSummary): string {
   if (record.status !== null) {
     return String(record.status);
   }
@@ -73,37 +75,67 @@ export function statusText(t: TFunction, record: RequestRecordSummary): string {
 /** Opens a record; the cells reach it through the context, so that the columns stay the same between renders. */
 const OpenRecord = createContext<(record: RequestRecordSummary) => void>(() => undefined);
 
-function AtCell({ row }: { row: RequestRecordSummary }) {
-  const time = useRecordTime();
-  return (
-    <time dateTime={row.at} className="whitespace-nowrap tabular-nums">
-      {time(row.at)}
-    </time>
-  );
+/**
+ * The time of a record as its date, the separator and its time of day, which joined read as the full time: a phone
+ * shows the time of day on a line of its own. A language whose full time is not the two joined keeps it whole.
+ */
+function useRecordTimeParts(): (iso: string) => [string, string, string] {
+  const { i18n } = useTranslation();
+  const { timeZone } = useTimeFormat();
+  const full = useRecordTime();
+  const locale = i18n.resolvedLanguage ?? "en";
+  return useMemo(() => {
+    const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone });
+    const time = new Intl.DateTimeFormat(locale, {
+      timeStyle: "medium",
+      hourCycle: "h23",
+      timeZone,
+    });
+    return (iso: string) => {
+      const at = new Date(iso);
+      const whole = full(iso);
+      const [d, t] = [date.format(at), time.format(at)];
+      if (whole.length > d.length + t.length && whole.startsWith(d) && whole.endsWith(t)) {
+        return [d, whole.slice(d.length, whole.length - t.length), t];
+      }
+      return [whole, "", ""];
+    };
+  }, [locale, timeZone, full]);
 }
 
-function DirectionCell({ row }: { row: RequestRecordSummary }) {
-  return <DirectionArrow direction={row.direction} />;
+function AtCell({ row }: { row: RequestRecordSummary }) {
+  const parts = useRecordTimeParts();
+  const [date, separator, time] = parts(row.at);
+  return (
+    <time dateTime={row.at} className="tabular-nums">
+      <span className="whitespace-nowrap">{date}</span>
+      <span className="max-sm:hidden">{separator}</span>
+      <span className="block whitespace-nowrap sm:inline">{time}</span>
+    </time>
+  );
 }
 
 function OperationCell({ row }: { row: RequestRecordSummary }) {
   const { t } = useTranslation();
   const open = useContext(OpenRecord);
   return (
-    <div className="flex min-w-0 flex-col items-start gap-0.5">
-      <button
-        type="button"
-        className="text-left font-mono text-xs wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
-        onClick={() => open(row)}
-        data-testid="request-operation"
-      >
-        {row.operation}
-      </button>
-      {row.check !== null && (
-        <span className="text-xs text-muted-foreground" data-testid="request-check">
-          {checkKindText(t, row.check)}
-        </span>
-      )}
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <DirectionArrow direction={row.direction} />
+      <div className="flex min-w-0 flex-col items-start gap-0.5">
+        <button
+          type="button"
+          className="text-left font-mono text-xs wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
+          onClick={() => open(row)}
+          data-testid="request-operation"
+        >
+          {row.operation}
+        </button>
+        {row.check !== null && (
+          <span className="text-xs text-muted-foreground" data-testid="request-check">
+            {checkKindText(t, row.check)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -113,18 +145,20 @@ function StatusCell({ row }: { row: RequestRecordSummary }) {
   const failed =
     row.status === null ? row.error_code !== null || row.error_class !== null : row.status >= 400;
   return (
-    <span className={cn("tabular-nums", failed && "text-destructive")} data-testid="request-status">
-      {statusText(t, row)}
-    </span>
-  );
-}
-
-function LatencyCell({ row }: { row: RequestRecordSummary }) {
-  const { t } = useTranslation();
-  return (
-    <span className="whitespace-nowrap tabular-nums" data-testid="request-latency">
-      {t("requestLog.latency", { ms: row.latency_ms })}
-    </span>
+    <div className="flex flex-col items-start gap-0.5">
+      <span
+        className={cn("tabular-nums", failed && "text-destructive")}
+        data-testid="request-status"
+      >
+        {statusText(t, row)}
+      </span>
+      <span
+        className="text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+        data-testid="request-latency"
+      >
+        {t("requestLog.latency", { ms: row.latency_ms })}
+      </span>
+    </div>
   );
 }
 
@@ -327,26 +361,26 @@ export function RequestLog({ scope, filters, onFiltersChange, onNavigate }: Requ
   );
   const columns = useMemo(
     (): DataColumn<RequestRecordSummary>[] => [
+      // Below 640 px the columns give up their minimum widths and the time its single line, so that the three fit
+      // 360 px.
       {
         id: "at",
         header: t("requestLog.columns.at"),
-        className: "whitespace-nowrap",
+        className: "sm:whitespace-nowrap",
         Cell: AtCell,
       },
-      { id: "direction", header: t("requestLog.columns.direction"), Cell: DirectionCell },
       {
         id: "operation",
         header: t("requestLog.columns.operation"),
-        className: "min-w-32",
+        className: "sm:min-w-32",
         Cell: OperationCell,
       },
       {
         id: "status",
         header: t("requestLog.columns.status"),
-        className: "min-w-24",
+        className: "sm:min-w-24",
         Cell: StatusCell,
       },
-      { id: "latency", header: t("requestLog.columns.latency"), Cell: LatencyCell },
     ],
     [t],
   );

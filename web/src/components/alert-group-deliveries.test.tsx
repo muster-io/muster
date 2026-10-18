@@ -6,7 +6,8 @@
 // tab without the opener, the error of the messenger as text, a section that follows the alert-group hint instead of
 // polling, and a Destination's name whose tooltip and accessible description are its full label with destinations:read
 // (a deleted Destination keeps its name alone). With destinations:read each row has "Requests", which opens the
-// requests of that Destination for that Alert Group in a dialog, and the row keeps its layout at 360 px.
+// requests of that Destination for that Alert Group in a dialog, and the row and the dialog's list, its status and
+// latency included, keep their layout at 360 px.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -454,6 +455,15 @@ describe("the requests of a delivery", () => {
     await expect.element(dialog.getByRole("img", { name: "Отправлен" })).toBeVisible();
     expect(scrollsSideways()).toBe(false);
     const content = dialog.element();
+    await expect.poll(() => content.getBoundingClientRect().left).toBe(0);
     expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
+    // The status and the latency of the request stay in view, and the list's own box does not scroll sideways.
+    for (const id of ["request-status", "request-latency"]) {
+      const cell = dialog.getByTestId(id).element();
+      expect(cell.getBoundingClientRect().right, id).toBeLessThanOrEqual(360);
+    }
+    const box = dialog.getByRole("table").element().parentElement;
+    expect(box).not.toBeNull();
+    expect(box?.scrollWidth).toBeLessThanOrEqual(box?.clientWidth ?? 0);
   });
 });
