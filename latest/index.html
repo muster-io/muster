@@ -407,6 +407,8 @@
       
         
       
+        
+      
     
     
     
@@ -547,6 +549,33 @@
     
   
   Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./messengers/write-a-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Write a bridge
 
     
   </span>
@@ -1398,6 +1427,8 @@
       
         
       
+        
+      
     
     
     
@@ -1613,6 +1644,33 @@
 
                 
               
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./reference/bridge-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bridge protocol
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
             </ul>
           </nav>
         
@@ -1694,8 +1752,8 @@
 
 <h1 id="muster">Muster<a class="headerlink" href="#muster" title="Permanent link">&para;</a></h1>
 <p>Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It groups Alerts into Alert
-Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram or behind an
-outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.</p>
+Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram, in any other
+messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.</p>
 <pre class="mermaid"><code>flowchart LR
   am["Alertmanager"] -- "Snapshots" --&gt; integration
   subgraph muster["Muster"]
@@ -1704,10 +1762,12 @@ outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.<
   subgraph destinations["Destinations"]
     mm["Mattermost"]
     tg["Telegram"]
+    br["Bridge"]
     wh["Outgoing webhook"]
   end
   groups --&gt; mm
   groups --&gt; tg
+  groups --&gt; br
   groups --&gt; wh</code></pre>
 <p>The Alertmanager of each cluster sends its notifications to an Integration of Muster. Routes pick Alerts by their
 labels, group them into Alert Groups and decide the Destinations they are delivered to, and Muster keeps the message
@@ -1718,14 +1778,15 @@ of each Alert Group there up to date until the Alert Group is resolved.</p>
 <li><a href="integrations/alertmanager/">Alertmanager</a>: connect the Alertmanager of a cluster, and watch the path from it with
   a <a href="integrations/heartbeat/">Heartbeat</a>.</li>
 <li><a href="messengers/mattermost/">Messengers</a>: connect <a href="messengers/mattermost/">Mattermost</a> and
-  <a href="messengers/telegram/">Telegram</a>, and <a href="messengers/account-links/">link your messenger accounts</a>.</li>
+  <a href="messengers/telegram/">Telegram</a>, reach any other messenger through a <a href="messengers/bridge/">Bridge</a> (and
+  <a href="messengers/write-a-bridge/">write one</a>), and <a href="messengers/account-links/">link your messenger accounts</a>.</li>
 <li><a href="outgoing-webhooks/events/">Outgoing webhooks</a>: send the lifecycle events of Alert Groups in the
   <a href="outgoing-webhooks/events/">events mode</a>, or keep a message in any chat in the
   <a href="outgoing-webhooks/templates/">template mode</a>.</li>
 <li><a href="sign-in/oidc-keycloak/">Sign-in</a>: sign in with OpenID Connect, shown with Keycloak.</li>
 <li><a href="operations/runbooks/">Runbooks</a>: what each alert about Muster means and how to fix it.</li>
-<li><a href="reference/">Reference</a>: metrics, log events, Internal alerts, environment variables, chart values and the
-  API.</li>
+<li><a href="reference/">Reference</a>: metrics, log events, Internal alerts, environment variables, chart values, the API
+  and the Bridge protocol.</li>
 </ul>
 
 

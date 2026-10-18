@@ -25,6 +25,9 @@
         <loc>https://muster-io.github.io/muster/messengers/telegram/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/messengers/write-a-bridge/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/operations/request-log/</loc>
       </url>
       <url>
@@ -83,6 +86,9 @@
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/reference/api/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/reference/bridge-protocol/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/reference/chart-values/</loc>
