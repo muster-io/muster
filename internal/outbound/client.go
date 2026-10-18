@@ -80,8 +80,8 @@ type Config struct {
 	Resolver Resolver
 	// MaxBodyBytes is the largest answer read; 0 is DefaultMaxBodyBytes.
 	MaxBodyBytes int64
-	// Recorder, with an Owner that names a Connection or an outgoing webhook Destination, gets the record of each
-	// attempt (C-23.FR-1); without either the client records nothing.
+	// Recorder, with an Owner that names a Connection, an outgoing webhook Destination or a draft, gets the record of
+	// each attempt (C-23.FR-1); without either the client records nothing.
 	Recorder Recorder
 	Owner    Owner
 }

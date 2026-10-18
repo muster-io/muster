@@ -43,7 +43,7 @@ connection?: PublicId;
  */
 destination?: PublicId;
 /**
- * Only the requests Muster sent (`outbound`) or, from S-089, received (`inbound`).
+ * Only the requests Muster sent (`outbound`) or received (`inbound`).
  */
 direction?: RequestDirection;
 /**
@@ -60,4 +60,8 @@ operation?: string;
  * Only the records of the deliveries of this Alert Group, by `public_id`.
  */
 alert_group?: PublicId;
+/**
+ * Only the records of this check run (`CR…`), which the results of `checkConnection`, `checkConnectionDraft`, `checkDestination` and `testDestination` name as `request_log_run`. Alone it lists the records of the run whose owner is a Connection or nobody and needs `connections:read`; the records of an outgoing webhook's test or probe are listed beside its `destination`. A run that left no record, or an id that is no check run, lists nothing.
+ */
+run?: PublicId;
 };

@@ -82,8 +82,8 @@ export const getListRequestLogUrl = (params?: ListRequestLogParams,) => {
 }
 
 /**
- * The records of exactly one owner, newest first: `connection` lists every record of a Connection, `destination` every record of an outgoing webhook Destination or, for a messenger Destination, the records of its Connection that name it. Neither or both answer `422` with the code `one_of_required`. The caller needs `connections:read` to name a Connection and `destinations:read` to name a Destination (`403` otherwise); an unknown or deleted owner is `404`. Only records newer than `request_log.max_age` and among the newest `request_log.max_records` of their owner are listed — a messenger Destination's within its Connection's — so a list never shows more than that bound. Each record is one attempt of a request: its URL as errors show it, its status, latency and path, without headers or bodies, which `getRequestRecord` reads.
- * @summary List the Request log of a Connection or a Destination
+ * The records of exactly one owner, or of one check run, newest first: `connection` lists every record of a Connection, `destination` every record of an outgoing webhook Destination or, for a messenger Destination, the records of its Connection that name it; `run` alone lists the records of that check run whose owner is a Connection or nobody — the checks before saving of new Connections — and beside an owner it narrows that owner's list. Neither an owner nor a run, or both owners, answer `422` with the code `one_of_required`. The caller needs `connections:read` to name a Connection or a run alone and `destinations:read` to name a Destination (`403` otherwise); an unknown or deleted owner is `404`. Only records newer than `request_log.max_age` and among the newest `request_log.max_records` of their owner are listed — a messenger Destination's within its Connection's — so a list never shows more than that bound. Each record is one attempt of a request: its URL as errors show it, its status, latency and path, without headers or bodies, which `getRequestRecord` reads.
+ * @summary List the Request log of a Connection, a Destination or a check run
  */
 export const listRequestLog = async (params?: ListRequestLogParams, options?: Parameters<typeof apiFetch>[1]): Promise<RequestLogList> => {
 
@@ -154,7 +154,7 @@ export function useListRequestLog<TData = Awaited<ReturnType<typeof listRequestL
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List the Request log of a Connection or a Destination
+ * @summary List the Request log of a Connection, a Destination or a check run
  */
 
 export function useListRequestLog<TData = Awaited<ReturnType<typeof listRequestLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(

@@ -2,12 +2,13 @@
 // Copyright The Muster Authors
 
 // Package requestlog is the Request log (C-23): the recent HTTP requests Muster sent for a Connection or an outgoing
-// webhook Destination — from S-089 also those that reached a Connection's callbacks — each with its answer. The
-// outbound package hands each attempt to the Writer already masked of the Secrets of its client and request; the Writer
-// applies the shape masking — signed action ids, `/start` tokens, the token of an account_link event — and the
-// truncation of mask.go, and inserts one row with the business time on the main pool, outside any transaction of the
-// caller, never failing or retrying the request it records. A record's owner is its Connection, else its outgoing
-// webhook Destination, else nobody. The Reader shows only the records newer than request_log.max_age among the newest
+// webhook Destination, and the requests that reached a Connection's callbacks, each with its answer. The outbound
+// package hands each attempt to the Writer already masked of the Secrets of its client and request, and Inbound each
+// request of a callback masked of the values of outbound.MaskedHeaders; the Writer applies the shape masking — signed
+// action ids, `/start` tokens, the token of an account_link event — and the truncation of bodies, URLs and headers,
+// and inserts one row with the business time on the main pool, outside any transaction of the caller, never failing
+// or retrying the request it records. A record's owner is its Connection, else its outgoing webhook Destination, else
+// nobody. The Reader shows only the records newer than request_log.max_age among the newest
 // request_log.max_records of their owner, and Prune deletes the rest.
 package requestlog
 
@@ -17,9 +18,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,6 +47,19 @@ const (
 	BodyMax = 16384
 )
 
+// The bounds of what a record keeps of a URL and of headers, which the callers of the callbacks choose: net/http takes
+// up to 1 MiB of a request's line and headers. A cut URL, header name or header value ends with "…".
+const (
+	// urlMax is the most bytes a record keeps of a URL, request_log.body_max.
+	urlMax = BodyMax
+	// headersMax is the most bytes a record keeps of the names and values of a request's or an answer's headers, as
+	// many as the outbound package reads of an answer's header.
+	headersMax = 64 << 10
+)
+
+// ellipsis ends a URL, a header name or a header value that a record keeps cut.
+const ellipsis = "…"
+
 // WriteTimeout bounds the write of one record.
 const WriteTimeout = 2 * time.Second
 
@@ -64,6 +81,7 @@ type Queries interface {
 		[]dbgen.ListConnectionRecordsRow, error)
 	ListDestinationRecords(ctx context.Context, arg dbgen.ListDestinationRecordsParams) (
 		[]dbgen.ListDestinationRecordsRow, error)
+	ListRunRecords(ctx context.Context, arg dbgen.ListRunRecordsParams) ([]dbgen.ListRunRecordsRow, error)
 	GetRecord(ctx context.Context, arg dbgen.GetRecordParams) (dbgen.GetRecordRow, error)
 	CountNewerOfConnection(ctx context.Context, arg dbgen.CountNewerOfConnectionParams) (int64, error)
 	CountNewerOfDestination(ctx context.Context, arg dbgen.CountNewerOfDestinationParams) (int64, error)
@@ -90,7 +108,8 @@ type Config struct {
 	Timeout time.Duration
 }
 
-// Writer writes the records of the Request log of one Organization; it is the outbound package's Recorder.
+// Writer writes the records of the Request log of one Organization; it is the outbound package's Recorder and the
+// InboundRecorder of the callbacks.
 type Writer struct {
 	orgID    int64
 	q        Queries
@@ -120,28 +139,64 @@ func (w *Writer) Record(ctx context.Context, r outbound.Record) {
 }
 
 func (w *Writer) write(ctx context.Context, direction string, r outbound.Record) {
-	p := w.paramsOf(direction, r)
+	w.insert(ctx, direction, r.Operation, r.Owner.PublicID, w.paramsOf(direction, r))
+}
+
+// insert writes the row p of the record of operation whose owner is owner, by public_id.
+func (w *Writer) insert(ctx context.Context, direction, operation, owner string, p dbgen.InsertRecordParams) {
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), w.timeout)
 	defer cancel()
 	if err := w.q.InsertRecord(wctx, p); err != nil {
 		metrics.RequestLogWriteFailures.With(direction).Inc()
 		w.log.Log(ctx, logging.RequestLogWriteFailed, logging.F("direction", direction),
-			logging.F("operation", r.Operation), logging.F("owner", r.Owner.PublicID), logging.F("error", err.Error()))
+			logging.F("operation", operation), logging.F("owner", owner), logging.F("error", err.Error()))
 		return
 	}
 	metrics.RequestLogRecords.With(direction).Inc()
 }
 
-// paramsOf is the row of r: masked, cut, and linked to its owner, its Destination and its Alert Group.
+var _ InboundRecorder = (*Writer)(nil)
+
+// maxMethod is the longest method a record stores.
+const maxMethod = 16
+
+// RecordInbound writes the record of a request that reached a callback (C-23.FR-1 to FR-4): the direction inbound, the
+// path direct, the attempt 1, no error, Muster's answer as its status, shape-masked and cut as an outbound record; a
+// body that Inbound did not keep whole is stored empty, marked truncated, with its size, and a method longer than a
+// record stores is cut. Like Record it fails nothing; a nil Writer records nothing.
+func (w *Writer) RecordInbound(ctx context.Context, r InboundRecord) {
+	if w == nil {
+		return
+	}
+	p := w.paramsOf(DirectionInbound, outbound.Record{
+		Owner:     outbound.Owner{Connection: r.Links.Connection, PublicID: r.Links.ConnectionID},
+		Links:     outbound.Links{Destination: r.Links.Destination, AlertGroup: r.Links.AlertGroup},
+		Operation: r.Operation, Method: r.Method[:min(len(r.Method), maxMethod)], URL: r.URL,
+		RequestHeader: r.RequestHeader, RequestBody: r.Request.Data, Status: cmp.Or(r.Status, http.StatusOK),
+		ResponseHeader: r.ResponseHeader, ResponseBody: r.Response.Data, Latency: r.Latency, Via: outbound.ViaDirect,
+		Attempt: 1})
+	p.RequestBodyBytes = r.Request.Size
+	if !r.Request.Whole {
+		p.RequestBody, p.RequestBodyTruncated = "", true
+	}
+	p.ResponseBodyBytes = r.Response.Size
+	if !r.Response.Whole {
+		p.ResponseBody, p.ResponseBodyTruncated = pgtype.Text{Valid: true}, true
+	}
+	w.insert(ctx, DirectionInbound, r.Operation, r.Links.ConnectionID, p)
+}
+
+// paramsOf is the row of r: masked, cut, and linked to its owner, its Destination, its Alert Group and its check run.
 func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecordParams {
 	body, size, cut := textOf(r.RequestBody)
 	p := dbgen.InsertRecordParams{
 		OrgID: w.orgID, PublicID: publicid.New(publicid.RequestRecord), At: w.business.Now(), Direction: direction,
-		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: clean(r.URL),
+		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: bounded(clean(r.URL), urlMax),
 		RequestHeaders: headersOf(r.RequestHeader), RequestBody: body, RequestBodyBytes: size,
 		RequestBodyTruncated: cut, LatencyMs: clamp32(r.Latency.Milliseconds()), Via: cmp.Or(r.Via, outbound.ViaDirect),
 		Attempt: clamp32(int64(max(r.Attempt, 1))), ConnectionID: id(r.Owner.Connection),
 		DestinationID: id(cmp.Or(r.Owner.Destination, r.Links.Destination)), AlertGroupID: id(r.Links.AlertGroup),
+		CheckKind: text(r.Links.Check), CheckRun: text(r.Links.Run),
 	}
 	if r.Status != 0 {
 		body, size, cut := textOf(r.ResponseBody)
@@ -164,20 +219,79 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 	return p
 }
 
-// headersOf is h as a JSON object of string arrays, every name and value masked; nil is an empty object.
+// header is a header as a record keeps it: its name and values masked.
+type header struct {
+	name   string
+	values []string
+}
+
+// headersOf is h as a JSON object of string arrays, every name and value masked; nil is an empty object. It keeps at
+// most headersMax bytes of names and values, masked first so that no part of a secret survives a cut, in the order of
+// the names: the name or value that crosses the bound is cut at a character boundary and ends with "…", and the
+// headers after it are left out.
 func headersOf(h map[string][]string) []byte {
-	out := make(map[string][]string, len(h))
-	for name, values := range h {
-		name = clean(name)
-		for _, v := range values {
-			out[name] = append(out[name], clean(v))
+	all := make([]header, 0, len(h))
+	size := 0
+	for _, name := range slices.Sorted(maps.Keys(h)) {
+		e := header{name: clean(name), values: make([]string, 0, len(h[name]))}
+		size += len(e.name)
+		for _, v := range h[name] {
+			v = clean(v)
+			e.values = append(e.values, v)
+			size += len(v)
 		}
-		if out[name] == nil {
-			out[name] = []string{}
+		all = append(all, e)
+	}
+	all = within(all, size > headersMax)
+	out := make(map[string][]string, len(all))
+	for _, e := range all {
+		out[e.name] = append(out[e.name], e.values...)
+		if out[e.name] == nil {
+			out[e.name] = []string{}
 		}
 	}
 	b, _ := json.Marshal(out) // a map of strings always encodes
 	return b
+}
+
+// within keeps of the headers hs, in order, at most headersMax bytes of names and values, the ellipsis included, when
+// they hold more (over): the name or value that crosses the bound is cut and ends with "…", and the headers after it
+// are left out.
+func within(hs []header, over bool) []header {
+	left := headersMax - len(ellipsis)
+	for i := range hs {
+		e := &hs[i]
+		if over && len(e.name) > left {
+			e.name, e.values = cutAt(e.name, left)+ellipsis, nil
+			return hs[:i+1]
+		}
+		left -= len(e.name)
+		for j, v := range e.values {
+			if over && len(v) > left {
+				e.values = append(e.values[:j], cutAt(v, left)+ellipsis)
+				return hs[:i+1]
+			}
+			left -= len(v)
+		}
+	}
+	return hs
+}
+
+// bounded is s, or past limit bytes s cut at a character boundary and ended with "…" within limit.
+func bounded(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return cutAt(s, limit-len(ellipsis)) + ellipsis
+}
+
+// cutAt is s cut at a character boundary to at most n bytes.
+func cutAt(s string, n int) string {
+	n = min(n, len(s))
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func id(v int64) pgtype.Int8 { return pgtype.Int8{Int64: v, Valid: v != 0} }
@@ -187,8 +301,9 @@ func clamp32(v int64) int32 { return int32(min(max(v, 0), math.MaxInt32)) }
 // ErrNotFound is a record, a Connection or a Destination that does not exist, is deleted or is past a bound.
 var ErrNotFound = errors.New("no such request record, connection or destination")
 
-// ErrOneOfRequired is a list that names neither a Connection nor a Destination, or both.
-var ErrOneOfRequired = errors.New("exactly one of a connection and a destination is needed")
+// ErrOneOfRequired is a list that names neither a Connection, a Destination nor a check run, or both a Connection and a
+// Destination.
+var ErrOneOfRequired = errors.New("exactly one of a connection and a destination, or a check run, is needed")
 
 // The status classes of Filter.StatusClass.
 const (
@@ -200,11 +315,14 @@ const (
 )
 
 // Filter is what a list shows: the records of exactly one owner, a Connection or a Destination by public_id — all
-// those of an outgoing webhook, and those of its Connection that name a messenger Destination — of a direction,
-// status class, operation and Alert Group when set, after a position, at most Limit of them (1 to MaxRecords).
+// those of an outgoing webhook, and those of its Connection that name a messenger Destination — or, with Run alone, of
+// a check run by public_id, those whose owner is a Connection or nobody; Run beside an owner narrows its list. Then
+// those of a direction, status class, operation and Alert Group when set, after a position, at most Limit of them (1
+// to MaxRecords).
 type Filter struct {
 	Connection  string
 	Destination string
+	Run         string
 	Direction   string
 	StatusClass string
 	Operation   string
@@ -302,10 +420,11 @@ func NewReader(orgID int64, db dbgen.DBTX, business clock.Clock) *Reader {
 }
 
 // List lists the records f names, newest first, within the bounds (C-23.FR-5): ErrOneOfRequired unless it names
-// exactly one owner, ErrNotFound for an owner that does not exist or is deleted. An Alert Group that is no public_id
-// matches nothing.
+// exactly one owner or a check run alone, ErrNotFound for an owner that does not exist or is deleted. A check run or an
+// Alert Group that is no public_id of its kind matches nothing.
 func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
-	if (f.Connection == "") == (f.Destination == "") {
+	byRun := f.Connection == "" && f.Destination == ""
+	if f.Connection != "" && f.Destination != "" || byRun && f.Run == "" {
 		return Page{}, ErrOneOfRequired
 	}
 	limit := min(max(f.Limit, 1), MaxRecords)
@@ -326,11 +445,21 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 		p.AfterAt = pgtype.Timestamptz{Time: f.After.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: f.After.ID, Valid: true}
 	}
-	hook, err := r.owner(ctx, f, &p)
-	if err != nil {
-		return Page{}, err
+	var hook int64
+	if !byRun {
+		var err error
+		if hook, err = r.owner(ctx, f, &p); err != nil {
+			return Page{}, err
+		}
 	}
 	page := Page{Records: []Summary{}}
+	if f.Run != "" {
+		run, err := publicid.Parse(publicid.CheckRun, f.Run)
+		if errors.Is(err, publicid.ErrInvalid) {
+			return page, nil
+		}
+		p.CheckRun = text(run)
+	}
 	if f.AlertGroup != "" {
 		g, err := publicid.Parse(publicid.AlertGroup, f.AlertGroup)
 		if errors.Is(err, publicid.ErrInvalid) {
@@ -338,7 +467,7 @@ func (r *Reader) List(ctx context.Context, f Filter) (Page, error) {
 		}
 		p.AlertGroup = text(g)
 	}
-	rows, err := r.rows(ctx, hook, p)
+	rows, err := r.rows(ctx, byRun, hook, p)
 	if err != nil {
 		return Page{}, fmt.Errorf("list the request log: %w", err)
 	}
@@ -379,16 +508,29 @@ func (r *Reader) owner(ctx context.Context, f Filter, p *dbgen.ListConnectionRec
 	return d.ID, nil
 }
 
-// rows reads the bounded set p names, or that of the outgoing webhook hook.
-func (r *Reader) rows(ctx context.Context, hook int64, p dbgen.ListConnectionRecordsParams) (
+// rows reads the bounded set p names, that of the outgoing webhook hook, or, byRun, the records of p's check run that
+// connections:read reads.
+func (r *Reader) rows(ctx context.Context, byRun bool, hook int64, p dbgen.ListConnectionRecordsParams) (
 	[]dbgen.ListConnectionRecordsRow, error) {
-	if hook == 0 {
+	switch {
+	case byRun:
+		rows, err := r.q.ListRunRecords(ctx, dbgen.ListRunRecordsParams{OrgID: r.orgID, CheckRun: p.CheckRun.String,
+			NotBefore: p.NotBefore, Direction: p.Direction, NoAnswer: p.NoAnswer, StatusFrom: p.StatusFrom,
+			StatusTo: p.StatusTo, Operation: p.Operation, AlertGroup: p.AlertGroup, AfterAt: p.AfterAt,
+			AfterID: p.AfterID, MaxRecords: p.MaxRecords, PageSize: p.PageSize})
+		out := make([]dbgen.ListConnectionRecordsRow, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, dbgen.ListConnectionRecordsRow(row))
+		}
+		return out, err
+	case hook == 0:
 		return r.q.ListConnectionRecords(ctx, p)
 	}
 	rows, err := r.q.ListDestinationRecords(ctx, dbgen.ListDestinationRecordsParams{OrgID: r.orgID,
 		DestinationID: hook, NotBefore: p.NotBefore, MaxRecords: p.MaxRecords, Direction: p.Direction,
 		NoAnswer: p.NoAnswer, StatusFrom: p.StatusFrom, StatusTo: p.StatusTo, Operation: p.Operation,
-		AlertGroup: p.AlertGroup, AfterAt: p.AfterAt, AfterID: p.AfterID, PageSize: p.PageSize})
+		AlertGroup: p.AlertGroup, CheckRun: p.CheckRun, AfterAt: p.AfterAt, AfterID: p.AfterID,
+		PageSize: p.PageSize})
 	out := make([]dbgen.ListConnectionRecordsRow, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, dbgen.ListConnectionRecordsRow(row))

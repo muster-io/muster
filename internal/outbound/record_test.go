@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -67,7 +68,9 @@ func TestMaskHeaders(t *testing.T) {
 }
 
 // TestRecordContext: links and secrets travel in the context of a request; WithSecrets adds to the secrets already
-// there without changing the parent's; an owner is set when it names a Connection or a Destination.
+// there without changing the parent's; links that name no check keep the outer check and run, links that name one
+// replace them, and each StartCheck makes a run of its own; an owner is set when it names a Connection, a Destination
+// or a draft.
 func TestRecordContext(t *testing.T) {
 	ctx := t.Context()
 	if LinksOf(ctx) != (Links{}) || secretsOf(ctx) != nil {
@@ -89,10 +92,60 @@ func TestRecordContext(t *testing.T) {
 		o    Owner
 		want bool
 	}{{Owner{}, false}, {Owner{PublicID: "CN0000000000A1"}, false}, {Owner{Connection: 1}, true},
-		{Owner{Destination: 2}, true}} {
+		{Owner{Destination: 2}, true}, {Owner{Draft: true}, true}} {
 		if tt.o.set() != tt.want {
 			t.Errorf("%+v.set() = %v", tt.o, !tt.want)
 		}
+	}
+	runRe := regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`)
+	checked, run := StartCheck(ctx, CheckProbe, 3)
+	if !runRe.MatchString(run) || LinksOf(checked) != (Links{Destination: 3, Check: CheckProbe, Run: run}) {
+		t.Fatalf("StartCheck: run %q, links %+v", run, LinksOf(checked))
+	}
+	if got := LinksOf(WithLinks(checked, Links{Destination: 3, AlertGroup: 4})); got !=
+		(Links{Destination: 3, AlertGroup: 4, Check: CheckProbe, Run: run}) {
+		t.Errorf("links within a check = %+v", got)
+	}
+	if got := LinksOf(WithLinks(checked, Links{Destination: 5, Check: CheckTest, Run: "CR0000000000A1"})); got !=
+		(Links{Destination: 5, Check: CheckTest, Run: "CR0000000000A1"}) {
+		t.Errorf("links naming a check = %+v", got)
+	}
+	inner, other := StartCheck(checked, CheckDestination, 0)
+	if other == run || !runRe.MatchString(other) ||
+		LinksOf(inner) != (Links{Check: CheckDestination, Run: other}) {
+		t.Errorf("a second check: run %q, links %+v", other, LinksOf(inner))
+	}
+}
+
+// TestRecordCheckRun: the requests made under a check run carry its kind and run; a draft owner records without a
+// Connection or a Destination, while a client without an owner still records nothing.
+func TestRecordCheckRun(t *testing.T) {
+	srv, _ := statusServer(t, nil, 200, 200, 200)
+	c, rec := recording(t, Config{})
+	ctx, run := StartCheck(t.Context(), CheckConnection, 0)
+	if _, err := c.Do(ctx, Request{URL: srv.URL + "/check", Operation: "getMe"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.got(); len(got) != 1 || got[0].Links != (Links{Check: CheckConnection, Run: run}) ||
+		got[0].Owner != testOwner {
+		t.Fatalf("records %+v", got)
+	}
+	draft, drec := recording(t, Config{Owner: Owner{Draft: true}})
+	ctx, run = StartCheck(t.Context(), CheckDraft, 0)
+	if _, err := draft.Do(ctx, Request{URL: srv.URL + "/draft", Operation: "getInfo"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := drec.got(); len(got) != 1 || got[0].Owner != (Owner{Draft: true}) ||
+		got[0].Links != (Links{Check: CheckDraft, Run: run}) || got[0].Operation != "getInfo" {
+		t.Fatalf("draft records %+v", got)
+	}
+	none := &fakeRecorder{}
+	n, _ := newTestClient(t, Config{Recorder: none})
+	if _, err := n.Do(ctx, Request{URL: srv.URL + "/none"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := none.got(); len(got) != 0 {
+		t.Fatalf("a client without an owner recorded %+v", got)
 	}
 }
 

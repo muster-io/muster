@@ -42,9 +42,12 @@ type fakeQueries struct {
 	findErr  error
 	connList []dbgen.ListConnectionRecordsRow
 	destList []dbgen.ListDestinationRecordsRow
+	runList  []dbgen.ListRunRecordsRow
 	listErr  error
 	connArgs []dbgen.ListConnectionRecordsParams
 	destArgs []dbgen.ListDestinationRecordsParams
+	runArgs  []dbgen.ListRunRecordsParams
+	finds    int
 	record   *dbgen.GetRecordRow
 	getErr   error
 	newer    int64
@@ -63,6 +66,7 @@ func (f *fakeQueries) InsertRecord(ctx context.Context, p dbgen.InsertRecordPara
 }
 
 func (f *fakeQueries) FindConnection(_ context.Context, p dbgen.FindConnectionParams) (int64, error) {
+	f.finds++
 	if f.findErr != nil {
 		return 0, f.findErr
 	}
@@ -75,6 +79,7 @@ func (f *fakeQueries) FindConnection(_ context.Context, p dbgen.FindConnectionPa
 
 func (f *fakeQueries) FindDestination(_ context.Context, p dbgen.FindDestinationParams) (
 	dbgen.FindDestinationRow, error) {
+	f.finds++
 	if f.findErr != nil {
 		return dbgen.FindDestinationRow{}, f.findErr
 	}
@@ -95,6 +100,12 @@ func (f *fakeQueries) ListDestinationRecords(_ context.Context, p dbgen.ListDest
 	[]dbgen.ListDestinationRecordsRow, error) {
 	f.destArgs = append(f.destArgs, p)
 	return f.destList, f.listErr
+}
+
+func (f *fakeQueries) ListRunRecords(_ context.Context, p dbgen.ListRunRecordsParams) ([]dbgen.ListRunRecordsRow,
+	error) {
+	f.runArgs = append(f.runArgs, p)
+	return f.runList, f.listErr
 }
 
 func (f *fakeQueries) GetRecord(_ context.Context, p dbgen.GetRecordParams) (dbgen.GetRecordRow, error) {
@@ -158,8 +169,9 @@ func newTestWriter(q Queries, timeout time.Duration) (*Writer, *bytes.Buffer, *c
 }
 
 // TestParamsOf maps the outbound record of each kind of attempt to its row (C-23.FR-2): the business time, an RQ id,
-// the owner and links, the answer or none, the error class and, for a request that got no answer, the code of
-// delivery.FailureCode; headers, URL, bodies and error shape-masked and sanitized; defaults for what is missing.
+// the owner and links, the kind and run of a check or a test, the answer or none, the error class and, for a request
+// that got no answer, the code of delivery.FailureCode; headers, URL, bodies and error shape-masked and sanitized;
+// defaults for what is missing.
 func TestParamsOf(t *testing.T) {
 	w, _, business := newTestWriter(&fakeQueries{}, 0)
 	business.Advance(time.Hour)
@@ -188,8 +200,21 @@ func TestParamsOf(t *testing.T) {
 		p.ResponseBody != (pgtype.Text{String: `{"id":"p1"}`, Valid: true}) || p.ResponseBodyBytes != 11 ||
 		p.LatencyMs != 1 || p.Via != "proxy" || p.Attempt != 2 || p.ErrorClass.Valid || p.ErrorCode.Valid ||
 		p.Error.Valid || p.ConnectionID != (pgtype.Int8{Int64: 3, Valid: true}) ||
-		p.DestinationID != (pgtype.Int8{Int64: 4, Valid: true}) || p.AlertGroupID != (pgtype.Int8{Int64: 5, Valid: true}) {
+		p.DestinationID != (pgtype.Int8{Int64: 4, Valid: true}) || p.AlertGroupID != (pgtype.Int8{Int64: 5, Valid: true}) ||
+		p.CheckKind.Valid || p.CheckRun.Valid {
 		t.Errorf("a Publication: %+v", p)
+	}
+	checked := w.paramsOf(DirectionOutbound, outbound.Record{Owner: outbound.Owner{Draft: true},
+		Links: outbound.Links{Check: outbound.CheckDraft, Run: "CR0000000000A1"}, Status: 200})
+	if checked.CheckKind != text("draft_check") || checked.CheckRun != text("CR0000000000A1") ||
+		checked.ConnectionID.Valid || checked.DestinationID.Valid {
+		t.Errorf("a check before saving: %+v", checked)
+	}
+	probe := w.paramsOf(DirectionOutbound, outbound.Record{Owner: outbound.Owner{Destination: 8},
+		Links: outbound.Links{Destination: 8, AlertGroup: 9, Check: outbound.CheckProbe, Run: "CR0000000000A2"}})
+	if probe.CheckKind != text("probe") || probe.CheckRun != text("CR0000000000A2") ||
+		probe.DestinationID != (pgtype.Int8{Int64: 8, Valid: true}) || probe.AlertGroupID.Int64 != 9 {
+		t.Errorf("a probe's delivery attempt: %+v", probe)
 	}
 	if headers["X-Nul"][0] != "a\uFFFDb" || headers["Authorization"][0] != "[redacted]" ||
 		headers["User-Agent"][0] != "Muster/1.0.0" || headers["X-Empty"] == nil {
@@ -257,6 +282,77 @@ func TestParamsOf(t *testing.T) {
 	}
 	if neg := w.paramsOf(DirectionOutbound, outbound.Record{Latency: -time.Second}); neg.LatencyMs != 0 {
 		t.Errorf("a negative latency: %d", neg.LatencyMs)
+	}
+}
+
+// headerBytes is the bytes of the names and values of the stored headers b.
+func headerBytes(t *testing.T, b []byte) (map[string][]string, int) {
+	t.Helper()
+	var h map[string][]string
+	if err := json.Unmarshal(b, &h); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for name, values := range h {
+		n += len(name)
+		for _, v := range values {
+			n += len(v)
+		}
+	}
+	return h, n
+}
+
+// TestBounds: a record keeps at most urlMax bytes of a URL and headersMax bytes of the names and values of headers,
+// masked before the cut; the URL, the name or the value that crosses its bound is cut at a character boundary and ends
+// with "…", and the headers after it, in the order of the names, are left out; what fits is kept as it is.
+func TestBounds(t *testing.T) {
+	if got := bounded("short", urlMax); got != "short" {
+		t.Errorf("bounded short: %q", got)
+	}
+	if got := bounded(strings.Repeat("я", 10), 9); got != "яяя"+ellipsis {
+		t.Errorf("bounded at a character boundary: %q", got)
+	}
+	if got := cutAt("aяb", 2); got != "a" || cutAt("ab", 5) != "ab" {
+		t.Errorf("cutAt: %q", got)
+	}
+
+	exact := http.Header{"A": {strings.Repeat("a", headersMax-2)}, "B": nil}
+	if h, n := headerBytes(t, headersOf(exact)); n != headersMax || len(h["A"][0]) != headersMax-2 || h["B"] == nil {
+		t.Errorf("headers of exactly headersMax bytes: %d bytes, %v", n, h["B"])
+	}
+
+	ack := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge)
+	left := headersMax - len(ellipsis) - len("A-First") - len("kept") - len("X-Big")
+	value := strings.Repeat(".", left-20) + " " + ack + " " + strings.Repeat(".", 1<<20)
+	h, n := headerBytes(t, headersOf(http.Header{"A-First": {"kept"}, "X-Big": {value, "next"},
+		"Z-Last": {"gone"}}))
+	if n != headersMax || h["A-First"][0] != "kept" || len(h["X-Big"]) != 1 ||
+		!strings.HasSuffix(h["X-Big"][0], ellipsis) || !strings.Contains(h["X-Big"][0], redacted) ||
+		strings.Contains(h["X-Big"][0], ack[:16]) || h["Z-Last"] != nil {
+		t.Errorf("a value across the bound: %d bytes, names %d, value of %d bytes", n, len(h), len(h["X-Big"][0]))
+	}
+
+	h, n = headerBytes(t, headersOf(http.Header{"A": {"1"}, strings.Repeat("N", 1<<20): {"v"}}))
+	var long string
+	for name := range h {
+		if name != "A" {
+			long = name
+		}
+	}
+	if n != headersMax || len(h) != 2 || !strings.HasSuffix(long, ellipsis) || len(h[long]) != 0 {
+		t.Errorf("a name across the bound: %d bytes, %d names, %d values", n, len(h), len(h[long]))
+	}
+
+	w, _, _ := newTestWriter(&fakeQueries{}, 0)
+	url := "/x?q=" + strings.Repeat(".", urlMax-35) + "&a=" + ack + "&b=" + strings.Repeat(".", 1<<20)
+	p := w.paramsOf(DirectionInbound, outbound.Record{URL: url, Status: 200,
+		ResponseHeader: http.Header{"X-Big": {strings.Repeat("r", 1<<20)}}})
+	if len(p.Url) != urlMax || !strings.HasSuffix(p.Url, ellipsis) || !strings.Contains(p.Url, "&a="+redacted) ||
+		strings.Contains(p.Url, ack[:16]) {
+		t.Errorf("a URL across the bound: %d bytes", len(p.Url))
+	}
+	if _, n := headerBytes(t, p.ResponseHeaders); n != headersMax {
+		t.Errorf("answer headers across the bound: %d bytes", n)
 	}
 }
 
@@ -445,6 +541,74 @@ func TestList(t *testing.T) {
 		if _, err := r.List(ctx, f); err == nil || errors.Is(err, ErrNotFound) {
 			t.Errorf("%+v, a failed lookup: %v", f, err)
 		}
+	}
+}
+
+// TestListByRun covers the check run of a list (C-23.FR-5): alone it reads the run's records with the bounds and every
+// filter and looks up no owner; beside a Connection, a messenger Destination or an outgoing webhook it narrows that
+// owner's query; a run that is no check run lists nothing, after the owner was found.
+func TestListByRun(t *testing.T) {
+	q := &fakeQueries{conn: map[string]int64{"CN0000000000M1": 3}, dest: map[string]dbgen.FindDestinationRow{
+		"DS0000000000M1": {ID: 4, Type: "mattermost", ConnectionID: pgtype.Int8{Int64: 3, Valid: true}},
+		"DS0000000000W1": {ID: 8, Type: "webhook"}}}
+	r := newTestReader(q)
+	ctx := t.Context()
+	for _, f := range []Filter{{Direction: "outbound"},
+		{Connection: "CN0000000000M1", Destination: "DS0000000000M1", Run: "CR0000000000A1"}} {
+		if _, err := r.List(ctx, f); !errors.Is(err, ErrOneOfRequired) {
+			t.Errorf("%+v: %v", f, err)
+		}
+	}
+
+	q.runList = []dbgen.ListRunRecordsRow{dbgen.ListRunRecordsRow(listRow(9, t0)),
+		dbgen.ListRunRecordsRow(listRow(8, t0)), dbgen.ListRunRecordsRow(listRow(7, t0.Add(-time.Minute)))}
+	page, err := r.List(ctx, Filter{Run: "cr0000000000a1", Direction: "outbound", StatusClass: "2xx",
+		Operation: "getInfo", AlertGroup: "agk7m3qx9p2rta", After: &Position{At: t0, ID: 10}, Limit: 2})
+	want := dbgen.ListRunRecordsParams{OrgID: 1, CheckRun: "CR0000000000A1", NotBefore: t0.Add(-MaxAge),
+		Direction: text("outbound"), StatusFrom: pgtype.Int4{Int32: 200, Valid: true},
+		StatusTo: pgtype.Int4{Int32: 300, Valid: true}, Operation: text("getInfo"), AlertGroup: text("AGK7M3QX9P2RTA"),
+		AfterAt: pgtype.Timestamptz{Time: t0, Valid: true}, AfterID: pgtype.Int8{Int64: 10, Valid: true},
+		MaxRecords: MaxRecords, PageSize: 3}
+	if err != nil || len(q.runArgs) != 1 || q.runArgs[0] != want || q.finds != 0 || len(q.connArgs) != 0 ||
+		len(q.destArgs) != 0 {
+		t.Fatalf("a run alone: %v, %+v, %d lookups", err, q.runArgs, q.finds)
+	}
+	if len(page.Records) != 2 || page.Records[0].ID != 9 || page.Next == nil || *page.Next != (Position{At: t0, ID: 8}) {
+		t.Errorf("a page of 2 of 3: %+v, next %+v", page.Records, page.Next)
+	}
+
+	if _, err := r.List(ctx, Filter{Connection: "CN0000000000M1", Run: "CR0000000000A2"}); err != nil ||
+		len(q.connArgs) != 1 || q.connArgs[0].ConnectionID != 3 || q.connArgs[0].CheckRun != text("CR0000000000A2") {
+		t.Errorf("a run of a Connection: %v, %+v", err, q.connArgs)
+	}
+	q.connArgs = nil
+	if _, err := r.List(ctx, Filter{Destination: "DS0000000000M1", Run: "CR0000000000A3"}); err != nil ||
+		len(q.connArgs) != 1 || q.connArgs[0].DestinationID.Int64 != 4 ||
+		q.connArgs[0].CheckRun != text("CR0000000000A3") {
+		t.Errorf("a run of a messenger Destination: %v, %+v", err, q.connArgs)
+	}
+	if _, err := r.List(ctx, Filter{Destination: "DS0000000000W1", Run: "CR0000000000A4"}); err != nil ||
+		len(q.destArgs) != 1 || q.destArgs[0].DestinationID != 8 || q.destArgs[0].CheckRun != text("CR0000000000A4") {
+		t.Errorf("a run of an outgoing webhook: %v, %+v", err, q.destArgs)
+	}
+
+	q.runArgs, q.connArgs = nil, nil
+	for _, f := range []Filter{{Run: "AG0000000000AA"}, {Run: "nonsense"}, {Connection: "CN0000000000M1",
+		Run: "RQ0000000000AA"}} {
+		if page, err := r.List(ctx, f); err != nil || page.Records == nil || len(page.Records) != 0 {
+			t.Errorf("%+v: %+v, %v", f, page, err)
+		}
+	}
+	if len(q.runArgs) != 0 || len(q.connArgs) != 0 {
+		t.Errorf("a run that is no check run was read: %+v, %+v", q.runArgs, q.connArgs)
+	}
+	if _, err := r.List(ctx, Filter{Connection: "CN0000000000ZZ", Run: "CR0000000000A1"}); !errors.Is(err,
+		ErrNotFound) {
+		t.Errorf("an unknown Connection with a run: %v", err)
+	}
+	q.listErr = errors.New("gone")
+	if _, err := r.List(ctx, Filter{Run: "CR0000000000A1"}); err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Errorf("a failed read of a run: %v", err)
 	}
 }
 

@@ -928,6 +928,8 @@ type CheckResult struct {
 	PendingUpdates *int64
 	Bridge         bool
 	Info           json.RawMessage
+	// Run is the check run its requests share in the Request log (C-23.FR-5).
+	Run string
 }
 
 // WarningPressAnswersInThread is the warning of a Connection whose bot may not make ephemeral messages: answers to
@@ -941,8 +943,19 @@ const WarningPressAnswersInThread = "press_answers_in_thread"
 // Connection; a 401 fails with "The bot token is not valid." and mattermost.CodeTokenInvalid, any other failure with
 // the code of mattermost.Result.FailureCode. No limiter token within the budget is a *delivery.LimitedError. Once the
 // token works, a read of the bot's roles tells whether it may make ephemeral posts; when it may not, the check passes
-// with WarningPressAnswersInThread (D284, F-064); a failed read adds nothing.
+// with WarningPressAnswersInThread (D284, F-064); a failed read adds nothing. Its requests are recorded as the kind
+// connection_check under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
+	ctx, run := outbound.StartCheck(ctx, outbound.CheckConnection, 0)
+	res, err := s.check(ctx, publicID, baseURL)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	res.Run = run
+	return res, nil
+}
+
+func (s *Service) check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
 	if err != nil {
 		return CheckResult{}, err

@@ -5746,15 +5746,18 @@ paths:
       operationId: listRequestLog
       tags:
       - Request log
-      summary: List the Request log of a Connection or a Destination
-      description: 'The records of exactly one owner, newest first: `connection` lists every record of a Connection,
-        `destination` every record of an outgoing webhook Destination or, for a messenger Destination, the records of its
-        Connection that name it. Neither or both answer `422` with the code `one_of_required`. The caller needs
-        `connections:read` to name a Connection and `destinations:read` to name a Destination (`403` otherwise); an
-        unknown or deleted owner is `404`. Only records newer than `request_log.max_age` and among the newest
-        `request_log.max_records` of their owner are listed — a messenger Destination''s within its Connection''s — so a
-        list never shows more than that bound. Each record is one attempt of a request: its URL as errors show it, its
-        status, latency and path, without headers or bodies, which `getRequestRecord` reads.'
+      summary: List the Request log of a Connection, a Destination or a check run
+      description: 'The records of exactly one owner, or of one check run, newest first: `connection` lists every record
+        of a Connection, `destination` every record of an outgoing webhook Destination or, for a messenger Destination,
+        the records of its Connection that name it; `run` alone lists the records of that check run whose owner is a
+        Connection or nobody — the checks before saving of new Connections — and beside an owner it narrows that
+        owner''s list. Neither an owner nor a run, or both owners, answer `422` with the code `one_of_required`. The
+        caller needs `connections:read` to name a Connection or a run alone and `destinations:read` to name a
+        Destination (`403` otherwise); an unknown or deleted owner is `404`. Only records newer than
+        `request_log.max_age` and among the newest `request_log.max_records` of their owner are listed — a messenger
+        Destination''s within its Connection''s — so a list never shows more than that bound. Each record is one attempt
+        of a request: its URL as errors show it, its status, latency and path, without headers or bodies, which
+        `getRequestRecord` reads.'
       x-permission:
       - connections:read
       - destinations:read
@@ -5777,7 +5780,7 @@ paths:
           $ref: '#/components/schemas/PublicId'
       - name: direction
         in: query
-        description: Only the requests Muster sent (`outbound`) or, from S-089, received (`inbound`).
+        description: Only the requests Muster sent (`outbound`) or received (`inbound`).
         schema:
           $ref: '#/components/schemas/RequestDirection'
       - name: status_class
@@ -5802,6 +5805,15 @@ paths:
       - name: alert_group
         in: query
         description: Only the records of the deliveries of this Alert Group, by `public_id`.
+        schema:
+          $ref: '#/components/schemas/PublicId'
+      - name: run
+        in: query
+        description: Only the records of this check run (`CR…`), which the results of `checkConnection`,
+          `checkConnectionDraft`, `checkDestination` and `testDestination` name as `request_log_run`. Alone it lists the
+          records of the run whose owner is a Connection or nobody and needs `connections:read`; the records of an
+          outgoing webhook's test or probe are listed beside its `destination`. A run that left no record, or an id
+          that is no check run, lists nothing.
         schema:
           $ref: '#/components/schemas/PublicId'
       responses:
@@ -7875,7 +7887,7 @@ components:
           description: The value is valid but not supported here, such as `owner=me` for a Service account token.
         - code: one_of_required
           description: Exactly one of several fields must be given, such as `until` or `no_end`, or the parameters
-            `connection` and `destination` of `listRequestLog`.
+            `connection` and `destination` of `listRequestLog`, of which it takes one, or `run` alone.
         - code: permission_not_held
           description: A token asks for a Permission its owner does not hold, or a token assigns a Role holding a Permission
             the token does not hold (`/role`).
@@ -12435,6 +12447,9 @@ components:
           oneOf:
           - $ref: '#/components/schemas/BridgeInfo'
           - type: 'null'
+        request_log_run:
+          description: The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.
+          $ref: '#/components/schemas/PublicId'
     MattermostChannel:
       type: object
       required:
@@ -13153,6 +13168,10 @@ components:
         health:
           description: Health after the test; a successful test of a Broken Destination makes it healthy.
           $ref: '#/components/schemas/DestinationHealth'
+        request_log_run:
+          description: The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the
+            Destination lists them.
+          $ref: '#/components/schemas/PublicId'
     DestinationPreviewRequest:
       type: object
       required:
@@ -13285,6 +13304,10 @@ components:
             $ref: '#/components/schemas/DestinationCheckItem'
         health:
           $ref: '#/components/schemas/DestinationHealth'
+        request_log_run:
+          description: The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the
+            Destination lists them.
+          $ref: '#/components/schemas/PublicId'
     LookupEntry:
       type: object
       required:
@@ -13942,7 +13965,7 @@ components:
       - null
     RequestDirection:
       type: string
-      description: Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
+      description: Whether Muster sent the request (`outbound`) or received it (`inbound`).
       enum:
       - outbound
       - inbound
@@ -13999,7 +14022,7 @@ components:
       type:
       - string
       - 'null'
-      description: The check or test a request belongs to (from S-089), null for any other request.
+      description: The check or test a request belongs to, null for any other request.
       enum:
       - connection_check
       - draft_check

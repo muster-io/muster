@@ -1363,10 +1363,12 @@ ORDER BY id;
 
 -- GetPressBinding reads what a button press on the Root message message_id of the Alert Group group_public_id is bound
 -- to (C-13.FR-4): the delivery of that Alert Group to a Mattermost Destination of the Connection that is not deleted
--- and whose Root message is message_id, with the Destination's channel and the Route's language and Snooze durations.
+-- and whose Root message is message_id, with the Destination's channel, the Route's language and Snooze durations, and
+-- the Alert Group's internal id for the Request log.
 -- name: GetPressBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds,
+       g.id AS alert_group_id
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1395,12 +1397,12 @@ LIMIT 1;
 
 -- GetReplyPressBinding reads what a press on the Reminder message_id of the Alert Group group_public_id is bound to
 -- (C-13.FR-4): a sent Reminder of that Alert Group to a Mattermost Destination of the Connection that is not deleted,
--- with the Destination's channel, the Root message the Reminder replies to and the Route's language and Snooze
--- durations.
+-- with the Destination's channel, the Root message the Reminder replies to, the Route's language and Snooze durations,
+-- and the Alert Group's internal id for the Request log.
 -- name: GetReplyPressBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        coalesce(ds.mattermost_channel_id, '')::text AS channel_id, coalesce(d.message_id, '')::text AS root_message_id,
-       r.language, r.snooze_durations_seconds
+       r.language, r.snooze_durations_seconds, g.id AS alert_group_id
 FROM deliveries d
 JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id

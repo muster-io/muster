@@ -24,6 +24,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/webhooks"
 )
 
@@ -337,8 +338,8 @@ func TestPushSignatures(t *testing.T) {
 }
 
 // TestPushNotAnEvent covers C-22.FR-11 and AC-14: a signed body that is no event of the protocol is answered 400 and
-// logged as not_an_event; a body larger than the limit is answered 400 as too_large before anything is read, whatever
-// the Connection.
+// logged as not_an_event; a body larger than the limit is answered 400 as too_large, whatever the Connection, which is
+// read once so that the refusal of a known one is in its Request log (C-23.FR-1).
 func TestPushNotAnEvent(t *testing.T) {
 	e := newPushEnv(t)
 	w := e.send(signed(t, "ev-2", e.now, []byte("not json")))
@@ -363,7 +364,7 @@ func TestPushNotAnEvent(t *testing.T) {
 	e.source.mu.Lock()
 	reads := e.source.reads
 	e.source.mu.Unlock()
-	if !strings.Contains(e.log.String(), `"connection":"CN0000000000Z9","reason":"too_large"`) || reads != 0 {
+	if !strings.Contains(e.log.String(), `"connection":"CN0000000000Z9","reason":"too_large"`) || reads != 1 {
 		t.Errorf("%d reads, logged %s", reads, e.log.String())
 	}
 	e.cfg.BodyLimit = 64
@@ -483,5 +484,87 @@ func TestPushWaitsForASlot(t *testing.T) {
 	close(e.store.hold)
 	if code := <-busy; code != http.StatusNoContent || strings.Contains(e.log.String(), "bridge_event_failed") {
 		t.Errorf("answered %d, logged %s", code, e.log.String())
+	}
+}
+
+// inbound keeps the Request log records of the push callback.
+type inbound struct{ records []requestlog.InboundRecord }
+
+func (r *inbound) RecordInbound(_ context.Context, rec requestlog.InboundRecord) {
+	r.records = append(r.records, rec)
+}
+
+// TestPushRequestLog covers C-23.FR-1, FR-2 and C-23.AC-5 at the push callback: a pushed event is recorded as a push
+// with its answer 204 and the Connection; a push signed with another secret and one to a Connection in poll mode with
+// their answer 401 and webhook-signature [redacted]; a body past the limit for a known Connection with its answer 400,
+// its size and no text; a push for a Connection that does not exist, and one whose Connection could not be read, are
+// not recorded.
+func TestPushRequestLog(t *testing.T) {
+	e := newPushEnv(t)
+	rec := &inbound{}
+	e.handler = requestlog.Inbound(rec, clock.NewManual(e.now), requestlog.OperationPush, e.handler)
+	body := eventJSON(t, eventFixture(TypeMessageDeleted))
+	other, err := webhooks.Sign([]logging.Secret{"whsec_b3RoZXItc2VjcmV0LW9mLWFub3RoZXItYnJpZGdl"}, "ev-1", e.now, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := eventJSON(t, eventFixture(TypeMessageDeleted, member("pad", strings.Repeat("x", MaxEventBytes))))
+	for _, c := range []struct {
+		name   string
+		p      pushed
+		status int
+		links  requestlog.Links
+		whole  bool
+	}{
+		{"a signed event", signed(t, "ev-1", e.now, body), http.StatusNoContent,
+			requestlog.Links{Connection: e.conn.ID, ConnectionID: pushID}, true},
+		{"another secret's signature", func() pushed {
+			p := signed(t, "ev-1", e.now, body)
+			p.signature = other
+			return p
+		}(), http.StatusUnauthorized, requestlog.Links{Connection: e.conn.ID, ConnectionID: pushID}, true},
+		{"a Connection in poll mode", func() pushed {
+			p := signed(t, "ev-1", e.now, body)
+			p.publicID = pollingID
+			return p
+		}(), http.StatusUnauthorized, requestlog.Links{Connection: 4, ConnectionID: pollingID}, true},
+		{"a body past the limit", signed(t, "ev-2", e.now, big), http.StatusBadRequest,
+			requestlog.Links{Connection: e.conn.ID, ConnectionID: pushID}, false},
+	} {
+		before := len(rec.records)
+		w := e.send(c.p)
+		if w.Code != c.status {
+			t.Fatalf("%s answered %d", c.name, w.Code)
+		}
+		if len(rec.records) != before+1 {
+			t.Fatalf("%s: %d records", c.name, len(rec.records)-before)
+		}
+		got := rec.records[before]
+		if got.Links != c.links || got.Operation != "push" || got.Method != http.MethodPost ||
+			got.URL != CallbackPath+c.p.publicID || got.Status != c.status || got.Request.Whole != c.whole ||
+			got.Request.Size != int64(len(c.p.body)) || c.whole && !bytes.Equal(got.Request.Data, c.p.body) ||
+			got.RequestHeader.Get(webhooks.HeaderSignature) != "[redacted]" ||
+			string(got.Response.Data) != w.Body.String() || !got.Response.Whole {
+			t.Errorf("%s: record %+v", c.name, got)
+		}
+	}
+	before := len(rec.records)
+	for _, c := range []struct {
+		id     string
+		body   []byte
+		status int
+	}{
+		{"CN0000000000Z9", body, http.StatusUnauthorized},
+		{brokenID, body, http.StatusInternalServerError},
+		{brokenID, big, http.StatusBadRequest},
+	} {
+		p := signed(t, "ev-3", e.now, c.body)
+		p.publicID = c.id
+		if w := e.send(p); w.Code != c.status {
+			t.Fatalf("%s answered %d", c.id, w.Code)
+		}
+	}
+	if len(rec.records) != before {
+		t.Errorf("%d records of pushes without a Connection", len(rec.records)-before)
 	}
 }

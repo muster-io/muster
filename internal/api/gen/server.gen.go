@@ -4203,7 +4203,10 @@ type ConnectionCheckResult struct {
 	Info           nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
 	Ok             bool                          `json:"ok"`
 	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
-	Steps          []ConnectionCheckStep         `json:"steps"`
+
+	// RequestLogRun The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.
+	RequestLogRun *PublicId             `json:"request_log_run,omitempty"`
+	Steps         []ConnectionCheckStep `json:"steps"`
 
 	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
@@ -4291,6 +4294,9 @@ type DestinationCheckResult struct {
 	Checks []DestinationCheckItem `json:"checks"`
 	Health DestinationHealth      `json:"health"`
 	Ok     bool                   `json:"ok"`
+
+	// RequestLogRun The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them.
+	RequestLogRun *PublicId `json:"request_log_run,omitempty"`
 }
 
 // DestinationCreated defines model for DestinationCreated.
@@ -4400,6 +4406,9 @@ type DestinationTestRequest struct {
 type DestinationTestResult struct {
 	// Health Health after the test; a successful test of a Broken Destination makes it healthy.
 	Health DestinationHealth `json:"health"`
+
+	// RequestLogRun The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.
+	RequestLogRun *PublicId `json:"request_log_run,omitempty"`
 
 	// Steps The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires.
 	Steps []TestStep `json:"steps"`
@@ -5213,7 +5222,7 @@ type NoteList struct {
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
-// NullableCheckKind The check or test a request belongs to (from S-089), null for any other request.
+// NullableCheckKind The check or test a request belongs to, null for any other request.
 type NullableCheckKind string
 
 // NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
@@ -5771,7 +5780,7 @@ type ReplicaStatus struct {
 	RefreshedAt time.Time `json:"refreshed_at"`
 }
 
-// RequestDirection Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
+// RequestDirection Whether Muster sent the request (`outbound`) or received it (`inbound`).
 type RequestDirection string
 
 // RequestLogList defines model for RequestLogList.
@@ -5791,7 +5800,7 @@ type RequestRecord struct {
 	// Attempt Which attempt of the request this was, from 1.
 	Attempt int `json:"attempt"`
 
-	// Check The check or test a request belongs to (from S-089), null for any other request.
+	// Check The check or test a request belongs to, null for any other request.
 	Check nullable.Nullable[NullableCheckKind] `json:"check"`
 
 	// CheckRun A `public_id` in the format of `PublicId`, or null.
@@ -5803,7 +5812,7 @@ type RequestRecord struct {
 	// Destination The Destination the request concerns, null for none.
 	Destination nullable.Nullable[DestinationRef] `json:"destination"`
 
-	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
+	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`).
 	Direction RequestDirection `json:"direction"`
 
 	// Error Why the attempt failed, masked; null for one that succeeded. Untrusted where it comes from the remote side.
@@ -5868,7 +5877,7 @@ type RequestRecordSummary struct {
 	// Attempt Which attempt of the request this was, from 1.
 	Attempt int `json:"attempt"`
 
-	// Check The check or test a request belongs to (from S-089), null for any other request.
+	// Check The check or test a request belongs to, null for any other request.
 	Check nullable.Nullable[NullableCheckKind] `json:"check"`
 
 	// CheckRun A `public_id` in the format of `PublicId`, or null.
@@ -5880,7 +5889,7 @@ type RequestRecordSummary struct {
 	// Destination The Destination the request concerns, null for none.
 	Destination nullable.Nullable[DestinationRef] `json:"destination"`
 
-	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
+	// Direction Whether Muster sent the request (`outbound`) or received it (`inbound`).
 	Direction RequestDirection `json:"direction"`
 
 	// ErrorClass How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.
@@ -7877,7 +7886,7 @@ type ListRequestLogParams struct {
 	// Destination The Destination whose records are listed, by `public_id`.
 	Destination *PublicId `form:"destination,omitempty" json:"destination,omitempty"`
 
-	// Direction Only the requests Muster sent (`outbound`) or, from S-089, received (`inbound`).
+	// Direction Only the requests Muster sent (`outbound`) or received (`inbound`).
 	Direction *RequestDirection `form:"direction,omitempty" json:"direction,omitempty"`
 
 	// StatusClass Only the records whose answer has a status of this class, or, with `none`, those that got no answer.
@@ -7888,6 +7897,9 @@ type ListRequestLogParams struct {
 
 	// AlertGroup Only the records of the deliveries of this Alert Group, by `public_id`.
 	AlertGroup *PublicId `form:"alert_group,omitempty" json:"alert_group,omitempty"`
+
+	// Run Only the records of this check run (`CR…`), which the results of `checkConnection`, `checkConnectionDraft`, `checkDestination` and `testDestination` name as `request_log_run`. Alone it lists the records of the run whose owner is a Connection or nobody and needs `connections:read`; the records of an outgoing webhook's test or probe are listed beside its `destination`. A run that left no record, or an id that is no check run, lists nothing.
+	Run *PublicId `form:"run,omitempty" json:"run,omitempty"`
 }
 
 // ListRequestLogParamsStatusClass defines parameters for ListRequestLog.
@@ -10297,7 +10309,7 @@ type ServerInterface interface {
 	// CompletePasswordSetup Set a password from a setup link
 	// (POST /password-setups)
 	CompletePasswordSetup(w http.ResponseWriter, r *http.Request)
-	// ListRequestLog List the Request log of a Connection or a Destination
+	// ListRequestLog List the Request log of a Connection, a Destination or a check run
 	// (GET /request-log)
 	ListRequestLog(w http.ResponseWriter, r *http.Request, params ListRequestLogParams)
 	// GetRequestRecord Read a record of the Request log
@@ -14396,6 +14408,19 @@ func (siw *ServerInterfaceWrapper) ListRequestLog(w http.ResponseWriter, r *http
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "alert_group"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alert_group", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "run" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "run", r.URL.Query(), &params.Run, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "run"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "run", Err: err})
 		}
 		return
 	}
@@ -32862,7 +32887,7 @@ type StrictServerInterface interface {
 	// CompletePasswordSetup Set a password from a setup link
 	// (POST /password-setups)
 	CompletePasswordSetup(ctx context.Context, request CompletePasswordSetupRequestObject) (CompletePasswordSetupResponseObject, error)
-	// ListRequestLog List the Request log of a Connection or a Destination
+	// ListRequestLog List the Request log of a Connection, a Destination or a check run
 	// (GET /request-log)
 	ListRequestLog(ctx context.Context, request ListRequestLogRequestObject) (ListRequestLogResponseObject, error)
 	// GetRequestRecord Read a record of the Request log

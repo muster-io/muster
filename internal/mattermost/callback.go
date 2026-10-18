@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/requestlog"
 )
 
 // CallbackPattern is the pattern of the callback of button presses on the callback mux of the ingest listener.
@@ -141,7 +142,8 @@ type pressHandler struct {
 // not made — refused with 403 to a bot without the create_post_ephemeral permission (F-063), or failed any other way —
 // the text is the answer's ephemeral_text, which needs no permission and shows in the Thread (F-025, F-062), so that it
 // is never lost (D284). A press on a Reminder whose key left the Keyring is answered that the button has expired
-// (C-17.FR-6).
+// (C-17.FR-6). Every request for a known Connection, refused ones included, is in its Request log through the
+// annotation of requestlog.Inbound, with the Destination and the Alert Group once the press is matched (C-23.FR-1).
 func NewCallback(cfg CallbackConfig) http.Handler {
 	if cfg.BodyLimit <= 0 {
 		cfg.BodyLimit = ingest.BodyLimit
@@ -212,6 +214,12 @@ func (h *pressHandler) recovered(ctx context.Context, w http.ResponseWriter, r *
 
 // handle runs one press and reports what it led to.
 func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *http.Request) press {
+	// The Connection is read first, so that every request for a known one is in its Request log, refused ones included
+	// (C-23.FR-1); the answers keep their order.
+	conn, connErr := h.cfg.Connections.Connection(ctx, r.PathValue("connection_id"))
+	if connErr == nil {
+		requestlog.Annotate(ctx, requestlog.Links{Connection: conn.ID, ConnectionID: conn.PublicID})
+	}
 	if r.Method != http.MethodPost {
 		return press{outcome: outcomeInvalidRequest, err: "the request is not a POST"}
 	}
@@ -224,12 +232,11 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 		req.PostID == "" || req.Context.Action == "" || req.Context.KeyID == "" {
 		return press{outcome: outcomeInvalidRequest, err: "the body is not a MattermostActionRequest"}
 	}
-	conn, err := h.cfg.Connections.Connection(ctx, r.PathValue("connection_id"))
-	if errors.Is(err, ErrNoConnection) {
+	if errors.Is(connErr, ErrNoConnection) {
 		return press{outcome: outcomeUnknownConnection}
 	}
-	if err != nil {
-		return press{outcome: outcomeFailed, err: err.Error()}
+	if connErr != nil {
+		return press{outcome: outcomeFailed, err: connErr.Error()}
 	}
 	p := press{connection: conn.PublicID}
 	a, err := buttons.Verify(h.cfg.Keys, req.Context.Action, req.Context.KeyID)
@@ -255,6 +262,7 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 		p.outcome, p.err = outcomeFailed, err.Error()
 		return p
 	}
+	requestlog.Annotate(ctx, requestlog.Links{Destination: b.Destination.ID, AlertGroup: b.AlertGroup})
 	answer := func(outcome, text string, cause error) press {
 		p.outcome = outcome
 		return h.answer(ctx, p, conn, b.Destination, req, b.RootMessageID, text, cause)
@@ -342,6 +350,7 @@ func (h *pressHandler) expired(ctx context.Context, p press, conn Connection, re
 		p.outcome, p.err = outcomeFailed, err.Error()
 		return p
 	}
+	requestlog.Annotate(ctx, requestlog.Links{Destination: b.Destination.ID, AlertGroup: b.AlertGroup})
 	p.outcome = outcomeExpired
 	return h.answer(ctx, p, conn, b.Destination, req, b.RootMessageID, messages.T(b.Language, "press.expired", nil),
 		nil)
@@ -373,6 +382,7 @@ func (h *pressHandler) testPress(ctx context.Context, p press, conn Connection, 
 		p.outcome = outcomeNotVerified
 		return p
 	}
+	requestlog.Annotate(ctx, requestlog.Links{Destination: d.ID})
 	p.outcome = outcomeTest
 	return h.answer(ctx, p, conn, d, req, "", messages.T(messages.LanguageEnglish, "press.test", nil), nil)
 }
@@ -391,6 +401,7 @@ func (h *pressHandler) notVerified(ctx context.Context, p press, conn Connection
 	if !ok {
 		return p
 	}
+	requestlog.Annotate(ctx, requestlog.Links{Destination: d.ID})
 	return h.answer(ctx, p, conn, d, req, "", messages.T(messages.LanguageEnglish, "press.notVerified", nil), nil)
 }
 

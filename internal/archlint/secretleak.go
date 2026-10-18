@@ -127,6 +127,7 @@ var registry = []Probe{
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
 	{Name: "request_log", Run: probeRequestLog},
+	{Name: "request_log_inbound", Run: probeRequestLogInbound},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -4111,10 +4112,11 @@ func (s *probeRotationStore) Reencrypt(_ context.Context, _ string, _ int64, row
 // message with signed buttons through the adapter of each messenger; a pollEvents whose batch carries the token of an
 // account_link event and a press; the direct messages with the codes of a Mattermost and a Bridge Account link; a
 // getTeam that the stand-in redirects to a Location below the Mattermost server URL's path prefix; and an outgoing
-// webhook event with its signature, Cookie and Proxy-Authorization headers, whose answer sets a cookie. The stand-in
-// echoes the request's path, base URL's path prefix included, in its answers. The signed action id, the tokens, the
-// codes, the path prefixes of the base URLs and the values of those headers are not planted secrets, so the probe looks
-// for them in the stored values itself; it is incomplete when an operation it drives left no record.
+// webhook event with its signature, Cookie and Proxy-Authorization headers, whose answer sets a cookie; and the getMe
+// of a check before saving of a new Connection, whose client has no Connection. The stand-in echoes the request's
+// path, base URL's path prefix included, in its answers. The signed action id, the tokens, the codes, the path
+// prefixes of the base URLs and the values of those headers are not planted secrets, so the probe looks for them in
+// the stored values itself; it is incomplete when an operation it drives left no record.
 func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
@@ -4215,6 +4217,14 @@ func probeRequestLog(ctx context.Context, secrets []string, log io.Writer) error
 	if err := probeRLWebhook(ctx, k, stand, base, secrets, network, clocks); err != nil {
 		return err
 	}
+	// A check before saving of a new Connection: its client has the draft owner and records under its run alone.
+	draft, err := telegram.NewClient(telegram.Network(network), telegram.Settings{BaseURL: base + "/" + stand.tg,
+		Token: logging.Secret(secrets[0]), Owner: outbound.Owner{Draft: true}})
+	if err != nil {
+		return err
+	}
+	draftCtx, _ := outbound.StartCheck(ctx, outbound.CheckDraft, 0)
+	_, _ = draft.GetMe(draftCtx, outbound.ClassInteractive)
 	return rows.verdict(stand, signed)
 }
 
@@ -4483,7 +4493,10 @@ func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
 		sent[0] != "session="+stand.cookie+" Basic "+stand.proxyAuth:
 		errs = append(errs, &probeIncomplete{"the webhook event carried no signature, Cookie or Proxy-Authorization"})
 	}
-	values := []struct{ what, value string }{
+	if !slices.ContainsFunc(rows, func(r probeRLRow) bool { return slices.Contains(r.values, outbound.CheckDraft) }) {
+		errs = append(errs, &probeIncomplete{"no record of the check before saving of a new Connection"})
+	}
+	values := []probeRLValue{
 		{"a signed action id", signed}, {"the token of a /start", stand.start},
 		{"the token of an account_link event", stand.link}, {"the path prefix of a Telegram base URL", stand.tg},
 		{"the path prefix of a Mattermost server URL", stand.mm}, {"the path prefix of a bridge's base URL", stand.br},
@@ -4491,14 +4504,24 @@ func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
 		{"the value of Set-Cookie", stand.setCookie},
 	}
 	for _, c := range mmCodes {
-		values = append(values, struct{ what, value string }{"the code of a Mattermost direct message", c})
+		values = append(values, probeRLValue{"the code of a Mattermost direct message", c})
 	}
 	for _, c := range brCodes {
-		values = append(values, struct{ what, value string }{"the code of a Bridge direct message", c})
+		values = append(values, probeRLValue{"the code of a Bridge direct message", c})
 	}
 	for _, s := range signatures {
-		values = append(values, struct{ what, value string }{"the value of webhook-signature", s})
+		values = append(values, probeRLValue{"the value of webhook-signature", s})
 	}
+	return errors.Join(append(errs, probeRLLeaks(rows, values),
+		fmt.Errorf("request_log rows: %s", strings.Join(stored, "\n")))...)
+}
+
+// probeRLValue is a value that is no planted secret and must not be stored, and what it is.
+type probeRLValue struct{ what, value string }
+
+// probeRLLeaks is a probeLeak for each of values found in a stored value of rows, naming it and the record's
+// operation, never the value; nil when none is.
+func probeRLLeaks(rows []probeRLRow, values []probeRLValue) error {
 	var leaks []string
 	for _, v := range values {
 		for _, r := range rows {
@@ -4507,9 +4530,184 @@ func (p *probeRLRows) verdict(stand *probeRLServer, signed string) error {
 			}
 		}
 	}
-	if len(leaks) > 0 {
-		slices.Sort(leaks)
-		errs = append(errs, &probeLeak{what: slices.Compact(leaks)})
+	if len(leaks) == 0 {
+		return nil
 	}
-	return errors.Join(append(errs, fmt.Errorf("request_log rows: %s", strings.Join(stored, "\n")))...)
+	slices.Sort(leaks)
+	return &probeLeak{what: slices.Compact(leaks)}
+}
+
+// probeRequestLogInbound pushes secrets through the Request log of the callbacks (C-23.FR-3, AC-3). The three
+// callbacks run behind runtime.Callbacks, as the runtime wraps them, with stand-in Connections and a requestlog.Writer
+// whose INSERTs the in-memory probeRLRows keeps — the lint has no database. The first secret is the Authorization of
+// a Mattermost press and of a Bridge push and the bot token of the Bridge Connection, the second the webhook secret
+// token of the Telegram Connection, and the third the push secret of the Bridge Connection. Through them: a Mattermost
+// press of a signed action id; Telegram updates with the secret token, a `/start <token>` and a press of the signed
+// action id, and the `/start` again with a wrong secret token, which is refused before its body is read; an
+// account_link event signed with the push secret under another webhook-id, refused after the signature check, and the
+// same event with a forged signature; each with an Authorization or a Cookie header. The signed action id, the tokens,
+// the wrong secret token, the header values and the signatures are not planted secrets, so the probe looks for them in
+// the stored values itself; it is incomplete when a callback answered otherwise or left no record.
+func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	signed, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[2]))
+	brc, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clocks.Real},
+		bridge.Settings{BaseURL: "http://127.0.0.1:1", Token: logging.Secret(secrets[0]),
+			PushSecret: logging.Secret(pushSecret)})
+	if err != nil {
+		return err
+	}
+	stand := probeInbound{secret: logging.Secret(secrets[1]), bridge: brc}
+	rows := &probeRLRows{}
+	w := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
+	h := runtime.Callbacks(w, clocks.Real, mattermost.CallbackConfig{Connections: stand, Bindings: stand,
+		Links: probeLinks{}, Commands: probeCommands{}, Keys: k, Business: clocks.Business, Log: logger},
+		telegram.WebhookConfig{Connections: stand, Router: &telegram.Router{Offsets: stand, Log: logger}, Log: logger},
+		bridge.PushConfig{Connections: stand, Real: clocks.Real, Log: logger})
+	var errs []error
+	post := func(path, body string, want int, header ...string) {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+		for i := 0; i+1 < len(header); i += 2 {
+			req.Header.Set(header[i], header[i+1])
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			errs = append(errs, &probeIncomplete{fmt.Sprintf("POST %s answered %d, want %d", path, rec.Code, want)})
+		}
+	}
+	auth, cookie, wrong, start, link := probeWord(), probeWord(), probeWord(), probeToken(), probeToken()
+
+	press, err := json.Marshal(map[string]any{"user_id": "u-bob", "channel_id": "c", "post_id": "p",
+		"trigger_id": "t", "context": map[string]string{"action": signed, "key_id": keyID}})
+	if err != nil {
+		return err
+	}
+	post(mattermost.CallbackPath+"CNAAAAAAAAAAA2", string(press), http.StatusOK, "Authorization", "Bearer "+secrets[0],
+		"Cookie", "MMAUTHTOKEN="+cookie)
+
+	from := `"from":{"id":7,"is_bot":false,"first_name":"b"}`
+	startUpdate := fmt.Sprintf(`{"update_id":1,"message":{"message_id":1,"date":0,"chat":{"id":7,"type":"private"},`+
+		`%s,"text":"/start %s"}}`, from, start)
+	pressUpdate := fmt.Sprintf(`{"update_id":2,"callback_query":{"id":"q",%s,"chat_instance":"c","data":%q}}`, from,
+		signed)
+	hook := telegram.WebhookPath + "CNAAAAAAAAAAA1"
+	post(hook, startUpdate, http.StatusOK, telegram.SecretTokenHeader, secrets[1], "Authorization", "Basic "+auth)
+	post(hook, pressUpdate, http.StatusOK, telegram.SecretTokenHeader, secrets[1])
+	post(hook, startUpdate, http.StatusUnauthorized, telegram.SecretTokenHeader, wrong)
+
+	event := fmt.Sprintf(`{"id":"e1","type":"account_link","occurred_at":"2026-10-18T12:00:00Z","token":%q,`+
+		`"user":{"external_id":"u-bob","display_name":"Bob","handle":"bob"}}`, link)
+	at := clocks.Real.Now()
+	sigA, err := webhooks.Sign([]logging.Secret{logging.Secret(pushSecret)}, "e2", at, []byte(event))
+	if err != nil {
+		return err
+	}
+	forged := make([]byte, 32)
+	_, _ = rand.Read(forged)
+	sigB := "v1," + base64.StdEncoding.EncodeToString(forged)
+	pushPath, ts := bridge.CallbackPath+"CNAAAAAAAAAAA3", strconv.FormatInt(at.Unix(), 10)
+	post(pushPath, event, http.StatusBadRequest, webhooks.HeaderID, "e2", webhooks.HeaderTimestamp, ts,
+		webhooks.HeaderSignature, sigA, "Authorization", "Bearer "+secrets[0])
+	post(pushPath, event, http.StatusUnauthorized, webhooks.HeaderID, "e1", webhooks.HeaderTimestamp, ts,
+		webhooks.HeaderSignature, sigB, "Cookie", "session="+cookie)
+
+	return rows.inboundVerdict(errs, []probeRLValue{{"a signed action id", signed}, {"the token of a /start", start},
+		{"the token of an account_link event", link}, {"a wrong secret token", wrong}, {"the value of Authorization", auth},
+		{"the value of Cookie", cookie}, {"the value of webhook-signature", sigA},
+		{"the value of webhook-signature", sigB}})
+}
+
+// inboundVerdict is the error of probeRequestLogInbound: errs, the answers that were not as they should be; a
+// probeIncomplete unless each callback left one record per request; a probeLeak for each of values that a record
+// stores; and every stored value, for CheckProbe to search for the planted secrets.
+func (p *probeRLRows) inboundVerdict(errs []error, values []probeRLValue) error {
+	p.mu.Lock()
+	rows := slices.Clone(p.rows)
+	p.mu.Unlock()
+	ops := map[string]int{}
+	var stored []string
+	for _, r := range rows {
+		ops[r.operation]++
+		stored = append(stored, r.values...)
+	}
+	press, update, push := ops[requestlog.OperationPress], ops[requestlog.OperationUpdate],
+		ops[requestlog.OperationPush]
+	if press != 1 || update != 3 || push != 2 || len(rows) != 6 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("records of %d presses, %d updates and %d pushes among %d, "+
+			"want 1, 3 and 2", press, update, push, len(rows))})
+	}
+	return errors.Join(append(errs, probeRLLeaks(rows, values),
+		fmt.Errorf("request_log rows: %s", strings.Join(stored, "\n")))...)
+}
+
+// probeInbound stands for the Connections of probeRequestLogInbound: the Mattermost CNAAAAAAAAAAA2, whose presses are
+// bound to no post; the Telegram CNAAAAAAAAAAA1 in the webhook mode with the secret token secret, whose updates find
+// no handler; and the Bridge CNAAAAAAAAAAA3 in push mode with the client bridge, whose events are never handled.
+type probeInbound struct {
+	secret logging.Secret
+	bridge *bridge.Client
+}
+
+func (probeInbound) Connection(context.Context, string) (mattermost.Connection, error) {
+	return mattermost.Connection{ID: 2, PublicID: "CNAAAAAAAAAAA2"}, nil
+}
+
+func (probeInbound) PressBinding(context.Context, int64, string, string) (delivery.Binding, error) {
+	return delivery.Binding{}, delivery.ErrNotBound
+}
+
+func (probeInbound) ReplyBinding(context.Context, int64, string, string) (delivery.Binding, error) {
+	return delivery.Binding{}, delivery.ErrNotBound
+}
+
+func (probeInbound) PostDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
+	return delivery.Destination{}, false, nil
+}
+
+func (probeInbound) TestDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
+	return delivery.Destination{}, false, nil
+}
+
+func (p probeInbound) Hooked(context.Context, string) (telegram.Conn, logging.Secret, error) {
+	return telegram.Conn{ID: 1, PublicID: "CNAAAAAAAAAAA1"}, p.secret, nil
+}
+
+func (probeInbound) HandleOnce(ctx context.Context, _, _ int64, f func(context.Context) error) (bool, error) {
+	return true, f(ctx)
+}
+
+func (p probeInbound) PushConnection(context.Context, string) (bridge.Conn, string, error) {
+	return bridge.Conn{ID: 3, PublicID: "CNAAAAAAAAAAA3", Version: 1, Client: p.bridge}, bridge.EventDeliveryPush, nil
+}
+
+func (probeInbound) PollingConnections(context.Context) ([]bridge.Polled, error) { return nil, nil }
+
+func (probeInbound) StoreEventsCursor(context.Context, bridge.Conn, *string) error { return nil }
+
+func (probeInbound) HandleEventOnce(context.Context, int64, string, func(context.Context) error) (bool, error) {
+	return false, nil
 }

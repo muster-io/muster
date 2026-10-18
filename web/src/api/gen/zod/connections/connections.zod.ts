@@ -546,6 +546,7 @@ export const checkConnectionDraftResponseInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+export const checkConnectionDraftResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const CheckConnectionDraftResponse = zod.object({
@@ -601,7 +602,8 @@ export const CheckConnectionDraftResponse = zod.object({
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
-}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
+  "request_log_run": zod.string().regex(checkConnectionDraftResponseRequestLogRunRegExp).optional().describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.')
 })
 
 /**
@@ -1117,6 +1119,7 @@ export const checkConnectionResponseInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const checkConnectionResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+export const checkConnectionResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const CheckConnectionResponse = zod.object({
@@ -1172,7 +1175,8 @@ export const CheckConnectionResponse = zod.object({
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
-}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
+  "request_log_run": zod.string().regex(checkConnectionResponseRequestLogRunRegExp).optional().describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.')
 })
 
 /**

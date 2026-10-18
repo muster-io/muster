@@ -19,7 +19,7 @@
  */
 
 /**
- * The check or test a request belongs to (from S-089), null for any other request.
+ * The check or test a request belongs to, null for any other request.
  * @nullable
  */
 export type NullableCheckKind = typeof NullableCheckKind[keyof typeof NullableCheckKind] | null;

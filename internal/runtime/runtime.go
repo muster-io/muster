@@ -767,21 +767,32 @@ func (p *process) messengerAdapters() {
 	}
 }
 
-// callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
+// Callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
 // every method, since the callback answers each request 200 with an empty JSON object; the webhook of Telegram
 // Connections in the webhook update mode (C-14.FR-1), on POST; and the events of Bridge Connections in push mode
 // (bridgeEvent, C-22.FR-11), on POST. The API's request validation never sees them: each handler decides every answer.
-func (p *process) callbacks() http.Handler {
+// Each callback is wrapped by requestlog.Inbound, which hands to rec, timed on realClock, every request its handler
+// annotates with a known Connection, refused ones included, once the answer is sent (C-23.FR-1).
+func Callbacks(rec requestlog.InboundRecorder, realClock clock.Clock, mm mattermost.CallbackConfig,
+	tg telegram.WebhookConfig, br bridge.PushConfig) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
+	mux.Handle(mattermost.CallbackPattern,
+		requestlog.Inbound(rec, realClock, requestlog.OperationPress, mattermost.NewCallback(mm)))
+	mux.Handle(telegram.WebhookPattern,
+		requestlog.Inbound(rec, realClock, requestlog.OperationUpdate, telegram.NewWebhook(tg)))
+	mux.Handle(bridge.PushPattern, requestlog.Inbound(rec, realClock, requestlog.OperationPush, bridge.NewPush(br)))
+	return mux
+}
+
+// callbacks is Callbacks with the services of the process.
+func (p *process) callbacks() http.Handler {
+	return Callbacks(p.requestLog, p.clocks.Real, mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: p.links,
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
-		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log}))
-	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
-		Router: p.updates, Outages: p.connections, Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log}))
-	mux.Handle(bridge.PushPattern, bridge.NewPush(bridge.PushConfig{Connections: p.connections,
-		Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log}))
-	return mux
+		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log},
+		telegram.WebhookConfig{Connections: p.connections, Router: p.updates, Outages: p.connections,
+			Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log},
+		bridge.PushConfig{Connections: p.connections, Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log})
 }
 
 // internalHandler serves health and metrics, and in development mode the development clock.
@@ -887,8 +898,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// the sandbox (C-15, ADR-0011, ADR-0012); the bodies of their events are rendered when the events are queued.
 	p.sandbox = templates.New(p.clocks.Business, p.clocks.Real)
 	// The requests of the Connections and the outgoing webhooks are recorded in the Request log, one INSERT on the main
-	// pool after each attempt (C-23.FR-1, FR-4); OIDC, the outgoing heartbeat, muster doctor and muster bridge check
-	// build their clients without it.
+	// pool after each attempt, and the requests that reach the callbacks of the Connections (C-23.FR-1, FR-4); OIDC, the
+	// outgoing heartbeat, muster doctor and muster bridge check build their clients without it.
 	p.requestLog = requestlog.NewWriter(requestlog.Config{OrgID: orgID, DB: p.db.MessagesDB(),
 		Business: p.clocks.Business, Log: p.log})
 	p.webhooks = webhooks.New(orgID, webhooks.Config{Store: p.db.WebhooksStore(), Writer: p.db.WebhooksWriter(),

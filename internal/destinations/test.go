@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The Audit log action of a Destination test (C-16.FR-5).
@@ -57,10 +58,12 @@ type Tester interface {
 	Preview(ctx context.Context, in delivery.TestInput) ([]delivery.PreviewItem, error)
 }
 
-// TestResult is the result of testDestination: each step, and the health after the test.
+// TestResult is the result of testDestination: each step, the health after the test, and the check run its requests
+// share in the Request log (C-23.FR-5).
 type TestResult struct {
 	Steps  []delivery.TestStep
 	Health Health
+	Run    string
 }
 
 // Test runs the Destination test of the Destination publicID from s (C-16.FR-1 to FR-3, FR-5, FR-7): one test message
@@ -68,7 +71,8 @@ type TestResult struct {
 // step that found no limiter token in time is limited and sent nothing; the operation still succeeds. When every step
 // succeeded on a Broken Destination its Broken state ends, as after a successful probe; a failed test changes nothing.
 // Every test is recorded in the Audit log as destination.tested, with the source and each step's class, and logged as
-// destination_tested.
+// destination_tested; its requests are recorded as the kind test with the Destination under one check run, which the
+// result names (C-23.FR-2, FR-5).
 func (s *Service) Test(ctx context.Context, r Requester, publicID string, src Source) (TestResult, error) {
 	d, tester, err := s.tester(ctx, publicID)
 	if err != nil {
@@ -79,6 +83,7 @@ func (s *Service) Test(ctx context.Context, r Requester, publicID string, src So
 		return TestResult{}, err
 	}
 	in.Actor = groups.Actor{Kind: r.Actor.Kind, Transport: r.Transport, Person: r.Actor, Address: r.Address}
+	ctx, run := outbound.StartCheck(ctx, outbound.CheckTest, d.ID)
 	steps, err := tester.Test(ctx, in)
 	if err != nil {
 		return TestResult{}, fmt.Errorf("test destination %s: %w", d.PublicID, err)
@@ -86,7 +91,7 @@ func (s *Service) Test(ctx context.Context, r Requester, publicID string, src So
 	if err := s.recordTest(ctx, r, d, src, steps); err != nil {
 		return TestResult{}, err
 	}
-	out := TestResult{Steps: steps, Health: d.Health}
+	out := TestResult{Steps: steps, Health: d.Health, Run: run}
 	if passed(steps) && d.Health.State == healthBroken {
 		if err := s.healthy(ctx, d.ID); err != nil {
 			return TestResult{}, err

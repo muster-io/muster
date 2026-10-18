@@ -17,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/requestlog"
 )
 
 // hooks serve one Connection in the webhook mode with its secret token, or fail.
@@ -299,5 +300,66 @@ func TestWebhookGapAfterAnOutage(t *testing.T) {
 	cfg.Outages, cfg.Clock = nil, nil
 	if d := pressAt(NewWebhook(cfg), 8); d != 0 {
 		t.Errorf("without Outages the gap is %v", d)
+	}
+}
+
+// inbound keeps the Request log records of the endpoint.
+type inbound struct{ records []requestlog.InboundRecord }
+
+func (r *inbound) RecordInbound(_ context.Context, rec requestlog.InboundRecord) {
+	r.records = append(r.records, rec)
+}
+
+// TestWebhookRequestLog covers C-23.FR-1, FR-2 and C-23.AC-2 at the webhook endpoint: an update with the right secret
+// token is recorded as an update with its body, the answer 200 and the Connection; one with a wrong secret token, and
+// one for a Telegram Connection not in the webhook mode, with the answer 401, the secret token [redacted] and the body,
+// which the endpoint did not read, by its size; a request for an unknown Connection, and one whose Connection could not
+// be read, are not recorded.
+func TestWebhookRequestLog(t *testing.T) {
+	r := &Router{Offsets: &memOffsets{}, Log: logging.New(&syncBuffer{}, logging.LevelInfo)}
+	conn := Conn{ID: 1, PublicID: "CNAAAAAAAAAAT1"}
+	rec := &inbound{}
+	mount := func(h Hooks) http.Handler {
+		return requestlog.Inbound(rec, clock.NewManual(press0), requestlog.OperationUpdate,
+			NewWebhook(WebhookConfig{Connections: h, Router: r, Log: logging.New(&syncBuffer{}, logging.LevelInfo)}))
+	}
+	hooked := mount(hooks{conn: conn, secret: "s3cr3t_hook"})
+	want := requestlog.Links{Connection: 1, ConnectionID: conn.PublicID}
+	for _, c := range []struct {
+		name, secret string
+		h            http.Handler
+		status       int
+		body         bool
+	}{
+		{"the right secret token", "s3cr3t_hook", hooked, http.StatusOK, true},
+		{"a wrong secret token", "wrong", hooked, http.StatusUnauthorized, false},
+		{"no webhook mode", "s3cr3t_hook", mount(hooks{conn: conn}), http.StatusUnauthorized, false},
+	} {
+		before := len(rec.records)
+		if w := post(t, c.h, WebhookPath+conn.PublicID, c.secret, privateUpdate); w.Code != c.status {
+			t.Fatalf("%s answered %d", c.name, w.Code)
+		}
+		if len(rec.records) != before+1 {
+			t.Fatalf("%s: %d records", c.name, len(rec.records)-before)
+		}
+		got := rec.records[before]
+		if got.Links != want || got.Operation != "update" || got.Method != http.MethodPost ||
+			got.URL != WebhookPath+conn.PublicID || got.Status != c.status || got.Request.Whole != c.body ||
+			got.Request.Size != int64(len(privateUpdate)) || got.RequestHeader.Get(SecretTokenHeader) != "[redacted]" ||
+			c.body && string(got.Request.Data) != privateUpdate {
+			t.Errorf("%s: record %+v", c.name, got)
+		}
+	}
+	before := len(rec.records)
+	if w := post(t, hooked, WebhookPath+"CN000000000000", "s3cr3t_hook", privateUpdate); w.Code !=
+		http.StatusUnauthorized {
+		t.Fatalf("an unknown Connection answered %d", w.Code)
+	}
+	if w := post(t, mount(hooks{err: errors.New("lookup failed")}), WebhookPath+conn.PublicID, "s3cr3t_hook",
+		privateUpdate); w.Code != http.StatusInternalServerError {
+		t.Fatalf("a failed lookup answered %d", w.Code)
+	}
+	if len(rec.records) != before {
+		t.Errorf("%d records of requests without a Connection", len(rec.records)-before)
 	}
 }

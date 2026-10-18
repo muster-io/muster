@@ -21,8 +21,8 @@ import * as zod from 'zod';
 
 
 /**
- * The records of exactly one owner, newest first: `connection` lists every record of a Connection, `destination` every record of an outgoing webhook Destination or, for a messenger Destination, the records of its Connection that name it. Neither or both answer `422` with the code `one_of_required`. The caller needs `connections:read` to name a Connection and `destinations:read` to name a Destination (`403` otherwise); an unknown or deleted owner is `404`. Only records newer than `request_log.max_age` and among the newest `request_log.max_records` of their owner are listed — a messenger Destination's within its Connection's — so a list never shows more than that bound. Each record is one attempt of a request: its URL as errors show it, its status, latency and path, without headers or bodies, which `getRequestRecord` reads.
- * @summary List the Request log of a Connection or a Destination
+ * The records of exactly one owner, or of one check run, newest first: `connection` lists every record of a Connection, `destination` every record of an outgoing webhook Destination or, for a messenger Destination, the records of its Connection that name it; `run` alone lists the records of that check run whose owner is a Connection or nobody — the checks before saving of new Connections — and beside an owner it narrows that owner's list. Neither an owner nor a run, or both owners, answer `422` with the code `one_of_required`. The caller needs `connections:read` to name a Connection or a run alone and `destinations:read` to name a Destination (`403` otherwise); an unknown or deleted owner is `404`. Only records newer than `request_log.max_age` and among the newest `request_log.max_records` of their owner are listed — a messenger Destination's within its Connection's — so a list never shows more than that bound. Each record is one attempt of a request: its URL as errors show it, its status, latency and path, without headers or bodies, which `getRequestRecord` reads.
+ * @summary List the Request log of a Connection, a Destination or a check run
  */
 export const listRequestLogQueryLimitDefault = 50;
 export const listRequestLogQueryLimitMax = 500;
@@ -32,6 +32,7 @@ export const listRequestLogQueryDestinationRegExp = new RegExp('^[A-HJKMNP-TV-Za
 export const listRequestLogQueryOperationMax = 64;
 
 export const listRequestLogQueryAlertGroupRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listRequestLogQueryRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ListRequestLogQueryParams = zod.object({
@@ -39,10 +40,11 @@ export const ListRequestLogQueryParams = zod.object({
   "limit": zod.int().min(1).max(listRequestLogQueryLimitMax).default(listRequestLogQueryLimitDefault).describe('Page size (`api.page_size`).'),
   "connection": zod.string().regex(listRequestLogQueryConnectionRegExp).optional().describe('The Connection whose records are listed, by `public_id`.'),
   "destination": zod.string().regex(listRequestLogQueryDestinationRegExp).optional().describe('The Destination whose records are listed, by `public_id`.'),
-  "direction": zod.enum(['outbound', 'inbound']).optional().describe('Only the requests Muster sent (`outbound`) or, from S-089, received (`inbound`).'),
+  "direction": zod.enum(['outbound', 'inbound']).optional().describe('Only the requests Muster sent (`outbound`) or received (`inbound`).'),
   "status_class": zod.enum(['2xx', '3xx', '4xx', '5xx', 'none']).optional().describe('Only the records whose answer has a status of this class, or, with `none`, those that got no answer.'),
   "operation": zod.string().min(1).max(listRequestLogQueryOperationMax).optional().describe('Only the records of this operation, such as `createPost`, `getUpdates`, `pollEvents` or `event`.'),
-  "alert_group": zod.string().regex(listRequestLogQueryAlertGroupRegExp).optional().describe('Only the records of the deliveries of this Alert Group, by `public_id`.')
+  "alert_group": zod.string().regex(listRequestLogQueryAlertGroupRegExp).optional().describe('Only the records of the deliveries of this Alert Group, by `public_id`.'),
+  "run": zod.string().regex(listRequestLogQueryRunRegExp).optional().describe('Only the records of this check run (`CR…`), which the results of `checkConnection`, `checkConnectionDraft`, `checkDestination` and `testDestination` name as `request_log_run`. Alone it lists the records of the run whose owner is a Connection or nobody and needs `connections:read`; the records of an outgoing webhook\'s test or probe are listed beside its `destination`. A run that left no record, or an id that is no check run, lists nothing.')
 })
 
 export const listRequestLogResponseItemsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -59,7 +61,7 @@ export const ListRequestLogResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string().regex(listRequestLogResponseItemsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "at": zod.iso.datetime({"offset":true}).describe('When the attempt was made, on the business clock.'),
-  "direction": zod.enum(['outbound', 'inbound']).describe('Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).'),
+  "direction": zod.enum(['outbound', 'inbound']).describe('Whether Muster sent the request (`outbound`) or received it (`inbound`).'),
   "operation": zod.string().describe('The operation as its protocol names it — the Bot API method for Telegram, the `operationId` of the Bridge protocol, the operation of Mattermost\'s REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).'),
   "method": zod.string(),
   "url": zod.string().describe('The URL as errors show it, masked; untrusted text. Without user information, with the path prefix of the base URL as `[redacted]`.'),
@@ -69,7 +71,7 @@ export const ListRequestLogResponse = zod.object({
   "attempt": zod.int().min(1).describe('Which attempt of the request this was, from 1.'),
   "error_class": zod.union([zod.literal('retry_after'),zod.literal('transient'),zod.literal('fatal'),zod.literal('unknown'),zod.literal('blocked'),zod.literal('redirect'),zod.literal(null)]).nullable().describe('How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.'),
   "error_code": zod.union([zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal(null)]).nullable().describe('What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.'),
-  "check": zod.union([zod.literal('connection_check'),zod.literal('draft_check'),zod.literal('destination_check'),zod.literal('test'),zod.literal('probe'),zod.literal(null)]).nullable().describe('The check or test a request belongs to (from S-089), null for any other request.'),
+  "check": zod.union([zod.literal('connection_check'),zod.literal('draft_check'),zod.literal('destination_check'),zod.literal('test'),zod.literal('probe'),zod.literal(null)]).nullable().describe('The check or test a request belongs to, null for any other request.'),
   "check_run": zod.string().regex(listRequestLogResponseItemsItemCheckRunRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
   "connection_id": zod.string().regex(listRequestLogResponseItemsItemConnectionIdRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
   "destination": zod.union([zod.object({
@@ -120,7 +122,7 @@ export const getRequestRecordResponseTwoResponseBodyBytesMin = 0;
 export const GetRequestRecordResponse = zod.object({
   "id": zod.string().regex(getRequestRecordResponseOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "at": zod.iso.datetime({"offset":true}).describe('When the attempt was made, on the business clock.'),
-  "direction": zod.enum(['outbound', 'inbound']).describe('Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).'),
+  "direction": zod.enum(['outbound', 'inbound']).describe('Whether Muster sent the request (`outbound`) or received it (`inbound`).'),
   "operation": zod.string().describe('The operation as its protocol names it — the Bot API method for Telegram, the `operationId` of the Bridge protocol, the operation of Mattermost\'s REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).'),
   "method": zod.string(),
   "url": zod.string().describe('The URL as errors show it, masked; untrusted text. Without user information, with the path prefix of the base URL as `[redacted]`.'),
@@ -130,7 +132,7 @@ export const GetRequestRecordResponse = zod.object({
   "attempt": zod.int().min(1).describe('Which attempt of the request this was, from 1.'),
   "error_class": zod.union([zod.literal('retry_after'),zod.literal('transient'),zod.literal('fatal'),zod.literal('unknown'),zod.literal('blocked'),zod.literal('redirect'),zod.literal(null)]).nullable().describe('How the attempt failed, as the outbound package classified it: the answer asked to wait (`retry_after`), was a server error, or the attempt got no answer, such as a refused connection or a timeout (`transient`); the answer was a client error (`fatal`), an answer it could not judge, such as one larger than its limit (`unknown`), or a redirect, which Muster never follows (`redirect`); or the outbound address policy refused the address (`blocked`). Null for an attempt that succeeded.'),
   "error_code": zod.union([zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal(null)]).nullable().describe('What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.'),
-  "check": zod.union([zod.literal('connection_check'),zod.literal('draft_check'),zod.literal('destination_check'),zod.literal('test'),zod.literal('probe'),zod.literal(null)]).nullable().describe('The check or test a request belongs to (from S-089), null for any other request.'),
+  "check": zod.union([zod.literal('connection_check'),zod.literal('draft_check'),zod.literal('destination_check'),zod.literal('test'),zod.literal('probe'),zod.literal(null)]).nullable().describe('The check or test a request belongs to, null for any other request.'),
   "check_run": zod.string().regex(getRequestRecordResponseOneCheckRunRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
   "connection_id": zod.string().regex(getRequestRecordResponseOneConnectionIdRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
   "destination": zod.union([zod.object({

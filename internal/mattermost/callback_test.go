@@ -5,6 +5,7 @@ package mattermost_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,7 @@ import (
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/requestlog"
 )
 
 // The fixtures of the callback: Connection 3, whose Destinations 31 and 32 post into ch-alerts and ch-alerts-prod;
@@ -240,6 +242,10 @@ type callbackEnv struct {
 	business *clock.Manual
 	// admin is whether the fake's bot has the system admin role, with which its ephemeral posts are made (F-063).
 	admin bool
+	// recorder, when set, gets the Request log records of the callback wrapped by requestlog.Inbound; answered is the
+	// body of the last answer.
+	recorder requestlog.InboundRecorder
+	answered string
 }
 
 func newCallback(t *testing.T) *callbackEnv {
@@ -328,11 +334,16 @@ func body(user, channel, post, action, keyID string) string {
 func (e *callbackEnv) press(t *testing.T, method, connection, payload string) string {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(e.cfg))
+	h := mattermost.NewCallback(e.cfg)
+	if e.recorder != nil {
+		h = requestlog.Inbound(e.recorder, clock.NewManual(press0), requestlog.OperationPress, h)
+	}
+	mux.Handle(mattermost.CallbackPattern, h)
 	req := httptest.NewRequestWithContext(t.Context(), method, mattermost.CallbackPath+connection,
 		strings.NewReader(payload))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
+	e.answered = rec.Body.String()
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("answer %d %q %v, want 200 JSON", rec.Code, rec.Body.String(), rec.Header())
 	}
@@ -945,5 +956,91 @@ func TestLinkBots(t *testing.T) {
 	e.conns.err = errors.New("database down")
 	if err := lb.Session(t.Context(), connectionPublicID, run); err == nil || ran {
 		t.Errorf("a failed lookup of the Connection = %v", err)
+	}
+}
+
+// inbound keeps the Request log records of the callback.
+type inbound struct{ records []requestlog.InboundRecord }
+
+func (r *inbound) RecordInbound(_ context.Context, rec requestlog.InboundRecord) {
+	r.records = append(r.records, rec)
+}
+
+// TestPressRequestLog covers C-23.FR-1 and FR-2 at the callback of presses: every request for a known Connection is
+// recorded as a press with Muster's JSON answer and the Connection, refused ones included, and with the Destination and
+// the Alert Group once the press is bound — on a Root message, on a Reminder, also one whose key left the Keyring — or
+// with the Destination alone for a press that is not verified on a delivered post and for a person's press of a test
+// message; a press for an unknown Connection, answered {} too, and one whose Connection could not be read are not
+// recorded.
+func TestPressRequestLog(t *testing.T) {
+	e := newCallbackAs(t, false)
+	rec := &inbound{}
+	e.recorder = rec
+	b := e.bindings.bound[bindingKey{connID, groupA, postA}]
+	b.AlertGroup = 21
+	e.bindings.bound[bindingKey{connID, groupA, postA}] = b
+	r := e.bindings.replies[bindingKey{connID, groupA, replyA}]
+	r.AlertGroup = 21
+	e.bindings.replies[bindingKey{connID, groupA, replyA}] = r
+	e.bindings.tests = map[postKey]delivery.Destination{{destA.PublicID, fakemattermost.ChannelAlerts}: destA}
+	alerts := fakemattermost.ChannelAlerts
+	id, kid := e.action(t, buttons.SubjectRoot, groupA, buttons.CommandAcknowledge, 0)
+	testID, testKID := e.action(t, buttons.SubjectTest, destA.PublicID, buttons.CommandAcknowledge, 0)
+	matched := requestlog.Links{Connection: connID, ConnectionID: connectionPublicID, Destination: destA.ID,
+		AlertGroup: 21}
+	posted := requestlog.Links{Connection: connID, ConnectionID: connectionPublicID, Destination: destA.ID}
+	known := requestlog.Links{Connection: connID, ConnectionID: connectionPublicID}
+	for _, c := range []struct {
+		name, method, payload string
+		press                 func() string
+		links                 requestlog.Links
+	}{
+		{name: "a bound press", payload: body(fakemattermost.BobUserID, alerts, postA, id, kid), links: matched},
+		{name: "a bound press of a person not linked", payload: body(fakemattermost.AliceUserID, alerts, postA, id, kid),
+			links: matched},
+		{name: "a Reminder whose key left the Keyring", press: func() string {
+			return e.pressReply(t, openKeyringOf(t, 'z'), fakemattermost.BobUserID, alerts, replyA, groupA,
+				buttons.CommandStillOnIt)
+		}, links: matched},
+		{name: "not verified on a delivered post", payload: body(fakemattermost.BobUserID, alerts, postA, tamper(id),
+			kid), links: posted},
+		{name: "not verified on a made-up post", payload: body(fakemattermost.BobUserID, alerts, "garbage-post",
+			tamper(id), kid), links: known},
+		{name: "a person's press of a test message", payload: testBody(fakemattermost.BobUserID, alerts, testID,
+			testKID, ""), links: posted},
+		{name: "a GET", method: http.MethodGet, links: known},
+		{name: "a body that is no press", payload: "not json", links: known},
+	} {
+		before := len(rec.records)
+		if c.press != nil {
+			c.press()
+		} else {
+			e.press(t, cmp.Or(c.method, http.MethodPost), connectionPublicID, c.payload)
+		}
+		if len(rec.records) != before+1 {
+			t.Fatalf("%s: %d records", c.name, len(rec.records)-before)
+		}
+		got := rec.records[before]
+		if got.Links != c.links || got.Operation != "press" || got.Method != cmp.Or(c.method, http.MethodPost) ||
+			got.URL != mattermost.CallbackPath+connectionPublicID || got.Status != http.StatusOK ||
+			string(got.Response.Data) != e.answered || !got.Response.Whole || !got.Request.Whole ||
+			(c.press == nil && string(got.Request.Data) != c.payload) {
+			t.Errorf("%s: record %+v, answered %s", c.name, got, e.answered)
+		}
+	}
+	if !strings.Contains(string(rec.records[1].Response.Data), `"ephemeral_text":"Your Mattermost account is not linked`) {
+		t.Errorf("the answer of a person not linked: %s", rec.records[1].Response.Data)
+	}
+
+	before := len(rec.records)
+	e.press(t, http.MethodPost, "CN000000000000", body(fakemattermost.BobUserID, alerts, postA, id, kid))
+	if e.answered != "{}" || len(rec.records) != before {
+		t.Errorf("an unknown Connection: answered %s, %d records", e.answered, len(rec.records)-before)
+	}
+	e.conns.err = errors.New("connection read failed")
+	e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts, postA, id, kid))
+	if e.answered != "{}" || len(rec.records) != before {
+		t.Errorf("a Connection that could not be read: answered %s, %d records", e.answered,
+			len(rec.records)-before)
 	}
 }

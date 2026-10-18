@@ -13,7 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/connections"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/requestlog"
 )
 
@@ -289,5 +293,107 @@ func TestGetRequestRecord(t *testing.T) {
 	if a := x.call(t, http.MethodGet, "/api/v1/request-log/RQ0000000000AC", "", "Cookie", bothReaderCookie); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("a failed read = %d", a.status)
+	}
+}
+
+// TestListRequestLogByRun is C-23.FR-5 for check runs: a run alone needs connections:read, checked before anything is
+// read, and reaches the reader alone; beside a Connection or a Destination it narrows that owner's list under that
+// owner's Permission; both owners with a run, or a filter without an owner or a run, are 422 one_of_required; a run
+// that is no public_id is 400.
+func TestListRequestLogByRun(t *testing.T) {
+	x, fl := newRequestLogAPI(t)
+	for _, c := range []struct {
+		cookie, query string
+		want          int
+		filter        requestlog.Filter
+	}{
+		{connReaderCookie, "?run=CR0000000000AA", http.StatusOK, requestlog.Filter{Run: "CR0000000000AA"}},
+		{destReaderCookie, "?run=CR0000000000AA", http.StatusForbidden, requestlog.Filter{}},
+		{"viewer-cookie", "?run=CR0000000000AA", http.StatusForbidden, requestlog.Filter{}},
+		{destReaderCookie, "?destination=DS0000000000AA&run=CR0000000000AA", http.StatusOK,
+			requestlog.Filter{Destination: "DS0000000000AA", Run: "CR0000000000AA"}},
+		{connReaderCookie, "?connection=CN0000000000AA&run=CR0000000000AA", http.StatusOK,
+			requestlog.Filter{Connection: "CN0000000000AA", Run: "CR0000000000AA"}},
+		{connReaderCookie, "?destination=DS0000000000AA&run=CR0000000000AA", http.StatusForbidden,
+			requestlog.Filter{}},
+		{bothReaderCookie, "?connection=CN0000000000AA&destination=DS0000000000AA&run=CR0000000000AA",
+			http.StatusUnprocessableEntity, requestlog.Filter{}},
+		{bothReaderCookie, "?direction=inbound", http.StatusUnprocessableEntity, requestlog.Filter{}},
+		{bothReaderCookie, "?run=nope", http.StatusBadRequest, requestlog.Filter{}},
+	} {
+		fl.filters = nil
+		a := x.call(t, http.MethodGet, "/api/v1/request-log"+c.query, "", "Cookie", c.cookie)
+		read := c.want == http.StatusOK
+		if a.status != c.want || read != (len(fl.filters) == 1) {
+			t.Errorf("%s %s = %d %s, %d reads", c.cookie, c.query, a.status, a.body, len(fl.filters))
+			continue
+		}
+		if read {
+			got := fl.filters[0]
+			got.Limit = 0
+			if got != c.filter {
+				t.Errorf("%s: filter %+v", c.query, got)
+			}
+		}
+		switch c.want {
+		case http.StatusForbidden:
+			need := "connections:read"
+			if strings.Contains(c.query, "destination=") {
+				need = "destinations:read"
+			}
+			if c.cookie != "viewer-cookie" && !strings.Contains(string(a.body), need) {
+				t.Errorf("%s: the 403 names %s", c.query, a.body)
+			}
+		case http.StatusUnprocessableEntity:
+			if problemCode(t, a) != "/query/connection one_of_required" {
+				t.Errorf("%s: %s", c.query, a.body)
+			}
+		}
+	}
+}
+
+// TestCheckResultsNameTheirRun is C-23.FR-5: checkConnection, checkConnectionDraft, checkDestination and
+// testDestination answer the check run of their requests as request_log_run, and leave it out without one.
+func TestCheckResultsNameTheirRun(t *testing.T) {
+	const run = "CRAAAAAAAAAAA1"
+	x, fc := newConnectionsAPI(t)
+	fc.check = connections.CheckResult{OK: true, Run: run}
+	for _, path := range []string{"/api/v1/connections/" + connectionID + "/checks", "/api/v1/connections/checks"} {
+		body := ""
+		if path == "/api/v1/connections/checks" {
+			body = `{"type":"mattermost","server_url":"http://127.0.0.1:18066"}`
+		}
+		a := x.as(t, connectionsWriter, http.MethodPost, path, body)
+		var res gen.ConnectionCheckResult
+		decodeInto(t, a, &res)
+		if a.status != http.StatusOK || res.RequestLogRun == nil || *res.RequestLogRun != run {
+			t.Errorf("%s = %d %s", path, a.status, a.body)
+		}
+	}
+	fc.check = connections.CheckResult{OK: true}
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/"+connectionID+"/checks", ""); a.status !=
+		http.StatusOK || strings.Contains(string(a.body), "request_log_run") {
+		t.Errorf("without a run = %d %s", a.status, a.body)
+	}
+
+	y, fd, _ := newDestinationsAPI(t)
+	ft := y.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	fd.check = destinations.CheckResult{OK: true, Health: destinations.Health{State: "healthy"}, Run: run}
+	a := y.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/"+mattermostID+"/checks", "")
+	var checked gen.DestinationCheckResult
+	decodeInto(t, a, &checked)
+	if a.status != http.StatusOK || checked.RequestLogRun == nil || *checked.RequestLogRun != run {
+		t.Errorf("checkDestination = %d %s", a.status, a.body)
+	}
+	fd.test = destinations.TestResult{Health: destinations.Health{State: "healthy"}, Run: run}
+	a = y.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/"+webhookID+"/tests",
+		`{"source":{"kind":"example"}}`)
+	var tested gen.DestinationTestResult
+	decodeInto(t, a, &tested)
+	if a.status != http.StatusOK || tested.RequestLogRun == nil || *tested.RequestLogRun != run {
+		t.Errorf("testDestination = %d %s", a.status, a.body)
 	}
 }

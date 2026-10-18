@@ -227,6 +227,9 @@ func (w *Worker) probe(ctx context.Context, org int64) error {
 // or for an outgoing webhook its oldest waiting event; with nothing waiting it runs the adapter's Destination check in
 // the delivery client class; for a type without one it marks d so that its next due delivery or event is the probe.
 func (w *Worker) probeOne(ctx context.Context, org int64, d Destination) error {
+	// Each probe is a check run of its own; its requests — the oldest waiting delivery or event, or the Destination
+	// check — are recorded as probe (C-23.FR-2).
+	ctx, _ = outbound.StartCheck(ctx, outbound.CheckProbe, d.ID)
 	var waiting dbgen.LeaseOldestWaitingRow
 	err := w.Store.inTx(ctx, func(q queries) error {
 		realNow := w.Lease.Clocks.Real.Now().UTC()

@@ -19,7 +19,7 @@
  */
 
 /**
- * Whether Muster sent the request (`outbound`) or received it (`inbound`, from S-089).
+ * Whether Muster sent the request (`outbound`) or received it (`inbound`).
  */
 export type RequestDirection = typeof RequestDirection[keyof typeof RequestDirection];
 

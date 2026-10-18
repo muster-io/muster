@@ -34,7 +34,7 @@ type requestLogKey struct {
 
 var (
 	errRequestLogOneOf = fieldProblem(http.StatusUnprocessableEntity, "/query/connection", codeOneOfRequired,
-		"Give exactly one of connection and destination.")
+		"Give exactly one of connection and destination, or a run.")
 	errRequestLogOwnerNotFound = problem(http.StatusNotFound, typeNotFound, "", "No such Connection or Destination.")
 	errRequestRecordNotFound   = problem(http.StatusNotFound, typeNotFound, "", "No such request record.")
 )
@@ -42,13 +42,23 @@ var (
 // codeOneOfRequired is the code of a request that gives neither or several of the fields of which it takes one.
 const codeOneOfRequired = "one_of_required"
 
-// ListRequestLog is listRequestLog (C-23.FR-5): the records of exactly one Connection or Destination, newest first, by
-// cursor, filtered by direction, status class, operation and Alert Group. Naming the owner needs its Permission —
-// connections:read for a Connection, destinations:read for a Destination — before its existence is told.
+// requestLogRunOf is the request_log_run of a check or test result whose requests share the check run run, none
+// without one.
+func requestLogRunOf(run string) *string {
+	if run == "" {
+		return nil
+	}
+	return &run
+}
+
+// ListRequestLog is listRequestLog (C-23.FR-5): the records of exactly one Connection or Destination, or of a check run
+// alone, newest first, by cursor, filtered by direction, status class, operation, Alert Group and check run. Naming
+// the owner needs its Permission — connections:read for a Connection, destinations:read for a Destination — before
+// its existence is told; a run alone needs connections:read.
 func (s *Server) ListRequestLog(ctx context.Context, req gen.ListRequestLogRequestObject) (
 	gen.ListRequestLogResponseObject, error) {
 	p := req.Params
-	if (p.Connection == nil) == (p.Destination == nil) {
+	if p.Connection != nil && p.Destination != nil || p.Connection == nil && p.Destination == nil && p.Run == nil {
 		return nil, errRequestLogOneOf
 	}
 	id, err := identity(ctx)
@@ -66,7 +76,7 @@ func (s *Server) ListRequestLog(ctx context.Context, req gen.ListRequestLogReque
 	for _, v := range []struct {
 		dst *string
 		src *string
-	}{{&f.Connection, p.Connection}, {&f.Destination, p.Destination}, {&f.Operation, p.Operation},
+	}{{&f.Connection, p.Connection}, {&f.Destination, p.Destination}, {&f.Run, p.Run}, {&f.Operation, p.Operation},
 		{&f.AlertGroup, p.AlertGroup}} {
 		if v.src != nil {
 			*v.dst = *v.src
