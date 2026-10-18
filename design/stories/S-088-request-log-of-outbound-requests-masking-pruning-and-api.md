@@ -26,6 +26,7 @@ files_touched:
   - internal/publicid/publicid.go
   - internal/publicid/publicid_test.go
   - internal/outbound/client.go
+  - internal/outbound/client_test.go
   - internal/outbound/redact.go
   - internal/outbound/record.go
   - internal/outbound/record_test.go
@@ -319,6 +320,8 @@ None.
     under the pattern and distinctness tests.
   - `internal/outbound/redact.go`: a Secret is also masked in the escaped forms a JSON string gives it, as bodies hold
     it.
+  - `internal/outbound/client_test.go`: the base URL's origin is matched without regard to the case of its scheme and
+    host and with an explicit default port equal to none (`TestDisplaySameOrigin`).
   - `internal/telegram/client_test.go`, `internal/bridge/client_test.go`: the empty-poll skip, the operation names and
     the secret token of `setWebhook` — "the adapters' tests" of Step 3.
   - `internal/bridge/info.go`: `getInfo` names its operation through the client's call, like the other operations.
