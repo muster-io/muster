@@ -204,8 +204,9 @@ issue: 256
   `127.0.0.1:18095`), every feature by default and the features listed in `BRIDGE_FEATURES` otherwise; `user_lookup` is
   `login` while `direct_messages` is on and `none` without it; push with `-push-url` and `-push-secret-file`. Outside
   the protocol it serves `POST /demo/press` `{message_id, user}`, which presses the first button of that message as that
-  person, so that a script can play the person of an interactive `muster bridge check`; like the rest of the example it
-  has no authentication and listens on loopback by default. The README's quick start is this file.
+  person, so that a script can play the person of an interactive `muster bridge check`; it has no authentication of its
+  own — the protocol under `/v1/` needs the token — and the example listens on loopback by default. The README's quick
+  start is this file.
 - **Copy check** (`Makefile`, `ci.yml`, ADR-0017): `make spec-check` downloads `api/bridge.yaml` from
   `https://raw.githubusercontent.com/muster-io/muster/master/api/bridge.yaml` (`MUSTER_SPEC_URL` overrides it) and
   compares it byte for byte with the copy, printing the difference; `make spec-sync` replaces the copy and runs
