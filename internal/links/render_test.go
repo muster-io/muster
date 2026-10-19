@@ -233,6 +233,39 @@ func TestEvaluateExploreWithoutKey(t *testing.T) {
 	}
 }
 
+// TestEvaluateGrafanaAlert: an Alert Group of an Alert from Grafana links to the rule's page in Grafana, its
+// generatorURL, as Source; the built-in Explore rule, with a row of the Lookup table "grafana" for the Alert Group's
+// cluster, writes no link, because the URL has no g0.expr, and counts no template error and logs nothing.
+func TestEvaluateGrafanaAlert(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, log := newService(t, f)
+	if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTable(ctx, by, grafana()); err != nil {
+		t.Fatal(err)
+	}
+	const page = "http://grafana.example.org/alerting/grafana/spike-cpu/view?orgId=1"
+	labels := templates.KV{"alertname": "SpikeCPU", "grafana_folder": "Checks", "host": "a", "cluster": "prod"}
+	in := Input{Group: "AGAAAAAAAAAAAA", Route: "RTAAAAAAAAAAAA", Data: templates.Data{Status: templates.StatusFiring,
+		Alerts: templates.Alerts{{Status: templates.StatusFiring, Labels: labels, GeneratorURL: page,
+			Fingerprint: "e0cc16b5c391be24"}},
+		CommonLabels: labels}}
+	before := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get()
+	got, err := s.Evaluate(ctx, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Kind != KindSource || got[0].URL != page {
+		t.Errorf("links %v", names(got))
+	}
+	if metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() != before ||
+		strings.Contains(log.String(), "link_rule_failed") {
+		t.Errorf("the Explore rule failed: %s", log.String())
+	}
+}
+
 // TestEvaluateLabelValue: a rule of the scope label_value yields one link per distinct value of its label among the
 // Alerts, with the labels of the first Alert carrying it.
 func TestEvaluateLabelValue(t *testing.T) {
