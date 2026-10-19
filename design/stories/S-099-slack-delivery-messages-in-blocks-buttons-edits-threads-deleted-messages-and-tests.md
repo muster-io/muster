@@ -59,7 +59,7 @@ acceptance:
   - "[C-24.FR-14] The Request log records each Publication, edit, Thread reply, deletion of a misplaced reply, test message and probe with the method as its operation, the Destination and the Alert Group linked, and the bot token masked."
 verify: "make ci test-integration e2e-go"
 operator_attention: true
-issue: null
+issue: 308
 ---
 
 # S-099. Slack delivery: messages in blocks, mrkdwn, buttons and the Snooze menu, edits, Thread replies, deleted Root messages, error classes and test messages (BE)

@@ -31,7 +31,7 @@ acceptance:
   - "[C-24.AC-20] `make docs-check` passes: the site builds strictly, no link or anchor is broken, and `llms.txt` and the full text are current."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 313
 ---
 
 # S-104. Connect Slack on the documentation site, with the app manifests, and Slack on the Messengers page

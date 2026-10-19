@@ -57,7 +57,7 @@ acceptance:
   - "[C-24.AC-19] On the test workspace, with the Connection in `socket` mode, the Leader's `hello` counts one connection, a new Alert Group appears in `#alerts`, and a person's press of Ack, from a Slack account linked to a Responder, acknowledges it as that User with the Transport `slack`."
 verify: "make ci test-integration e2e-go rules-test docs-check"
 operator_attention: true
-issue: null
+issue: 310
 ---
 
 # S-101. Slack Socket Mode held by the Leader: the WebSocket through the outbound package, confirmed envelopes, refresh and back-off, and the warning about a shared app (BE)

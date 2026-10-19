@@ -22,7 +22,7 @@ acceptance:
   - "[C-24.FR-2] The records of a draft check are kept in the Request log with the kind `draft_check` and its run, the typed tokens masked (`secretleak.go` probe `slack_connections`, the draft check added)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
-issue: null
+issue: 314
 ---
 
 # S-105. Check a Slack Connection before saving it, with the dry probe without a token (BE)

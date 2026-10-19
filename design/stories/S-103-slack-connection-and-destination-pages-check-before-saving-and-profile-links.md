@@ -51,7 +51,7 @@ acceptance:
   - "[C-24.AC-18] Every text above exists in English and Russian, `make lint` finds no missing key, and the Slack Connection page, the Slack Destination form and the profile's link dialog show no horizontal scrollbar at 360 px wide (Playwright)."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 312
 ---
 
 # S-103. Slack Connection and Destination pages, the check before saving, and Slack in the profile (FE)

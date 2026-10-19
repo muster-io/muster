@@ -45,7 +45,7 @@ acceptance:
   - "[C-24.AC-14] A press from the linked account runs its Command as Alice with the Transport `slack`, and a press after she unlinks it in the profile is answered with the \"not linked\" text (`test/e2e/account_links_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: true
-issue: null
+issue: 311
 ---
 
 # S-102. Slack Account links by a code sent by direct message, and Mentions of linked people (BE)

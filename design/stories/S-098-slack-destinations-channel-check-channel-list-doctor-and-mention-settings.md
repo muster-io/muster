@@ -59,7 +59,7 @@ acceptance:
   - "[C-24.FR-3] With `slack` in the `Destination` union the SPA's type check passes: `destinationPlace` shows a Slack Destination's channel name, else its channel id, with `#` before it, `destinationTypeName` names it \"Slack\", and the Destination page shows its name, Broken banner and Routes but no form until S-103; `checkCodeText` translates `missing_scope` for the Destination check."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 307
 ---
 
 # S-098. Slack Destinations, the channel check, the channel list, `muster doctor` and the Mention settings of Slack (BE)

@@ -60,7 +60,7 @@ acceptance:
   - "[C-24.AC-19] On the test workspace, with the Connection in `http` mode and the app's Interactivity Request URL set to a public address of the ingest listener of `muster dev`, a person's press of Ack on a Root message in `#alerts`, from a Slack account linked to a Responder, acknowledges the Alert Group as that User, and a press from an account without a link is answered privately with the \"not linked\" text."
 verify: "make ci test-integration e2e-go"
 operator_attention: true
-issue: null
+issue: 309
 ---
 
 # S-100. Slack presses over HTTP: the signed callback, presses and their attribution, answers to people and Reminder buttons (BE)

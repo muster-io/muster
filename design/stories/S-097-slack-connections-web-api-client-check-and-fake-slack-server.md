@@ -64,7 +64,7 @@ acceptance:
   - "[C-01.FR-13] The fake Slack server answers `auth.test`, `bots.info` and `apps.connections.open` for two apps with published tokens, sets `x-oauth-scopes` and `x-accepted-oauth-scopes`, answers errors as `200` `ok: false` and `429` with `Retry-After` when told to; `muster dev` starts it on `127.0.0.1:18095`, prints its address before \"fake Telegram\" and creates the demo Connection \"Dev Slack\" in `socket` mode; the end-to-end harness waits for it; `listLinkableConnections` leaves Slack Connections out until S-102 and `muster doctor` skips them until S-098."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 306
 ---
 
 # S-097. Slack Connections, the Web API client with its error classes, the Connection check and the fake Slack server (BE)
