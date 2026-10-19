@@ -7,9 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -353,16 +358,102 @@ func TestPoolSize(t *testing.T) {
 	}
 }
 
-// TestOnlyFromURL sets the PG* variables pgx reads: none of them may change the connections.
+// TestIgnoresPGEnvironment sets the PG* variables pgx reads, class by class: none may change the connections, which
+// come only from the URL (ADR-0010).
+func TestIgnoresPGEnvironment(t *testing.T) {
+	const (
+		verifyFull = "postgres://muster@127.0.0.1:5432/muster?sslmode=verify-full"
+		plain      = "postgres://muster@127.0.0.1:5432/muster?sslmode=disable"
+	)
+	tests := []struct {
+		name string
+		env  []string // name, value, name, value, …
+		url  string
+		ok   func(c *pgx.ConnConfig) bool
+	}{
+		{"root certificate", []string{"PGSSLROOTCERT", "/nonexistent/ca.pem"}, verifyFull,
+			func(c *pgx.ConnConfig) bool { return c.TLSConfig != nil && c.TLSConfig.RootCAs == nil }},
+		{"client certificate", []string{"PGSSLCERT", "/nonexistent/client.pem", "PGSSLKEY", "/nonexistent/client.key",
+			"PGSSLPASSWORD", "from-the-environment"}, verifyFull,
+			func(c *pgx.ConnConfig) bool { return c.TLSConfig != nil && len(c.TLSConfig.Certificates) == 0 }},
+		{"TLS mode", []string{"PGSSLMODE", "disable"}, "postgres://muster@127.0.0.1:5432/muster",
+			func(c *pgx.ConnConfig) bool { return c.TLSConfig != nil }},
+		{"TLS negotiation and SNI", []string{"PGSSLNEGOTIATION", "direct", "PGSSLSNI", "0"},
+			"postgres://muster@db.example.org:5432/muster?sslmode=require",
+			func(c *pgx.ConnConfig) bool {
+				return c.SSLNegotiation == "" && c.TLSConfig.ServerName == "db.example.org"
+			}},
+		{"runtime parameters", []string{"PGOPTIONS", "-c search_path=evil", "PGTZ", "Antarctica/Troll"}, plain,
+			func(c *pgx.ConnConfig) bool {
+				_, options := c.RuntimeParams["options"]
+				_, timezone := c.RuntimeParams["timezone"]
+				return !options && !timezone
+			}},
+		{"target session attributes", []string{"PGTARGETSESSIONATTRS", "read-only"}, plain,
+			func(c *pgx.ConnConfig) bool { return c.ValidateConnect == nil }},
+		{"service", []string{"PGSERVICE", "missing", "PGSERVICEFILE", "/nonexistent/pg_service.conf"}, plain,
+			func(*pgx.ConnConfig) bool { return true }},
+		{"address and names", []string{"PGHOST", "elsewhere", "PGPORT", "6543", "PGUSER", "other", "PGDATABASE",
+			"other"}, "postgres://muster@127.0.0.1/muster?sslmode=disable",
+			func(c *pgx.ConnConfig) bool {
+				return c.Host == "127.0.0.1" && c.Port == 5432 && c.User == "muster" && c.Database == "muster"
+			}},
+		{"protocol versions", []string{"PGMINPROTOCOLVERSION", "3.2", "PGMAXPROTOCOLVERSION", "3.2"}, plain,
+			func(c *pgx.ConnConfig) bool { return c.MinProtocolVersion == "3.0" && c.MaxProtocolVersion == "3.0" }},
+		{"authentication", []string{"PGCHANNELBINDING", "require", "PGREQUIREAUTH", "scram-sha-256"}, plain,
+			func(c *pgx.ConnConfig) bool { return c.ChannelBinding == "prefer" && c.RequireAuth == "" }},
+		{"password", []string{"PGPASSWORD", "from-the-environment", "PGPASSFILE", "/nonexistent"}, plain,
+			func(c *pgx.ConnConfig) bool { return c.Password == "" }},
+		{"application name and connect timeout", []string{"PGAPPNAME", "other", "PGCONNECT_TIMEOUT", "99"}, plain,
+			func(c *pgx.ConnConfig) bool {
+				return c.RuntimeParams["application_name"] == "" && c.ConnectTimeout == connectTimeout
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir()) // no ~/.postgresql or ~/.pgpass of whoever runs the tests
+			for i := 0; i < len(tt.env); i += 2 {
+				t.Setenv(tt.env[i], tt.env[i+1])
+			}
+			t.Setenv("PGNOTREADBYPGX", "x")
+			db := config.Database{URL: logging.Secret(tt.url)}
+			d, err := Open(t.Context(), db, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if !tt.ok(d.Pool.Config().ConnConfig) || !tt.ok(d.sessionConfig) {
+				t.Errorf("%v changed the connections", tt.env)
+			}
+			for _, kv := range os.Environ() {
+				if strings.HasPrefix(kv, "PG") {
+					t.Errorf("%s is still in the environment", kv)
+				}
+			}
+		})
+	}
+}
+
+// TestOnlyFromURL: the settings of the URL apply, the password file ~/.pgpass does not.
 func TestOnlyFromURL(t *testing.T) {
-	t.Setenv("PGPASSWORD", "from-the-environment")
-	t.Setenv("PGCONNECT_TIMEOUT", "99")
-	t.Setenv("PGAPPNAME", "other")
-	t.Setenv("PGPASSFILE", "/nonexistent")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	pgpass := []byte("*:*:*:*:from-the-password-file\n")
+	if err := os.WriteFile(filepath.Join(home, ".pgpass"), pgpass, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	srv.Close()
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
 	noPassword := config.Database{URL: "postgres://muster@127.0.0.1:5432/muster?sslmode=disable"}
-	d, err := Open(t.Context(), noPassword, config.Database{
-		URL: "postgres://muster:pw@127.0.0.1:5432/muster?sslmode=disable&connect_timeout=3&application_name=muster",
-	})
+	d, err := Open(t.Context(), noPassword, config.Database{URL: logging.Secret(
+		"postgres://muster:pw@127.0.0.1:5432/muster?sslmode=verify-full&connect_timeout=3&application_name=muster" +
+			"&sslrootcert=" + url.QueryEscape(ca) + "&options=-c%20statement_timeout%3D5s" +
+			"&target_session_attrs=read-write")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,10 +463,14 @@ func TestOnlyFromURL(t *testing.T) {
 		t.Errorf("main connection: password %q, connect timeout %v, application name %q", main.Password,
 			main.ConnectTimeout, main.RuntimeParams["application_name"])
 	}
-	if s := d.sessionConfig; s.Password != "pw" || s.ConnectTimeout != 3*time.Second ||
-		s.RuntimeParams["application_name"] != "muster" {
+	s := d.sessionConfig
+	if s.Password != "pw" || s.ConnectTimeout != 3*time.Second || s.RuntimeParams["application_name"] != "muster" {
 		t.Errorf("session connection: password %q, connect timeout %v, application name %q", s.Password,
 			s.ConnectTimeout, s.RuntimeParams["application_name"])
+	}
+	if s.TLSConfig == nil || s.TLSConfig.RootCAs == nil || s.RuntimeParams["options"] != "-c statement_timeout=5s" ||
+		s.ValidateConnect == nil {
+		t.Errorf("session connection: the URL's sslrootcert, options or target_session_attrs do not apply")
 	}
 	c := d.sessionConfig.Copy()
 	onlyFromURL(c, "postgres://%zz")
