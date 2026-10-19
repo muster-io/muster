@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // The application shell (C-03.FR-18) that every signed-in page lives in: the navigation, filtered by the Permissions
-// of the session, the user menu, the banner area and the live updates.
+// of the session, the mark of the live updates (C-09.FR-26), the user menu, the banner area and the live updates.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -19,6 +19,8 @@ import {
   useSession,
 } from "../lib/api";
 import { connectLiveUpdates } from "../lib/live";
+import { liveStatus } from "../lib/live-status";
+import { LiveIndicator } from "./live-indicator";
 import { NoticeBanners } from "./notice-banners";
 import { ACCESS_NAVIGATION } from "./access-nav";
 import { ORGANIZATION_NAVIGATION } from "./organization-nav";
@@ -225,7 +227,8 @@ const RECONNECT_DELAY_MS = 10_000;
 /**
  * Opens the live updates for the signed-in session. The server closes the stream for good when the session ends; the
  * browser's reconnect then gets 401, which may be the answer that carried the reason. The shell reads the session
- * again: without one it leaves the page, with one it opens the stream again a little later.
+ * again: without one it leaves the page, with one it opens the stream again a little later. The state that the mark in
+ * the header shows starts at connecting and spans the reopens.
  */
 function useLiveUpdates(active: boolean) {
   const queryClient = useQueryClient();
@@ -236,6 +239,7 @@ function useLiveUpdates(active: boolean) {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let close: (() => void) | undefined;
+    liveStatus.start();
     const retry = () => {
       if (!stopped) {
         timer = setTimeout(open, RECONNECT_DELAY_MS);
@@ -243,6 +247,7 @@ function useLiveUpdates(active: boolean) {
     };
     const open = () => {
       close = connectLiveUpdates(queryClient, {
+        status: liveStatus,
         onClosed: () => {
           // A session that is gone leaves the page (see below); any other answer opens the stream again later.
           queryClient
@@ -261,6 +266,7 @@ function useLiveUpdates(active: boolean) {
       stopped = true;
       clearTimeout(timer);
       close?.();
+      liveStatus.stop();
     };
   }, [active, queryClient]);
 }
@@ -305,7 +311,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="sr-only sm:hidden">Muster</span>
           </Link>
           <Navigation entries={NAVIGATION} permissions={session?.permissions ?? []} />
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <LiveIndicator />
             {session !== null && <UserMenu user={session.user} />}
           </div>
         </div>

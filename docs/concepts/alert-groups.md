@@ -47,6 +47,25 @@ so that a person can say "I have this one". The two often look alike, but you ca
 The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
 
+## Live updates
+
+The list and the Alert Group page change as soon as something happens, without a reload. A mark in the header of every
+page says whether these live updates reach your browser, so that on a phone at night you know whether the list in front
+of you is current:
+
+| Mark | Meaning |
+|---|---|
+| Green dot, "Live" | Live updates are on. On a narrow screen only the dot shows. |
+| Grey dot, "Connecting…" | The page has loaded and is connecting. The text shows once this has taken 5 seconds. |
+| Amber dot, "Reconnecting…" | The connection has been lost for 5 seconds, and the browser keeps trying again. |
+| Red dot, "Offline" | The connection has been lost for 30 seconds, or the page has not connected within 30 seconds of loading. |
+
+A drop shorter than 5 seconds, such as a Muster replica restarting, leaves the mark as it was. Press the mark to read
+what its state means: in every state but "Live" it says that what you see may be out of date, while reconnecting or
+offline it names the time the connection was lost, and when offline it offers to reload the page. As soon as the
+connection is back, the list and the page are read again, so they show everything that happened meanwhile. The mark
+sends nothing to Muster.
+
 ## How Alerts join an Alert Group
 
 When an Alert starts firing, Muster picks its [Route](routes-and-group-keys.md) and reads the values of the Route's

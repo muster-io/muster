@@ -12,6 +12,7 @@ files_touched:
   - web/src/lib/live-status.test.ts
   - web/src/components/live-indicator.tsx
   - web/src/components/live-indicator.test.tsx
+  - web/src/components/ui/popover.tsx
   - web/src/components/app-shell.tsx
   - web/src/components/app-shell.test.tsx
   - web/src/locales/en.json
@@ -65,9 +66,12 @@ issue: 298
   first `open` of a new EventSource after a loss invalidates every query, as the browser's reconnect already does.
 - **Mark** (`components/live-indicator.tsx`), in the header before the user menu: a button with a dot — green `live`,
   grey `connecting`, amber `reconnecting` (pulsing unless `prefers-reduced-motion`), red `offline` — and the state's
-  text, visible in every state but `live` at every width and in `live` from the `sm` breakpoint up (below it a
-  screen-reader text); the text sits in a `role="status"` region; the popover (Base UI) shows the explanation of
-  reference.md and, in `offline`, the time of the loss in the user's time zone and "Reload page".
+  text, visible at every width in `reconnecting` and `offline`, in `connecting` once `live.reconnecting_after` has
+  passed (before that a screen-reader text, as the table of C-09.FR-26 says, so that a page load does not flash
+  "Connecting…"), and in `live` from the `sm` breakpoint up (below it a screen-reader text); the text sits in a
+  `role="status"` region that holds the button, since the content of a button is presentational; the popover (Base
+  UI, `components/ui/popover.tsx` from shadcn/ui) shows the explanation of reference.md and, in `reconnecting` and
+  `offline`, the time of the loss in the user's time zone, and in `offline` "Reload page".
   `data-testid="live-indicator"`, `data-state`.
 - **Texts** (EN / RU): "Connecting…" / «Подключение…», "Live" / «Онлайн», "Reconnecting…" / «Переподключение…»,
   "Offline" / «Нет связи»; "Live updates are on: lists and pages change as soon as something happens." / «Обновления
