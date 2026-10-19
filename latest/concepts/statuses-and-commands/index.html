@@ -1373,6 +1373,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#snooze-presets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Snooze presets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#who-may" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2652,6 +2663,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#snooze-presets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Snooze presets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#who-may" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2921,7 +2943,7 @@ message or a Thread reply.</p>
 <tr>
 <td><strong>Snooze</strong></td>
 <td>Firing, Acknowledged, Snoozed</td>
-<td>The Alert Group is Snoozed until a time in the future, or with no end. A Snooze with a new end changes the end.</td>
+<td>The Alert Group is Snoozed until a time in the future, until a <a href="#snooze-presets">Snooze preset</a>, or with no end. A Snooze with a new end changes the end.</td>
 </tr>
 <tr>
 <td><strong>Unsnooze</strong></td>
@@ -2945,10 +2967,11 @@ message or a Thread reply.</p>
 <li><strong>Takeover.</strong> Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
   is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
   button.</li>
-<li><strong>Snooze.</strong> The web UI and the API accept any future time, or no end. The API makes you say which: a request names
-  either <code>until</code> or <code>no_end</code>. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone
-  unsnoozes it". Messengers offer the Route's <strong>Snooze durations</strong> as separate buttons or a menu (<code>route.snooze_durations</code>:
-  1 hour, 4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).</li>
+<li><strong>Snooze.</strong> The web UI and the API accept any future time, or no end, and the API also a <a href="#snooze-presets">Snooze
+  preset</a>. The API makes you say which: a request names exactly one of <code>until</code>, <code>no_end</code> and
+  <code>preset</code>. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
+  Messengers offer the Route's <strong>Snooze durations</strong> as separate buttons or a menu (<code>route.snooze_durations</code>: 1 hour,
+  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).</li>
 <li><strong>Unresolve</strong> is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
   already resolved.</li>
@@ -2963,6 +2986,79 @@ message or a Thread reply.</p>
   one Takeover in the Timeline.</li>
 </ul>
 <p>Every command is a Quiet event except the Takeover. See <a href="../loud-and-quiet/">Loud and Quiet</a>.</p>
+<h3 id="snooze-presets">Snooze presets<a class="headerlink" href="#snooze-presets" title="Permanent link">&para;</a></h3>
+<p>A <strong>Snooze preset</strong> ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
+end when the command runs:</p>
+<table>
+<thead>
+<tr>
+<th>Preset</th>
+<th>API value</th>
+<th>Ends at</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Until tomorrow 09:00</td>
+<td><code>tomorrow</code></td>
+<td>the next start of the working day</td>
+</tr>
+<tr>
+<td>Until Monday 09:00</td>
+<td><code>week_start</code></td>
+<td>the next start of the working day on the first day of the week</td>
+</tr>
+</tbody>
+</table>
+<p>"Next" is strictly after now. With the working day starting at 09:00:</p>
+<ul>
+<li>At 02:00, "Until tomorrow 09:00" ends at 09:00 the same day. The night belongs to the day before it, so "tomorrow"
+  is the morning about to come, seven hours away.</li>
+<li>At 08:59 it ends one minute later: the preset means "until the working day starts".</li>
+<li>At 09:00 sharp, and at any later time of the day, it ends at 09:00 the next day.</li>
+<li>There is no working-week calendar, so on Friday evening "Until tomorrow 09:00" ends on Saturday at 09:00. For a
+  weekend, use <code>week_start</code>, which ends on Monday at 09:00.</li>
+<li>The start is the time on the clock on the day of the end. A start that the clocks skip moves forward by the change:
+  02:30 on the night the clocks jump from 02:00 to 03:00 is 03:30. A start that the clocks show twice, when they go
+  back, is the first of the two.</li>
+</ul>
+<p>The end is stored as a time. A later change of the settings or of a time zone never moves a Snooze already set, and the
+Snooze ends like any other: if Alerts still fire, the Alert Group is Firing again without an Owner, with a Loud message.</p>
+<p><strong>Time zone.</strong> The preset counts in the time zone that the request names in <code>time_zone</code>. Without one, it counts in the
+profile time zone of the user who snoozes, also through a Personal access token, and otherwise in the Organization's
+time zone (<code>organization.time_zone</code>). A Service account has no profile, so it always gets the Organization's.</p>
+<p><strong>Settings.</strong> Two Organization settings define the presets, as the fields <code>workday_start</code> and <code>week_start</code> of the
+organization in the API:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>organization.workday_start</code></td>
+<td><code>09:00</code></td>
+<td>the start of the working day, <code>HH:MM</code> on the 24-hour clock</td>
+</tr>
+<tr>
+<td><code>organization.week_start</code></td>
+<td><code>monday</code></td>
+<td>the first day of the week, <code>monday</code> to <code>sunday</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>API.</strong> A Snooze takes <code>preset</code>, <code>tomorrow</code> or <code>week_start</code>, as a third choice beside <code>until</code> and <code>no_end</code>, with an
+optional <code>time_zone</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"preset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tomorrow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"time_zone"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Europe/Berlin"</span><span class="p">}</span>
+</code></pre></div>
+<p>A <code>time_zone</code> without <code>preset</code> is refused with <code>422</code> <code>unsupported</code>, and a time zone Muster does not know with <code>422</code>
+<code>invalid_format</code>. A bulk Snooze with a preset computes the end once, so every Alert Group gets the same end.
+<code>GET /api/v1/snooze-presets</code>, with an optional <code>time_zone</code>, answers the end that each preset would set now and the time
+zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
+preset and the time zone beside the end. See the <a href="../../reference/api/">API reference</a>.</p>
 <h3 id="who-may">Who may<a class="headerlink" href="#who-may" title="Permanent link">&para;</a></h3>
 <p>A <strong>Responder</strong> or an <strong>Admin</strong> may acknowledge, resolve, snooze and add Notes. A <strong>Viewer</strong> may read and may not act:
 the command is refused. A <strong>Service account</strong> may run the commands its Role allows, except Acknowledge and Still on it,
