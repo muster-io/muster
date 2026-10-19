@@ -175,7 +175,7 @@ curl -s "${A[@]}" "$API/snooze-presets?time_zone=UTC" | WHEN
 ORG '.workday_start = "09:00" | .week_start = "monday"' > /dev/null
 
 # four firing Alert Groups; bob's profile time zone
-curl -s "${HB[@]}" -X PUT $API/me -d '{"name":"bob","time_zone":"Asia/Tokyo"}' | jq -r .time_zone   # Asia/Tokyo
+curl -s "${HB[@]}" -X PUT $API/me -d '{"name":"bob","time_zone":"Asia/Tokyo"}' | jq -r .user.time_zone   # Asia/Tokyo
 curl -s -X PUT $FAM/groups/s1 -d '{"receiver":"cmd","route":"{}","labels":{"alertname":"Nightly"}}' > /dev/null
 for c in a b c d; do PUTA s1 $c "{\"labels\":{\"team\":\"ops\",\"cluster\":\"$c\"}}"; done
 NOTIFY s1 '{"reason":"first notification"}'

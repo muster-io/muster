@@ -54,7 +54,7 @@ func TestSnoozePresets(t *testing.T) {
 	if a := session.signIn("bob", "bob-password-1"); a.status != http.StatusCreated {
 		t.Fatalf("bob = %d %s", a.status, a.body)
 	}
-	if me := session.json(http.MethodPut, "/api/v1/me", `{"name":"bob","time_zone":"Asia/Tokyo"}`, http.StatusOK); me["time_zone"] !=
+	if me := session.json(http.MethodPut, "/api/v1/me", `{"name":"bob","time_zone":"Asia/Tokyo"}`, http.StatusOK); me["user"].(map[string]any)["time_zone"] !=
 		"Asia/Tokyo" {
 		t.Fatalf("bob's profile = %v", me)
 	}
