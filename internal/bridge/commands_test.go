@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/groups"
 )
 
@@ -43,52 +44,79 @@ func (e *pressEnv) texts(t *testing.T) []string {
 
 // TestTextCommandGrammar covers C-22.FR-14 and bridge.text_commands: the whole text, trimmed, case-insensitive and
 // with an optional leading slash, is a Text command in English or in Russian, ё written as е or not; a Snooze takes a
-// count of minutes, hours or days in either language; any other text is none.
+// count of minutes, hours or days, or a Snooze preset word — tomorrow, or any day of the week in the nominative — in
+// either language; any other text is none.
 func TestTextCommandGrammar(t *testing.T) {
 	for _, tc := range []struct {
 		text    string
 		command string
 		seconds int64
+		preset  string
 	}{
-		{"ack", buttons.CommandAcknowledge, 0},
-		{"/ACK", buttons.CommandAcknowledge, 0},
-		{"  Ack \n", buttons.CommandAcknowledge, 0},
-		{"unack", buttons.CommandUnacknowledge, 0},
-		{"resolve", buttons.CommandResolve, 0},
-		{"unsnooze", buttons.CommandUnsnooze, 0},
-		{"still on it", buttons.CommandStillOnIt, 0},
-		{"Still  On\tIt", buttons.CommandStillOnIt, 0},
-		{"/still on it", buttons.CommandStillOnIt, 0},
-		{"взял", buttons.CommandAcknowledge, 0},
-		{"отпускаю", buttons.CommandUnacknowledge, 0},
-		{"Решено", buttons.CommandResolve, 0},
-		{"/решено", buttons.CommandResolve, 0},
-		{"вернуть", buttons.CommandUnsnooze, 0},
-		{"ещё работаю", buttons.CommandStillOnIt, 0},
-		{"еще работаю", buttons.CommandStillOnIt, 0},
-		{"ЕЩЁ РАБОТАЮ", buttons.CommandStillOnIt, 0},
-		{"snooze 30m", buttons.CommandSnooze, 1800},
-		{"snooze 4h", buttons.CommandSnooze, 14400},
-		{"/Snooze 4H", buttons.CommandSnooze, 14400},
-		{"snooze 1d", buttons.CommandSnooze, 86400},
-		{"snooze 24h", buttons.CommandSnooze, 86400},
-		{"snooze 0m", buttons.CommandSnooze, 0},
-		{"snooze 9999d", buttons.CommandSnooze, 9999 * 86400},
-		{"отложить 30м", buttons.CommandSnooze, 1800},
-		{"отложить 4ч", buttons.CommandSnooze, 14400},
-		{"Отложить 1Д", buttons.CommandSnooze, 86400},
-		{"snooze 4ч", buttons.CommandSnooze, 14400},
-		{"отложить 4h", buttons.CommandSnooze, 14400},
+		{"ack", buttons.CommandAcknowledge, 0, ""},
+		{"/ACK", buttons.CommandAcknowledge, 0, ""},
+		{"  Ack \n", buttons.CommandAcknowledge, 0, ""},
+		{"unack", buttons.CommandUnacknowledge, 0, ""},
+		{"resolve", buttons.CommandResolve, 0, ""},
+		{"unsnooze", buttons.CommandUnsnooze, 0, ""},
+		{"still on it", buttons.CommandStillOnIt, 0, ""},
+		{"Still  On\tIt", buttons.CommandStillOnIt, 0, ""},
+		{"/still on it", buttons.CommandStillOnIt, 0, ""},
+		{"взял", buttons.CommandAcknowledge, 0, ""},
+		{"отпускаю", buttons.CommandUnacknowledge, 0, ""},
+		{"Решено", buttons.CommandResolve, 0, ""},
+		{"/решено", buttons.CommandResolve, 0, ""},
+		{"вернуть", buttons.CommandUnsnooze, 0, ""},
+		{"ещё работаю", buttons.CommandStillOnIt, 0, ""},
+		{"еще работаю", buttons.CommandStillOnIt, 0, ""},
+		{"ЕЩЁ РАБОТАЮ", buttons.CommandStillOnIt, 0, ""},
+		{"snooze 30m", buttons.CommandSnooze, 1800, ""},
+		{"snooze 4h", buttons.CommandSnooze, 14400, ""},
+		{"/Snooze 4H", buttons.CommandSnooze, 14400, ""},
+		{"snooze 1d", buttons.CommandSnooze, 86400, ""},
+		{"snooze 24h", buttons.CommandSnooze, 86400, ""},
+		{"snooze 0m", buttons.CommandSnooze, 0, ""},
+		{"snooze 9999d", buttons.CommandSnooze, 9999 * 86400, ""},
+		{"отложить 30м", buttons.CommandSnooze, 1800, ""},
+		{"отложить 4ч", buttons.CommandSnooze, 14400, ""},
+		{"Отложить 1Д", buttons.CommandSnooze, 86400, ""},
+		{"snooze 4ч", buttons.CommandSnooze, 14400, ""},
+		{"отложить 4h", buttons.CommandSnooze, 14400, ""},
+		{"snooze tomorrow", buttons.CommandSnooze, 0, "tomorrow"},
+		{"/Snooze Tomorrow", buttons.CommandSnooze, 0, "tomorrow"},
+		{" SNOOZE  TOMORROW ", buttons.CommandSnooze, 0, "tomorrow"},
+		{"отложить завтра", buttons.CommandSnooze, 0, "tomorrow"},
+		{"/Отложить Завтра", buttons.CommandSnooze, 0, "tomorrow"},
+		{"snooze завтра", buttons.CommandSnooze, 0, "tomorrow"},
+		{"отложить tomorrow", buttons.CommandSnooze, 0, "tomorrow"},
+		{"snooze monday", buttons.CommandSnooze, 0, "monday"},
+		{"snooze Tuesday", buttons.CommandSnooze, 0, "tuesday"},
+		{"snooze wednesday", buttons.CommandSnooze, 0, "wednesday"},
+		{"snooze thursday", buttons.CommandSnooze, 0, "thursday"},
+		{"snooze friday", buttons.CommandSnooze, 0, "friday"},
+		{"snooze saturday", buttons.CommandSnooze, 0, "saturday"},
+		{"/snooze SUNDAY", buttons.CommandSnooze, 0, "sunday"},
+		{"отложить понедельник", buttons.CommandSnooze, 0, "monday"},
+		{"отложить вторник", buttons.CommandSnooze, 0, "tuesday"},
+		{"отложить Среда", buttons.CommandSnooze, 0, "wednesday"},
+		{"отложить четверг", buttons.CommandSnooze, 0, "thursday"},
+		{"отложить пятница", buttons.CommandSnooze, 0, "friday"},
+		{"отложить суббота", buttons.CommandSnooze, 0, "saturday"},
+		{"отложить воскресенье", buttons.CommandSnooze, 0, "sunday"},
+		{"snooze понедельник", buttons.CommandSnooze, 0, "monday"},
+		{"отложить monday", buttons.CommandSnooze, 0, "monday"},
 	} {
 		got, ok := parseTextCommand(tc.text)
-		if !ok || got != (textCommand{command: tc.command, seconds: tc.seconds}) {
+		if !ok || got != (textCommand{command: tc.command, seconds: tc.seconds, preset: tc.preset}) {
 			t.Errorf("%q = %+v, %v", tc.text, got, ok)
 		}
 	}
 	for _, text := range []string{"", " ", "/", "looking into it", "ack please", "please ack", "acknowledge", "ack!",
 		"//ack", "snooze", "snooze 4", "snooze 4 h", "snooze h", "snooze 4x", "snooze 4hours", "snooze 10000m",
 		"snooze -4h", "snooze 4h now", "отложить", "отложить 4 ч", "still on", "on it", "ещё", "/ack@bot",
-		"unsnooze 4h", "snooze4h"} {
+		"unsnooze 4h", "snooze4h", "tomorrow", "завтра", "monday", "snooze tomorrows", "snooze tomorrow 9:00",
+		"snooze mon", "snooze week", "snooze week_start", "отложить понедельника", "отложить до завтра",
+		"unsnooze tomorrow", "ack tomorrow"} {
 		if got, ok := parseTextCommand(text); ok {
 			t.Errorf("%q is a Text command: %+v", text, got)
 		}
@@ -192,8 +220,8 @@ func TestTextCommandSnoozeDurations(t *testing.T) {
 	if calls := e.commands.ran(); len(calls) != 0 {
 		t.Errorf("a duration the Route does not have ran %+v", calls)
 	}
-	if got := e.texts(t); !slices.Equal(got, []string{"Snooze for one of: 1h, 4h, 24h",
-		"Отложить можно на: 1ч, 4ч, 24ч", "Snooze for one of: 1h, 4h, 24h"}) {
+	if got := e.texts(t); !slices.Equal(got, []string{"Snooze for one of: 1h, 4h, 24h, tomorrow, monday",
+		"Отложить можно на: 1ч, 4ч, 24ч, tomorrow, monday", "Snooze for one of: 1h, 4h, 24h, tomorrow, monday"}) {
 		t.Errorf("answers %q", got)
 	}
 	got := e.log.String()
@@ -203,28 +231,108 @@ func TestTextCommandSnoozeDurations(t *testing.T) {
 	}
 }
 
-// TestTextCommandSnoozeWithoutDurations covers C-22.FR-14: on a Route without Snooze durations, a Snooze from the
-// Thread changes nothing and is answered that the Route has none, in the profile language, never with an empty list.
+// TestTextCommandSnoozeWithoutDurations covers C-22.FR-14 and C-10.FR-18: on a Route without Snooze durations, a
+// Snooze from the Thread, a Snooze preset included, changes nothing and is answered that the Route has none, in the
+// profile language, never with an empty list.
 func TestTextCommandSnoozeWithoutDurations(t *testing.T) {
 	e := newPressEnv(t)
-	for id, b := range e.bindings.bound {
-		b.SnoozeSeconds = nil
-		e.bindings.bound[id] = b
-	}
+	e.bindings.change(func(b *delivery.BridgeBinding) { b.SnoozeSeconds = nil })
 	e.handle(t, e.said(t, "ev-1", "m1", "u-bob", "snooze 4h"))
 	e.handle(t, e.said(t, "ev-2", "m0", "u-ivan", "отложить 4ч"))
+	e.handle(t, e.said(t, "ev-3", "m1", "u-bob", "snooze tomorrow"))
+	e.handle(t, e.said(t, "ev-4", "m1", "u-ivan", "отложить понедельник"))
 	if calls := e.commands.ran(); len(calls) != 0 {
 		t.Errorf("a Snooze without durations ran %+v", calls)
 	}
-	if got := e.texts(t); !slices.Equal(got, []string{
-		"This Alert Group's Route has no Snooze durations; nothing was changed.",
-		"У маршрута этой группы алертов нет сроков откладывания; ничего не изменилось."}) {
+	none := []string{"This Alert Group's Route has no Snooze durations; nothing was changed.",
+		"У маршрута этой группы алертов нет сроков откладывания; ничего не изменилось."}
+	if got := e.texts(t); !slices.Equal(got, append(slices.Clone(none), none...)) {
 		t.Errorf("answers %q", got)
 	}
 	got := e.log.String()
-	if !strings.Contains(got, textLine(pressGroup, "snooze", "unknown_duration", "u-bob")+"}") ||
-		!strings.Contains(got, textLine(pressGroup, "snooze", "unknown_duration", "u-ivan")+"}") {
+	if strings.Count(got, textLine(pressGroup, "snooze", "unknown_duration", "u-bob")+"}") != 2 ||
+		strings.Count(got, textLine(pressGroup, "snooze", "unknown_duration", "u-ivan")+"}") != 2 {
 		t.Errorf("logged %s", got)
+	}
+}
+
+// TestTextCommandSnoozePresets covers C-22.FR-14, AC-27 and C-10.FR-18: from a linked Responder, tomorrow and the
+// Organization's first day of the week, in either language, run the Snooze with the tomorrow and the week_start preset
+// and no time zone, so that the dispatcher takes the User's profile time zone, else the Organization's, with the
+// Transport bridge, each answered "Done: Snoozed #N" in the profile language.
+func TestTextCommandSnoozePresets(t *testing.T) {
+	e := newPressEnv(t)
+	for i, text := range []string{"snooze tomorrow", "/Snooze Tomorrow", "отложить завтра", "snooze monday",
+		"отложить понедельник"} {
+		e.handle(t, e.said(t, fmt.Sprintf("ev-%d", i), "m1", "u-bob", text))
+	}
+	e.handle(t, e.said(t, "ev-5", "m0", "u-ivan", "Отложить Завтра"))
+	calls := e.commands.ran()
+	want := []groups.SnoozePreset{groups.PresetTomorrow, groups.PresetTomorrow, groups.PresetTomorrow,
+		groups.PresetWeekStart, groups.PresetWeekStart, groups.PresetTomorrow}
+	if len(calls) != len(want) {
+		t.Fatalf("commands %+v", calls)
+	}
+	for i, p := range want {
+		c := calls[i]
+		if c.command != buttons.CommandSnooze || c.group != pressGroup || c.end == nil ||
+			*c.end != (groups.SnoozeEnd{Preset: p}) || c.caller.Transport != audit.TransportBridge {
+			t.Errorf("%d: ran %+v, end %+v, want the preset %s", i, c, c.end, p)
+		}
+	}
+	if got := e.texts(t); !slices.Equal(got, append(slices.Repeat([]string{"Done: Snoozed #1"}, 5),
+		"Готово: Отложено #1")) {
+		t.Errorf("answers %q", got)
+	}
+	if got := e.log.String(); strings.Count(got, textLine(pressGroup, "snooze", "done", "u-bob")+"}") != 5 {
+		t.Errorf("logged %s", got)
+	}
+
+	e = newPressEnv(t)
+	e.bindings.change(func(b *delivery.BridgeBinding) { b.WeekStart = "sunday" })
+	e.handle(t, e.said(t, "ev-1", "m1", "u-bob", "snooze sunday"))
+	e.handle(t, e.said(t, "ev-2", "m1", "u-ivan", "отложить воскресенье"))
+	e.handle(t, e.said(t, "ev-3", "m1", "u-bob", "snooze monday"))
+	if calls := e.commands.ran(); len(calls) != 2 || *calls[0].end != (groups.SnoozeEnd{Preset: groups.PresetWeekStart}) ||
+		*calls[1].end != (groups.SnoozeEnd{Preset: groups.PresetWeekStart}) {
+		t.Errorf("commands %+v", calls)
+	}
+	if got := e.texts(t); !slices.Equal(got, []string{"Done: Snoozed #1", "Готово: Отложено #1",
+		"Snooze for one of: 1h, 4h, 24h, tomorrow, sunday"}) {
+		t.Errorf("answers %q", got)
+	}
+}
+
+// TestTextCommandSnoozePresetRefused covers C-22.FR-14 and AC-27: a day that is not the Organization's first day of the
+// week changes nothing and is answered with the Route's durations and the two preset words: the sentence and the
+// durations in the profile language of the User (C-22.FR-13), the preset words in the Route's language, as its buttons
+// name the presets.
+func TestTextCommandSnoozePresetRefused(t *testing.T) {
+	for _, tc := range []struct {
+		route, user, text, want string
+	}{
+		{"en", "u-bob", "snooze friday", "Snooze for one of: 1h, 4h, 24h, tomorrow, monday"},
+		{"ru", "u-ivan", "отложить пятница", "Отложить можно на: 1ч, 4ч, 24ч, завтра, понедельник"},
+		{"ru", "u-ivan", "snooze friday", "Отложить можно на: 1ч, 4ч, 24ч, завтра, понедельник"},
+		{"en", "u-ivan", "отложить пятница", "Отложить можно на: 1ч, 4ч, 24ч, tomorrow, monday"},
+		{"ru", "u-bob", "snooze friday", "Snooze for one of: 1h, 4h, 24h, завтра, понедельник"},
+		{"ru", "u-bob", "snooze sunday", "Snooze for one of: 1h, 4h, 24h, завтра, понедельник"},
+	} {
+		t.Run(tc.route+" "+tc.user+" "+tc.text, func(t *testing.T) {
+			e := newPressEnv(t)
+			e.bindings.change(func(b *delivery.BridgeBinding) { b.Language = tc.route })
+			e.handle(t, e.said(t, "ev-1", "m1", tc.user, tc.text))
+			if calls := e.commands.ran(); len(calls) != 0 {
+				t.Errorf("a day other than the first of the week ran %+v", calls)
+			}
+			if got := e.texts(t); !slices.Equal(got, []string{tc.want}) {
+				t.Errorf("answers %q, want %q", got, tc.want)
+			}
+			if got := e.log.String(); !strings.Contains(got, textLine(pressGroup, "snooze", "unknown_duration",
+				tc.user)+"}") {
+				t.Errorf("logged %s", got)
+			}
+		})
 	}
 }
 

@@ -272,27 +272,83 @@ func (*rotating) VerifyPrefix(keyring.Purpose, string, []byte, []byte) (bool, er
 }
 func (*rotating) KeyIDs() []string { return nil }
 
-// TestForStatus: the buttons of each status of reference.md, Snooze once per duration.
+// TestForStatus: the buttons of each status of reference.md, Snooze once per duration and then once per Snooze
+// preset, tomorrow before week_start; without durations neither Snooze nor a preset.
 func TestForStatus(t *testing.T) {
-	cmds := func(bs []buttons.Button) []string {
-		out := []string{}
+	type btn struct {
+		command  string
+		argument int
+	}
+	of := func(bs []buttons.Button) []btn {
+		out := []btn{}
 		for _, b := range bs {
-			out = append(out, b.Command)
+			out = append(out, btn{b.Command, b.Argument})
 		}
 		return out
 	}
-	for status, want := range map[string][]string{
-		"firing":       {"acknowledge", "resolve", "snooze", "snooze", "snooze"},
-		"acknowledged": {"unacknowledge", "resolve", "snooze", "snooze", "snooze"},
-		"snoozed":      {"acknowledge", "unsnooze", "resolve"},
-		"resolved":     {},
+	ack, unack, resolve := btn{command: "acknowledge"}, btn{command: "unacknowledge"}, btn{command: "resolve"}
+	unsnooze := btn{command: "unsnooze"}
+	snooze := func(arg int) btn { return btn{"snooze", arg} }
+	tomorrow, week := snooze(buttons.ArgumentTomorrow), snooze(buttons.ArgumentWeekStart)
+	for _, c := range []struct {
+		status    string
+		durations int
+		want      []btn
+	}{
+		{"firing", 3, []btn{ack, resolve, snooze(0), snooze(1), snooze(2), tomorrow, week}},
+		{"acknowledged", 3, []btn{unack, resolve, snooze(0), snooze(1), snooze(2), tomorrow, week}},
+		{"snoozed", 3, []btn{ack, unsnooze, resolve}},
+		{"resolved", 3, []btn{}},
+		{"firing", 1, []btn{ack, resolve, snooze(0), tomorrow, week}},
+		{"firing", 0, []btn{ack, resolve}},
+		{"acknowledged", 0, []btn{unack, resolve}},
+		{"snoozed", 0, []btn{ack, unsnooze, resolve}},
+		{"resolved", 0, []btn{}},
 	} {
-		if got := cmds(buttons.ForStatus(status, 3)); !slices.Equal(got, want) {
-			t.Errorf("%s: %v", status, got)
+		if got := of(buttons.ForStatus(c.status, c.durations)); !slices.Equal(got, c.want) {
+			t.Errorf("%s with %d durations: %v", c.status, c.durations, got)
 		}
 	}
-	if bs := buttons.ForStatus("firing", 3); bs[4].Argument != 2 {
-		t.Errorf("the third Snooze has argument %d", bs[4].Argument)
+	// A Route offers at most its first 254 durations as buttons: the two arguments above are the presets'.
+	for _, n := range []int{254, 255, 300} {
+		bs := buttons.ForStatus("firing", n)
+		if len(bs) != 2+254+2 || bs[255].Argument != 253 || bs[256] != (buttons.Button{Command: "snooze",
+			Argument: buttons.ArgumentTomorrow}) || bs[257].Argument != buttons.ArgumentWeekStart {
+			t.Errorf("%d durations: %d buttons, the last %v", n, len(bs), bs[len(bs)-3:])
+		}
+	}
+	if buttons.MaxSnoozeDurations != 254 || buttons.ArgumentTomorrow != 254 || buttons.ArgumentWeekStart != 255 {
+		t.Error("the arguments of the presets are not the last two of the one-byte argument")
+	}
+	for arg, want := range map[int]bool{0: false, 253: false, 254: true, 255: true, 256: false, -1: false} {
+		if buttons.IsPreset(arg) != want {
+			t.Errorf("IsPreset(%d) = %v", arg, !want)
+		}
+	}
+}
+
+// TestPresetActionIDs: the action id of a preset button of a Root message and of a test message keeps the layout and
+// the 64-byte bound, and verifies to the same Snooze with the preset's argument; the action ids of the two presets
+// and of a duration differ.
+func TestPresetActionIDs(t *testing.T) {
+	k := active(t, 'a')
+	seen := map[string]bool{}
+	for _, s := range []buttons.Subject{buttons.SubjectRoot, buttons.SubjectTest} {
+		for _, arg := range []int{0, buttons.ArgumentTomorrow, buttons.ArgumentWeekStart} {
+			a := buttons.Action{Subject: s, PublicID: "AGK7M3QX9P2RTA", Command: buttons.CommandSnooze, Argument: arg}
+			id, _, err := buttons.Sign(k, a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(id) > buttons.MaxLen || !buttons.LooksSigned(id) || seen[id] {
+				t.Errorf("%s %d: %q (%d bytes)", s, arg, id, len(id))
+			}
+			seen[id] = true
+			if got, err := buttons.Verify(k, id, ""); err != nil || got != a || buttons.IsPreset(got.Argument) !=
+				(arg != 0) {
+				t.Errorf("%s %d: Verify = %+v, %v", s, arg, got, err)
+			}
+		}
 	}
 }
 

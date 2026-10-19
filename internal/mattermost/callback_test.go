@@ -496,6 +496,59 @@ func TestPressRunsCommand(t *testing.T) {
 	}
 }
 
+// TestPressSnoozePresets is C-10.FR-18 and C-10.AC-23 at the callback: a press on "Until tomorrow" or "Until {day}"
+// from a linked Responder runs a Snooze with that Snooze preset and no time zone — the dispatcher takes the User's
+// profile time zone, else the Organization's — as that User with the Transport mattermost, and answers {}; on a Root
+// message whose Route lost its Snooze durations after it was published, it changes nothing and is answered "This
+// button could not be verified; nothing was changed."; on a test message, "This is a test message; nothing was
+// changed".
+func TestPressSnoozePresets(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		alerts := fakemattermost.ChannelAlerts
+		for _, c := range []struct {
+			arg    int
+			preset groups.SnoozePreset
+		}{{buttons.ArgumentTomorrow, groups.PresetTomorrow}, {buttons.ArgumentWeekStart, groups.PresetWeekStart}} {
+			n := len(e.ephemeralCalls())
+			e.expectUnanswered(t, e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA, buttons.CommandSnooze,
+				c.arg), n)
+			d := e.commands.calls[len(e.commands.calls)-1]
+			if d.command != buttons.CommandSnooze || d.group != groupA || d.caller.Actor != audit.User(7,
+				"SR0000000000B1") || d.caller.Transport != audit.TransportMattermost ||
+				!slices.Equal(d.caller.Permissions, roles.Permissions("responder")) || d.end == nil ||
+				d.end.Preset != c.preset || d.end.TimeZone != nil || d.end.Until != nil || d.end.NoEnd {
+				t.Errorf("preset %d dispatched %+v, the end %+v", c.arg, d, d.end)
+			}
+			e.expectLine(t, groupA, buttons.CommandSnooze, "done")
+		}
+		calls := len(e.commands.calls)
+		key := bindingKey{connID, groupA, postA}
+		b := e.bindings.bound[key]
+		b.SnoozeSeconds = nil
+		e.bindings.bound[key] = b
+		for _, arg := range []int{buttons.ArgumentTomorrow, buttons.ArgumentWeekStart} {
+			e.expectAnswered(t, e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA, buttons.CommandSnooze,
+				arg), fakemattermost.BobUserID, alerts, textNotVerified)
+			e.expectLine(t, groupA, buttons.CommandSnooze, "not_verified")
+		}
+		if len(e.commands.calls) != calls {
+			t.Errorf("a preset without durations ran %+v", e.commands.calls[calls:])
+		}
+		e.bindings.tests = map[postKey]delivery.Destination{{destA.PublicID, alerts}: destA}
+		id, kid := e.action(t, buttons.SubjectTest, destA.PublicID, buttons.CommandSnooze, buttons.ArgumentWeekStart)
+		text := e.press(t, http.MethodPost, connectionPublicID, testBody(fakemattermost.BobUserID, alerts, id, kid, ""))
+		want := "This is a test message; nothing was changed"
+		if eph := e.fake.Ephemeral(); e.admin && (text != "" || eph[len(eph)-1].Message != want) ||
+			!e.admin && text != want {
+			t.Errorf("a preset of a test message: answer %q, ephemeral %+v", text, eph)
+		}
+		if l := e.last(t); l["outcome"] != "test" || l["command"] != buttons.CommandSnooze ||
+			len(e.commands.calls) != calls {
+			t.Errorf("a preset of a test message: %v, %+v", l, e.commands.calls[calls:])
+		}
+	})
+}
+
 // TestPressRefusals is C-13.AC-4 and C-18.FR-8: an account without an Account link, a disabled User, a User without
 // the Permission and a refused Command change nothing more and are answered once each, in the language of the Route:
 // in the channel view with an admin bot, in the answer's ephemeral_text with a Member bot (D284).
@@ -821,6 +874,11 @@ func TestReplyPressBinding(t *testing.T) {
 		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
 			buttons.CommandAcknowledge), fakemattermost.BobUserID, alerts, postA, textNotVerified)
 		e.expectLine(t, groupA, buttons.CommandAcknowledge, "not_verified")
+		// Nor is a Snooze preset on a Reminder, though its Route has Snooze durations.
+		id, kid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandSnooze, buttons.ArgumentTomorrow)
+		e.expectAnsweredIn(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+			replyA, id, kid)), fakemattermost.BobUserID, alerts, postA, textNotVerified)
+		e.expectLine(t, groupA, buttons.CommandSnooze, "not_verified")
 		if len(e.commands.calls) != 0 {
 			t.Fatalf("an unbound press ran %+v", e.commands.calls)
 		}

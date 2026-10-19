@@ -134,7 +134,9 @@ var (
 // ReadAlerts is the most Alerts of an Alert Group a message reads; the counts of the Alerts section cover them.
 const ReadAlerts = 1000
 
-// Source is an Alert Group as its messages show it, read through the transaction of the change.
+// Source is an Alert Group as its messages show it, read through the transaction of the change, with the
+// Organization's time zone, start of the working day (organization.workday_start, HH:MM) and first day of the week
+// (organization.week_start, monday to sunday), which the labels of the Snooze presets name (C-10.FR-18).
 type Source struct {
 	ID                int64
 	PublicID          string
@@ -158,6 +160,8 @@ type Source struct {
 	StartedAt         time.Time
 	Route             RouteRef
 	TimeZone          string
+	WorkdayStart      string
+	WeekStart         string
 	Owner             string
 	SnoozedBy         string
 	ResolvedBy        string
@@ -257,8 +261,8 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 		CommonAnnotations: jsonMap(g.CommonAnnotations), FiringCount: g.FiringAlertCount, ReopenCount: g.ReopenCount,
 		ResolvedByKind: g.ResolvedByKind.String, ResolveReason: g.ResolveReason.String,
 		SnoozeUntil: timeOf(g.SnoozeUntil), SnoozeNoEnd: g.SnoozeNoEnd, Unclaimed: g.Unclaimed,
-		StartedAt: g.CreatedAt.UTC(), TimeZone: g.TimeZone, Owner: g.OwnerName, SnoozedBy: g.SnoozedByName,
-		ResolvedBy: g.ResolvedByName,
+		StartedAt: g.CreatedAt.UTC(), TimeZone: g.TimeZone, WorkdayStart: g.WorkdayStart, WeekStart: g.WeekStart,
+		Owner: g.OwnerName, SnoozedBy: g.SnoozedByName, ResolvedBy: g.ResolvedByName,
 		Route: RouteRef{ID: g.RouteID, PublicID: g.RoutePublicID, Name: g.RouteName, Language: g.Language,
 			SnoozeDurations: g.SnoozeDurationsSeconds, RootMessage: textOf(g.TemplateRootMessage),
 			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),

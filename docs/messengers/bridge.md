@@ -142,10 +142,15 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
 - **The length.** The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
   long Root message drops its Alert lines first, then the label sections, but always keeps its title, its status, its
   footer, its buttons and its link to Muster. The bridge may still shorten what it renders, and says so.
-- **Buttons.** When the bridge offers buttons, a Root message carries the buttons of its status — Ack, Resolve and one
-  per Snooze duration, for example — with a style hint for each, at most as many as the bridge allows; the Snooze
-  buttons of the longest durations go first. Without buttons, a bridge that forwards the messages of a Thread gets a
-  last line in each Root message that is not resolved, such as "Reply in the Thread: ack · resolve · snooze 1h".
+- **Buttons.** When the bridge offers buttons, a Root message carries the buttons of its status — Ack, Resolve, one
+  per Snooze duration and the two [Snooze presets](../concepts/statuses-and-commands.md#in-messengers) "Until tomorrow
+  09:00" and "Until Monday 09:00", for example — with a style hint for each, the presets `neutral` like the durations,
+  at most as many as the bridge allows. Beyond that limit the Snooze buttons go first, whatever their labels: the
+  "Until Monday" preset (the first day of the week), then the "Until tomorrow" preset, then the durations from the
+  longest. A firing Root message on an On-call Route has seven buttons, so a bridge that allows five gets Ack, Resolve
+  and the three durations, and one that allows six also "Until tomorrow 09:00". Without buttons, a bridge that forwards
+  the messages of a Thread gets a last line in each Root message that is not resolved, such as "Reply in the Thread:
+  ack · resolve · snooze 1h", and takes the presets as Text commands such as `snooze tomorrow`.
 - **Edits and Thread replies.** An edit sends the whole envelope of the new state, Quiet and without Mentions. A Thread
   reply goes under the Root message with the Thread reference the bridge returned last.
 - **Posts are not repeated.** Every new message carries an idempotency key, the same for every retry of it. When an

@@ -5,6 +5,8 @@ package messages
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -47,7 +49,7 @@ func source(status string, n int) *Source {
 			"team": "web"},
 		CommonAnnotations: map[string]string{"summary": "Pods are down", "description": "long text",
 			"runbook_url": "https://runbooks/x", "dashboard": "https://grafana/d"},
-		StartedAt: t0, TimeZone: "UTC",
+		StartedAt: t0, TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday",
 		Route: RouteRef{ID: 3, PublicID: "RTAAAAAAAAAAA1", Name: "db", Language: "en",
 			SnoozeDurations: []int64{3600, 14400, 86400}},
 		TotalAlerts: int64(n)}
@@ -87,7 +89,7 @@ func TestDefaultRootMessage(t *testing.T) {
 		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
 		"🔁 Reopened ×2",
 		"Acknowledged by Alice",
-		"[Unack] [Resolve] [Snooze 1 h] [Snooze 4 h] [Snooze 24 h]",
+		"[Unack] [Resolve] [Snooze 1 h] [Snooze 4 h] [Snooze 24 h] [Until tomorrow 09:00] [Until Monday 09:00]",
 	}, "\n")
 	if got != want {
 		t.Errorf("layout\n%s\nwant\n%s", got, want)
@@ -130,7 +132,7 @@ func TestFootersAndNotices(t *testing.T) {
 		notices []string
 	}{
 		{"firing", func(s *Source) { s.Unclaimed = true }, "", []string{"Ack", "Resolve", "Snooze 1 h", "Snooze 4 h",
-			"Snooze 24 h"}, []string{"⚠ Nobody has taken this"}},
+			"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}, []string{"⚠ Nobody has taken this"}},
 		{"snoozed", func(s *Source) { s.SnoozedBy, s.SnoozeUntil = "Bob", &until },
 			"Snoozed by Bob until 2026-10-04 16:05 UTC", []string{"Ack", "Unsnooze", "Resolve"}, nil},
 		{"snoozed", func(s *Source) { s.SnoozedBy, s.SnoozeNoEnd = "Bob", true }, "Snoozed by Bob with no end",
@@ -168,7 +170,8 @@ func TestFootersAndNotices(t *testing.T) {
 	for _, b := range r.Root(src, MarkupMarkdown).Message.Buttons {
 		ru = append(ru, b.Label)
 	}
-	if !slices.Equal(ru, []string{"Подтвердить", "Закрыть", "Отложить на 30 мин", "Отложить на 3 д", "Отложить на 45 с"}) {
+	if !slices.Equal(ru, []string{"Подтвердить", "Закрыть", "Отложить на 30 мин", "Отложить на 3 д", "Отложить на 45 с",
+		"До завтра 09:00", "До понедельника 09:00"}) {
 		t.Errorf("ru buttons %v", ru)
 	}
 	// A single Alert is named by its alertname; one without labels by its fingerprint.
@@ -345,5 +348,177 @@ func TestBuiltinSources(t *testing.T) {
 	}
 	if BuiltinSource(TemplateLinkRule, "en") != "" {
 		t.Error("a link rule has no built-in source")
+	}
+}
+
+// labels are the labels of buttons.
+func labels(bs []Button) []string {
+	out := []string{}
+	for _, b := range bs {
+		out = append(out, b.Label)
+	}
+	return out
+}
+
+// TestPresetLabels is C-10.FR-18 and C-10.AC-23: the two Snooze preset buttons follow the durations and name
+// organization.workday_start as HH:MM and the day of organization.week_start, capitalised in English and in the
+// genitive in Russian, for every day of the week; another argument has no preset label, and a language without texts
+// takes English.
+func TestPresetLabels(t *testing.T) {
+	r := newRenderer(t)
+	for _, c := range []struct{ day, en, ru string }{
+		{"monday", "Monday", "понедельника"},
+		{"tuesday", "Tuesday", "вторника"},
+		{"wednesday", "Wednesday", "среды"},
+		{"thursday", "Thursday", "четверга"},
+		{"friday", "Friday", "пятницы"},
+		{"saturday", "Saturday", "субботы"},
+		{"sunday", "Sunday", "воскресенья"},
+	} {
+		for lang, want := range map[string][]string{
+			LanguageEnglish: {"Until tomorrow 09:00", "Until " + c.en + " 09:00"},
+			LanguageRussian: {"До завтра 09:00", "До " + c.ru + " 09:00"},
+		} {
+			src := source("firing", 1)
+			src.Route.Language, src.WeekStart = lang, c.day
+			bs := r.Root(src, MarkupMarkdown).Message.Buttons
+			if got := labels(bs[len(bs)-2:]); !slices.Equal(got, want) || bs[len(bs)-2].Argument !=
+				buttons.ArgumentTomorrow || bs[len(bs)-1].Argument != buttons.ArgumentWeekStart {
+				t.Errorf("%s %s: %v, want %v", lang, c.day, got, want)
+			}
+			if got := PresetLabel(lang, buttons.ArgumentWeekStart, "09:00", c.day); got != want[1] {
+				t.Errorf("PresetLabel %s %s = %q", lang, c.day, got)
+			}
+		}
+	}
+	for _, c := range []struct {
+		lang     string
+		argument int
+		want     string
+	}{
+		{"en", buttons.ArgumentTomorrow, "Until tomorrow 23:59"},
+		{"ru", buttons.ArgumentTomorrow, "До завтра 23:59"},
+		{"xx", buttons.ArgumentWeekStart, "Until Sunday 23:59"},
+		{"en", 0, ""},
+		{"en", 253, ""},
+	} {
+		if got := PresetLabel(c.lang, c.argument, "23:59", "sunday"); got != c.want {
+			t.Errorf("PresetLabel(%s, %d) = %q, want %q", c.lang, c.argument, got, c.want)
+		}
+	}
+}
+
+// TestPresetButtonsDesiredState is C-10.FR-18 and C-10.AC-23: the settings the preset labels name are read with the
+// Alert Group for its message, so the labels are part of the Desired state and its hash: a render with unchanged
+// settings hashes the same, and after organization.workday_start becomes 08:30 the next render reads "Until tomorrow
+// 08:30" and hashes differently. The presets follow the durations on firing and acknowledged, signed with their
+// arguments and with the neutral style; a snoozed Root message has none, and a Route without Snooze durations offers
+// neither presets nor Snooze.
+func TestPresetButtonsDesiredState(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 2)}
+	r := withFake(t, f)
+	// render is the Root message of the Alert Group read again, and the hash of its JSON as delivery stores it.
+	render := func() (Message, [32]byte) {
+		t.Helper()
+		src, err := r.Load(t.Context(), nil, 9)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := r.Root(src, MarkupMarkdown).Message
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m, sha256.Sum256(raw)
+	}
+	before, hash := render()
+	if _, again := render(); again != hash {
+		t.Error("the same settings hash differently")
+	}
+	if got := labels(before.Buttons); !slices.Equal(got, []string{"Ack", "Resolve", "Snooze 1 h", "Snooze 4 h",
+		"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}) {
+		t.Errorf("before: %v", got)
+	}
+	for i, b := range before.Buttons[5:] {
+		a, err := buttons.Verify(fakeKeys{}, b.ActionID, "")
+		if err != nil || a.Command != buttons.CommandSnooze || a.Argument != buttons.ArgumentTomorrow+i ||
+			b.Argument != a.Argument || b.Style() != buttons.StyleNeutral {
+			t.Errorf("preset %d %+v: %+v %v", i, b, a, err)
+		}
+	}
+	f.group.WorkdayStart = "08:30"
+	after, changed := render()
+	if got := labels(after.Buttons[5:]); !slices.Equal(got, []string{"Until tomorrow 08:30", "Until Monday 08:30"}) ||
+		changed == hash {
+		t.Errorf("after the change: %v, the hash changed %v", got, changed != hash)
+	}
+	f.group.WeekStart = "sunday"
+	if m, h := render(); m.Buttons[6].Label != "Until Sunday 08:30" || h == changed {
+		t.Errorf("another first day of the week: %q", m.Buttons[6].Label)
+	}
+	for status, want := range map[string][]string{
+		"acknowledged": {"Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 08:30",
+			"Until Sunday 08:30"},
+		"snoozed": {"Ack", "Unsnooze", "Resolve"},
+	} {
+		f.group.Status = status
+		if m, _ := render(); !slices.Equal(labels(m.Buttons), want) {
+			t.Errorf("%s: %v", status, labels(m.Buttons))
+		}
+	}
+	f.group.Route.SnoozeDurations = nil
+	for status, want := range map[string][]string{"firing": {"Ack", "Resolve"}, "acknowledged": {"Unack", "Resolve"}} {
+		f.group.Status = status
+		if m, _ := render(); !slices.Equal(labels(m.Buttons), want) {
+			t.Errorf("%s without durations: %v", status, labels(m.Buttons))
+		}
+	}
+}
+
+// TestPresetsOfTestsAndPreviews is C-10.FR-18 with C-16.FR-1: a Destination test message carries the preset buttons
+// of its status, signed as the subject test naming the Destination; the Destination preview and a preview of a Route
+// lay them out with the Organization's settings, in the Route's language, and a Route without durations has none.
+func TestPresetsOfTestsAndPreviews(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 2)}
+	f.group.WorkdayStart, f.group.WeekStart = "07:45", "saturday"
+	r := withFake(t, f)
+	ex, err := r.TestExample(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := r.TestRoot(ex, MarkupMarkdown, "DSAAAAAAAAAAA1").Message.Buttons
+	if got := labels(bs); !slices.Equal(got, []string{"Ack", "Resolve", "Snooze 1 h", "Until tomorrow 07:45",
+		"Until Saturday 07:45"}) {
+		t.Errorf("test message: %v", got)
+	}
+	for i, b := range bs[3:] {
+		a, err := buttons.Verify(fakeKeys{}, b.ActionID, b.KeyID)
+		if err != nil || a.Subject != buttons.SubjectTest || a.PublicID != "DSAAAAAAAAAAA1" ||
+			a.Command != buttons.CommandSnooze || a.Argument != buttons.ArgumentTomorrow+i {
+			t.Errorf("test preset %d: %+v %v", i, a, err)
+		}
+	}
+	sample, err := r.TestSample(t.Context(), "AGK7M3QX9P2RTA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := labels(r.TestRoot(sample, MarkupHTML, "DSAAAAAAAAAAA1").Message.Buttons); len(got) != 7 ||
+		got[6] != "Until Saturday 07:45" {
+		t.Errorf("test message of a sample: %v", got)
+	}
+	res, err := r.Preview(t.Context(), PreviewRequest{Kind: TemplateRootMessage})
+	if err != nil || !strings.HasSuffix(res.Output, "[Ack] [Resolve] [Snooze 1 h] [Until tomorrow 07:45] "+
+		"[Until Saturday 07:45]") {
+		t.Errorf("preview: %+v, %v", res, err)
+	}
+	f.group.Route.Language = LanguageRussian
+	res, err = r.Preview(t.Context(), PreviewRequest{Kind: TemplateRootMessage, RouteID: "RTAAAAAAAAAAA1"})
+	if err != nil || !strings.HasSuffix(res.Output, "[Отложить на 24 ч] [До завтра 07:45] [До субботы 07:45]") {
+		t.Errorf("preview of a route: %+v, %v", res, err)
+	}
+	f.group.Route.SnoozeDurations = []int64{}
+	res, err = r.Preview(t.Context(), PreviewRequest{Kind: TemplateRootMessage, RouteID: "RTAAAAAAAAAAA1"})
+	if err != nil || !strings.HasSuffix(res.Output, "[Подтвердить] [Закрыть]") {
+		t.Errorf("preview of a route without durations: %+v, %v", res, err)
 	}
 }

@@ -72,19 +72,41 @@ const (
 
 var subjectCodes = map[Subject]byte{SubjectRoot: 'r', SubjectReply: 'p', SubjectTest: 't'}
 
-// Button is a button before it is signed: its Command and the argument, the index of a Snooze duration.
+// Button is a button before it is signed: its Command and the argument of a Snooze button, the index of a Snooze
+// duration or the argument of a Snooze preset.
 type Button struct {
 	Command  string
 	Argument int
 }
 
+// The arguments of the Snooze buttons of the two Snooze presets (C-10.FR-18), "Until tomorrow {start}" and "Until
+// {day} {start}", in the order of groups.PresetOrder; the arguments below them are the indices of Snooze durations.
+const (
+	ArgumentTomorrow  = 254
+	ArgumentWeekStart = 255
+)
+
+// MaxSnoozeDurations is the most Snooze durations a Root message offers as buttons: the indices below the arguments
+// of the Snooze presets.
+const MaxSnoozeDurations = ArgumentTomorrow
+
+// IsPreset reports whether the argument of a Snooze button names a Snooze preset rather than the index of a duration.
+func IsPreset(argument int) bool {
+	return argument == ArgumentTomorrow || argument == ArgumentWeekStart
+}
+
 // ForStatus are the buttons of a Root message in a status (reference.md): firing — Ack, Resolve, Snooze;
 // acknowledged — Unack, Resolve, Snooze; snoozed — Ack, Unsnooze, Resolve; resolved — none. Snooze is one button per
-// duration of route.snooze_durations.
+// duration of route.snooze_durations, at most MaxSnoozeDurations, then one per Snooze preset when there is at least
+// one duration.
 func ForStatus(status string, snoozeDurations int) []Button {
-	snooze := make([]Button, 0, snoozeDurations)
-	for i := range min(snoozeDurations, maxArgument+1) {
+	snooze := make([]Button, 0, min(snoozeDurations, MaxSnoozeDurations)+2)
+	for i := range min(snoozeDurations, MaxSnoozeDurations) {
 		snooze = append(snooze, Button{Command: CommandSnooze, Argument: i})
+	}
+	if snoozeDurations > 0 {
+		snooze = append(snooze, Button{Command: CommandSnooze, Argument: ArgumentTomorrow},
+			Button{Command: CommandSnooze, Argument: ArgumentWeekStart})
 	}
 	switch status {
 	case "firing":

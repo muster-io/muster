@@ -515,7 +515,8 @@ func TestMattermost(t *testing.T) {
 			t.Errorf("action %+v", a)
 		}
 	}
-	if !slices.Equal(ids, []string{"ack", "resolve", "snooze0", "snooze1", "snooze2"}) {
+	if !slices.Equal(ids, []string{"ack", "resolve", "snooze0", "snooze1", "snooze2", "snoozetomorrow",
+		"snoozeweek"}) {
 		t.Errorf("action ids %v", ids)
 	}
 	if got := e.notifications(); len(got) != 0 {
@@ -532,7 +533,8 @@ func TestMattermost(t *testing.T) {
 	edited := e.post(root.ID)
 	ea := edited.attachment(t)
 	if ea.Color != "#f57c00" || !slices.Equal(actionNames(ea), []string{"Unack", "Resolve", "Snooze 1 h", "Snooze 4 h",
-		"Snooze 24 h"}) || !strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || strings.Contains(edited.Message, "@") {
+		"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}) ||
+		!strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || strings.Contains(edited.Message, "@") {
 		t.Errorf("edited post %q: %+v", edited.Message, ea)
 	}
 	e.alert("d1", "i2", `{"team":"db","cluster":"a","disk":"i2"}`, "")
@@ -979,7 +981,8 @@ func TestMattermostMessages(t *testing.T) {
 		root := e.root(e.number(e.groupOf("ru")))
 		att := root.attachment(t)
 		if names := actionNames(att); !slices.Equal(names, []string{"Подтвердить", "Закрыть", "Отложить на 1 ч",
-			"Отложить на 4 ч", "Отложить на 24 ч"}) || !strings.Contains(att.Text, "[Открыть в Muster](") {
+			"Отложить на 4 ч", "Отложить на 24 ч", "До завтра 09:00", "До понедельника 09:00"}) ||
+			!strings.Contains(att.Text, "[Открыть в Muster](") {
 			t.Errorf("russian root message %v %q", names, att.Text)
 		}
 		e.alert("r1", "r2", `{"team":"ru","cluster":"ru","disk":"r2"}`, "")

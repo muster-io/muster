@@ -58,8 +58,22 @@ const (
 )
 
 // errUnverifiable is a verified button that names no Command of its message: a Snooze duration the Route no longer
-// has, or a Command its kind of message does not carry.
+// has, a Snooze preset of a Route that no longer has Snooze durations, or a Command its kind of message does not carry.
 var errUnverifiable = errors.New("the button names no command of its message")
+
+// snoozePresets are the Snooze presets by the argument of their buttons (C-10.FR-18).
+var snoozePresets = map[int]groups.SnoozePreset{
+	buttons.ArgumentTomorrow:  groups.PresetTomorrow,
+	buttons.ArgumentWeekStart: groups.PresetWeekStart,
+}
+
+// snooze is the end of a Snooze that a press or a Text command asks for: its duration from now on the business clock,
+// or its Snooze preset, whose end the dispatcher computes in the profile time zone of the User, else the
+// Organization's (C-10.FR-18).
+type snooze struct {
+	duration time.Duration
+	preset   groups.SnoozePreset
+}
 
 // pressed is what a press or a Text command led to, as bridge_press or bridge_text_command logs it, with the text it is
 // answered with, empty for none.
@@ -137,10 +151,10 @@ func (e *Events) pressOf(ctx context.Context, c Conn, ev Event) (pressed, error)
 		r.outcome, r.answer = outcomeDisabled, messages.T(lang, "press.disabled", nil)
 		return r, nil
 	}
-	snooze, err := snoozeOf(a, b)
+	s, err := snoozeOf(a, b)
 	if err == nil {
 		var res groups.Result
-		res, err = e.run(ctx, e.caller(u), a.Command, a.PublicID, snooze)
+		res, err = e.run(ctx, e.caller(u), a.Command, a.PublicID, s)
 		if err == nil {
 			r.outcome = string(res.Outcome)
 			return r, nil
@@ -214,28 +228,32 @@ func (e *Events) caller(u accountlinks.User) groups.Caller {
 		Permissions: e.Roles.Permissions(u.Role)}
 }
 
-// snoozeOf is the Snooze duration of the button a on its message b, the Route's duration at the button's index, zero
-// for any other Command; errUnverifiable for a Command the kind of message does not carry — "Still on it" and
-// Unacknowledge on a Reminder, any other on a Root message — or an index the Route no longer has.
-func snoozeOf(a buttons.Action, b delivery.BridgeBinding) (time.Duration, error) {
+// snoozeOf is the Snooze of the button a on its message b — the Route's duration at the button's index, or the Snooze
+// preset its argument names while the Route has Snooze durations (C-10.FR-18) — and none for any other Command;
+// errUnverifiable for a Command the kind of message does not carry — "Still on it" and Unacknowledge on a Reminder,
+// any other on a Root message — an index the Route no longer has, or a preset of a Route without durations.
+func snoozeOf(a buttons.Action, b delivery.BridgeBinding) (snooze, error) {
 	carried := a.Command != buttons.CommandStillOnIt
 	if b.Kind == buttons.SubjectReply {
 		carried = a.Command == buttons.CommandStillOnIt || a.Command == buttons.CommandUnacknowledge
 	}
+	p, preset := snoozePresets[a.Argument]
 	switch {
 	case !carried:
-		return 0, errUnverifiable
+		return snooze{}, errUnverifiable
 	case a.Command != buttons.CommandSnooze:
-		return 0, nil
+		return snooze{}, nil
+	case preset && len(b.SnoozeSeconds) > 0:
+		return snooze{preset: p}, nil
 	case a.Argument >= len(b.SnoozeSeconds):
-		return 0, errUnverifiable
+		return snooze{}, errUnverifiable
 	}
-	return time.Duration(b.SnoozeSeconds[a.Argument]) * time.Second, nil
+	return snooze{duration: time.Duration(b.SnoozeSeconds[a.Argument]) * time.Second}, nil
 }
 
-// run runs command on the Alert Group publicID as c through the dispatcher; a Snooze lasts snooze from now on the
-// business clock.
-func (e *Events) run(ctx context.Context, c groups.Caller, command, publicID string, snooze time.Duration) (
+// run runs command on the Alert Group publicID as c through the dispatcher; a Snooze ends at the preset of s, with no
+// time zone, so that the dispatcher takes the User's, else lasts the duration of s from now on the business clock.
+func (e *Events) run(ctx context.Context, c groups.Caller, command, publicID string, s snooze) (
 	groups.Result, error) {
 	switch command {
 	case buttons.CommandStillOnIt:
@@ -249,7 +267,10 @@ func (e *Events) run(ctx context.Context, c groups.Caller, command, publicID str
 	case buttons.CommandUnsnooze:
 		return e.Commands.Unsnooze(ctx, c, publicID)
 	case buttons.CommandSnooze:
-		until := e.Clocks.Business.Now().Add(snooze)
+		if s.preset != "" {
+			return e.Commands.Snooze(ctx, c, publicID, groups.SnoozeEnd{Preset: s.preset})
+		}
+		until := e.Clocks.Business.Now().Add(s.duration)
 		return e.Commands.Snooze(ctx, c, publicID, groups.SnoozeEnd{Until: &until})
 	}
 	return groups.Result{}, errUnverifiable

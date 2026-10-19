@@ -7,11 +7,15 @@ layer: L1
 depends_on: [S-092, S-075, S-082]
 covers: [C-10.FR-18, C-10.AC-23, C-22.FR-5, C-22.FR-14, C-22.AC-27]
 files_touched:
+  - api/bridge.yaml
+  - api/openapi.yaml
+  - internal/logging/events.go
   - internal/buttons/buttons.go
   - internal/buttons/buttons_test.go
   - internal/messages/default.go
   - internal/messages/default_test.go
   - internal/messages/render.go
+  - internal/messages/render_test.go
   - internal/messages/preview.go
   - internal/messages/query.sql
   - internal/messages/texts/en.json
@@ -20,17 +24,27 @@ files_touched:
   - internal/mattermost/layout_test.go
   - internal/mattermost/callback.go
   - internal/mattermost/callback_test.go
+  - internal/mattermost/adapter_test.go
   - internal/telegram/layout.go
   - internal/telegram/layout_test.go
   - internal/telegram/presses.go
   - internal/telegram/presses_test.go
+  - internal/telegram/adapter_test.go
+  - internal/delivery/query.sql
+  - internal/delivery/presses.go
+  - internal/delivery/presses_test.go
   - internal/bridge/envelope.go
   - internal/bridge/envelope_test.go
   - internal/bridge/commands.go
   - internal/bridge/commands_test.go
   - internal/bridge/presses.go
   - internal/bridge/presses_test.go
+  - internal/bridge/delivery_test.go
   - test/e2e/snooze_preset_buttons_test.go
+  - test/e2e/button_styles_test.go
+  - test/e2e/mattermost_test.go
+  - test/e2e/telegram_test.go
+  - test/e2e/bridge_test.go
   - docs/concepts/statuses-and-commands.md
   - docs/messengers/bridge.md
   - docs/messengers/write-a-bridge.md
@@ -100,14 +114,18 @@ issue: 296
   Organization's `week_start` is taken; any other day, like any duration the Route lacks, is answered with
   `bridge.snoozeDurations`, whose `{durations}` now ends with the two preset words in the Route's language; on a Route
   without durations the answer stays `bridge.noSnoozeDurations`. The dispatch is a Snooze with a preset, Transport
-  `bridge`.
+  `bridge`. The bindings of Bridge presses and Thread messages (`internal/delivery/query.sql`) read the Route's language
+  and `organization.week_start`, which a Text command needs to take only the first day of the week and to list the
+  preset words.
 - **Answers**: unchanged — a preset press that runs is answered as any Snooze press, and a Text command with "Done:
   Snoozed #N".
 - **Fake servers**: no change. They keep any number of buttons and keyboard rows, and their presses name a button by
   its label (Telegram, Bridge) or its action id (Mattermost).
 - **Settings**: `organization.workday_start`, `organization.week_start`, `route.snooze_durations`,
   `buttons.max_per_message` of a bridge's `info`, `bridge.text_commands`, `bridge.info_max_age`.
-- **Metrics, log events, schema, spec**: unchanged.
+- **Metrics, schema**: unchanged. The spec changes only the description of `max_per_message` (`api/bridge.yaml`,
+  `api/openapi.yaml`), which named the durations as the first buttons dropped; the log event `bridge_text_command` only
+  the description of its outcome `unknown_duration`, which now also covers a preset the Route does not offer.
 
 ## Steps
 

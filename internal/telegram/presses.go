@@ -114,8 +114,15 @@ const (
 	outcomeTest = "test"
 )
 
-// errUnverifiable is a verified button that names no Command of its Route: a Snooze duration that no longer exists.
+// errUnverifiable is a verified button that names no Command of its Route: a Snooze duration that no longer exists,
+// or a Snooze preset of a Route that no longer has Snooze durations.
 var errUnverifiable = errors.New("the button names no command of its route")
+
+// snoozePresets are the Snooze presets by the argument of their buttons (C-10.FR-18).
+var snoozePresets = map[int]groups.SnoozePreset{
+	buttons.ArgumentTomorrow:  groups.PresetTomorrow,
+	buttons.ArgumentWeekStart: groups.PresetWeekStart,
+}
 
 // pressed is what a press led to, as telegram_press logs it.
 type pressed struct {
@@ -234,8 +241,10 @@ func (p *Presses) run(ctx context.Context, q *CallbackQuery, a buttons.Action, b
 	return messages.T(b.Language, "press.failed", nil)
 }
 
-// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index. A
-// Reminder carries only "Still on it" and Unacknowledge, and only a Reminder carries "Still on it".
+// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index, or
+// ends at its Snooze preset in the time zone of the User c acts as, else the Organization's, while the Route has
+// Snooze durations (C-10.FR-18). A Reminder carries only "Still on it" and Unacknowledge, and only a Reminder carries
+// "Still on it".
 func (p *Presses) dispatch(ctx context.Context, c groups.Caller, a buttons.Action, b delivery.Binding) (
 	groups.Result, error) {
 	if !onSubject(a) {
@@ -253,6 +262,9 @@ func (p *Presses) dispatch(ctx context.Context, c groups.Caller, a buttons.Actio
 	case buttons.CommandUnsnooze:
 		return p.Commands.Unsnooze(ctx, c, a.PublicID)
 	case buttons.CommandSnooze:
+		if preset, ok := snoozePresets[a.Argument]; ok && len(b.SnoozeSeconds) > 0 {
+			return p.Commands.Snooze(ctx, c, a.PublicID, groups.SnoozeEnd{Preset: preset})
+		}
 		if a.Argument >= len(b.SnoozeSeconds) {
 			return groups.Result{}, errUnverifiable
 		}

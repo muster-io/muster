@@ -909,7 +909,7 @@ func TestBridgeTextCommands(t *testing.T) {
 		t.Errorf("the answer of the Reminder %+v", x)
 	}
 	said(fakebridge.BobID, "unack", done("Unacknowledged"))
-	said(fakebridge.BobID, "snooze 2h", "Snooze for one of: 1h, 4h, 24h")
+	said(fakebridge.BobID, "snooze 2h", "Snooze for one of: 1h, 4h, 24h, tomorrow, monday")
 	said(fakebridge.BobID, "/Snooze 4h", done("Snoozed"))
 	until, err := time.Parse(time.RFC3339Nano, fmt.Sprint(e.alertGroup(g)["snooze_until"]))
 	if want := readClock(t, r).Now.Add(4 * time.Hour); err != nil || e.status(g) != "snoozed" ||

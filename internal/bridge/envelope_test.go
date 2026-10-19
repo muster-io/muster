@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -43,8 +44,9 @@ func (testKeys) VerifyPrefix(keyring.Purpose, string, []byte, []byte) (bool, err
 
 func (testKeys) KeyIDs() []string { return []string{"k-0123456789abcdef0123456789abcdef"} }
 
-// signedButtons are the buttons of a Root message in status, in lang, with the Snooze durations seconds, each with a
-// signed action id as the renderer gives it.
+// signedButtons are the buttons of a Root message in status, in lang, with the Snooze durations seconds and the Snooze
+// presets of a working day that starts at 09:00 and a week that starts on Monday, each with a signed action id as the
+// renderer gives it.
 func signedButtons(t *testing.T, status, lang string, seconds []int64) []messages.Button {
 	t.Helper()
 	out := []messages.Button{}
@@ -57,7 +59,10 @@ func signedButtons(t *testing.T, status, lang string, seconds []int64) []message
 		label := messages.T(lang, "button."+map[string]string{buttons.CommandAcknowledge: "acknowledge",
 			buttons.CommandUnacknowledge: "unacknowledge", buttons.CommandResolve: "resolve",
 			buttons.CommandUnsnooze: "unsnooze"}[b.Command], nil)
-		if b.Command == buttons.CommandSnooze {
+		switch {
+		case b.Command == buttons.CommandSnooze && buttons.IsPreset(b.Argument):
+			label = messages.PresetLabel(lang, b.Argument, "09:00", "monday")
+		case b.Command == buttons.CommandSnooze:
 			label = messages.T(lang, "button.snooze", messages.Args{"duration": messages.Duration(lang,
 				seconds[b.Argument])})
 		}
@@ -277,8 +282,8 @@ func TestButtonsAndCommandsLine(t *testing.T) {
 			t.Errorf("data of %s: %q", b.Label, b.Data)
 		}
 	}
-	if fmt.Sprint(got) != "[Ack:primary Resolve:success Snooze 1 h:neutral Snooze 4 h:neutral Snooze 24 h:neutral]" ||
-		strings.Contains(c.Body, line) {
+	if fmt.Sprint(got) != "[Ack:primary Resolve:success Snooze 1 h:neutral Snooze 4 h:neutral Snooze 24 h:neutral "+
+		"Until tomorrow 09:00:neutral Until Monday 09:00:neutral]" || strings.Contains(c.Body, line) {
 		t.Fatalf("buttons %v, body %q", got, c.Body)
 	}
 	acked := content(rootMessage(t, messages.ColourAcknowledged), infoOf(t), nil)
@@ -329,9 +334,9 @@ func TestButtonsAndCommandsLine(t *testing.T) {
 	}
 }
 
-// TestButtonsBeyondMaxPerMessage covers C-22.FR-5: beyond buttons.max_per_message the Snooze buttons of the longest
-// durations go first, whatever their order, then buttons from the end; a button without signed data and a long label
-// are never sent as they are.
+// TestButtonsBeyondMaxPerMessage covers C-22.FR-5: beyond buttons.max_per_message the Snooze buttons go first — the
+// week_start preset, then the tomorrow preset, then the durations from the longest, whatever their order — then
+// buttons from the end; a button without signed data and a long label are never sent as they are.
 func TestButtonsBeyondMaxPerMessage(t *testing.T) {
 	labels := func(bs []gen.Button) string {
 		var out []string
@@ -364,9 +369,62 @@ func TestButtonsBeyondMaxPerMessage(t *testing.T) {
 	odd.Buttons[1].Label = strings.Repeat("ж", 80)
 	odd.Buttons[2].ActionID = strings.Repeat("a", 65)
 	got := buttonsOf(odd, infoOf(t))
-	if len(got) != 3 || utf8.RuneCountInString(got[0].Label) != maxLabel || got[1].Label != "Snooze 4 h" {
+	if len(got) != 5 || utf8.RuneCountInString(got[0].Label) != maxLabel || got[1].Label != "Snooze 4 h" {
 		t.Fatalf("odd buttons %+v", got)
 	}
+	if got := labels(buttonsOf(shuffled, most(5))); got != "Ack,Resolve,Snooze 24 h,Snooze 1 h,Snooze 4 h" {
+		t.Fatalf("unsorted durations, 5 = %s", got)
+	}
+}
+
+// TestPresetButtonsBeyondMaxPerMessage covers C-22.FR-5 and AC-27: the Snooze presets follow the durations with the
+// style hint neutral, and beyond buttons.max_per_message the week_start preset goes first, then the tomorrow preset,
+// then the durations from the longest — whatever the length of the labels, the Russian ones and a long one included —
+// on a firing and an acknowledged Root message of a Route with the durations 1 h, 4 h and 24 h, at every limit from 2
+// to 7.
+func TestPresetButtonsBeyondMaxPerMessage(t *testing.T) {
+	all := map[string][]string{
+		messages.ColourFiring: {"Ack:primary", "Resolve:success", "Snooze 1 h:neutral", "Snooze 4 h:neutral",
+			"Snooze 24 h:neutral", "Until tomorrow 09:00:neutral", "Until Monday 09:00:neutral"},
+		messages.ColourAcknowledged: {"Unack:neutral", "Resolve:success", "Snooze 1 h:neutral", "Snooze 4 h:neutral",
+			"Snooze 24 h:neutral", "Until tomorrow 09:00:neutral", "Until Monday 09:00:neutral"},
+	}
+	ru := []string{"Подтвердить:primary", "Закрыть:success", "Отложить на 1 ч:neutral", "Отложить на 4 ч:neutral",
+		"Отложить на 24 ч:neutral", "До завтра 09:00:neutral", "До понедельника 09:00:neutral"}
+	for limit := 2; limit <= 7; limit++ {
+		i := infoOf(t, set("capabilities.buttons", "max_per_message", limit))
+		for status, want := range all {
+			if got := styled(buttonsOf(rootMessage(t, status), i)); !slices.Equal(got, want[:limit]) {
+				t.Errorf("%s, %d: %q, want %q", status, limit, got, want[:limit])
+			}
+		}
+		m := rootMessage(t, messages.ColourFiring)
+		m.Language, m.Buttons = messages.LanguageRussian, signedButtons(t, messages.ColourFiring, "ru", snoozeSeconds)
+		if got := styled(buttonsOf(m, i)); !slices.Equal(got, ru[:limit]) {
+			t.Errorf("russian, %d: %q", limit, got)
+		}
+		short := rootMessage(t, messages.ColourFiring)
+		short.Buttons[5].Label, short.Buttons[6].Label = "T", "W"
+		short.Buttons[4].Label = strings.Repeat("x", maxLabel)
+		if got := styled(buttonsOf(short, i)); len(got) != limit || limit < 6 && slices.ContainsFunc(got,
+			func(s string) bool { return s == "T:neutral" || s == "W:neutral" }) || limit == 6 && got[5] != "T:neutral" {
+			t.Errorf("short presets, %d: %q", limit, got)
+		}
+	}
+	if got := styled(buttonsOf(rootMessage(t, messages.ColourFiring),
+		infoOf(t, set("capabilities.buttons", "max_per_message", 10)))); !slices.Equal(got,
+		all[messages.ColourFiring]) {
+		t.Errorf("10: %q", got)
+	}
+}
+
+// styled are the labels and style hints of bs as label:style.
+func styled(bs []gen.Button) []string {
+	out := []string{}
+	for _, b := range bs {
+		out = append(out, b.Label+":"+string(b.Style))
+	}
+	return out
 }
 
 // TestBodyShortening covers C-22.FR-7 and C-12.FR-11 within the body: the text is shortened by its Alerts first,

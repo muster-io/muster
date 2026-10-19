@@ -97,6 +97,45 @@ func TestKeyboard(t *testing.T) {
 	}
 }
 
+// TestKeyboardRows is C-14.FR-15 with C-10.FR-18 and C-10.AC-23: the commands on the first row, the Snooze durations
+// on the second and the Snooze presets on a third, each sending the action id of its button, on a firing and an
+// acknowledged Root message; a snoozed one has no Snooze, and on a Route without Snooze durations neither Snooze nor
+// the presets.
+func TestKeyboardRows(t *testing.T) {
+	rows := func(m messages.Message) [][]string {
+		t.Helper()
+		raw, err := json.Marshal(keyboard(m.Buttons))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return keyboardOf(t, raw)
+	}
+	for _, c := range []struct {
+		m    messages.Message
+		want string
+	}{
+		{root(messages.ColourFiring), `[["Ack","Resolve"],["Snooze 1 h","Snooze 4 h","Snooze 24 h"],` +
+			`["Until tomorrow 09:00","Until Monday 09:00"]]`},
+		{root(messages.ColourAcknowledged), `[["Unack","Resolve"],["Snooze 1 h","Snooze 4 h","Snooze 24 h"],` +
+			`["Until tomorrow 09:00","Until Monday 09:00"]]`},
+		{root(messages.ColourSnoozed), `[["Ack","Unsnooze","Resolve"]]`},
+		{rootOf(messages.ColourFiring, 1), `[["Ack","Resolve"],["Snooze 1 h"],` +
+			`["Until tomorrow 09:00","Until Monday 09:00"]]`},
+		{rootOf(messages.ColourFiring, 0), `[["Ack","Resolve"]]`},
+		{rootOf(messages.ColourAcknowledged, 0), `[["Unack","Resolve"]]`},
+	} {
+		raw, _ := json.Marshal(rows(c.m))
+		if string(raw) != c.want {
+			t.Errorf("%s: keyboard %s, want %s", c.m.Colour, raw, c.want)
+		}
+	}
+	k := keyboard(root(messages.ColourFiring).Buttons)
+	if got := []string{k.InlineKeyboard[2][0].CallbackData, k.InlineKeyboard[2][1].CallbackData}; got[0] !=
+		"a-snooze254" || got[1] != "a-snooze255" {
+		t.Errorf("the presets send %v", got)
+	}
+}
+
 // styledKeyboard is a keyboard as its JSON sends it, row by row: each button's text with its style, "-" for a button
 // without a style field.
 func styledKeyboard(t *testing.T, raw []byte) string {
@@ -123,8 +162,9 @@ func styledKeyboard(t *testing.T, raw []byte) string {
 }
 
 // TestKeyboardStyles is D329 with F-066 and F-067: in the JSON of the keyboard Ack and "Still on it" have the style
-// primary and Resolve success, while Unack, Unsnooze and every Snooze button have no style field, on a firing, an
-// acknowledged and a snoozed Root message and on a Reminder; a button of any other Command has no style either.
+// primary and Resolve success, while Unack, Unsnooze and every Snooze button, the Snooze presets included, have no
+// style field, on a firing, an acknowledged and a snoozed Root message and on a Reminder; a button of any other Command
+// has no style either.
 func TestKeyboardStyles(t *testing.T) {
 	reminder := []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "s"},
 		{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "u"}}
@@ -134,9 +174,11 @@ func TestKeyboardStyles(t *testing.T) {
 		want string
 	}{
 		{"firing", root(messages.ColourFiring).Buttons,
-			"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+			"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-] " +
+				"[Until tomorrow 09:00:-, Until Monday 09:00:-]"},
 		{"acknowledged", root(messages.ColourAcknowledged).Buttons,
-			"[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+			"[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-] " +
+				"[Until tomorrow 09:00:-, Until Monday 09:00:-]"},
 		{"snoozed", root(messages.ColourSnoozed).Buttons, "[Ack:primary, Unsnooze:-, Resolve:success]"},
 		{"reminder", reminder, "[Still on it:primary, Unack:-]"},
 		{"unknown", []messages.Button{{Command: "unresolve", Label: "x", ActionID: "x"}}, "[x:-]"},

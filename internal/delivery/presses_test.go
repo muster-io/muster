@@ -401,6 +401,9 @@ func (f *fakeDB) bridgeDest(id, conn int64) *fakeDest {
 	return ds
 }
 
+// bridgeWeekStart is organization.week_start as the reads of a bridge binding give it.
+const bridgeWeekStart = "sunday"
+
 // bridgeRoot is the binding row of the delivery to a Bridge Destination of the Connection conn whose current Root
 // message, or older one when older is set, is messageID, the lowest delivery id first.
 func (f *fakeDB) bridgeRoot(conn int64, messageID string, older bool) (dbgen.GetBridgeRootBindingRow, bool) {
@@ -415,8 +418,8 @@ func (f *fakeDB) bridgeRoot(conn int64, messageID string, older bool) (dbgen.Get
 			(older && !slices.Contains(d.superseded, messageID)) {
 			continue
 		}
-		return dbgen.GetBridgeRootBindingRow{GroupPublicID: g.publicID,
-			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, true
+		return dbgen.GetBridgeRootBindingRow{GroupPublicID: g.publicID, Language: f.routes[g.route].language,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze), WeekStart: bridgeWeekStart}, true
 	}
 	return dbgen.GetBridgeRootBindingRow{}, false
 }
@@ -460,22 +463,23 @@ func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridge
 			*r.messageID != arg.MessageID {
 			continue
 		}
-		return dbgen.GetBridgeReminderBindingRow{GroupPublicID: g.publicID,
-			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze)}, nil
+		return dbgen.GetBridgeReminderBindingRow{GroupPublicID: g.publicID, Language: f.routes[g.route].language,
+			SnoozeDurationsSeconds: slices.Clone(f.routes[g.route].snooze), WeekStart: bridgeWeekStart}, nil
 	}
 	return dbgen.GetBridgeReminderBindingRow{}, pgx.ErrNoRows
 }
 
 // TestBridgePressBinding is the binding of C-22.FR-12: a press on a message of a Bridge Connection is bound to the
 // delivery of an Alert Group to a Bridge Destination of the Connection whose current Root message it is, or whose older
-// Root message a republication past the edit window replaced, or to a sent Reminder there, with the Alert Group and
-// the Route's Snooze durations; another Connection, another type, a deleted Destination, a Thread reply that is not a
-// sent Reminder, a Storm summary or an unknown message is not bound, and a failed read is an error.
+// Root message a republication past the edit window replaced, or to a sent Reminder there, with the Alert Group, the
+// Route's language and Snooze durations and the Organization's first day of the week; another Connection, another
+// type, a deleted Destination, a Thread reply that is not a sent Reminder, a Storm summary or an unknown message is not
+// bound, and a failed read is an error.
 func TestBridgePressBinding(t *testing.T) {
 	e, _ := bridged(t)
 	e.db.dests[destMM].name = "alerts"
 	r := e.db.routes[routeID]
-	r.snooze = []int64{3600, 14400, 86400}
+	r.language, r.snooze = "ru", []int64{3600, 14400, 86400}
 	e.db.routes[routeID] = r
 	current, reminder, other, summary := "m3", "r-1", "r-2", "s-1"
 	e.db.deliveries = append(e.db.deliveries,
@@ -502,8 +506,8 @@ func TestBridgePressBinding(t *testing.T) {
 	} {
 		calls := maps.Clone(e.db.calls)
 		b, err := e.svc.BridgePressBinding(t.Context(), connID, tc.message)
-		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" ||
-			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" || b.Language != "ru" ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400, 86400}) || b.WeekStart != bridgeWeekStart {
 			t.Errorf("BridgePressBinding(%s) = %+v, %v", tc.message, b, err)
 		}
 		if got := readsSince(calls, e.db.calls); !slices.Equal(got, tc.reads) {

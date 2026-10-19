@@ -51,7 +51,13 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 	}
 	keyID := ""
 	for _, b := range buttons.ForStatus(src.Status, len(src.Route.SnoozeDurations)) {
-		btn := Button{Command: b.Command, Argument: b.Argument, Label: buttonLabel(lang, b, src.Route.SnoozeDurations)}
+		var label string
+		if b.Command == buttons.CommandSnooze && buttons.IsPreset(b.Argument) {
+			label = PresetLabel(lang, b.Argument, src.WorkdayStart, src.WeekStart)
+		} else {
+			label = buttonLabel(lang, b, src.Route.SnoozeDurations)
+		}
+		btn := Button{Command: b.Command, Argument: b.Argument, Label: label}
 		if sign && r.keys != nil {
 			id, kid, err := buttons.Sign(r.keys, buttons.Action{Subject: buttons.SubjectRoot, PublicID: src.PublicID,
 				Command: b.Command, Argument: b.Argument})
@@ -86,6 +92,21 @@ func buttonLabel(lang string, b buttons.Button, durations []int64) string {
 	return T(lang, "button."+map[string]string{buttons.CommandAcknowledge: "acknowledge",
 		buttons.CommandUnacknowledge: "unacknowledge", buttons.CommandResolve: "resolve",
 		buttons.CommandUnsnooze: "unsnooze", buttons.CommandStillOnIt: "stillOnIt"}[b.Command], nil)
+}
+
+// PresetLabel is the label of the Snooze button of a Snooze preset in lang (C-10.FR-18), by the argument of the
+// button: "Until tomorrow 09:00" for buttons.ArgumentTomorrow and "Until Monday 09:00" — «До понедельника 09:00» —
+// for buttons.ArgumentWeekStart, from workdayStart, organization.workday_start as HH:MM, and weekStart,
+// organization.week_start from monday to sunday; empty for any other argument.
+func PresetLabel(lang string, argument int, workdayStart, weekStart string) string {
+	switch argument {
+	case buttons.ArgumentTomorrow:
+		return T(lang, "button.snoozeTomorrow", Args{"time": workdayStart})
+	case buttons.ArgumentWeekStart:
+		return T(lang, "button.snoozeWeekStart", Args{"day": T(lang, "button.snoozeWeekStartDay."+weekStart, nil),
+			"time": workdayStart})
+	}
+	return ""
 }
 
 // notices are the notices of reference.md that apply to src (item 10): still firing after a manual resolve,

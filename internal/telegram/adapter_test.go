@@ -77,8 +77,13 @@ func loud(ts ...mentions.Target) delivery.Call {
 }
 
 // root is a Root message in a status, with a label that tries to mention the channel and write HTML, two Alerts, one
-// of them resolved, and its buttons for three Snooze durations.
+// of them resolved, and its buttons for three Snooze durations and the two Snooze presets.
 func root(status string) messages.Message {
+	return rootOf(status, 3)
+}
+
+// rootOf is root on a Route with the given number of Snooze durations, at most three.
+func rootOf(status string, durations int) messages.Message {
 	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
 		Heading:      &messages.Heading{Number: 7, Title: "CertExpiry", URL: groupPage},
 		Environment:  "prod · started 2026-10-09 12:00 UTC",
@@ -91,9 +96,12 @@ func root(status string) messages.Message {
 		Footer: "Acknowledged by bob", Footers: map[string]string{"telegram": "Acknowledged by @bob_tg"}}
 	labels := map[string]string{buttons.CommandAcknowledge: "Ack", buttons.CommandUnacknowledge: "Unack",
 		buttons.CommandResolve: "Resolve", buttons.CommandUnsnooze: "Unsnooze"}
-	for _, b := range buttons.ForStatus(status, 3) {
+	for _, b := range buttons.ForStatus(status, durations) {
 		label := labels[b.Command]
 		if b.Command == buttons.CommandSnooze {
+			label = messages.PresetLabel("en", b.Argument, "09:00", "monday")
+		}
+		if b.Command == buttons.CommandSnooze && !buttons.IsPreset(b.Argument) {
 			label = []string{"Snooze 1 h", "Snooze 4 h", "Snooze 24 h"}[b.Argument]
 		}
 		m.Buttons = append(m.Buttons, messages.Button{Command: b.Command, Argument: b.Argument, Label: label,
@@ -159,7 +167,8 @@ func TestPublishRootMessage(t *testing.T) {
 		strings.Contains(m.Text, "<table") || strings.Contains(m.Text, "<pre>") {
 		t.Fatalf("post = %+v\n%s", m, m.Text)
 	}
-	if got := fmt.Sprint(keyboardOf(t, m.ReplyMarkup)); got != "[[Ack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h]]" {
+	if got := fmt.Sprint(keyboardOf(t, m.ReplyMarkup)); got != "[[Ack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h] "+
+		"[Until tomorrow 09:00 Until Monday 09:00]]" {
 		t.Fatalf("keyboard = %s", got)
 	}
 	var kb inlineKeyboard
@@ -219,8 +228,12 @@ func TestPublishQuietAndMentions(t *testing.T) {
 	}
 }
 
-// TestUpdateKeepsTheKeyboard is C-14.AC-14 and C-14.FR-15: every edit carries the whole keyboard of the new state, an
-// edit that changes nothing is success (F-017), and a resolved Root message gets an empty keyboard on purpose.
+// presetRow is the third row of a keyboard: the Snooze presets (C-10.FR-18).
+const presetRow = "[Until tomorrow 09:00 Until Monday 09:00]"
+
+// TestUpdateKeepsTheKeyboard is C-14.AC-14 and C-14.FR-15: every edit carries the whole keyboard of the new state, the
+// Snooze presets included, an edit that changes nothing is success (F-017), and a resolved Root message gets an empty
+// keyboard on purpose.
 func TestUpdateKeepsTheKeyboard(t *testing.T) {
 	e := newAdapter(t)
 	o := e.adapter.Publish(t.Context(), loud(), root(messages.ColourFiring))
@@ -228,8 +241,8 @@ func TestUpdateKeepsTheKeyboard(t *testing.T) {
 		status string
 		want   string
 	}{
-		{messages.ColourAcknowledged, "[[Unack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h]]"},
-		{messages.ColourAcknowledged, "[[Unack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h]]"},
+		{messages.ColourAcknowledged, "[[Unack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h] " + presetRow + "]"},
+		{messages.ColourAcknowledged, "[[Unack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h] " + presetRow + "]"},
 		{messages.ColourSnoozed, "[[Ack Unsnooze Resolve]]"},
 		{messages.ColourResolved, "[]"},
 	}
@@ -271,7 +284,7 @@ func TestUpdateKeepsTheKeyboard(t *testing.T) {
 // TestStylesReachTheServer is D329 with F-066 against the fake server, which refuses an unknown style (F-067): the
 // posted Root message, its edits to acknowledged and snoozed, and a Reminder in the discussion group keep the style of
 // each button as sent — primary on Ack and "Still on it", success on Resolve, and no style field on Unack, Unsnooze and
-// every Snooze button.
+// every Snooze button, the Snooze presets included.
 func TestStylesReachTheServer(t *testing.T) {
 	e := newAdapter(t)
 	o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring))
@@ -279,11 +292,13 @@ func TestStylesReachTheServer(t *testing.T) {
 		t.Fatalf("publish = %+v", o)
 	}
 	if got := styledKeyboard(t, only(t, e.fake).ReplyMarkup); got !=
-		"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]" {
+		"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-] "+
+			"[Until tomorrow 09:00:-, Until Monday 09:00:-]" {
 		t.Errorf("firing: %s", got)
 	}
 	for _, c := range []struct{ status, want string }{
-		{messages.ColourAcknowledged, "[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+		{messages.ColourAcknowledged, "[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-] " +
+			"[Until tomorrow 09:00:-, Until Monday 09:00:-]"},
 		{messages.ColourSnoozed, "[Ack:primary, Unsnooze:-, Resolve:success]"},
 	} {
 		if u := e.adapter.Update(t.Context(), call(1), o.MessageID, root(c.status)); u.Kind != delivery.OutcomeOK {

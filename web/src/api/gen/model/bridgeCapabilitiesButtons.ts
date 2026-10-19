@@ -24,7 +24,7 @@ import type { BridgeButtonStyle } from './bridgeButtonStyle';
  */
 export type BridgeCapabilitiesButtons = {
   /**
-     * Muster sends at most this many; Snooze durations are dropped first.
+     * Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.
      * @minimum 2
      */
   max_per_message: number;
