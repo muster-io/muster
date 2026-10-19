@@ -118,6 +118,14 @@
   "textCommand.resolve": "решено",
   "textCommand.snooze": "отложить {duration}",
   "textCommand.stillOnIt": "ещё работаю",
+  "textCommand.tomorrow": "завтра",
   "textCommand.unacknowledge": "отпускаю",
-  "textCommand.unsnooze": "вернуть"
+  "textCommand.unsnooze": "вернуть",
+  "textCommand.weekday.monday": "понедельник",
+  "textCommand.weekday.tuesday": "вторник",
+  "textCommand.weekday.wednesday": "среда",
+  "textCommand.weekday.thursday": "четверг",
+  "textCommand.weekday.friday": "пятница",
+  "textCommand.weekday.saturday": "суббота",
+  "textCommand.weekday.sunday": "воскресенье"
 }

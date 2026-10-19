@@ -256,7 +256,7 @@ func cutEnd(s string, limit int) string {
 
 // buttonsOf are the buttons of m for a bridge whose info is i (C-22.FR-5): none without `buttons`; otherwise each
 // signed button with its label, its style hint and its action id as data, at most `buttons.max_per_message` of them —
-// the Snooze buttons of the longest durations go first, then buttons from the end.
+// the Snooze buttons go first, in the order of droppedSnooze, then buttons from the end.
 func buttonsOf(m messages.Message, i Info) []gen.Button {
 	out := []gen.Button{}
 	caps := i.Capabilities.Buttons
@@ -267,7 +267,7 @@ func buttonsOf(m messages.Message, i Info) []gen.Button {
 		return b.ActionID == "" || len(b.ActionID) > maxData || b.Label == ""
 	})
 	for limit := max(caps.MaxPerMessage, 0); len(kept) > limit; {
-		n := longestSnooze(kept, m.SnoozeSeconds)
+		n := droppedSnooze(kept, m.SnoozeSeconds)
 		if n < 0 {
 			kept = kept[:limit]
 			break
@@ -279,6 +279,20 @@ func buttonsOf(m messages.Message, i Info) []gen.Button {
 			Data: b.ActionID})
 	}
 	return out
+}
+
+// droppedSnooze is the index in bs of the Snooze button that goes first beyond `buttons.max_per_message`, whatever the
+// length of the labels: the week_start preset, then the tomorrow preset, then the longest duration (longestSnooze);
+// -1 without a Snooze button.
+func droppedSnooze(bs []messages.Button, seconds []int64) int {
+	for _, argument := range []int{buttons.ArgumentWeekStart, buttons.ArgumentTomorrow} {
+		if n := slices.IndexFunc(bs, func(b messages.Button) bool {
+			return b.Command == buttons.CommandSnooze && b.Argument == argument
+		}); n >= 0 {
+			return n
+		}
+	}
+	return longestSnooze(bs, seconds)
 }
 
 // longestSnooze is the index in bs of the Snooze button of the longest duration of seconds, the last of equal ones;

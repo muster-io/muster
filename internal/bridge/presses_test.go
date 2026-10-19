@@ -94,8 +94,8 @@ func (k *pressKeys) drop(id string) {
 }
 
 // The fixtures of presses: the Root message m1 of the Alert Group A in the Bridge Destination R of the Connection 3,
-// its older Root message m0, replaced past its edit window, and its Reminder r1; the Route's Snooze durations of 1 h,
-// 4 h and 24 h.
+// its older Root message m0, replaced past its edit window, and its Reminder r1; the Route in English with the Snooze
+// durations of 1 h, 4 h and 24 h, and the week starting on Monday.
 const (
 	pressGroup = "AG0000000000A1"
 	otherGroup = "AG0000000000B2"
@@ -132,11 +132,21 @@ type pressBindings struct {
 }
 
 func newPressBindings() *pressBindings {
-	root := delivery.BridgeBinding{Kind: buttons.SubjectRoot, GroupPublicID: pressGroup,
-		SnoozeSeconds: []int64{3600, 14400, 86400}}
+	root := delivery.BridgeBinding{Kind: buttons.SubjectRoot, GroupPublicID: pressGroup, Language: "en",
+		SnoozeSeconds: []int64{3600, 14400, 86400}, WeekStart: "monday"}
 	older, reminder := root, root
 	reminder.Kind = buttons.SubjectReply
 	return &pressBindings{bound: map[string]delivery.BridgeBinding{"m1": root, "m0": older, "r1": reminder}}
+}
+
+// change changes every binding with f.
+func (b *pressBindings) change(f func(*delivery.BridgeBinding)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id, bound := range b.bound {
+		f(&bound)
+		b.bound[id] = bound
+	}
 }
 
 func (b *pressBindings) BridgePressBinding(_ context.Context, connectionID int64, messageID string) (
@@ -451,6 +461,60 @@ func TestPressRunsTheCommandAsTheLinkedUser(t *testing.T) {
 	}
 }
 
+// TestPressSnoozePresets covers C-10.FR-18 and C-22.FR-5: a press on a Snooze preset button of a Root message runs the
+// Snooze with that preset and no time zone, so that the dispatcher takes the linked User's, else the Organization's,
+// with the Transport bridge, unanswered; on a Route that lost its Snooze durations, or on a Reminder, which carries no
+// Snooze, the press changes nothing and is answered "This button could not be verified; nothing was changed.".
+func TestPressSnoozePresets(t *testing.T) {
+	e := newPressEnv(t)
+	for i, arg := range []int{buttons.ArgumentTomorrow, buttons.ArgumentWeekStart} {
+		e.handle(t, e.press(t, fmt.Sprintf("ev-%d", i), "m1", "u-bob", e.sign(t, buttons.SubjectRoot, pressGroup,
+			buttons.CommandSnooze, arg)))
+	}
+	e.handle(t, e.press(t, "ev-2", "m0", "u-ivan", e.sign(t, buttons.SubjectRoot, pressGroup, buttons.CommandSnooze,
+		buttons.ArgumentWeekStart)))
+	calls := e.commands.ran()
+	if len(calls) != 3 {
+		t.Fatalf("commands %+v", calls)
+	}
+	for i, want := range []groups.SnoozePreset{groups.PresetTomorrow, groups.PresetWeekStart,
+		groups.PresetWeekStart} {
+		c := calls[i]
+		if c.command != buttons.CommandSnooze || c.group != pressGroup || c.end == nil ||
+			*c.end != (groups.SnoozeEnd{Preset: want}) || c.caller.Transport != audit.TransportBridge {
+			t.Errorf("%d: ran %+v, end %+v, want the preset %s", i, c, c.end, want)
+		}
+	}
+	if calls[2].caller.Actor != audit.User(10, "SR0000000000I1") {
+		t.Errorf("caller %+v", calls[2].caller)
+	}
+	if a := e.answers(t); len(a) != 0 {
+		t.Errorf("answered %+v", a)
+	}
+	if got := e.log.String(); strings.Count(got, pressLine(pressGroup, "snooze", "done", "u-bob")+"}") != 2 {
+		t.Errorf("logged %s", got)
+	}
+
+	e = newPressEnv(t)
+	e.bindings.change(func(b *delivery.BridgeBinding) { b.SnoozeSeconds = nil })
+	for i, arg := range []int{buttons.ArgumentTomorrow, buttons.ArgumentWeekStart} {
+		e.handle(t, e.press(t, fmt.Sprintf("ev-%d", i), "m1", "u-bob", e.sign(t, buttons.SubjectRoot, pressGroup,
+			buttons.CommandSnooze, arg)))
+	}
+	e.bindings.change(func(b *delivery.BridgeBinding) { b.SnoozeSeconds = []int64{3600} })
+	e.handle(t, e.press(t, "ev-2", "r1", "u-bob", e.sign(t, buttons.SubjectReply, pressGroup, buttons.CommandSnooze,
+		buttons.ArgumentTomorrow)))
+	if calls := e.commands.ran(); len(calls) != 0 {
+		t.Errorf("a preset without durations ran %+v", calls)
+	}
+	if got := e.texts(t); !slices.Equal(got, slices.Repeat([]string{notVerified}, 3)) {
+		t.Errorf("answers %q", got)
+	}
+	if got := e.log.String(); strings.Count(got, pressLine(pressGroup, "snooze", "not_verified", "u-bob")+"}") != 3 {
+		t.Errorf("logged %s", got)
+	}
+}
+
 // TestPressTamperedData covers C-22.FR-12 and AC-15: a press whose data is not a valid signed action id — a changed
 // signature, garbage, data longer than an action id — changes nothing and is answered "This button could not be
 // verified; nothing was changed.", logged without an Alert Group or a Command.
@@ -760,12 +824,17 @@ func TestPressOnATestMessage(t *testing.T) {
 	data := e.sign(t, buttons.SubjectTest, pressDest.PublicID, buttons.CommandAcknowledge, 0)
 	e.handle(t, e.press(t, "ev-1", "t-1", "u-alice", data))
 	e.handle(t, e.press(t, "ev-2", "t-1", "u-ivan", data))
+	for i, arg := range []int{buttons.ArgumentTomorrow, buttons.ArgumentWeekStart} {
+		e.handle(t, e.press(t, fmt.Sprintf("ev-p%d", i), "t-1", "u-bob", e.sign(t, buttons.SubjectTest,
+			pressDest.PublicID, buttons.CommandSnooze, arg)))
+	}
 	if len(e.commands.ran()) != 0 || e.bindings.count() != 0 {
 		t.Errorf("a test press ran %+v", e.commands.ran())
 	}
 	a := e.answers(t)
-	if len(a) != 2 || a[0].text != "This is a test message; nothing was changed" ||
-		a[1].text != "Это тестовое сообщение; ничего не изменилось" {
+	if len(a) != 4 || a[0].text != "This is a test message; nothing was changed" ||
+		a[1].text != "Это тестовое сообщение; ничего не изменилось" || a[2].text != a[0].text ||
+		a[3].text != a[0].text {
 		t.Errorf("answers %+v", a)
 	}
 	if !strings.Contains(e.log.String(), pressLine("", "acknowledge", "test", "u-alice")+"}") {

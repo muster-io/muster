@@ -231,7 +231,7 @@ func TestPublishEnvelope(t *testing.T) {
 		t.Fatalf("envelope %v", env)
 	}
 	if got := fmt.Sprint(buttonsSent(t, env)); got != "[Ack:primary Resolve:success Snooze 1 h:neutral "+
-		"Snooze 4 h:neutral Snooze 24 h:neutral]" {
+		"Snooze 4 h:neutral Snooze 24 h:neutral Until tomorrow 09:00:neutral Until Monday 09:00:neutral]" {
 		t.Fatalf("buttons %s", got)
 	}
 	body := env["body"].(string)
@@ -271,7 +271,7 @@ func TestUpdateEnvelope(t *testing.T) {
 		t.Fatalf("envelope %v", env)
 	}
 	if got := fmt.Sprint(buttonsSent(t, env)); got != "[Unack:neutral Resolve:success Snooze 1 h:neutral "+
-		"Snooze 4 h:neutral Snooze 24 h:neutral]" {
+		"Snooze 4 h:neutral Snooze 24 h:neutral Until tomorrow 09:00:neutral Until Monday 09:00:neutral]" {
 		t.Fatalf("buttons %s", got)
 	}
 	e.bridge.answer("edit", answerJSON(http.StatusOK, "application/json", `{"truncated":true}`))
@@ -677,7 +677,7 @@ func TestBodyFitsMaxBodyLength(t *testing.T) {
 		t.Fatalf("%d code points: %q", n, body)
 	}
 	if env["title"] != "#42 DiskFull" || env["link"].(map[string]any)["label"] != "Open in Muster" ||
-		len(env["buttons"].([]any)) != 5 {
+		len(env["buttons"].([]any)) != 7 {
 		t.Fatalf("envelope %v", env)
 	}
 	e.bridge.answer("edit", answerJSON(http.StatusOK, "application/json", `{"truncated":true}`))

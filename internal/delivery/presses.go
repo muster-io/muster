@@ -166,19 +166,23 @@ type bridgePressQueries interface {
 
 // BridgeBinding is what a press or a Thread message on a message of a Bridge Connection is bound to (C-22.FR-12,
 // FR-14): the kind of the message — a Root message, buttons.SubjectRoot, or a sent Reminder, buttons.SubjectReply — the
-// Alert Group, by public_id, and its Route's Snooze durations. An older Root message that a republication past the
-// bridge's edit window replaced (C-22.FR-9) is bound as the current one is: a press or a Text command there acts on
-// the Alert Group as on the current one, and nothing ever edits it again, since the worker reconciles only the current
-// Root message of a delivery.
+// Alert Group, by public_id, its Route's language and Snooze durations, and organization.week_start, monday to sunday,
+// which the Snooze presets of Text commands name. An older Root message that a republication past the bridge's edit
+// window replaced (C-22.FR-9) is bound as the current one is: a press or a Text command there acts on the Alert Group
+// as on the current one, and nothing ever edits it again, since the worker reconciles only the current Root message of
+// a delivery.
 type BridgeBinding struct {
 	Kind          buttons.Subject
 	GroupPublicID string
+	Language      string
 	SnoozeSeconds []int64
+	WeekStart     string
 }
 
 // bridgeBound is the binding of a message of the kind kind from the columns its reads share.
 func bridgeBound(kind buttons.Subject, r dbgen.GetBridgeRootBindingRow) BridgeBinding {
-	return BridgeBinding{Kind: kind, GroupPublicID: r.GroupPublicID, SnoozeSeconds: r.SnoozeDurationsSeconds}
+	return BridgeBinding{Kind: kind, GroupPublicID: r.GroupPublicID, Language: r.Language,
+		SnoozeSeconds: r.SnoozeDurationsSeconds, WeekStart: r.WeekStart}
 }
 
 // BridgePressBinding reads the binding of a press on the message messageID of the Bridge Connection connectionID

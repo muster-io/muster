@@ -1005,11 +1005,12 @@ func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummary
 }
 
 const getBridgeReminderBinding = `-- name: GetBridgeReminderBinding :one
-SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.language, r.snooze_durations_seconds, o.week_start
 FROM destinations ds
 JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = t.org_id AND g.id = t.alert_group_id
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
 WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'bridge' AND ds.deleted_at IS NULL
   AND t.event = 'reminder' AND t.state = 'sent' AND t.message_id = $3::text
 ORDER BY t.id
@@ -1024,26 +1025,34 @@ type GetBridgeReminderBindingParams struct {
 
 type GetBridgeReminderBindingRow struct {
 	GroupPublicID          string
+	Language               string
 	SnoozeDurationsSeconds []int64
+	WeekStart              string
 }
 
 // GetBridgeReminderBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
 // a Reminder (C-22.FR-12, C-17.FR-6): a sent Reminder of an Alert Group to a Bridge Destination of the Connection that
-// is not deleted, with the Alert Group and its Route's Snooze durations, found through the partial index
+// is not deleted, with the columns of GetBridgeRootBinding, found through the partial index
 // thread_replies_reminder_message_idx.
 func (q *Queries) GetBridgeReminderBinding(ctx context.Context, arg GetBridgeReminderBindingParams) (GetBridgeReminderBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeReminderBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeReminderBindingRow
-	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
+	err := row.Scan(
+		&i.GroupPublicID,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+		&i.WeekStart,
+	)
 	return i, err
 }
 
 const getBridgeRootBinding = `-- name: GetBridgeRootBinding :one
-SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.language, r.snooze_durations_seconds, o.week_start
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
 WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'bridge' AND ds.deleted_at IS NULL
   AND d.message_id = $3::text
 ORDER BY d.id
@@ -1058,26 +1067,35 @@ type GetBridgeRootBindingParams struct {
 
 type GetBridgeRootBindingRow struct {
 	GroupPublicID          string
+	Language               string
 	SnoozeDurationsSeconds []int64
+	WeekStart              string
 }
 
 // GetBridgeRootBinding reads what a press on the message message_id of the Bridge Connection is bound to when it is
 // the current Root message (C-22.FR-12): the delivery of an Alert Group to a Bridge Destination of the Connection that
-// is not deleted whose Root message it is, with the Alert Group and its Route's Snooze durations. A message id names
-// one message of a bot, so at most one delivery has it.
+// is not deleted whose Root message it is, with the Alert Group, its Route's language and Snooze durations, and the
+// Organization's first day of the week, which the Snooze presets of Text commands name (C-22.FR-14). A message id
+// names one message of a bot, so at most one delivery has it.
 func (q *Queries) GetBridgeRootBinding(ctx context.Context, arg GetBridgeRootBindingParams) (GetBridgeRootBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeRootBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeRootBindingRow
-	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
+	err := row.Scan(
+		&i.GroupPublicID,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+		&i.WeekStart,
+	)
 	return i, err
 }
 
 const getBridgeSupersededBinding = `-- name: GetBridgeSupersededBinding :one
-SELECT g.public_id AS group_public_id, r.snooze_durations_seconds
+SELECT g.public_id AS group_public_id, r.language, r.snooze_durations_seconds, o.week_start
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
 WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'bridge' AND ds.deleted_at IS NULL
   AND d.superseded_message_ids <> '{}' AND d.superseded_message_ids @> ARRAY[$3::text]
 ORDER BY d.id
@@ -1092,7 +1110,9 @@ type GetBridgeSupersededBindingParams struct {
 
 type GetBridgeSupersededBindingRow struct {
 	GroupPublicID          string
+	Language               string
 	SnoozeDurationsSeconds []int64
+	WeekStart              string
 }
 
 // GetBridgeSupersededBinding is GetBridgeRootBinding for an older Root message that a republication past the bridge's
@@ -1101,7 +1121,12 @@ type GetBridgeSupersededBindingRow struct {
 func (q *Queries) GetBridgeSupersededBinding(ctx context.Context, arg GetBridgeSupersededBindingParams) (GetBridgeSupersededBindingRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeSupersededBinding, arg.OrgID, arg.ConnectionID, arg.MessageID)
 	var i GetBridgeSupersededBindingRow
-	err := row.Scan(&i.GroupPublicID, &i.SnoozeDurationsSeconds)
+	err := row.Scan(
+		&i.GroupPublicID,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+		&i.WeekStart,
+	)
 	return i, err
 }
 
