@@ -11,7 +11,7 @@ project built. "Tested" means different things for different rows, so each row s
 ## Requirements
 
 **PostgreSQL**
-:   14 or newer, directly or through a pooler that keeps a session for the one connection that needs it. Nothing else
+:   14 or newer, directly or or through a pooler whose session connection is session-capable. Nothing else
     stateful: no Redis, no queue. See [The database](database.md).
 
 **Where Muster runs**
@@ -74,7 +74,8 @@ The images are `ghcr.io/muster-io/muster` and the tags are:
 
 A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image
 with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so a valid signature
-proves that the image was built by that workflow on that tag. Install cosign, then:
+proves that the image was built by that workflow on that tag. Install cosign v3 or newer (the release signs with v3.1.3,
+in the new signature format), then:
 
 ```sh
 VERSION=vX.Y.Z
@@ -84,7 +85,7 @@ cosign verify ghcr.io/muster-io/muster:$VERSION \
 ```
 
 It prints the verified signature and exits `0`. To accept any release tag, replace `--certificate-identity` with
-`--certificate-identity-regexp '^https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/v'`.
+`--certificate-identity-regexp '^https://github\.com/muster-io/muster/\.github/workflows/release\.yml@refs/tags/v'`.
 The signature covers the multi-architecture index and the image of each platform. To pin what you run, deploy the digest
 you verified, `ghcr.io/muster-io/muster@sha256:…`, rather than the tag.
 

@@ -96,7 +96,7 @@ Muster".
 
 ## Whom a message mentions
 
-Each Destination has a **Mentions** section for six kinds of Loud change: nobody by default, or everyone in the chat,
+Each Destination has a **Mentions** section for six kinds of Loud event: nobody by default, or everyone in the chat,
 chosen Muster users, or messenger groups, as far as the messenger offers them (`destination.mentions`). The
 [Loud and Quiet](../concepts/loud-and-quiet.md#mentions) page lists what each Destination type takes and why a user
 needs an Account link to be mentioned.
@@ -134,8 +134,9 @@ rule** and fill in:
     "column"` reads one cell and gives an empty text when the table, the key or the column does not exist. A template
     that writes nothing, or something that is not an `http` or `https` URL, gives no link.
 
-A template reads at most 100 rows with `lookup` in one render (`template.lookups_per_render`); the 101st is a template
-error, and a Link rule that fails is left out of the message and counted.
+All the Link rules of one message together read at most 100 rows with `lookup` in one render
+(`template.lookups_per_render`); the 101st is a template error, and a Link rule that fails is left out of the message
+and counted.
 
 Example: a dashboard per cluster.
 
@@ -161,6 +162,8 @@ Lookup tables comes at most 50 to a page (`lookup_table.page_max`), since each c
 
 ## Thread replies
 
-New Alerts, a Takeover, a Reopen and the other Lifecycle events that are Thread replies are collected for the Route's
-**Thread batching window** (**Routes → a Route → Delivery**, `route.thread_batching_window`, 60 seconds by default) and
-sent as one reply. A reply lists the first 10 new Alerts and then "…and K more" (`delivery.thread_alerts_listed`).
+Lifecycle events that are Thread replies, such as a Takeover or a Reopen, are sent at once. Only new Alerts are
+batched, by the Route's **Thread batching window** (**Routes → a Route → Delivery**, `route.thread_batching_window`, 60
+seconds by default): the first new Alert is sent at once and opens the window, and the new Alerts that arrive within it
+are sent as one reply when it closes. After a quiet period longer than the window, the next one is again immediate. A
+reply lists the first 10 new Alerts and then "…and K more" (`delivery.thread_alerts_listed`).

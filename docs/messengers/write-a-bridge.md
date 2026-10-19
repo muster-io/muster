@@ -672,18 +672,23 @@ name and nothing on the host's loopback is involved.
 
     The example's page is published on the loopback of the host only, at `http://127.0.0.1:8095/`, because it has no
     authentication (see the warning above). On a VM, reach it with an SSH tunnel, `ssh -L 8095:localhost:8095 <vm>`.
-    The protocol under `/v1/` is not published: Muster reaches it inside the compose network.
+    The whole port is published, so `/v1/` is reachable on the host's loopback too, and it needs the token. Muster
+    reaches
+    the example inside the compose network.
 2. Create a Bridge Connection with the base URL `http://example-bridge:8095`, the token from `.env`
    (`grep EXAMPLE_BRIDGE_TOKEN .env`) and the event delivery **Polling**. The Organization's outbound address policy
    is **Standard**, which allows the private address that the name resolves to; only loopback is blocked.
-3. Then do steps 3 to 5 of the list above: **Check connection** shows "Messenger: Example chat", create a Destination for
-   the channel `alerts`, and link an account to press buttons.
+3. Then do the check of step 3 above, which shows "Messenger: Example chat", and steps 4 and 5: a Destination for the
+   channel `alerts`, and an account link to press buttons. Do not create the loopback Connection of step 3.
 
-`docker compose down -v` removes the example together with the rest of the project.
+To remove the example and keep Muster and its data, run `docker compose rm -sf example-bridge` and delete
+`compose.override.yaml`. Do not run `docker compose down -v` for this: it deletes Muster's database too.
 
 For **Push**, choose a push secret (see [Push](#push)), enter it in the Connection, and restart the example with
 `BRIDGE_PUSH_URL` set to the callback address that the Connection shows, and the secret in `BRIDGE_PUSH_SECRET` or in
-the file of `-push-secret-file`.
+the file of `-push-secret-file`. With the compose service, set `BRIDGE_PUSH_URL` in the override's `environment` to the
+callback address with the service name of Muster, `http://muster:8080/api/v1/callbacks/bridge/<id>`, not `localhost`:
+the example reaches Muster inside the compose network.
 
 ## The protocol without a library
 

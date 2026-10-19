@@ -123,7 +123,4 @@ Organization's grace period (`auth.oidc_token_grace`, 7 days; **Organization →
 [Organization settings](organization.md#security)). Your profile shows the date until which your tokens work. Service
 account tokens are not affected, which is why automation belongs on a Service account.
 
-## Sessions
-
-A signed-in session ends after 12 hours without a request (`auth.session_idle_timeout`) or 7 days after sign-in
-(`auth.session_lifetime`). These are built in and not settings you change.
+A web session has its own lifetimes: see [Sign-in](../sign-in/index.md#ways-to-sign-in).

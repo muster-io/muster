@@ -3,7 +3,8 @@
 The **Organization** is the owner of all Users, Routes and data in Muster; there is one. Its settings change behaviour
 for everyone, so only Admins open them: choose **Organization** in the main navigation, then a page of its
 sub-navigation. Every change is recorded in the Audit log (**Organization → Audit log**) with a before and after, and two Admins
-editing the same page do not overwrite each other: the second save is refused with "Someone else changed this", and you
+editing the same page do not overwrite each other: the second save is refused with "Someone else changed these settings.
+Reload to see them.", and you
 reload and apply your change again.
 
 The defaults below are what a new installation has.
@@ -65,7 +66,7 @@ status.
 **Organization → Security**
 
 **TOTP required** (`organization.totp_required`, **Nobody**)
-:   **Nobody**, **Local users** (accounts that sign in with a password) or **Everyone** (OIDC users too). A person the
+:   **Nobody**, **Local users** (Users who sign in with a password) or **Everyone** (OIDC users too). A person the
     policy covers who has no TOTP sets it up right after their next sign-in. See [TOTP](../sign-in/totp.md).
 
 **Token grace for OIDC users without an offline token** (`auth.oidc_token_grace`, 7 days)
@@ -121,8 +122,10 @@ tables** and **Link rules** in [Messages and templates](messages-and-templates.m
 `GET /api/v1/organization` reads the Organization and its `ETag`; `PUT /api/v1/organization` replaces the fields above
 with `If-Match` set to that ETag, as [API tokens and automation](api-tokens.md#conventions) shows. The fields are
 `name`, `time_zone`, `workday_start`, `week_start`, `severity_label`, `severity_mapping`, `severity_styles`,
-`critical_is_urgent`, `instance_labels`, `retention` (`stored_snapshots_days`, `alert_details_days`,
+`critical_is_urgent`, `instance_labels`, `outgoing_heartbeat` (required, with `proxy`, whose `enabled` is
+required; `url` is write-only and kept when omitted), `retention` (`stored_snapshots_days`, `alert_details_days`,
 `alert_group_summaries_days`, `audit_log_days`), `totp_required` (`nobody`, `local_users` or `everyone`) and
 `oidc_token_grace_seconds`. The outbound policy is `GET` and `PUT /api/v1/organization/outbound-policy`, and the values
-seen are `GET /api/v1/organization/severity-values`. Reading the Organization needs any sign-in; changing it needs the
-Permission `organization:write`, which only the Admin Role holds.
+seen are `GET /api/v1/organization/severity-values`. Reading the Organization needs any sign-in; reading the outbound
+policy and the values seen needs `organization:read`, and changing anything needs `organization:write`; only the Admin
+Role holds both. `workday_start` and `week_start` are optional on an update.

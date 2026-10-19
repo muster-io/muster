@@ -50,7 +50,8 @@ token is refused there.
 A web session ends after 12 hours without a request (`auth.session_idle_timeout`), or 7 days after sign-in
 (`auth.session_lifetime`). Both are built in. A session of an OIDC user whose identity provider granted no offline token
 ends 12 hours after sign-in (`auth.oidc_fallback_session_lifetime`), and a background re-check asks the identity provider
-about every OIDC user with a live session every 15 minutes (`auth.oidc_recheck_interval`).
+about every OIDC user who has an offline token and a live session or a usable Personal access token, every 15 minutes
+(`auth.oidc_recheck_interval`).
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](closed-networks.md).
 
