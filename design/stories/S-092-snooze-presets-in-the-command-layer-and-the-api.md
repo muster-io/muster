@@ -18,6 +18,7 @@ files_touched:
   - internal/organization/defaults.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
+  - internal/organization/heartbeat_integration_test.go
   - internal/api/organization.go
   - internal/api/organization_test.go
   - internal/groups/snoozepreset.go
