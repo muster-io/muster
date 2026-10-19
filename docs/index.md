@@ -36,15 +36,20 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [PostgreSQL](install/database.md).
 - [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, watch the path from it with a
   [Heartbeat](integrations/heartbeat.md), and send [Grafana Alerting](integrations/grafana.md) through it.
-- [Messengers](messengers/mattermost.md): connect [Mattermost](messengers/mattermost.md) and
+- [Messengers](messengers/index.md): see what each Destination type can do, connect [Mattermost](messengers/mattermost.md) and
   [Telegram](messengers/telegram.md), reach any other messenger through a [Bridge](messengers/bridge.md) (and
   [write one](messengers/write-a-bridge.md)), [link your messenger accounts](messengers/account-links.md), and set a
   [proxy](messengers/proxies.md) for a client.
 - [Outgoing webhooks](outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
-  [template mode](outgoing-webhooks/templates.md).
+  [template mode](outgoing-webhooks/templates.md); [recipes](outgoing-webhooks/recipes.md) for a phone call, a status page,
+  a second chat and an issue tracker.
 - [Sign-in](sign-in/index.md): Roles and ways to sign in; [OpenID Connect with Keycloak](sign-in/oidc-keycloak.md),
   [TOTP](sign-in/totp.md), and [closed networks](sign-in/closed-networks.md).
+- [Concepts](concepts/alert-groups.md): what an [Alert Group](concepts/alert-groups.md) is, how
+  [Routes and Group keys](concepts/routes-and-group-keys.md) group Alerts, the rules of
+  [Snapshots](concepts/snapshot-semantics.md), [Loud and Quiet](concepts/loud-and-quiet.md) messages, the
+  [statuses and commands](concepts/statuses-and-commands.md), and [Broken Destinations](concepts/broken-destinations.md).
 - [Runbooks](operations/runbooks/index.md): what each alert about Muster means and how to fix it.
 - [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values, the API
   and the Bridge protocol.

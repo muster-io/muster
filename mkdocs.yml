@@ -82,6 +82,7 @@ nav:
       - integrations/heartbeat.md
       - integrations/grafana.md
   - Messengers:
+      - messengers/index.md
       - messengers/mattermost.md
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
@@ -92,11 +93,19 @@ nav:
   - Outgoing webhooks:
       - outgoing-webhooks/events.md
       - outgoing-webhooks/templates.md
+      - outgoing-webhooks/recipes.md
   - Sign-in:
       - sign-in/index.md
       - sign-in/oidc-keycloak.md
       - sign-in/totp.md
       - sign-in/closed-networks.md
+  - Concepts:
+      - concepts/alert-groups.md
+      - concepts/routes-and-group-keys.md
+      - concepts/snapshot-semantics.md
+      - concepts/loud-and-quiet.md
+      - concepts/statuses-and-commands.md
+      - concepts/broken-destinations.md
   - Operations:
       - operations/request-log.md
       - Runbooks:
