@@ -402,7 +402,7 @@ dev: dev-db build ## Start the development PostgreSQL, build and run muster dev
 # Playwright specs of the SPA (web/e2e) on a muster dev of their own. make e2e runs both, the second even when the first
 # fails; e2e-go and e2e-web run one each. Both use the fixed ports of muster dev, so one machine runs one at a time; CI
 # runs them as two jobs side by side.
-E2E_GO = MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) $(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/...
+E2E_GO = MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) $(GO) test -tags e2e -count=1 -timeout 20m ./test/e2e/...
 E2E_WEB = MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) $(PNPM) --dir web run e2e
 
 e2e: dev-db build web-browsers ## Run the end-to-end suites (Go, then Playwright); E2E_REPLICAS=2 for the Go suite

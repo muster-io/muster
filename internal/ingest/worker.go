@@ -50,6 +50,8 @@ const (
 	laneRetries = 5
 	// maxBackoff bounds the wait after failed rounds.
 	maxBackoff = time.Minute
+	// claimTimeout bounds a claim of Integrations, which runs on past the end of ctx.
+	claimTimeout = 5 * time.Second
 	// releaseTimeout bounds the release of a lease at shutdown.
 	releaseTimeout = 5 * time.Second
 	// maxErrorLength bounds the processing_error that is stored.
@@ -275,11 +277,23 @@ func (p *Processor) claim(ctx context.Context, skip func(int64) bool, limit int)
 		IntegrationIds: ids}); err != nil {
 		return nil, fmt.Errorf("create the claim rows: %w", err)
 	}
-	claimed, err := p.store.ClaimIntegrations(ctx, p.lease, p.orgID, ids, int32(min(limit, len(ids), maxClaim)))
+	claimed, err := p.leaseIntegrations(ctx, ids, int32(min(limit, len(ids), maxClaim)))
 	if err != nil {
 		return nil, fmt.Errorf("claim the integrations: %w", err)
 	}
 	return claimed, nil
+}
+
+// leaseIntegrations leases at most limit of the Integrations ids, and none once ctx has ended. A claim that started
+// runs on for up to claimTimeout even when ctx ends meanwhile: an end of ctx that cuts off the answer of its commit
+// makes pgx return an error although the lease was taken, and nothing would release that lease before it ran out.
+func (p *Processor) leaseIntegrations(ctx context.Context, ids []int64, limit int32) ([]Claimed, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimTimeout)
+	defer cancel()
+	return p.store.ClaimIntegrations(ctx, p.lease, p.orgID, ids, limit)
 }
 
 // release frees the lease of an Integration that this replica holds.
