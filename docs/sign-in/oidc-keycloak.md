@@ -16,6 +16,8 @@ In the examples, Keycloak runs at `https://keycloak.example.org` with the realm 
 
 In the Keycloak admin console, open the realm, then **Clients → Create client**:
 
+<!-- tablecheck: allow the names fit; the long values are URLs to copy, longer than a phone line in any layout -->
+
 | Setting | Value |
 |---|---|
 | Client type | OpenID Connect |
@@ -75,6 +77,8 @@ background:
 ## 4. Configure Muster
 
 Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oidc-settings`:
+
+<!-- tablecheck: allow the names fit; the long values are URLs to copy, longer than a phone line in any layout -->
 
 | Setting | Value |
 |---|---|

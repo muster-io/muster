@@ -3,10 +3,15 @@
 Muster keeps all its state in PostgreSQL, and encrypts its secrets with the [master keys](key-rotation.md) from the
 environment. Neither the Helm chart nor the compose example backs up anything, so you back up two things, **separately**:
 
-| What | Holds | Without it |
-|---|---|---|
-| the database | Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted | everything is gone |
-| the master keys (`MUSTER_SECRET_KEYS`) | the keys that decrypt the Secrets and sign the buttons in messages | Muster refuses to start on the database, and its encrypted Secrets cannot be read |
+The database
+:   Holds Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted.
+
+    Without it, everything is gone.
+
+The master keys (`MUSTER_SECRET_KEYS`)
+:   Hold the keys that decrypt the Secrets and sign the buttons in messages.
+
+    Without them, Muster refuses to start on the database, and its encrypted Secrets cannot be read.
 
 ## Why they are kept apart
 
