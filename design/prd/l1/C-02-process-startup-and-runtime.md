@@ -77,7 +77,8 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
   gone replicas and of short-lived rows; the database gauges — the ingestion backlog, the open Alert Groups, and the
   pending deliveries with the Broken Destinations and active Storms; the retention of the Alerts view (C-06.FR-19), of
   Alert Groups (C-09.FR-16), of Thread replies and of outgoing webhook events; the Heartbeat lost check (C-07.FR-8) and
-  the Stale scan (C-06); Telegram polling (C-14) and Bridge polling (C-22.FR-11); the OIDC client secret expiry check
+  the Stale scan (C-06); Telegram polling (C-14), Bridge polling (C-22.FR-11) and the Socket Mode connections of
+  Slack (C-24.FR-9); the OIDC client secret expiry check
   that raises `MusterOIDCSecretExpiring` (C-19.FR-5); the outgoing heartbeat (C-19.FR-7); the re-render of open Root
   messages after a key rotation (C-20.FR-7); and the pruning of the Request log (C-23.FR-4). Nothing else runs only on
   the Leader. The Leader pings over the lock session every `leader.ping_interval` and stops all singleton work if no
@@ -125,7 +126,8 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
   code; the provider's error text is kept as a separate, untrusted field. Requests are counted in
   `muster_client_requests_total{client,outcome}` and `muster_client_request_duration_seconds{client,outcome}`. Secrets
   that travel in URLs are redacted from every log line and every returned error, including the URL inside Go's
-  `url.Error`.
+  `url.Error`. A WebSocket connection, such as Slack's Socket Mode (C-24.FR-9), is opened through the same package,
+  with the same address policy and the client's proxy.
 - **C-02.FR-21** The outbound package enforces the Organization's outbound address policy
   (`organization.outbound_policy`) on every address a name resolves to, inside the dialer, and connects only to an
   address that passed. **Standard** allows private addresses and blocks loopback unless an allowed network includes it;

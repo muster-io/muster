@@ -74,19 +74,21 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   template error, the Timeline records it and the Internal alert `MusterTemplateError` is raised; it resolves when the
   template renders again. A failing Link rule is left out of the message and counted.
 - **C-12.FR-7** Safe output: alert data is escaped for the Destination's markup (HTML in Telegram, Markdown in
-  Mattermost — implemented by the adapters, C-13.FR-8 and C-14.FR-13); `@` in alert data is neutralized with a
+  Mattermost, mrkdwn in Slack — implemented by the adapters, C-13.FR-8, C-14.FR-13 and C-24.FR-7); `@` in alert data
+  is neutralized with a
   zero-width space; links are `http(s)` only; label and annotation values are truncated to `message.value_cap`.
 - **C-12.FR-8** A Destination sets whom to mention for each kind of Loud event — new Alert Group, new Alerts, Reopen,
   ack timeout notice, Snooze ended and rise to Urgent, named `new_alert_group`, `new_alerts`, `reopen`, `ack_timeout`,
   `snooze_ended` and `rise_to_urgent` in the lifecycle event tables (C-09.FR-22): nobody (`destination.mentions`);
-  everyone in the chat (`@channel`, `@all` or `@here`, as the messenger supports); chosen Muster users, rendered
-  through their Account links; or messenger groups. What applies per Destination type: Mattermost offers all of them,
-  groups being Mattermost group names; Telegram has neither everyone in the chat nor groups, so a Telegram Destination
-  takes only nobody and chosen users and refuses the rest; an outgoing webhook takes every choice and receives it as
-  data (C-15.FR-11). Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner, a Reopen
-  into acknowledged only the Owner. In templates, `{{ mention "all" }}` and similar produce trusted tokens rendered for
-  the platform; a literal `@all` in a template's text is escaped. The settings form is part of the Destination form
-  (C-13.FR-9).
+  everyone in the chat (`@channel`, `@all` or `@here`, as the messenger supports); chosen Muster users, rendered through
+  their Account links; or messenger groups. What applies per Destination type: Mattermost offers all of them, groups
+  being Mattermost group names; Telegram has neither everyone in the chat nor groups, so a Telegram Destination takes
+  only nobody and chosen users and refuses the rest; Slack has `@channel` and `@here` but no `@all` and no groups Muster
+  could name with its scopes, so a Slack Destination takes nobody, those two and chosen users (C-24.FR-6); an outgoing
+  webhook takes every choice and receives it as data (C-15.FR-11). Reminders and auto-unacknowledge always mention the
+  Owner, Takeovers the previous Owner, a Reopen into acknowledged only the Owner. In templates, `{{ mention "all" }}`
+  and similar produce trusted tokens rendered for the platform; a literal `@all` in a template's text is escaped. The
+  settings form is part of the Destination form (C-13.FR-9).
 - **C-12.FR-9** Links: the Organization keeps Lookup tables (a key and one value per named column, edited in the UI). A
   Link rule has a name, a Matcher condition checked against the Alert Group's common labels (a label that only some of
   its Alerts carry counts as missing), a scope — the Alert Group, or each distinct value of a label among its Alerts —
@@ -101,9 +103,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
 - **C-12.FR-12** The footer shows a user by their messenger username, without `@`, when they have an Account link in
-  that messenger, otherwise by their Muster display name. A Mention of a user with an Account link uses the
-  messenger's own form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram —
-  and of a user without one the display name as text, which notifies nobody (checked in C-18.AC-7).
+  that messenger — through a Bridge or a Slack Connection by the link's display name (C-22.FR-16, C-24.FR-6) — otherwise
+  by their Muster display name. A Mention of a user with an Account link uses the messenger's own form — `@username` in
+  Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack — and of a user
+  without one the display name as text, which notifies nobody (checked in C-18.AC-7).
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 

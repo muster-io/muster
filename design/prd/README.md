@@ -19,7 +19,7 @@ Teams therefore put an on-call tool between Alertmanager and their messengers. F
 tool was Grafana OnCall. Its open-source edition was archived in March 2026; its successor, Grafana IRM, is not
 available as open-source software that a team can run inside its own network. Muster is an **open, self-hosted
 alternative to Grafana IRM**, licensed AGPL-3.0-only (ADR-0001), built for teams that run Prometheus-style monitoring
-and talk in Mattermost or Telegram — and want their alerting path to keep working inside a closed network.
+and talk in Mattermost, Telegram or Slack — and want their alerting path to keep working inside a closed network.
 
 Muster turns Alertmanager's notifications into **Alert Groups**: one problem with a number, a status and an Owner,
 shown as **one editable message** per messenger channel. People acknowledge, resolve and snooze it from the chat or the
@@ -50,10 +50,10 @@ Muster is built in four layers. Each layer is usable on its own and is the base 
 
 **L1 — Alert Groups in messengers.** Alertmanager webhooks with Snapshot semantics and a Heartbeat per Integration;
 user-built Routes and Group keys; the four-status Alert Group lifecycle with Reopen, Grace period, Snooze and visible
-reasons; a web UI to manage current and past Alert Groups; commands from the web UI, the API, Mattermost and Telegram;
-delivery as one reconciled Root message per Destination with Threads, Storm summaries and a fixed Loud/Quiet table,
-with Broken Destinations that recover to the current state; outgoing webhooks; ack timeouts and Reminders; local and
-OIDC sign-in, TOTP, Personal access tokens, Service accounts and an Audit log; Muster's own metrics, alert rules,
+reasons; a web UI to manage current and past Alert Groups; commands from the web UI, the API, Mattermost, Telegram and
+Slack; delivery as one reconciled Root message per Destination with Threads, Storm summaries and a fixed Loud/Quiet
+table, with Broken Destinations that recover to the current state; outgoing webhooks; ack timeouts and Reminders; local
+and OIDC sign-in, TOTP, Personal access tokens, Service accounts and an Audit log; Muster's own metrics, alert rules,
 Internal alerts and outgoing heartbeat. L1 is the first release. See [L1.md](L1.md).
 
 **L2 — On-call parity.** Schedules, rotations, escalations beyond the ack timeout and paging the person on call; the
@@ -74,8 +74,9 @@ with read-only tools — and the result is added to the message that has already
 Destinations, builds Routes, manages Users, sign-in and Organization settings, and watches Muster's own health. Holds
 the Admin Role. Often also an on-call responder.
 
-**On-call responder.** Works in Mattermost or Telegram. Acknowledges, resolves and snoozes Alert Groups from the chat,
-gets ack timeout notices and Reminders, opens the web UI for details, Notes and Unresolve. Holds the Responder Role.
+**On-call responder.** Works in Mattermost, Telegram or Slack. Acknowledges, resolves and snoozes Alert Groups from the
+chat, gets ack timeout notices and Reminders, opens the web UI for details, Notes and Unresolve. Holds the Responder
+Role.
 
 **Viewer.** Follows what is happening without acting on it — a team lead, a neighbouring team, a support engineer.
 Reads Alert Groups and their Timelines in the UI and sees messages in chats, but every command is refused. Holds the
@@ -91,14 +92,14 @@ code. Neither signs in to the UI or links messenger accounts.
 | Document | Content |
 |---|---|
 | [L1.md](L1.md) | The first release: scope, rollout stages, the capability map, conventions, non-functional requirements, what is out of scope and what is still open |
-| [l1/C-NN-….md](l1/) | One file per L1 capability `C-01`…`C-23`, with scenarios, functional requirements (`C-NN.FR-n`), UI, API surface, acceptance statements (`C-NN.AC-n`) and a suggested story split |
+| [l1/C-NN-….md](l1/) | One file per L1 capability `C-01`…`C-24`, with scenarios, functional requirements (`C-NN.FR-n`), UI, API surface, acceptance statements (`C-NN.AC-n`) and a suggested story split |
 | [l1/reference.md](l1/reference.md) | Tables shared by several capabilities: Loud and Quiet, buttons, banners, Roles and Permissions, Internal alerts, metrics, chart rules |
 | [l1/defaults.md](l1/defaults.md) | Every configurable value and built-in limit of L1, with its status: decided or provisional |
 | [L2.md](L2.md) | Scope of the on-call parity layer and the designs already kept for it, plus features waiting for operating experience |
 | [L3.md](L3.md) | Scope of the Incidents layer |
 | [L4.md](L4.md) | Scope of the AI layer: tiers, data sources, protocols, safety and cost controls |
 | [ADR index](../adr/README.md) | Architectural decisions with their context, consequences and rejected alternatives |
-| [Verified facts](../facts.md) | Behaviour of Telegram, Mattermost and Alertmanager checked on the real systems, each fact `F-NNN` with its date and method; requirements cite them |
+| [Verified facts](../facts.md) | Behaviour of Telegram, Mattermost, Slack, Alertmanager and Grafana checked on the real systems, each fact `F-NNN` with its date and method; requirements cite them |
 | [`CONTEXT.md`](../../CONTEXT.md) | The glossary; capitalized terms in these documents (Alert Group, Route, Destination, …) have exactly that meaning |
 
 Conventions:

@@ -160,8 +160,8 @@ A request from a person or automation to change an Alert Group, such as Acknowle
 _Avoid_: Operation
 
 **Transport**:
-The way a Command reaches Muster: the web UI, the API, Mattermost, Telegram or a Bridge, or Muster itself (`system`)
-for transitions it starts on its own.
+The way a Command reaches Muster: the web UI, the API, Mattermost, Telegram, Slack or a Bridge, or Muster itself
+(`system`) for transitions it starts on its own.
 _Avoid_: Channel
 
 **Text command**:
@@ -250,7 +250,8 @@ _Avoid_: Twin, Duplicate
 ### Delivery
 
 **Connection**:
-The credentials Muster uses to talk to one messenger: a bot on a Mattermost server, a Telegram bot, or a Bridge.
+The credentials Muster uses to talk to one messenger: a bot on a Mattermost server, a Telegram bot, the bot of a Slack
+app in one workspace, or a Bridge.
 _Avoid_: Notification integration, Provider, Bot (on its own)
 
 **Bridge**:
@@ -275,8 +276,14 @@ A Destination that sends Alert Group events, or requests built from templates, t
 A message sent to a Destination from its settings to check how it looks, without touching any Alert Group.
 
 **Signing secret**:
-The secret of one Outgoing webhook that Muster uses to sign every request it sends there.
+The secret of one Outgoing webhook that Muster uses to sign every request it sends there. It is not a Slack signing
+secret.
 _Avoid_: Webhook key, Token
+
+**Slack signing secret**:
+The secret of a Slack app with which Slack signs the button presses it sends to a Slack Connection's callback address;
+Muster checks the signature and never signs anything with it.
+_Avoid_: Signing secret (on its own)
 
 **Publication**:
 The first delivery of an Alert Group to a Destination, which creates its Root message.
@@ -369,7 +376,7 @@ _Avoid_: Binding, Pairing, Connection
 
 **Identity space**:
 The scope in which one messenger account means one person for Account links: all of Telegram, one Mattermost
-Connection, or one Bridge.
+Connection, one Slack Connection, or one Bridge.
 
 **Secret**:
 A setting Muster stores encrypted and never shows again once saved, such as a bot token or an outgoing webhook header.

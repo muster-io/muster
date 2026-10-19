@@ -14,14 +14,14 @@ part; this page joins them.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [NFR](#non-functional-requirements)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements)
 
 ## Summary
 
 | Capability | Phase | IDs | Stories | Contracts written | Complete |
 |---|---|---|---|---|---|
-| C-01 Project skeleton and releases | Foundation | 20 | S-001, S-002, S-003, S-004 | yes | 20 of 20 |
-| C-02 Process startup and runtime | Foundation | 36 | S-005, S-006, S-007, S-008, S-009 | yes | 36 of 36 |
+| C-01 Project skeleton and releases | Foundation | 20 | S-001, S-002, S-003, S-004, S-097 | yes | 20 of 20 |
+| C-02 Process startup and runtime | Foundation | 36 | S-005, S-006, S-007, S-008, S-009, S-098, S-101 | yes | 36 of 36 |
 | C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015, S-072 | yes | 58 of 58 |
 | C-04 API tokens | Foundation | 17 | S-016, S-017 | yes | 17 of 17 |
 | C-05 Integrations | Observation | 18 | S-018, S-019, S-096 | yes | 18 of 18 |
@@ -29,20 +29,21 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-07 Heartbeat | Observation | 12 | S-023, S-024 | yes | 12 of 12 |
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
 | C-09 Alert Group lifecycle | Observation | 51 | S-028, S-029, S-030, S-031, S-065, S-095 | yes | 51 of 51 |
-| C-10 Commands | Observation | 41 | S-032, S-063, S-033, S-092, S-093, S-094 | yes | 41 of 41 |
+| C-10 Commands | Observation | 41 | S-032, S-063, S-033, S-092, S-093, S-094, S-100 | yes | 41 of 41 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
-| C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082 | yes | 19 of 19 |
-| C-13 Mattermost | Shadow | 31 | S-039, S-061, S-040, S-064, S-087 | yes | 31 of 31 |
+| C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082, S-098, S-099, S-102 | yes | 19 of 19 |
+| C-13 Mattermost | Shadow | 31 | S-039, S-061, S-040, S-064, S-087, S-105, S-103 | yes | 31 of 31 |
 | C-14 Telegram | Shadow | 36 | S-041, S-042, S-066, S-067, S-043 | yes | 36 of 36 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
-| C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
+| C-16 Destination test | Shadow | 14 | S-047, S-048, S-099 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
-| C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
+| C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070, S-100, S-102 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 14 | S-055, S-071, S-056, S-072, S-092, S-094 | yes | 14 of 14 |
 | C-21 Documentation site and runbooks | Operations | 11 | S-057, S-058, S-060, S-091 | yes | 11 of 11 |
 | C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
-| C-23 Request log | Bridge | 13 | S-088, S-089, S-090 | yes | 13 of 13 |
+| C-23 Request log | Bridge | 13 | S-088, S-089, S-090, S-097, S-100, S-101 | yes | 13 of 13 |
+| C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
 
 ## C-01
 
@@ -62,7 +63,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-01.FR-10 | S-003 | complete |  |
 | C-01.FR-11 | S-002 (part), S-003 (part) | complete |  |
 | C-01.FR-12 | S-001 (part), S-005 (part), S-006 | complete |  |
-| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part), S-069 (part), S-073 (part) | complete | later capabilities extend their fake servers and the demo configuration; the fake bridge in S-073; re-verified with several Connections of one messenger in S-069 (D305) |
+| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part), S-069 (part), S-073 (part), S-097 (part) | complete | later capabilities extend their fake servers and the demo configuration; the fake bridge in S-073; re-verified with several Connections of one messenger in S-069 (D305); the fake Slack server in S-097 |
 | C-01.FR-14 | S-001, S-058 (part) | complete | the README demo animation is added after the frontend stories, with S-058 |
 | C-01.FR-15 | S-003 (part), S-004 (part) | complete |  |
 | C-01.AC-1 | S-001 (part), S-002 (part) | complete |  |
@@ -85,17 +86,17 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-02.FR-6 | S-006 | complete |  |
 | C-02.FR-7 | S-007 | complete |  |
 | C-02.FR-8 | S-007 | complete |  |
-| C-02.FR-10 | S-008 (part), S-023 (part), S-041 (part), S-053 (part) | complete | later Leader tasks join with S-023, S-041 and S-053 |
+| C-02.FR-10 | S-008 (part), S-023 (part), S-041 (part), S-053 (part), S-101 (part) | complete | later Leader tasks join with S-023, S-041 and S-053; Slack's Socket Mode connections in S-101 |
 | C-02.FR-11 | S-008 | complete |  |
 | C-02.FR-12 | S-008 (part), S-028 (part), S-049 (part) | complete | collapsed overdue timers and Timeline entries are C-09 and C-17 (S-028, S-049) |
 | C-02.FR-13 | S-008 | complete |  |
-| C-02.FR-14 | S-006 (part), S-008 (part), S-061 (part), S-041 (part), S-042 (part) | complete | Connection and Destination checks join with S-061, S-041 and S-042 |
+| C-02.FR-14 | S-006 (part), S-008 (part), S-061 (part), S-041 (part), S-042 (part), S-098 (part) | complete | Connection and Destination checks join with S-061, S-041 and S-042; Slack Connections and Destinations in S-098 |
 | C-02.FR-15 | S-006 (part), S-008 (part), S-011 (part), S-012 (part), S-021 (part), S-071 (part) | complete | the other subcommands come with S-011, S-012, S-021 and S-071 |
 | C-02.FR-16 | S-006 | complete |  |
 | C-02.FR-17 | S-005 | complete |  |
 | C-02.FR-18 | S-005 | complete |  |
 | C-02.FR-19 | S-005 (part), S-006 (part), S-008 (part), S-009 (part), S-010 (part) | complete |  |
-| C-02.FR-20 | S-009 | complete |  |
+| C-02.FR-20 | S-009, S-101 (part) | complete | WebSocket connections, for Slack's Socket Mode, in S-101 |
 | C-02.FR-21 | S-009, S-055 (part) | complete | editing the policy, effective at once, is S-055 |
 | C-02.FR-22 | S-009 (part), S-013 (part), S-015 (part) | complete |  |
 | C-02.FR-23 | S-007 | complete |  |
@@ -388,7 +389,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 |---|---|---|---|
 | C-10.FR-1 | S-032 (part), S-063 (part), S-033 | complete |  |
 | C-10.FR-2 | S-032 (part), S-033 | complete |  |
-| C-10.FR-3 | S-032, S-061 (part), S-067 (part) | complete | the messenger Transports are passed in by S-061 and S-067 |
+| C-10.FR-3 | S-032, S-061 (part), S-067 (part), S-100 (part) | complete | the messenger Transports are passed in by S-061 and S-067; the Transport `slack` in S-100 |
 | C-10.FR-4 | S-032 (part), S-033, S-049 (part) | complete | Reminders starting over for the new Owner are C-17 (S-049) |
 | C-10.FR-5 | S-032 | complete |  |
 | C-10.FR-6 | S-032 (part), S-063 (part), S-033, S-061 (part), S-042 (part), S-067 (part) | complete | the messenger durations come with S-061, and with S-042 (buttons) and S-067 (presses) |
@@ -482,12 +483,12 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-12.FR-4 | S-036 (part), S-037 (part), S-045 (part), S-049 (part) | complete | the ack timeout notice is rendered from S-049 on |
 | C-12.FR-5 | S-036 (part), S-038 (part) | complete |  |
 | C-12.FR-6 | S-036 (part), S-037 (part), S-038 (part) | complete |  |
-| C-12.FR-7 | S-036 (part), S-037 (part), S-061 (part), S-042 (part) | complete |  |
-| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-064 (part), S-042 (part), S-066 (part), S-044 (part), S-045 (part) | complete |  |
+| C-12.FR-7 | S-036 (part), S-037 (part), S-061 (part), S-042 (part), S-099 (part) | complete | mrkdwn for Slack in S-099 |
+| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-064 (part), S-042 (part), S-066 (part), S-044 (part), S-045 (part), S-098 (part) | complete | what a Slack Destination takes in S-098 |
 | C-12.FR-9 | S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-10 | S-036 | complete |  |
 | C-12.FR-11 | S-036 (part), S-061 (part), S-042 (part) | complete |  |
-| C-12.FR-12 | S-037, S-051 (part) | complete | checked with real Account links in C-18.AC-7 (S-051) |
+| C-12.FR-12 | S-037, S-051 (part), S-102 (part) | complete | checked with real Account links in C-18.AC-7 (S-051); Slack's Mention form and display names in S-102 |
 | C-12.FR-13 | S-036 (part), S-037 (part), S-045 (part) | complete |  |
 | C-12.AC-1 | S-036 (part), S-037 (part) | complete |  |
 | C-12.AC-2 | S-036 (part), S-038 (part) | complete |  |
@@ -515,7 +516,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.FR-11 | S-061 (part), S-064 (part), S-070 (part) | complete | the Internal-alerts suggestion picker's labels in S-070 (D309) |
 | C-13.FR-12 | S-061 (part), S-064 (part) | complete |  |
 | C-13.FR-13 | S-039 (part), S-040 (part), S-047 (part), S-048 (part) | complete |  |
-| C-13.FR-14 | S-087 | complete | added after the Bridge (D353): the check before saving of every Connection type |
+| C-13.FR-14 | S-087, S-105 (part), S-103 (part) | complete | added after the Bridge (D353): the check before saving of every Connection type; Slack, added with C-24 (D381): the operation in S-105, the forms in S-103 |
 | C-13.AC-1 | S-061 | complete |  |
 | C-13.AC-2 | S-061 | complete |  |
 | C-13.AC-3 | S-061 (part), S-064 (part) | complete |  |
@@ -617,7 +618,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 |---|---|---|---|
 | C-16.FR-1 | S-047 (part), S-048 (part) | complete |  |
 | C-16.FR-2 | S-047 (part), S-048 (part) | complete |  |
-| C-16.FR-3 | S-047 (part), S-048 (part) | complete |  |
+| C-16.FR-3 | S-047 (part), S-048 (part), S-099 (part) | complete | the test of a Slack Destination, which cannot press, in S-099 |
 | C-16.FR-4 | S-047 (part), S-048 (part) | complete |  |
 | C-16.FR-5 | S-047 | complete |  |
 | C-16.FR-6 | S-047 | complete | a scope rule: a test is one "create" request, nothing more |
@@ -666,11 +667,11 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-18.FR-1 | S-051 | complete |  |
 | C-18.FR-2 | S-051 (part), S-052 (part), S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); "Relink Telegram" in S-070 (D309) |
 | C-18.FR-3 | S-051 (part), S-052 (part) | complete |  |
-| C-18.FR-4 | S-051, S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); the Identity spaces explained in the profile in S-070 (D309) |
+| C-18.FR-4 | S-051, S-069 (part), S-070 (part), S-102 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); the Identity spaces explained in the profile in S-070 (D309); the Identity space of a Slack Connection in S-102 |
 | C-18.FR-5 | S-051 | complete |  |
 | C-18.FR-6 | S-051 (part), S-052 (part), S-070 (part) | complete | the user page's Telegram row in S-070 (D309) |
 | C-18.FR-7 | S-051 | complete |  |
-| C-18.FR-8 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-18.FR-8 | S-051, S-069 (part), S-100 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); Slack presses in S-100 |
 | C-18.FR-9 | S-051 | complete |  |
 | C-18.FR-10 | S-051 (part), S-052 (part), S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); the profile's Telegram row and the Mattermost hint in S-070 (D309) |
 | C-18.FR-11 | S-051 | complete |  |
@@ -808,9 +809,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-23.FR-1 | S-088 (part), S-089 (part) | complete | outbound requests in S-088; inbound ones and the checks before saving of new Connections in S-089 |
-| C-23.FR-2 | S-088 (part), S-089 (part) | complete | the kind and run of checks in S-089 |
-| C-23.FR-3 | S-088 (part), S-089 (part) | complete |  |
+| C-23.FR-1 | S-088 (part), S-089 (part), S-100 (part), S-101 (part) | complete | outbound requests in S-088; inbound ones and the checks before saving of new Connections in S-089; Slack's callback in S-100, Socket Mode envelopes in S-101 |
+| C-23.FR-2 | S-088 (part), S-089 (part), S-097 (part), S-100 (part) | complete | the kind and run of checks in S-089; Slack's Web API methods in S-097, `interactive` in S-100 |
+| C-23.FR-3 | S-088 (part), S-089 (part), S-100 (part), S-101 (part) | complete | Slack's secrets in S-100 and S-101 |
 | C-23.FR-4 | S-088 | complete |  |
 | C-23.FR-5 | S-088 (part), S-089 (part) | complete | the run filter and the run on check and test results in S-089 |
 | C-23.FR-6 | S-090 | complete |  |
@@ -821,6 +822,50 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-23.AC-4 | S-088 | complete |  |
 | C-23.AC-5 | S-088 (part), S-089 (part) | complete |  |
 | C-23.AC-6 | S-090 | complete |  |
+
+## C-24
+
+[Slack](../prd/l1/C-24-slack.md) · Slack · stories: S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-24.FR-1 | S-097 (part), S-103 (part) | complete |  |
+| C-24.FR-2 | S-097 (part), S-101 (part), S-105 (part), S-103 (part) | complete | the check before saving and its dry probe in S-105 |
+| C-24.FR-3 | S-098 (part), S-099 (part), S-103 (part) | complete |  |
+| C-24.FR-4 | S-099 | complete |  |
+| C-24.FR-5 | S-099 (part), S-100 (part) | complete |  |
+| C-24.FR-6 | S-098 (part), S-099 (part), S-102 (part) | complete |  |
+| C-24.FR-7 | S-099 (part), S-103 (part) | complete |  |
+| C-24.FR-8 | S-097 (part), S-099 (part) | complete |  |
+| C-24.FR-9 | S-100 (part), S-101 (part) | complete | HTTP in S-100, Socket Mode in S-101 |
+| C-24.FR-10 | S-100 | complete |  |
+| C-24.FR-11 | S-100 | complete |  |
+| C-24.FR-12 | S-102 (part), S-103 (part) | complete |  |
+| C-24.FR-13 | S-099 (part), S-100 (part), S-103 (part) | complete | the press on a test message in S-100, the panel's note in S-103 |
+| C-24.FR-14 | S-097 (part), S-099 (part), S-100 (part), S-101 (part) | complete |  |
+| C-24.FR-15 | S-099 | complete |  |
+| C-24.FR-16 | S-104 | complete |  |
+| C-24.FR-17 | S-100 (part), S-101 (part) | complete |  |
+| C-24.AC-1 | S-097 | complete |  |
+| C-24.AC-2 | S-105 (part), S-103 (part) | complete |  |
+| C-24.AC-3 | S-097 (part), S-098 (part), S-101 (part) | complete |  |
+| C-24.AC-4 | S-098 (part) | complete |  |
+| C-24.AC-5 | S-099 | complete |  |
+| C-24.AC-6 | S-099 | complete |  |
+| C-24.AC-7 | S-099 | complete |  |
+| C-24.AC-8 | S-099 | complete |  |
+| C-24.AC-9 | S-099 (part), S-103 (part) | complete |  |
+| C-24.AC-10 | S-101 | complete |  |
+| C-24.AC-11 | S-100 | complete |  |
+| C-24.AC-12 | S-100 | complete |  |
+| C-24.AC-13 | S-100 | complete |  |
+| C-24.AC-14 | S-102 | complete |  |
+| C-24.AC-15 | S-098 (part), S-099 (part), S-102 (part) | complete |  |
+| C-24.AC-16 | S-099 (part), S-100 (part), S-103 (part) | complete |  |
+| C-24.AC-17 | S-100 (part), S-101 (part) | complete |  |
+| C-24.AC-18 | S-103 | complete |  |
+| C-24.AC-19 | S-100 (part), S-101 (part) | complete | a person's press on the maintainer's test workspace: HTTP in S-100, Socket Mode in S-101 |
+| C-24.AC-20 | S-104 | complete |  |
 
 ## Non-functional requirements
 
@@ -834,13 +879,13 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
-| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075, S-087, S-088, S-089 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075); a stored token sent only to its saved address and a typed one only to the address typed with it, in the check before saving (S-087); secrets masked in the Request log (S-088, S-089) |
+| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075, S-087, S-088, S-089, S-097, S-100 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075); a stored token sent only to its saved address and a typed one only to the address typed with it, in the check before saving (S-087); secrets masked in the Request log (S-088, S-089); Slack's tokens sent only to Slack's fixed address (S-097); Slack's presses verified by their signature (S-100) |
 | NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |
 | NFR-10 Retention | S-008, S-029, S-055 | partitions dropped by retention (S-008); batched deletes of summary rows and details (S-029, with the other owners of unpartitioned tables); editing the periods (S-055) |
 | NFR-11 Upgrades | S-003, S-006, S-060 | semantic versions through release-please (S-003); expand/contract migrations and the refusal of a newer schema (S-006); the upgrade page (S-060) |
-| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073, S-096 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Grafana Alerting's webhook contact point (S-096); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073) |
+| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073, S-096, S-097 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Grafana Alerting's webhook contact point (S-096); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073); Slack through its Web API, with Socket Mode or HTTP (S-097) |
 | NFR-13 API | S-002, S-010, S-011 | spec-first generation (S-002); RFC 9457 errors with pointers, UTC and `public_id` in URLs (S-010); optimistic locking with `ETag` and `If-Match`, and cursor pagination without `OFFSET` (S-011) |
 | NFR-14 Quality | S-001, S-002, S-004, S-014 | the coverage gate (S-001); the nightly mutation report (S-002); end-to-end tests with fake servers (S-004) and a real browser (S-014); evidence for every acceptance statement in each pull request (section 7 of the [README](README.md#7-lifecycle)) |
 | NFR-15 Phone width | S-030 | the Alert Group list and page at 360 CSS pixels, checked end to end at that width |

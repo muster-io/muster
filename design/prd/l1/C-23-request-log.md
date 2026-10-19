@@ -34,19 +34,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   registration, Connection checks — of saved Connections and before saving (C-13.FR-14), marked as such — Destination
   checks and Broken probes, and event polling (Telegram `getUpdates`, Bridge `pollEvents`), except a long poll that
   ended without events. Inbound: Mattermost button presses (`callbacks/mattermost/{connection_id}`), Telegram updates in
-  the webhook mode (`callbacks/telegram/{connection_id}`) and pushed Bridge events (`callbacks/bridge/{connection_id}`),
-  each with Muster's answer, refused ones included — a bad signature, a wrong secret token, a Connection in the other
-  mode. A request whose path names no Connection, or a deleted one, is not recorded. Not recorded in L1: OIDC requests,
-  the outgoing heartbeat, and the requests of `muster doctor` and `muster bridge check`, which run outside the server.
+  the webhook mode (`callbacks/telegram/{connection_id}`), pushed Bridge events (`callbacks/bridge/{connection_id}`) and
+  Slack presses in the HTTP event mode (`callbacks/slack/{connection_id}`), each with Muster's answer, refused ones
+  included — a bad signature, a wrong secret token, a Connection in the other mode — and the envelopes a Slack
+  Connection receives over Socket Mode, each with Muster's confirmation (C-24.FR-14). A request whose path names no
+  Connection, or a deleted one, is not recorded. Not recorded in L1: OIDC requests, the outgoing heartbeat, and the
+  requests of `muster doctor` and `muster bridge check`, which run outside the server.
 - **C-23.FR-2** A record holds: the time; the direction, `outbound` or `inbound`; the operation as its protocol names it
   — the Bot API method for Telegram (`sendMessage`, `getUpdates`), the `operationId` of `api/bridge.yaml` for a bridge
   (`postMessage`, `pollEvents`), the operation of Mattermost's REST API in lower camel case (`createPost`, `patchPost`,
-  `getPing`), `event` or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`) for an
-  outgoing webhook, and `press`, `update` or `push` for inbound requests; the method and the URL; the request headers
-  and body; the answer's status, headers and body, none for a request that got no answer; the latency in milliseconds;
-  the path, direct or through the proxy; the attempt; when the request failed, its error class (the outcomes of the
-  outbound package: `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect`), its code (the codes of the
-  checks, such as `dns_failed` or `timeout`) and the masked error text; for a request of a check or a test, its kind —
+  `getPing`), the Web API method for Slack (`chat.postMessage`, `apps.connections.open`), `event` or the request of the
+  template mode (`create`, `update`, `open_thread`, `reply_in_thread`) for an outgoing webhook, and `press`, `update`,
+  `push` or `interactive` for inbound requests and Slack's envelopes; the method and the URL; the request headers and
+  body; the answer's status, headers and body, none for a request that got no answer; the latency in milliseconds; the
+  path, direct or through the proxy; the attempt; when the request failed, its error class (the outcomes of the outbound
+  package: `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect`), its code (the codes of the checks,
+  such as `dns_failed` or `timeout`) and the masked error text; for a request of a check or a test, its kind —
   `connection_check`, `draft_check` (a check before saving), `destination_check`, `test` or `probe` (the Broken probe) —
   and its check run, an id that the requests of one check or test share; and links — the Connection or the outgoing
   webhook Destination, and the Destination and the Alert Group when the request concerns one. A body longer than
@@ -54,14 +57,17 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   text, bytes that are not UTF-8 replaced.
 - **C-23.FR-3** Nothing secret is stored. The URL keeps no user information, and the path prefix of a base URL, which
   may be a secret, is shown as `[redacted]`, as in errors (ADR-0015). Every Secret a request carries — a bot token, also
-  inside a Telegram URL, a proxy password, an outgoing webhook's Secrets and Signing secret, a push secret, a secret in
-  a query — is replaced by `[redacted]` in the URL, the headers and both bodies; the values of `Authorization`,
-  `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token`, `webhook-signature` and of the
-  outgoing webhook's signature header are replaced whatever they hold; the signed action ids of buttons (ADR-0011),
-  which authenticate a Mattermost press, and the tokens and codes of Account links — `/start <token>` in a Telegram
-  update, the `token` of an `account_link` event, the code in a direct message — are replaced too. Masking happens
-  before the record is written: for outbound requests in the outbound package, which knows each request's Secrets, and
-  for inbound requests in one place shared by the three callbacks. The secret lint of ADR-0016 covers both (C-01.FR-6).
+  inside a Telegram URL, a proxy password, an outgoing webhook's Secrets and Signing secret, a push secret, a Slack
+  app-level token and Slack signing secret, a secret in a query — is replaced by `[redacted]` in the URL, the headers
+  and both bodies; the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
+  `X-Telegram-Bot-Api-Secret-Token`, `webhook-signature`, `X-Slack-Signature` and of the outgoing webhook's signature
+  header are replaced whatever they hold, and so are the `url` of a Socket Mode connection, with its one-time `ticket`,
+  and a Slack press's `response_url`; the signed action ids of buttons (ADR-0011), which authenticate a Mattermost press
+  and are the `value` of a Slack button or menu option, and the tokens and codes of Account links — `/start <token>` in
+  a Telegram update, the `token` of an `account_link` event, the code in a direct message — are replaced too. Masking
+  happens before the record is written: for outbound requests in the outbound package, which knows each request's
+  Secrets, and for inbound requests in one place shared by the callbacks and the Socket Mode connection. The secret lint
+  of ADR-0016 covers both (C-01.FR-6).
 - **C-23.FR-4** Muster keeps the newest `request_log.max_records` records of each Connection and of each outgoing
   webhook Destination, and as many of the checks before saving of new Connections per Organization, none older than
   `request_log.max_age`; a Leader task deletes the rest and is safe to run twice (ADR-0007), and reads never show a

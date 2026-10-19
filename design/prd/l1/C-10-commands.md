@@ -49,8 +49,8 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   on it" from a Service account); "not permitted". The API returns them as `Problem` documents with `409` for
   preconditions and `403` for permissions.
 - **C-10.FR-3** Every command passes through one dispatcher: permission → precondition → transition → Audit log →
-  Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`) is recorded; transitions
-  Muster starts itself use the Transport `system` and appear in the Timeline only (ADR-0016).
+  Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`) is recorded;
+  transitions Muster starts itself use the Transport `system` and appear in the Timeline only (ADR-0016).
 - **C-10.FR-4** A Takeover needs no confirmation: ownership moves to the new user, a Loud event names both users and
   mentions the previous Owner, Reminders start over for the new Owner (C-17), and the Audit log records it as a
   Takeover.
