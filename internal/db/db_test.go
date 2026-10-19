@@ -381,7 +381,7 @@ func TestIgnoresPGEnvironment(t *testing.T) {
 		{"TLS negotiation and SNI", []string{"PGSSLNEGOTIATION", "direct", "PGSSLSNI", "0"},
 			"postgres://muster@db.example.org:5432/muster?sslmode=require",
 			func(c *pgx.ConnConfig) bool {
-				return c.SSLNegotiation == "" && c.TLSConfig.ServerName == "db.example.org"
+				return c.SSLNegotiation == "" && c.TLSConfig != nil && c.TLSConfig.ServerName == "db.example.org"
 			}},
 		{"runtime parameters", []string{"PGOPTIONS", "-c search_path=evil", "PGTZ", "Antarctica/Troll"}, plain,
 			func(c *pgx.ConnConfig) bool {
