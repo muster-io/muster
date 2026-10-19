@@ -5553,9 +5553,9 @@ Details:
 - **Takeover.** Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
   is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
   button.
-- **Snooze.** The web UI and the API accept any future time, or no end, and the API also a [Snooze
-  preset](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets). The API makes you say which: a request names exactly one of `until`, `no_end` and
-  `preset`. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
+- **Snooze.** The web UI and the API accept any future time, a [Snooze preset](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets), or no end. The API
+  makes you say which: a request names exactly one of `until`, `no_end` and `preset`. A Snooze with no end asks you to
+  confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
   4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
   two Snooze presets; see [In messengers](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#in-messengers).
@@ -5625,6 +5625,16 @@ A `time_zone` without `preset` is refused with `422` `unsupported`, and a time z
 `GET /api/v1/snooze-presets`, with an optional `time_zone`, answers the end that each preset would set now and the time
 zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
 preset and the time zone beside the end. See the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+#### In the web UI
+
+The Snooze dialog of an Alert Group offers both presets after the Route's Snooze durations and before "Until" and "No
+end", also on a Route without durations; the bulk Snooze of the list, which has no durations, offers them first. Under
+each preset the dialog shows the end it would set now, such as "Ends Oct 20, 2026, 09:00": Muster computes it when the
+dialog opens, on its own clock and in your time zone (the one of your profile, else your browser's), and the dialog sends
+that time zone with the preset. Admins set the start of the working day and the first day of the week on Organization →
+General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
+in the Organization's while the profile follows the browser.
 
 #### In messengers
 

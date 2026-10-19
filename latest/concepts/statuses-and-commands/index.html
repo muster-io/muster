@@ -1385,6 +1385,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#in-messengers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2692,6 +2703,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#in-messengers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3001,9 +3023,9 @@ message or a Thread reply.</p>
 <li><strong>Takeover.</strong> Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
   is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
   button.</li>
-<li><strong>Snooze.</strong> The web UI and the API accept any future time, or no end, and the API also a <a href="#snooze-presets">Snooze
-  preset</a>. The API makes you say which: a request names exactly one of <code>until</code>, <code>no_end</code> and
-  <code>preset</code>. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
+<li><strong>Snooze.</strong> The web UI and the API accept any future time, a <a href="#snooze-presets">Snooze preset</a>, or no end. The API
+  makes you say which: a request names exactly one of <code>until</code>, <code>no_end</code> and <code>preset</code>. A Snooze with no end asks you to
+  confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's <strong>Snooze durations</strong> as separate buttons or a menu (<code>route.snooze_durations</code>: 1 hour,
   4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
   two Snooze presets; see <a href="#in-messengers">In messengers</a>.</li>
@@ -3096,6 +3118,14 @@ optional <code>time_zone</code>:</p>
 <code>GET /api/v1/snooze-presets</code>, with an optional <code>time_zone</code>, answers the end that each preset would set now and the time
 zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
 preset and the time zone beside the end. See the <a href="../../reference/api/">API reference</a>.</p>
+<h4 id="in-the-web-ui">In the web UI<a class="headerlink" href="#in-the-web-ui" title="Permanent link">&para;</a></h4>
+<p>The Snooze dialog of an Alert Group offers both presets after the Route's Snooze durations and before "Until" and "No
+end", also on a Route without durations; the bulk Snooze of the list, which has no durations, offers them first. Under
+each preset the dialog shows the end it would set now, such as "Ends Oct 20, 2026, 09:00": Muster computes it when the
+dialog opens, on its own clock and in your time zone (the one of your profile, else your browser's), and the dialog sends
+that time zone with the preset. Admins set the start of the working day and the first day of the week on Organization →
+General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
+in the Organization's while the profile follows the browser.</p>
 <h4 id="in-messengers">In messengers<a class="headerlink" href="#in-messengers" title="Permanent link">&para;</a></h4>
 <p>On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
 two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until Monday 09:00", or «До завтра 09:00» and
