@@ -2359,6 +2359,24 @@ func (e SnapshotState) Valid() bool {
 	}
 }
 
+// Defines values for SnoozePreset.
+const (
+	Tomorrow  SnoozePreset = "tomorrow"
+	WeekStart SnoozePreset = "week_start"
+)
+
+// Valid indicates whether the value is a known member of the SnoozePreset enum.
+func (e SnoozePreset) Valid() bool {
+	switch e {
+	case Tomorrow:
+		return true
+	case WeekStart:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SnoozeRequestNoEnd.
 const (
 	True SnoozeRequestNoEnd = true
@@ -3199,6 +3217,39 @@ func (e WebhookMentionTargetType) Valid() bool {
 	case WebhookMentionTargetTypeGroup:
 		return true
 	case WebhookMentionTargetTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Weekday.
+const (
+	Friday    Weekday = "friday"
+	Monday    Weekday = "monday"
+	Saturday  Weekday = "saturday"
+	Sunday    Weekday = "sunday"
+	Thursday  Weekday = "thursday"
+	Tuesday   Weekday = "tuesday"
+	Wednesday Weekday = "wednesday"
+)
+
+// Valid indicates whether the value is a known member of the Weekday enum.
+func (e Weekday) Valid() bool {
+	switch e {
+	case Friday:
+		return true
+	case Monday:
+		return true
+	case Saturday:
+		return true
+	case Sunday:
+		return true
+	case Thursday:
+		return true
+	case Tuesday:
+		return true
+	case Wednesday:
 		return true
 	default:
 		return false
@@ -5443,6 +5494,12 @@ type Organization struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart Weekday `json:"week_start"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart string `json:"workday_start"`
 }
 
 // OrganizationBase defines model for OrganizationBase.
@@ -5469,6 +5526,12 @@ type OrganizationBase struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart *Weekday `json:"week_start,omitempty"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart *string `json:"workday_start,omitempty"`
 }
 
 // OrganizationInput defines model for OrganizationInput.
@@ -5502,6 +5565,12 @@ type OrganizationInput struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart *Weekday `json:"week_start,omitempty"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart *string `json:"workday_start,omitempty"`
 }
 
 // OutboundPolicy defines model for OutboundPolicy.
@@ -6334,10 +6403,43 @@ type SigningSecretStatus struct {
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
 type SnapshotState string
 
-// SnoozeRequest Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.
+// SnoozePreset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+type SnoozePreset string
+
+// SnoozePresetEnd defines model for SnoozePresetEnd.
+type SnoozePresetEnd struct {
+	// Preset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+	Preset SnoozePreset `json:"preset"`
+
+	// Until The end a Snooze with this preset would set now.
+	Until time.Time `json:"until"`
+}
+
+// SnoozePresetList defines model for SnoozePresetList.
+type SnoozePresetList struct {
+	// Items One item per Snooze preset, in the order `tomorrow`, `week_start`.
+	Items []SnoozePresetEnd `json:"items"`
+
+	// TimeZone The IANA time zone of the ends — the request's, else the caller's profile time zone, else the Organization's.
+	TimeZone string `json:"time_zone"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart Weekday `json:"week_start"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start`.
+	WorkdayStart string `json:"workday_start"`
+}
+
+// SnoozeRequest Exactly one of `until`, `no_end` and `preset`; none or more than one is `422` `one_of_required`, and a past `until` is `422` `out_of_range` at `/until`. A Snooze with no end is chosen explicitly, never by leaving a field out; the UI shows a warning before sending `no_end`. `time_zone` goes only with `preset`, so a `time_zone` without `preset` is `422` `unsupported` at `/time_zone`, and a time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/time_zone`. Without `time_zone` the end of a preset is computed in the profile time zone of the User the caller acts as, else in the Organization's. In `runBulkCommand` the pointers start with `/snooze`.
 type SnoozeRequest struct {
 	// NoEnd Snooze until someone unsnoozes it.
 	NoEnd *SnoozeRequestNoEnd `json:"no_end,omitempty"`
+
+	// Preset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+	Preset *SnoozePreset `json:"preset,omitempty"`
+
+	// TimeZone IANA time zone in which the end of `preset` is computed; only with `preset`.
+	TimeZone *string `json:"time_zone,omitempty"`
 
 	// Until A future time.
 	Until *time.Time `json:"until,omitempty"`
@@ -7294,6 +7396,9 @@ type WebhookUser struct {
 	Name  string   `json:"name"`
 }
 
+// Weekday A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+type Weekday string
+
 // AccountLinkId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type AccountLinkId = PublicId
 
@@ -7964,6 +8069,12 @@ type CompleteOidcSignInParams struct {
 type StartOidcSignInParams struct {
 	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
+}
+
+// ListSnoozePresetsParams defines parameters for ListSnoozePresets.
+type ListSnoozePresetsParams struct {
+	// TimeZone IANA time zone of the ends; defaults to the caller's profile time zone, else the Organization's.
+	TimeZone *string `form:"time_zone,omitempty" json:"time_zone,omitempty"`
 }
 
 // ListStoredSnapshotsParams defines parameters for ListStoredSnapshots.
@@ -10087,7 +10198,7 @@ type ClientInterface interface {
 
 	// RunBulkCommandWithBody Run a Command on several Alert Groups
 	//
-	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10096,7 +10207,7 @@ type ClientInterface interface {
 
 	// RunBulkCommand Run a Command on several Alert Groups
 	//
-	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -10179,7 +10290,7 @@ type ClientInterface interface {
 
 	// SnoozeAlertGroupWithBody Snooze
 	//
-	// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+	// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10188,7 +10299,7 @@ type ClientInterface interface {
 
 	// SnoozeAlertGroup Snooze
 	//
-	// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+	// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11148,7 +11259,7 @@ type ClientInterface interface {
 
 	// UpdateOrganizationWithBody Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -11157,7 +11268,7 @@ type ClientInterface interface {
 
 	// UpdateOrganization Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11527,6 +11638,13 @@ type ClientInterface interface {
 	// Corresponds with GET /sign-in-options (the `GetSignInOptions` operationId).
 	GetSignInOptions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListSnoozePresets List the ends of the Snooze presets
+	//
+	// The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+	//
+	// Corresponds with GET /snooze-presets (the `ListSnoozePresets` operationId).
+	ListSnoozePresets(ctx context.Context, params *ListSnoozePresetsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListStoredSnapshots List Stored Snapshots
 	//
 	// Kept for `retention.stored_snapshots`. Replay is the CLI command `muster ingest replay`.
@@ -11730,7 +11848,7 @@ func (c *Client) ListAlertGroups(ctx context.Context, params *ListAlertGroupsPar
 
 // RunBulkCommandWithBody Run a Command on several Alert Groups
 //
-// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11749,7 +11867,7 @@ func (c *Client) RunBulkCommandWithBody(ctx context.Context, contentType string,
 
 // RunBulkCommand Run a Command on several Alert Groups
 //
-// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -11942,7 +12060,7 @@ func (c *Client) ResolveAlertGroup(ctx context.Context, alertGroupId AlertGroupI
 
 // SnoozeAlertGroupWithBody Snooze
 //
-// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11961,7 +12079,7 @@ func (c *Client) SnoozeAlertGroupWithBody(ctx context.Context, alertGroupId Aler
 
 // SnoozeAlertGroup Snooze
 //
-// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -14141,7 +14259,7 @@ func (c *Client) GetOrganization(ctx context.Context, reqEditors ...RequestEdito
 
 // UpdateOrganizationWithBody Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes any type of body and a specified content type.
 //
@@ -14160,7 +14278,7 @@ func (c *Client) UpdateOrganizationWithBody(ctx context.Context, params *UpdateO
 
 // UpdateOrganization Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -15000,6 +15118,23 @@ func (c *Client) StartOidcSignIn(ctx context.Context, params *StartOidcSignInPar
 // Corresponds with GET /sign-in-options (the `GetSignInOptions` operationId).
 func (c *Client) GetSignInOptions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSignInOptionsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListSnoozePresets List the ends of the Snooze presets
+//
+// The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+//
+// Corresponds with GET /snooze-presets (the `ListSnoozePresets` operationId).
+func (c *Client) ListSnoozePresets(ctx context.Context, params *ListSnoozePresetsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSnoozePresetsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -22057,6 +22192,60 @@ func NewGetSignInOptionsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListSnoozePresetsRequest constructs an http.Request for the ListSnoozePresets method
+func NewListSnoozePresetsRequest(server string, params *ListSnoozePresetsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/snooze-presets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.TimeZone != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "time_zone", *params.TimeZone, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListStoredSnapshotsRequest constructs an http.Request for the ListStoredSnapshots method
 func NewListStoredSnapshotsRequest(server string, params *ListStoredSnapshotsParams) (*http.Request, error) {
 	var err error
@@ -22988,7 +23177,7 @@ type ClientWithResponsesInterface interface {
 
 	// RunBulkCommandWithBodyWithResponse Run a Command on several Alert Groups
 	//
-	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -22997,7 +23186,7 @@ type ClientWithResponsesInterface interface {
 
 	// RunBulkCommandWithResponse Run a Command on several Alert Groups
 	//
-	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+	// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23092,7 +23281,7 @@ type ClientWithResponsesInterface interface {
 
 	// SnoozeAlertGroupWithBodyWithResponse Snooze
 	//
-	// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+	// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23101,7 +23290,7 @@ type ClientWithResponsesInterface interface {
 
 	// SnoozeAlertGroupWithResponse Snooze
 	//
-	// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+	// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -24167,7 +24356,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateOrganizationWithBodyWithResponse Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -24176,7 +24365,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateOrganizationWithResponse Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -24595,6 +24784,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /sign-in-options (the `GetSignInOptions` operationId).
 	GetSignInOptionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSignInOptionsResponse, error)
+
+	// ListSnoozePresetsWithResponse List the ends of the Snooze presets
+	//
+	// The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /snooze-presets (the `ListSnoozePresets` operationId).
+	ListSnoozePresetsWithResponse(ctx context.Context, params *ListSnoozePresetsParams, reqEditors ...RequestEditorFn) (*ListSnoozePresetsResponse, error)
 
 	// ListStoredSnapshotsWithResponse List Stored Snapshots
 	//
@@ -36112,6 +36310,82 @@ func (r GetSignInOptionsResponse) ContentType() string {
 	return ""
 }
 
+// ListSnoozePresetsResponse429Headers the declared response headers of an HTTP 429 response for ListSnoozePresets
+type ListSnoozePresetsResponse429Headers struct {
+	RetryAfter *int
+}
+
+type ListSnoozePresetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SnoozePresetList
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ListSnoozePresetsResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListSnoozePresetsResponse) GetJSON200() *SnoozePresetList {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListSnoozePresetsResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ListSnoozePresetsResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r ListSnoozePresetsResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ListSnoozePresetsResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r ListSnoozePresetsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSnoozePresetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSnoozePresetsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSnoozePresetsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListStoredSnapshotsResponse429Headers the declared response headers of an HTTP 429 response for ListStoredSnapshots
 type ListStoredSnapshotsResponse429Headers struct {
 	RetryAfter *int
@@ -37612,7 +37886,7 @@ func (c *ClientWithResponses) ListAlertGroupsWithResponse(ctx context.Context, p
 
 // RunBulkCommandWithBodyWithResponse Run a Command on several Alert Groups
 //
-// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -37627,7 +37901,7 @@ func (c *ClientWithResponses) RunBulkCommandWithBodyWithResponse(ctx context.Con
 
 // RunBulkCommandWithResponse Run a Command on several Alert Groups
 //
-// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+// Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -37788,7 +38062,7 @@ func (c *ClientWithResponses) ResolveAlertGroupWithResponse(ctx context.Context,
 
 // SnoozeAlertGroupWithBodyWithResponse Snooze
 //
-// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -37803,7 +38077,7 @@ func (c *ClientWithResponses) SnoozeAlertGroupWithBodyWithResponse(ctx context.C
 
 // SnoozeAlertGroupWithResponse Snooze
 //
-// A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+// A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -39601,7 +39875,7 @@ func (c *ClientWithResponses) GetOrganizationWithResponse(ctx context.Context, r
 
 // UpdateOrganizationWithBodyWithResponse Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -39616,7 +39890,7 @@ func (c *ClientWithResponses) UpdateOrganizationWithBodyWithResponse(ctx context
 
 // UpdateOrganizationWithResponse Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -40322,6 +40596,21 @@ func (c *ClientWithResponses) GetSignInOptionsWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseGetSignInOptionsResponse(rsp)
+}
+
+// ListSnoozePresetsWithResponse List the ends of the Snooze presets
+//
+// The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /snooze-presets (the `ListSnoozePresets` operationId).
+func (c *ClientWithResponses) ListSnoozePresetsWithResponse(ctx context.Context, params *ListSnoozePresetsParams, reqEditors ...RequestEditorFn) (*ListSnoozePresetsResponse, error) {
+	rsp, err := c.ListSnoozePresets(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSnoozePresetsResponse(rsp)
 }
 
 // ListStoredSnapshotsWithResponse List Stored Snapshots
@@ -50926,6 +51215,73 @@ func ParseGetSignInOptionsResponse(rsp *http.Response) (*GetSignInOptionsRespons
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetSignInOptionsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseListSnoozePresetsResponse parses an HTTP response from a ListSnoozePresetsWithResponse call
+func ParseListSnoozePresetsResponse(rsp *http.Response) (*ListSnoozePresetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSnoozePresetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SnoozePresetList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers ListSnoozePresetsResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

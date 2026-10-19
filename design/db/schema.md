@@ -29,7 +29,9 @@
   [`0013_request_log`](../../internal/db/migrations/0013_request_log.up.sql)
   (the Request log, S-088) and
   [`0014_alerts_org_last_seen_index`](../../internal/db/migrations/0014_alerts_org_last_seen_index.up.sql)
-  (`alerts_org_last_seen_idx` for the values seen of the severity label), in
+  (`alerts_org_last_seen_idx` for the values seen of the severity label) and
+  [`0015_snooze_presets`](../../internal/db/migrations/0015_snooze_presets.up.sql)
+  (`organizations.workday_start` and `organizations.week_start` for the Snooze presets, S-092), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -525,6 +527,8 @@ erDiagram
     organizations {
         bigint id PK
         text time_zone
+        text workday_start
+        text week_start
         jsonb severity_mapping
         text_array instance_labels
         bigint retention_alert_details_days
@@ -600,15 +604,20 @@ Serves C-02, C-03.FR-2, C-20.FR-6–7; [ADR-0007](../adr/0007-active-replicas-wi
 
 ### 4.2 Organization
 
-Serves C-02.FR-21–23, C-03.FR-20, C-19.FR-7, C-20; [ADR-0003](../adr/0003-route-first-then-group-by-label-list.md),
+Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../adr/0003-route-first-then-group-by-label-list.md),
 [ADR-0015](../adr/0015-outbound-http-and-ssrf-policy.md).
 
-- **`organizations`** — the `organization` resource: time zone, Severity levels (`severity_label`, `severity_mapping`,
+- **`organizations`** — the `organization` resource: time zone, the start of the working day and the first day of the
+  week at which the Snooze presets end (`workday_start`, `HH:MM` on the 24-hour clock, and `week_start`, `monday` to
+  `sunday`; migration 0015, C-20.FR-9, C-10.FR-17), Severity levels (`severity_label`, `severity_mapping`,
   `severity_styles` as JSON arrays), "critical is Urgent", Instance labels, the four retention periods in days, the TOTP
   policy, the token grace for OIDC accounts (`auth.oidc_token_grace`) and the outgoing heartbeat (URL as a Secret, its
-  proxy, and the last result for System status). Invariant:
+  proxy, and the last result for System status). Invariants:
   `retention_alert_group_summaries_days >= retention_alert_details_days`, because details always go before the summary
-  rows they belong to; the API refuses the opposite with `422` (`retention_order`) before it reaches the database.
+  rows they belong to; the API refuses the opposite with `422` (`retention_order`) before it reaches the database. A
+  `CHECK` keeps `workday_start` a valid time of day and `week_start` a day of the week; the defaults of migration 0015,
+  `09:00` and `monday`, gave the Organization that existed before it its values, and the start-up step sets both for a
+  new one. A Snooze stores its end as an instant, so a later change of either never moves one already set.
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.

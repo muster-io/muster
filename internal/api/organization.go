@@ -30,8 +30,9 @@ func (s *Server) GetOrganization(ctx context.Context, _ gen.GetOrganizationReque
 }
 
 // UpdateOrganization is updateOrganization with If-Match: it changes every setting of the Organization (C-20.FR-1,
-// FR-8, C-04.FR-8), the TOTP policy (C-03.FR-20) and the outgoing heartbeat, its write-only URL (null clears it) and its
-// proxy (C-19.FR-7); an invalid field is 422 at its full JSON pointer.
+// FR-8, C-04.FR-8), the start of the working day and the first day of the week, kept when omitted (C-20.FR-9), the TOTP
+// policy (C-03.FR-20) and the outgoing heartbeat, its write-only URL (null clears it) and its proxy (C-19.FR-7); an
+// invalid field is 422 at its full JSON pointer.
 func (s *Server) UpdateOrganization(ctx context.Context, req gen.UpdateOrganizationRequestObject) (
 	gen.UpdateOrganizationResponseObject, error) {
 	r, err := requester(ctx)
@@ -73,8 +74,9 @@ func (s *Server) GetKeyring(ctx context.Context, _ gen.GetKeyringRequestObject) 
 func organizationOf(o organization.Organization) gen.Organization {
 	tag := etag(o.Version)
 	out := gen.Organization{
-		Id: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel,
-		CriticalIsUrgent: o.CriticalIsUrgent, InstanceLabels: o.InstanceLabels,
+		Id: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart,
+		WeekStart: gen.Weekday(o.WeekStart), SeverityLabel: o.SeverityLabel, CriticalIsUrgent: o.CriticalIsUrgent,
+		InstanceLabels:  o.InstanceLabels,
 		SeverityMapping: make([]gen.SeverityMappingEntry, 0, len(o.SeverityMapping)),
 		SeverityStyles:  make([]gen.SeverityLevelStyle, 0, len(o.SeverityStyles)),
 		Retention: gen.RetentionSettings{
@@ -124,8 +126,9 @@ func secretStatusOf(st organization.SecretState) gen.SecretStatus {
 // inputOf is an update of the organization resource as internal/organization takes it.
 func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 	in := organization.Input{
-		Name: b.Name, TimeZone: b.TimeZone, SeverityLabel: b.SeverityLabel, CriticalIsUrgent: b.CriticalIsUrgent,
-		InstanceLabels: b.InstanceLabels, TOTPRequired: organization.TOTPPolicy(b.TotpRequired),
+		Name: b.Name, TimeZone: b.TimeZone, WorkdayStart: b.WorkdayStart, SeverityLabel: b.SeverityLabel,
+		CriticalIsUrgent: b.CriticalIsUrgent, InstanceLabels: b.InstanceLabels,
+		TOTPRequired:          organization.TOTPPolicy(b.TotpRequired),
 		OIDCTokenGraceSeconds: int64(b.OidcTokenGraceSeconds),
 		Retention: organization.Retention{
 			StoredSnapshotsDays: int64(b.Retention.StoredSnapshotsDays), AlertDetailsDays: int64(b.Retention.AlertDetailsDays),
@@ -133,6 +136,10 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 			AuditLogDays:            int64(b.Retention.AuditLogDays),
 		},
 		HeartbeatURL: secretInputOf(b.OutgoingHeartbeat.Url),
+	}
+	if b.WeekStart != nil {
+		w := string(*b.WeekStart)
+		in.WeekStart = &w
 	}
 	if in.InstanceLabels == nil {
 		in.InstanceLabels = []string{}

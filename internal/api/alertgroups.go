@@ -21,8 +21,8 @@ import (
 )
 
 // AlertGroups is what the API needs of internal/groups: the list with its counts, one Alert Group, its Alerts, its
-// Timeline, its Notes and its related Alert Groups, the statistics, the open count of Integrations, and the move of a Route's
-// open Alert Groups to the Default route.
+// Timeline, its Notes and its related Alert Groups, the statistics, the open count of Integrations, the move of a Route's
+// open Alert Groups to the Default route, and the ends of the Snooze presets.
 type AlertGroups interface {
 	List(ctx context.Context, r groups.ListRequest) (groups.ListPage, error)
 	Counts(ctx context.Context, f groups.Filter) (groups.Counts, error)
@@ -34,6 +34,7 @@ type AlertGroups interface {
 	Statistics(ctx context.Context, r groups.StatisticsRequest) (groups.Statistics, error)
 	OpenCounts(ctx context.Context, integrations []string) (map[string]int64, error)
 	MoveOpenAlertGroups(ctx context.Context, r groups.Requester, routeID string) (int, error)
+	SnoozePresets(ctx context.Context, c groups.Caller, timeZone string) (groups.PresetList, error)
 }
 
 // permissionAlertGroupsRead reads Alert Groups; the live-update hints about them go only to those who hold it.
@@ -256,6 +257,30 @@ func (s *Server) GetAlertGroupStatistics(ctx context.Context, req gen.GetAlertGr
 		out.Items = append(out.Items, item)
 	}
 	return gen.GetAlertGroupStatistics200JSONResponse(out), nil
+}
+
+// ListSnoozePresets is listSnoozePresets (C-10.FR-18): the end of each Snooze preset now, in the time zone of the
+// request or the caller's, which the answer names; an unknown time zone is invalid_format at /query/time_zone.
+func (s *Server) ListSnoozePresets(ctx context.Context, req gen.ListSnoozePresetsRequestObject) (
+	gen.ListSnoozePresetsResponseObject, error) {
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var zone string
+	if req.Params.TimeZone != nil {
+		zone = *req.Params.TimeZone
+	}
+	l, err := s.alertGroups.SnoozePresets(ctx, c, zone)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.SnoozePresetList{TimeZone: l.TimeZone, WorkdayStart: l.WorkdayStart, WeekStart: gen.Weekday(l.WeekStart),
+		Items: make([]gen.SnoozePresetEnd, 0, len(l.Ends))}
+	for _, e := range l.Ends {
+		out.Items = append(out.Items, gen.SnoozePresetEnd{Preset: gen.SnoozePreset(e.Preset), Until: e.Until})
+	}
+	return gen.ListSnoozePresets200JSONResponse(out), nil
 }
 
 // durationStatsOf is the API form of durations: median and 95th percentile are null without any.

@@ -168,3 +168,66 @@ func TestBulkRequest(t *testing.T) {
 		t.Errorf("a failing item = %v", err)
 	}
 }
+
+// TestBulkSnoozePreset is C-10.FR-18 and C-10.AC-22 for a bulk Snooze: the check of the Snooze at /snooze, and the end
+// of a preset computed once before the first Alert Group, so that every Alert Group gets the same end even when the
+// business clock passes the start of the working day in between; each has its own Audit log entry naming the preset.
+func TestBulkSnoozePreset(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	a, b := h.firing(t, "a"), h.firing(t, "b")
+	ids := []string{a.PublicID, b.PublicID}
+	future := h.clock.Now().Add(time.Hour)
+	for _, c := range []struct {
+		end  SnoozeEnd
+		want string
+	}{
+		{SnoozeEnd{Preset: PresetTomorrow, Until: &future}, "/snooze one_of_required"},
+		{SnoozeEnd{Until: &future, TimeZone: ptr("UTC")}, "/snooze/time_zone unsupported"},
+		{SnoozeEnd{Preset: PresetWeekStart, TimeZone: ptr("Mars/Base")}, "/snooze/time_zone invalid_format"},
+	} {
+		if _, err := h.svc.Bulk(t.Context(), alice, BulkRequest{Command: CommandSnooze, IDs: ids,
+			Snooze: &c.end}); code(err) != c.want {
+			t.Errorf("%+v = %v, want %s", c.end, err, c.want)
+		}
+	}
+	h.db.fail["GetListSettings"] = errBoom
+	locks := h.db.calls["LockGroups"]
+	if _, err := h.svc.Bulk(t.Context(), alice, BulkRequest{Command: CommandSnooze, IDs: ids,
+		Snooze: &SnoozeEnd{Preset: PresetTomorrow}}); !errors.Is(err, errBoom) || h.db.calls["LockGroups"] != locks {
+		t.Errorf("settings failing = %v", err)
+	}
+	delete(h.db.fail, "GetListSettings")
+	// One second before 09:00 UTC; the clock passes 09:00 while the first Alert Group is locked.
+	h.clock.Set(time.Date(2026, 10, 8, 8, 59, 59, 0, time.UTC))
+	h.db.before["LockGroups"] = func() { h.clock.Advance(2 * time.Second) }
+	end := &SnoozeEnd{Preset: PresetTomorrow, TimeZone: ptr("UTC")}
+	audits, reads := len(h.db.audit), h.db.calls["GetListSettings"]
+	items, err := h.svc.Bulk(t.Context(), bobToken, BulkRequest{Command: CommandSnooze, IDs: ids, Snooze: end})
+	want := ts(time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC))
+	if err != nil || strings.Join(outcomes(items), "|") != "done  |done  " || a.SnoozeUntil != want ||
+		b.SnoozeUntil != want {
+		t.Fatalf("bulk snooze = %v %+v, ends %v %v", err, items, a.SnoozeUntil, b.SnoozeUntil)
+	}
+	if _, pending := h.db.before["LockGroups"]; pending || !h.clock.Now().After(want.Time) {
+		t.Error("the clock did not pass 09:00 during the bulk Snooze")
+	}
+	if n := h.db.calls["GetListSettings"] - reads; n != 1 || end.Until != nil {
+		t.Errorf("%d reads of the settings, the request's end %v", n, end.Until)
+	}
+	if n := len(h.db.audit) - audits; n != 2 {
+		t.Fatalf("%d audit entries", n)
+	}
+	for _, e := range h.db.audit[audits:] {
+		if string(e.Details) != `{"no_end":false,"preset":"tomorrow","time_zone":"UTC","until":"2026-10-08T09:00:00Z"}` {
+			t.Errorf("details %s", e.Details)
+		}
+	}
+	// The week starts on the first day of the week of the Organization, in the caller's profile time zone.
+	h.db.zones[bobID] = "Asia/Tokyo"
+	if _, err := h.svc.Bulk(t.Context(), bobToken, BulkRequest{Command: CommandSnooze, IDs: ids,
+		Snooze: &SnoozeEnd{Preset: PresetWeekStart}}); err != nil || a.SnoozeUntil != b.SnoozeUntil ||
+		a.SnoozeUntil != ts(time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("week_start = %v %v %v", err, a.SnoozeUntil, b.SnoozeUntil)
+	}
+}

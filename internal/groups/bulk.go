@@ -46,8 +46,9 @@ type BulkItem struct {
 }
 
 // Bulk runs a bulk command (C-10.FR-14): the caller needs the Permission of the command, checked once before the
-// arguments and any Alert Group; then each Alert Group, in the order of the request, goes through the dispatcher in
-// a transaction of its own, with its own Audit log and Timeline entries, and a refusal of one never stops the others. A bulk Acknowledge
+// arguments and any Alert Group; the end of a Snooze preset is computed once, so every Alert Group gets the same end
+// (C-10.FR-18); then each Alert Group, in the order of the request, goes through the dispatcher in a transaction of its
+// own, with its own Audit log and Timeline entries, and a refusal of one never stops the others. A bulk Acknowledge
 // skips an Alert Group another user owns, so it never makes a Takeover; an id that names no Alert Group fails with
 // not found.
 func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem, error) {
@@ -80,6 +81,10 @@ func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem
 	case CommandAcknowledge, CommandUnacknowledge, CommandUnresolve, CommandUnsnooze, CommandStillOnIt, CommandAddNote:
 	}
 	if err := a.check("/snooze", s.clock.Now()); err != nil {
+		return nil, err
+	}
+	var err error
+	if a.end, err = s.resolveEnd(ctx, c, a.end); err != nil {
 		return nil, err
 	}
 	out := make([]BulkItem, 0, len(r.IDs))

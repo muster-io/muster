@@ -10,12 +10,15 @@ files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0015_snooze_presets.up.sql
   - internal/db/migrations/0015_snooze_presets.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
   - design/db/schema.md
   - internal/organization/organization.go
   - internal/organization/settings.go
   - internal/organization/defaults.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
+  - internal/organization/heartbeat_integration_test.go
   - internal/api/organization.go
   - internal/api/organization_test.go
   - internal/groups/snoozepreset.go
@@ -25,10 +28,14 @@ files_touched:
   - internal/groups/bulk.go
   - internal/groups/bulk_test.go
   - internal/groups/query.sql
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/list_test.go
   - internal/api/commands.go
   - internal/api/commands_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
+  - internal/api/server.go
   - test/e2e/snooze_presets_test.go
   - docs/concepts/statuses-and-commands.md
 acceptance:
@@ -169,7 +176,7 @@ curl -s "${A[@]}" "$API/snooze-presets?time_zone=UTC" | WHEN
 ORG '.workday_start = "09:00" | .week_start = "monday"' > /dev/null
 
 # four firing Alert Groups; bob's profile time zone
-curl -s "${HB[@]}" -X PUT $API/me -d '{"name":"bob","time_zone":"Asia/Tokyo"}' | jq -r .time_zone   # Asia/Tokyo
+curl -s "${HB[@]}" -X PUT $API/me -d '{"name":"bob","time_zone":"Asia/Tokyo"}' | jq -r .user.time_zone   # Asia/Tokyo
 curl -s -X PUT $FAM/groups/s1 -d '{"receiver":"cmd","route":"{}","labels":{"alertname":"Nightly"}}' > /dev/null
 for c in a b c d; do PUTA s1 $c "{\"labels\":{\"team\":\"ops\",\"cluster\":\"$c\"}}"; done
 NOTIFY s1 '{"reason":"first notification"}'
@@ -216,7 +223,7 @@ AT 32460                                                                        
 GET $GC | jq -c '{status, owner}'                                                          # {"status":"firing","owner":null}
 curl -s "${A[@]}" "$API/alert-groups/$GC/timeline?limit=1" | jq -c '.items[0] | {event, loudness, mentions}'
 # {"event":"snooze_ended","loudness":"loud","mentions":["snooze_ended"]}
-curl -s "${A[@]}" "$API/snooze-presets?time_zone=UTC" | jq -r '.items[0].until'; T 122400 # both lines: tomorrow 10:00:00Z
+curl -s "${A[@]}" "$API/snooze-presets?time_zone=UTC" | jq -r '.items[0].until'; T 36000  # both lines: today 10:00:00Z
 ORG '.workday_start = "09:00"' > /dev/null
 ```
 

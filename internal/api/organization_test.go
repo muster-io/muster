@@ -38,8 +38,9 @@ func newFakeOrganization() *fakeOrganization {
 	user := "hb"
 	at := t0
 	return &fakeOrganization{org: organization.Organization{
-		PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, SeverityLabel: d.SeverityLabel,
-		SeverityMapping: d.SeverityMapping, SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
+		PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
+		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel, SeverityMapping: d.SeverityMapping,
+		SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
 		InstanceLabels: d.InstanceLabels, Retention: d.Retention, TOTPRequired: d.TOTPRequired,
 		OIDCTokenGrace: d.OIDCTokenGrace, Version: 3,
 		OutgoingHeartbeat: organization.OutgoingHeartbeat{
@@ -74,6 +75,12 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 			Code: fieldInvalidFormat, Detail: "The URL is not an absolute http or https URL."}
 	}
 	f.org.TOTPRequired, f.org.Name = in.TOTPRequired, in.Name
+	if in.WorkdayStart != nil {
+		f.org.WorkdayStart = *in.WorkdayStart
+	}
+	if in.WeekStart != nil {
+		f.org.WeekStart = *in.WeekStart
+	}
 	if in.HeartbeatURL.Given {
 		f.org.OutgoingHeartbeat.URL.Set = !in.HeartbeatURL.Null
 	}
@@ -154,7 +161,8 @@ func TestGetOrganization(t *testing.T) {
 			proxy["address"] != "proxy:3128" {
 			t.Errorf("proxy = %v", proxy)
 		}
-		if a.json(t)["totp_required"] != "nobody" || a.json(t)["oidc_token_grace_seconds"] != 604800.0 {
+		if a.json(t)["totp_required"] != "nobody" || a.json(t)["oidc_token_grace_seconds"] != 604800.0 ||
+			a.json(t)["workday_start"] != "09:00" || a.json(t)["week_start"] != "monday" {
 			t.Errorf("body = %s", a.body)
 		}
 	}
@@ -241,6 +249,58 @@ func TestUpdateOrganization(t *testing.T) {
 	if a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", body, "If-Match", `W/"x"`); a.status !=
 		http.StatusPreconditionFailed {
 		t.Errorf("an If-Match that names no version = %d", a.status)
+	}
+}
+
+// TestUpdateOrganizationSnoozePresetSettings is C-20.FR-9 and C-20.AC-7 on the API: an Admin sets the start of the
+// working day and the first day of the week, which the answer carries; an update that omits both keeps them; a value
+// outside the pattern or the days of the week is refused by the request validation with 400 invalid_format at the
+// field, before the service.
+func TestUpdateOrganizationSnoozePresetSettings(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	read := x.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie).body
+	a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, func(m map[string]any) {
+		m["workday_start"], m["week_start"] = "08:30", "sunday"
+	}), "If-Match", "*")
+	if a.status != http.StatusOK || a.json(t)["workday_start"] != "08:30" || a.json(t)["week_start"] != "sunday" {
+		t.Fatalf("08:30 with sunday = %d %s", a.status, a.body)
+	}
+	if in := f.inputs[0]; in.WorkdayStart == nil || *in.WorkdayStart != "08:30" || in.WeekStart == nil ||
+		*in.WeekStart != "sunday" {
+		t.Errorf("input %+v", in)
+	}
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, func(m map[string]any) {
+		delete(m, "workday_start")
+		delete(m, "week_start")
+	}), "If-Match", "*")
+	if a.status != http.StatusOK || a.json(t)["workday_start"] != "08:30" || a.json(t)["week_start"] != "sunday" {
+		t.Fatalf("an update that omits both = %d %s", a.status, a.body)
+	}
+	if in := f.inputs[1]; in.WorkdayStart != nil || in.WeekStart != nil {
+		t.Errorf("an omitted field is not kept: %+v", in)
+	}
+	for _, c := range []struct{ field, value, pointer string }{
+		{"workday_start", "24:00", "/workday_start"},
+		{"workday_start", "9:00", "/workday_start"},
+		{"week_start", "weekend", "/week_start"},
+	} {
+		a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read,
+			func(m map[string]any) { m[c.field] = c.value }), "If-Match", "*")
+		var p struct {
+			Errors []struct{ Pointer, Code string }
+		}
+		_ = json.Unmarshal(a.body, &p)
+		if a.status != http.StatusBadRequest || len(p.Errors) != 1 || p.Errors[0].Pointer != c.pointer ||
+			p.Errors[0].Code != fieldInvalidFormat || len(f.inputs) != 2 {
+			t.Errorf("%s %s = %d %s", c.field, c.value, a.status, a.body)
+		}
+	}
+	// The service's own check of the same rules answers 422 at the field.
+	f.err = &organization.FieldError{Pointer: "/week_start", Code: organization.CodeInvalidFormat,
+		Detail: "The first day of the week is not a day from monday to sunday."}
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, nil), "If-Match", "*")
+	if a.status != http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"pointer":"/week_start"`) {
+		t.Errorf("the service's refusal = %d %s", a.status, a.body)
 	}
 }
 

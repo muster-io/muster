@@ -21,12 +21,19 @@ import type { RetentionSettings } from './retentionSettings';
 import type { SeverityLevelStyle } from './severityLevelStyle';
 import type { SeverityMappingEntry } from './severityMappingEntry';
 import type { TotpPolicy } from './totpPolicy';
+import type { Weekday } from './weekday';
 
 export interface OrganizationBase {
   /** @minLength 1 */
   name: string;
   /** IANA time zone used for times in messages. */
   time_zone: string;
+  /**
+     * The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  workday_start?: string;
+  week_start?: Weekday;
   /** Label that carries severity. */
   severity_label: string;
   /** Values of the severity label mapped to Severity levels. Unmapped values count as warning. */

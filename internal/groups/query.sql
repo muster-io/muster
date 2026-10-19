@@ -855,12 +855,19 @@ WHERE g.org_id = @org_id
        OR g.summary ILIKE sqlc.narg('pattern')::text)
 GROUP BY g.status, (CASE WHEN @with_labels::boolean THEN g.common_labels END);
 
--- GetListSettings reads what the list and the reads of one Alert Group need of the Organization: retention.alert_details
--- and organization.time_zone.
+-- GetListSettings reads what the list, the reads of one Alert Group and the Snooze presets need of the Organization:
+-- retention.alert_details, organization.time_zone, organization.workday_start and organization.week_start.
 -- name: GetListSettings :one
-SELECT retention_alert_details_days, time_zone
+SELECT retention_alert_details_days, time_zone, workday_start, week_start
 FROM organizations
 WHERE id = @org_id;
+
+-- GetUserTimeZone reads the profile time zone of a User, in which the Snooze presets of that User's Commands end; empty
+-- while the profile follows the browser.
+-- name: GetUserTimeZone :one
+SELECT coalesce(time_zone, '')::text AS time_zone
+FROM users
+WHERE org_id = @org_id AND id = @id;
 
 -- ListRoutesByPublicID names Routes, deleted ones included, by public_id: the Route filter of the list and of the
 -- statistics.

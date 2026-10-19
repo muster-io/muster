@@ -80,9 +80,12 @@ type OutgoingHeartbeat struct {
 
 // Organization is the organization resource (C-03.FR-20).
 type Organization struct {
-	PublicID          string
-	Name              string
-	TimeZone          string
+	PublicID string
+	Name     string
+	TimeZone string
+	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start (C-20.FR-9).
+	WorkdayStart      string
+	WeekStart         string
 	SeverityLabel     string
 	SeverityMapping   []SeverityMapping
 	SeverityStyles    []SeverityStyle
@@ -104,8 +107,11 @@ type ProxyInput = proxyconf.Input
 
 // Input is an update of the organization resource.
 type Input struct {
-	Name                  string
-	TimeZone              string
+	Name     string
+	TimeZone string
+	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start; nil keeps the stored one.
+	WorkdayStart          *string
+	WeekStart             *string
 	SeverityLabel         string
 	SeverityMapping       []SeverityMapping
 	SeverityStyles        []SeverityStyle
@@ -235,8 +241,9 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 		return Organization{}, fmt.Errorf("read the organization: %w", err)
 	}
 	o := Organization{
-		PublicID: row.PublicID, Name: row.Name, TimeZone: row.TimeZone, SeverityLabel: row.SeverityLabel,
-		CriticalIsUrgent: row.CriticalIsUrgent, InstanceLabels: row.InstanceLabels,
+		PublicID: row.PublicID, Name: row.Name, TimeZone: row.TimeZone, WorkdayStart: row.WorkdayStart,
+		WeekStart: row.WeekStart, SeverityLabel: row.SeverityLabel, CriticalIsUrgent: row.CriticalIsUrgent,
+		InstanceLabels: row.InstanceLabels,
 		Retention: Retention{
 			StoredSnapshotsDays: row.RetentionStoredSnapshotsDays, AlertDetailsDays: row.RetentionAlertDetailsDays,
 			AlertGroupSummariesDays: row.RetentionAlertGroupSummariesDays, AuditLogDays: row.RetentionAuditLogDays,
@@ -268,13 +275,14 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 	return o, nil
 }
 
-// Update applies an update of every field of the organization resource (C-20.FR-1, FR-8, C-04.FR-8). version is the
-// version of If-Match, nil for any; another one is ErrVersionMismatch. An invalid field is a *FieldError at the full
-// JSON pointer of the field, and changes nothing. A change is recorded in the Audit log as organization.updated with
-// its before/after diff, in which the Secrets show only that they changed, and announced to the live-updates streams
-// with an organization hint, in the transaction of the change. An update that changes nothing writes nothing. A new or
-// cleared URL clears the result of the last outgoing heartbeat and also sends a system-status hint. Severity levels and
-// Instance labels apply from the next evaluation: their readers read them in their own transactions (C-20.FR-2).
+// Update applies an update of every field of the organization resource (C-20.FR-1, FR-8, FR-9, C-04.FR-8); an omitted
+// start of the working day or first day of the week keeps the stored one. version is the version of If-Match, nil for
+// any; another one is ErrVersionMismatch. An invalid field is a *FieldError at the full JSON pointer of the field, and
+// changes nothing. A change is recorded in the Audit log as organization.updated with its before/after diff, in which
+// the Secrets show only that they changed, and announced to the live-updates streams with an organization hint, in
+// the transaction of the change. An update that changes nothing writes nothing. A new or cleared URL clears the result
+// of the last outgoing heartbeat and also sends a system-status hint. Severity levels and Instance labels apply from
+// the next evaluation: their readers read them in their own transactions (C-20.FR-2).
 func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
 	in Input) (Organization, error) {
 	var out Organization
@@ -336,6 +344,8 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			OrgID:                            s.orgID,
 			Name:                             after.Name,
 			TimeZone:                         after.TimeZone,
+			WorkdayStart:                     after.WorkdayStart,
+			WeekStart:                        after.WeekStart,
 			SeverityLabel:                    after.SeverityLabel,
 			SeverityMapping:                  mapping,
 			SeverityStyles:                   styles,
@@ -396,6 +406,12 @@ func applyInput(before Organization, in Input) (Organization, error) {
 	}
 	after := before
 	after.Name, after.TimeZone = strings.TrimSpace(in.Name), in.TimeZone
+	if in.WorkdayStart != nil {
+		after.WorkdayStart = *in.WorkdayStart
+	}
+	if in.WeekStart != nil {
+		after.WeekStart = *in.WeekStart
+	}
 	after.SeverityLabel, after.CriticalIsUrgent = in.SeverityLabel, in.CriticalIsUrgent
 	after.SeverityMapping = append([]SeverityMapping{}, in.SeverityMapping...)
 	after.SeverityStyles = append([]SeverityStyle{}, in.SeverityStyles...)
@@ -471,6 +487,8 @@ func optTime(t *time.Time) pgtype.Timestamptz {
 type view struct {
 	Name                  string            `json:"name"`
 	TimeZone              string            `json:"time_zone"`
+	WorkdayStart          string            `json:"workday_start"`
+	WeekStart             string            `json:"week_start"`
 	SeverityLabel         string            `json:"severity_label"`
 	SeverityMapping       []SeverityMapping `json:"severity_mapping"`
 	SeverityStyles        []SeverityStyle   `json:"severity_styles"`
@@ -497,8 +515,9 @@ type heartbeatView struct {
 
 func viewOf(o Organization) view {
 	return view{
-		Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping,
-		SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent, InstanceLabels: o.InstanceLabels,
+		Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart, WeekStart: o.WeekStart,
+		SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles,
+		CriticalIsUrgent: o.CriticalIsUrgent, InstanceLabels: o.InstanceLabels,
 		Retention: retentionView{
 			StoredSnapshotsDays: o.Retention.StoredSnapshotsDays, AlertDetailsDays: o.Retention.AlertDetailsDays,
 			AlertGroupSummariesDays: o.Retention.AlertGroupSummariesDays, AuditLogDays: o.Retention.AuditLogDays,
@@ -546,6 +565,12 @@ var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // hexColour is a CSS colour as #rrggbb.
 var hexColour = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+// timeOfDay is organization.workday_start: HH:MM on the 24-hour clock, the pattern of the API and of the CHECK.
+var timeOfDay = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
+// weekdays are the values of organization.week_start, as the API and the CHECK name them.
+var weekdays = []string{"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+
 // severityLevels are the Severity levels in the order the API shows them.
 var severityLevels = []SeverityLevel{SeverityCritical, SeverityWarning, SeverityInfo}
 
@@ -574,6 +599,12 @@ func validate(in Input) *FieldError {
 	case !ValidTimeZone(in.TimeZone):
 		return &FieldError{Pointer: "/time_zone", Code: CodeInvalidFormat,
 			Detail: "The time zone is not an IANA time zone such as Europe/Berlin."}
+	case in.WorkdayStart != nil && !timeOfDay.MatchString(*in.WorkdayStart):
+		return &FieldError{Pointer: "/workday_start", Code: CodeInvalidFormat,
+			Detail: "The start of the working day is not a time HH:MM on the 24-hour clock, such as 09:00."}
+	case in.WeekStart != nil && !slices.Contains(weekdays, *in.WeekStart):
+		return &FieldError{Pointer: "/week_start", Code: CodeInvalidFormat,
+			Detail: "The first day of the week is not a day from monday to sunday."}
 	case !labelName.MatchString(in.SeverityLabel):
 		return &FieldError{Pointer: "/severity_label", Code: CodeInvalidFormat,
 			Detail: "The severity label is not a label name."}

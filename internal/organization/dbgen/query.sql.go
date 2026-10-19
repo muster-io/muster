@@ -62,16 +62,16 @@ func (q *Queries) ClaimOutgoingHeartbeat(ctx context.Context, arg ClaimOutgoingH
 
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (
-    public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-    instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+    public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+    critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
     retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
     created_at, updated_at
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10,
-    $11, $12, $13, $14,
-    $15, $15
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17, $17
 )
 RETURNING id
 `
@@ -80,6 +80,8 @@ type CreateOrganizationParams struct {
 	PublicID                         string
 	Name                             string
 	TimeZone                         string
+	WorkdayStart                     string
+	WeekStart                        string
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
@@ -99,6 +101,8 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.PublicID,
 		arg.Name,
 		arg.TimeZone,
+		arg.WorkdayStart,
+		arg.WeekStart,
 		arg.SeverityLabel,
 		arg.SeverityMapping,
 		arg.SeverityStyles,
@@ -148,8 +152,8 @@ func (q *Queries) CreateOutboundPolicy(ctx context.Context, arg CreateOutboundPo
 
 const getOrganization = `-- name: GetOrganization :one
 
-SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
 FROM organizations
 ORDER BY id
@@ -161,6 +165,8 @@ type GetOrganizationRow struct {
 	PublicID                         string
 	Name                             string
 	TimeZone                         string
+	WorkdayStart                     string
+	WeekStart                        string
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
@@ -184,6 +190,8 @@ func (q *Queries) GetOrganization(ctx context.Context) (GetOrganizationRow, erro
 		&i.PublicID,
 		&i.Name,
 		&i.TimeZone,
+		&i.WorkdayStart,
+		&i.WeekStart,
 		&i.SeverityLabel,
 		&i.SeverityMapping,
 		&i.SeverityStyles,
@@ -277,8 +285,8 @@ func (q *Queries) GetOutgoingHeartbeatSecrets(ctx context.Context, orgID int64) 
 }
 
 const getSettings = `-- name: GetSettings :one
-SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
@@ -293,6 +301,8 @@ type GetSettingsRow struct {
 	PublicID                                string
 	Name                                    string
 	TimeZone                                string
+	WorkdayStart                            string
+	WeekStart                               string
 	SeverityLabel                           string
 	SeverityMapping                         []byte
 	SeverityStyles                          []byte
@@ -321,6 +331,8 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.PublicID,
 		&i.Name,
 		&i.TimeZone,
+		&i.WorkdayStart,
+		&i.WeekStart,
 		&i.SeverityLabel,
 		&i.SeverityMapping,
 		&i.SeverityStyles,
@@ -488,37 +500,41 @@ const updateSettings = `-- name: UpdateSettings :execrows
 UPDATE organizations
 SET name                                         = $1,
     time_zone                                    = $2,
-    severity_label                               = $3,
-    severity_mapping                             = $4,
-    severity_styles                              = $5,
-    critical_is_urgent                           = $6,
-    instance_labels                              = $7,
-    retention_stored_snapshots_days              = $8,
-    retention_alert_details_days                 = $9,
-    retention_alert_group_summaries_days         = $10,
-    retention_audit_log_days                     = $11,
-    oidc_token_grace_seconds                     = $12,
-    totp_required                                = $13,
-    outgoing_heartbeat_url_ciphertext            = $14,
-    outgoing_heartbeat_url_key_id                = $15,
-    outgoing_heartbeat_url_updated_at            = $16,
-    outgoing_heartbeat_proxy                     = $17,
-    outgoing_heartbeat_proxy_password_ciphertext = $18,
-    outgoing_heartbeat_proxy_password_key_id     = $19,
-    outgoing_heartbeat_proxy_password_updated_at = $20,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $21::boolean THEN NULL
+    workday_start                                = $3,
+    week_start                                   = $4,
+    severity_label                               = $5,
+    severity_mapping                             = $6,
+    severity_styles                              = $7,
+    critical_is_urgent                           = $8,
+    instance_labels                              = $9,
+    retention_stored_snapshots_days              = $10,
+    retention_alert_details_days                 = $11,
+    retention_alert_group_summaries_days         = $12,
+    retention_audit_log_days                     = $13,
+    oidc_token_grace_seconds                     = $14,
+    totp_required                                = $15,
+    outgoing_heartbeat_url_ciphertext            = $16,
+    outgoing_heartbeat_url_key_id                = $17,
+    outgoing_heartbeat_url_updated_at            = $18,
+    outgoing_heartbeat_proxy                     = $19,
+    outgoing_heartbeat_proxy_password_ciphertext = $20,
+    outgoing_heartbeat_proxy_password_key_id     = $21,
+    outgoing_heartbeat_proxy_password_updated_at = $22,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $23::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $21::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $21::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $23::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $23::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $22,
+    updated_at = $24,
     version = version + 1
-WHERE id = $23
+WHERE id = $25
 `
 
 type UpdateSettingsParams struct {
 	Name                             string
 	TimeZone                         string
+	WorkdayStart                     string
+	WeekStart                        string
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
@@ -548,6 +564,8 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 	result, err := q.db.Exec(ctx, updateSettings,
 		arg.Name,
 		arg.TimeZone,
+		arg.WorkdayStart,
+		arg.WeekStart,
 		arg.SeverityLabel,
 		arg.SeverityMapping,
 		arg.SeverityStyles,

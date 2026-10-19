@@ -842,3 +842,212 @@ func TestSnoozeEndAfterReopen(t *testing.T) {
 		t.Errorf("snooze_ended = %+v", e.InsertTimelineEntryParams)
 	}
 }
+
+func (f *fakeDB) GetUserTimeZone(_ context.Context, arg dbgen.GetUserTimeZoneParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetUserTimeZone"); err != nil {
+		return "", err
+	}
+	zone, ok := f.zones[arg.ID]
+	if !ok || arg.OrgID != orgID {
+		return "", pgx.ErrNoRows
+	}
+	return zone, nil
+}
+
+// thursday2am is Thursday 8 October 2026, 02:00 UTC: the night before the working day of the Snooze preset tests.
+var thursday2am = time.Date(2026, 10, 8, 2, 0, 0, 0, time.UTC)
+
+// TestSnoozePresetCheck is C-10.FR-18, C-10.AC-17 and C-10.AC-22: exactly one of until, no_end and preset, a known
+// preset, a time zone only with a preset and one that Muster knows; a refusal reads no setting and writes nothing.
+func TestSnoozePresetCheck(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	g := h.firing(t, "x")
+	future := h.clock.Now().Add(time.Hour)
+	for _, c := range []struct {
+		end  SnoozeEnd
+		want string
+	}{
+		{SnoozeEnd{Preset: PresetTomorrow, Until: &future}, " one_of_required"},
+		{SnoozeEnd{Preset: PresetTomorrow, NoEnd: true}, " one_of_required"},
+		{SnoozeEnd{Preset: PresetWeekStart, Until: &future, NoEnd: true}, " one_of_required"},
+		{SnoozeEnd{}, " one_of_required"},
+		{SnoozeEnd{TimeZone: ptr("UTC")}, " one_of_required"},
+		{SnoozeEnd{Until: &future, TimeZone: ptr("UTC")}, "/time_zone unsupported"},
+		{SnoozeEnd{NoEnd: true, TimeZone: ptr("UTC")}, "/time_zone unsupported"},
+		{SnoozeEnd{Preset: PresetTomorrow, TimeZone: ptr("Mars/Base")}, "/time_zone invalid_format"},
+		{SnoozeEnd{Preset: PresetTomorrow, TimeZone: ptr("Local")}, "/time_zone invalid_format"},
+		{SnoozeEnd{Preset: PresetTomorrow, TimeZone: ptr("")}, "/time_zone invalid_format"},
+		{SnoozeEnd{Preset: "someday"}, "/preset invalid_format"},
+	} {
+		if _, err := h.svc.Snooze(t.Context(), alice, g.PublicID, c.end); code(err) != c.want {
+			t.Errorf("snooze %+v = %v, want %s", c.end, err, c.want)
+		}
+	}
+	if h.db.calls["GetListSettings"] != 0 || h.db.calls["GetUserTimeZone"] != 0 || len(h.db.audit) != 0 ||
+		g.Status != "firing" {
+		t.Errorf("a refusal read %v or wrote %d audit entries", h.db.calls, len(h.db.audit))
+	}
+	// The Permission comes first: a Viewer's preset reads nothing.
+	if _, err := h.svc.Snooze(t.Context(), carol, g.PublicID, SnoozeEnd{Preset: PresetTomorrow}); code(err) !=
+		CodeForbidden || h.db.calls["GetListSettings"] != 0 {
+		t.Errorf("a viewer's preset = %v", err)
+	}
+}
+
+// TestSnoozePreset is C-10.FR-17, C-10.FR-18 and C-10.AC-22 in the command layer, at 02:00 UTC: the time zone of the
+// request; else the profile time zone of the User the caller acts as, also through a Personal access token; else the
+// Organization's, for a Service account, a User whose profile follows the browser and one whose profile names a zone
+// Muster no longer knows. The end is stored with the snoozed entry, and the Audit log details name the preset and the
+// time zone used only for a preset; the settings come from the Organization and never move a Snooze already set.
+func TestSnoozePreset(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	groups := []*dbgen.LockGroupsRow{h.firing(t, "a"), h.firing(t, "b"), h.firing(t, "c"), h.firing(t, "d"),
+		h.firing(t, "e")}
+	h.clock.Set(thursday2am)
+	h.db.timeZone = "America/New_York"
+	h.db.zones[bobID] = "Asia/Tokyo"
+	h.db.zones[owner] = ""
+	at := func(s string) time.Time { return instant(t, s) }
+	for i, c := range []struct {
+		caller Caller
+		zone   *string
+		until  time.Time
+		used   string
+	}{
+		{alice, ptr("UTC"), at("2026-10-08T09:00:00Z"), "UTC"},
+		{bobToken, nil, at("2026-10-09T00:00:00Z"), "Asia/Tokyo"},
+		{robot, nil, at("2026-10-08T13:00:00Z"), "America/New_York"},
+		{alice, nil, at("2026-10-08T13:00:00Z"), "America/New_York"},
+		{bob, ptr("Asia/Kathmandu"), at("2026-10-08T03:15:00Z"), "Asia/Kathmandu"},
+	} {
+		g := groups[i]
+		res, err := h.svc.Snooze(t.Context(), c.caller, g.PublicID, SnoozeEnd{Preset: PresetTomorrow, TimeZone: c.zone})
+		if err != nil || res.Group.SnoozeUntil == nil || !res.Group.SnoozeUntil.Equal(c.until) ||
+			g.SnoozeUntil != ts(c.until) || g.SnoozeNoEnd {
+			t.Fatalf("%d: snooze = %v %+v, want %s", i, err, res.Group.SnoozeUntil, c.until)
+		}
+		if e := h.last(t, g); e.Event.String != "snoozed" || e.SnoozeUntil != ts(c.until) {
+			t.Errorf("%d: snoozed = %+v", i, e.InsertTimelineEntryParams)
+		}
+		a := h.db.audit[len(h.db.audit)-1]
+		want := `{"no_end":false,"preset":"tomorrow","time_zone":"` + c.used + `","until":"` +
+			c.until.Format(time.RFC3339) + `"}`
+		if a.Action != ActionSnoozed || string(a.Details) != want {
+			t.Errorf("%d: audit %s, want %s", i, a.Details, want)
+		}
+	}
+	// A Service account has no profile, and the request's time zone needs none.
+	if n := h.db.calls["GetUserTimeZone"]; n != 2 {
+		t.Errorf("%d profile reads", n)
+	}
+	// A profile time zone that Muster no longer knows falls through to the Organization's.
+	h.db.zones[bobID] = "Mars/Base"
+	if res, err := h.svc.Snooze(t.Context(), bob, groups[1].PublicID, SnoozeEnd{Preset: PresetTomorrow}); err != nil ||
+		!res.Group.SnoozeUntil.Equal(at("2026-10-08T13:00:00Z")) {
+		t.Errorf("an unknown profile zone = %v %+v", err, res.Group.SnoozeUntil)
+	}
+	// The Organization's start of the working day and first day of the week.
+	h.db.workdayStart, h.db.weekStart = "08:30", "sunday"
+	if res, err := h.svc.Snooze(t.Context(), alice, groups[2].PublicID, SnoozeEnd{Preset: PresetWeekStart,
+		TimeZone: ptr("UTC")}); err != nil || !res.Group.SnoozeUntil.Equal(at("2026-10-11T08:30:00Z")) {
+		t.Errorf("week_start = %v %+v", err, res.Group.SnoozeUntil)
+	}
+	if g := groups[0]; g.SnoozeUntil != ts(at("2026-10-08T09:00:00Z")) {
+		t.Errorf("a change of the settings moved a Snooze to %v", g.SnoozeUntil)
+	}
+	// Any other end records only no_end and until.
+	if _, err := h.svc.Snooze(t.Context(), alice, groups[3].PublicID, SnoozeEnd{NoEnd: true}); err != nil ||
+		string(h.db.audit[len(h.db.audit)-1].Details) != `{"no_end":true}` {
+		t.Errorf("no end = %v %s", err, h.db.audit[len(h.db.audit)-1].Details)
+	}
+	until := thursday2am.Add(time.Hour)
+	if _, err := h.svc.Snooze(t.Context(), alice, groups[3].PublicID, SnoozeEnd{Until: &until}); err != nil ||
+		string(h.db.audit[len(h.db.audit)-1].Details) != `{"no_end":false,"until":"2026-10-08T03:00:00Z"}` {
+		t.Errorf("until = %v %s", err, h.db.audit[len(h.db.audit)-1].Details)
+	}
+}
+
+// TestSnoozePresetFailures: a setting or a profile that cannot be read, and settings that cannot be used, fail the
+// Snooze before any Alert Group is locked.
+func TestSnoozePresetFailures(t *testing.T) {
+	for name, setup := range map[string]func(h *harness){
+		"GetListSettings": func(h *harness) { h.db.fail["GetListSettings"] = errBoom },
+		"GetUserTimeZone": func(h *harness) { h.db.fail["GetUserTimeZone"] = errBoom },
+		"time zone":       func(h *harness) { h.db.timeZone = "Mars/Base" },
+		"workday start":   func(h *harness) { h.db.workdayStart = "24:00" },
+		"week start":      func(h *harness) { h.db.weekStart = "weekend" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.people()
+			g := h.firing(t, "x")
+			setup(h)
+			locks := h.db.calls["LockGroups"]
+			if _, err := h.svc.Snooze(t.Context(), alice, g.PublicID, SnoozeEnd{Preset: PresetTomorrow}); err == nil ||
+				h.db.calls["LockGroups"] != locks || g.Status != "firing" {
+				t.Errorf("snooze = %v", err)
+			}
+		})
+	}
+	h := newHarness(t)
+	if _, err := h.svc.resolveEnd(t.Context(), alice, &SnoozeEnd{Preset: "someday"}); err == nil {
+		t.Error("an unknown preset was resolved")
+	}
+}
+
+// TestSnoozePresets is C-10.FR-18 and C-10.AC-22 for listSnoozePresets: alert-groups:snooze is needed, a time zone
+// Muster does not know is invalid_format at /query/time_zone, and the ends come in the order tomorrow, week_start, in
+// the time zone of the request, else the caller's, which the answer names with the Organization's settings. It writes
+// nothing.
+func TestSnoozePresets(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	h.clock.Set(thursday2am)
+	h.db.zones[bobID] = "Asia/Tokyo"
+	if _, err := h.svc.SnoozePresets(t.Context(), carol, ""); code(err) != CodeForbidden ||
+		h.db.calls["GetListSettings"] != 0 {
+		t.Errorf("a viewer = %v", err)
+	}
+	for _, zone := range []string{"Mars/Base", "Local"} {
+		if _, err := h.svc.SnoozePresets(t.Context(), alice, zone); code(err) != "/query/time_zone invalid_format" {
+			t.Errorf("%s = %v", zone, err)
+		}
+	}
+	ends := func(l PresetList) string {
+		var out []string
+		for _, e := range l.Ends {
+			out = append(out, string(e.Preset)+" "+e.Until.Format(time.RFC3339))
+		}
+		return l.TimeZone + " " + l.WorkdayStart + " " + l.WeekStart + ": " + strings.Join(out, ", ")
+	}
+	for _, c := range []struct {
+		caller Caller
+		zone   string
+		want   string
+	}{
+		{alice, "UTC", "UTC 09:00 monday: tomorrow 2026-10-08T09:00:00Z, week_start 2026-10-12T09:00:00Z"},
+		{bobToken, "", "Asia/Tokyo 09:00 monday: tomorrow 2026-10-09T00:00:00Z, week_start 2026-10-12T00:00:00Z"},
+		{robot, "", "UTC 09:00 monday: tomorrow 2026-10-08T09:00:00Z, week_start 2026-10-12T09:00:00Z"},
+	} {
+		l, err := h.svc.SnoozePresets(t.Context(), c.caller, c.zone)
+		if err != nil || ends(l) != c.want {
+			t.Errorf("%s %q = %v %q, want %q", c.caller.Actor.PublicID, c.zone, err, ends(l), c.want)
+		}
+	}
+	h.db.workdayStart, h.db.weekStart = "08:30", "sunday"
+	if l, err := h.svc.SnoozePresets(t.Context(), alice, "UTC"); err != nil || ends(l) !=
+		"UTC 08:30 sunday: tomorrow 2026-10-08T08:30:00Z, week_start 2026-10-11T08:30:00Z" {
+		t.Errorf("08:30 sunday = %v %q", err, ends(l))
+	}
+	if len(h.db.audit) != 0 || h.db.calls["LockGroups"] != 0 {
+		t.Errorf("the read wrote %d audit entries", len(h.db.audit))
+	}
+	h.db.fail["GetListSettings"] = errBoom
+	if _, err := h.svc.SnoozePresets(t.Context(), alice, ""); !errors.Is(err, errBoom) {
+		t.Errorf("failing = %v", err)
+	}
+}

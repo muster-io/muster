@@ -81,7 +81,8 @@ func settings(orgID int64, ciphertext []byte, changed bool, now time.Time) dbgen
 	d := organization.Defaults()
 	mapping, _ := json.Marshal(d.SeverityMapping)
 	styles, _ := json.Marshal(d.SeverityStyles)
-	p := dbgen.UpdateSettingsParams{OrgID: orgID, Name: d.Name, TimeZone: d.TimeZone, SeverityLabel: d.SeverityLabel,
+	p := dbgen.UpdateSettingsParams{OrgID: orgID, Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
+		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel,
 		SeverityMapping: mapping, SeverityStyles: styles, CriticalIsUrgent: d.CriticalIsUrgent,
 		InstanceLabels: d.InstanceLabels, RetentionStoredSnapshotsDays: d.Retention.StoredSnapshotsDays,
 		RetentionAlertDetailsDays:        d.Retention.AlertDetailsDays,

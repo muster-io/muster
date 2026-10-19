@@ -29,7 +29,7 @@ var errBoom = errors.New("boom")
 func ptr[T any](v T) *T { return &v }
 
 // fakeAlertGroups stands for internal/groups: one Alert Group, resolved by the system, with two Alerts and a
-// Timeline of one entry of each kind.
+// Timeline of one entry of each kind; presets records the callers and time zones of the reads of the Snooze presets.
 type fakeAlertGroups struct {
 	view      groups.View
 	alerts    []groups.AlertFilter
@@ -41,7 +41,22 @@ type fakeAlertGroups struct {
 	stats     []groups.StatisticsRequest
 	open      map[string]int64
 	notes     []*groups.NotePosition
+	presets   []string
+	callers   []groups.Caller
 	err       error
+}
+
+// SnoozePresets answers the ends of a Tuesday 02:00 in Berlin, the caller's time zone, or invalid_format for Mars/Base,
+// as the command layer reports it.
+func (f *fakeAlertGroups) SnoozePresets(_ context.Context, c groups.Caller, zone string) (groups.PresetList, error) {
+	f.presets, f.callers = append(f.presets, zone), append(f.callers, c)
+	if zone == "Mars/Base" {
+		return groups.PresetList{}, &groups.FieldError{Pointer: "/query/time_zone", Code: groups.CodeInvalid,
+			Detail: "The time zone is not an IANA time zone name."}
+	}
+	return groups.PresetList{TimeZone: "Europe/Berlin", WorkdayStart: "09:00", WeekStart: "monday",
+		Ends: []groups.PresetEnd{{Preset: groups.PresetTomorrow, Until: t0.Add(5 * time.Hour)},
+			{Preset: groups.PresetWeekStart, Until: t0.Add(6*24*time.Hour + 6*time.Hour)}}}, f.err
 }
 
 func (f *fakeAlertGroups) Notes(_ context.Context, id string, after *groups.NotePosition, limit int) (groups.NotePage,
@@ -773,5 +788,54 @@ func TestAlertGroupDeliveriesPastEditWindowAPI(t *testing.T) {
 	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/deliveries", "")
 	if !strings.Contains(string(a.body), `"past_edit_window":false`) {
 		t.Errorf("the flag is not always present: %s", a.body)
+	}
+}
+
+// TestListSnoozePresetsAPI is listSnoozePresets (C-10.FR-18, C-10.AC-22): the caller and the time zone of the request
+// reach the command layer, the ends come back in its order with the time zone used and the Organization's settings,
+// an unknown time zone is 422 invalid_format at /query/time_zone, and the middleware refuses a caller without
+// alert-groups:snooze before the command layer.
+func TestListSnoozePresetsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	a := x.as(t, fullToken, http.MethodGet, "/api/v1/snooze-presets?time_zone=Europe/Berlin", "")
+	var l gen.SnoozePresetList
+	decodeInto(t, a, &l)
+	if a.status != http.StatusOK || l.TimeZone != "Europe/Berlin" || l.WorkdayStart != "09:00" ||
+		l.WeekStart != gen.Monday || len(l.Items) != 2 || l.Items[0].Preset != gen.Tomorrow ||
+		!l.Items[0].Until.Equal(t0.Add(5*time.Hour)) || l.Items[1].Preset != gen.WeekStart {
+		t.Fatalf("presets = %d %s", a.status, a.body)
+	}
+	if c := fg.callers[0]; fg.presets[0] != "Europe/Berlin" || c.Actor.Kind != audit.ActorUser ||
+		c.Actor.TokenName != "full" || c.Transport != audit.TransportAPI {
+		t.Errorf("request %q %+v", fg.presets[0], c)
+	}
+	if a := x.as(t, serviceToken, http.MethodGet, "/api/v1/snooze-presets", ""); a.status != http.StatusOK ||
+		fg.presets[1] != "" || fg.callers[1].Actor.Kind != audit.ActorServiceAccount {
+		t.Errorf("without a time zone = %d %s %q", a.status, a.body, fg.presets)
+	}
+	a = x.as(t, fullToken, http.MethodGet, "/api/v1/snooze-presets?time_zone=Mars/Base", "")
+	if a.status != http.StatusUnprocessableEntity || problemCode(t, a) != "/query/time_zone invalid_format" {
+		t.Errorf("Mars/Base = %d %s", a.status, a.body)
+	}
+	calls := len(fg.presets)
+	for name, a := range map[string]answer{
+		"viewer":      x.call(t, http.MethodGet, "/api/v1/snooze-presets", "", "Cookie", viewerCookie),
+		"reader":      x.as(t, groupsReader, http.MethodGet, "/api/v1/snooze-presets", ""),
+		"no identity": x.call(t, http.MethodGet, "/api/v1/snooze-presets", ""),
+	} {
+		want := http.StatusForbidden
+		if name == "no identity" {
+			want = http.StatusUnauthorized
+		}
+		if a.status != want {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	if len(fg.presets) != calls {
+		t.Errorf("a refused read reached the command layer: %q", fg.presets[calls:])
+	}
+	fg.err = errBoom
+	if a := x.as(t, fullToken, http.MethodGet, "/api/v1/snooze-presets", ""); a.status != http.StatusInternalServerError {
+		t.Errorf("a failure = %d", a.status)
 	}
 }

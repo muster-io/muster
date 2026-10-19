@@ -101,7 +101,8 @@ func (s *Server) UnresolveAlertGroup(ctx context.Context, req gen.UnresolveAlert
 	return gen.UnresolveAlertGroup200JSONResponse(out), nil
 }
 
-// SnoozeAlertGroup is snoozeAlertGroup: the request names until or no_end, which the command layer checks.
+// SnoozeAlertGroup is snoozeAlertGroup: the request names until, no_end or a Snooze preset with its optional time
+// zone, which the command layer checks and resolves.
 func (s *Server) SnoozeAlertGroup(ctx context.Context, req gen.SnoozeAlertGroupRequestObject) (
 	gen.SnoozeAlertGroupResponseObject, error) {
 	out, err := s.command(ctx, func(c groups.Caller) (groups.Result, error) {
@@ -143,7 +144,11 @@ func snoozeEndOf(r *gen.SnoozeRequest) groups.SnoozeEnd {
 	if r == nil {
 		return groups.SnoozeEnd{}
 	}
-	return groups.SnoozeEnd{Until: r.Until, NoEnd: r.NoEnd != nil && bool(*r.NoEnd)}
+	end := groups.SnoozeEnd{Until: r.Until, NoEnd: r.NoEnd != nil && bool(*r.NoEnd), TimeZone: r.TimeZone}
+	if r.Preset != nil {
+		end.Preset = groups.SnoozePreset(*r.Preset)
+	}
+	return end
 }
 
 // RunBulkCommand is runBulkCommand: one outcome per Alert Group, in the order of the request.

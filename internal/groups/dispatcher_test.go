@@ -91,9 +91,12 @@ type fakeDB struct {
 	locked   [][]int64
 	// before runs before a query of that name, for changes that race the transaction.
 	before map[string]func()
-	// details and summaries are the retention periods in days, timeZone organization.time_zone.
-	details, summaries int64
-	timeZone           string
+	// details and summaries are the retention periods in days, timeZone organization.time_zone, workdayStart and
+	// weekStart organization.workday_start and organization.week_start, and zones the profile time zones of Users.
+	details, summaries      int64
+	timeZone                string
+	workdayStart, weekStart string
+	zones                   map[int64]string
 	// hints are the live-update hints sent, stats the rows the statistics queries answer.
 	hints []db.Hint
 	stats []dbgen.RouteStatisticsRow
@@ -111,7 +114,8 @@ func newDB() *fakeDB {
 		users:    map[int64]dbgen.ListUserRefsRow{},
 		accounts: map[int64]dbgen.ListServiceAccountRefsRow{}, ints: map[int64]dbgen.ListIntegrationRefsRow{},
 		keys: map[int64][]string{}, fail: map[string]error{}, calls: map[string]int{}, before: map[string]func(){},
-		nextID: 100, details: 90, summaries: 730, timeZone: "UTC"}
+		nextID: 100, details: 90, summaries: 730, timeZone: "UTC", workdayStart: "09:00", weekStart: "monday",
+		zones: map[int64]string{}}
 }
 
 func (f *fakeDB) call(name string) error {
