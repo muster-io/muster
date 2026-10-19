@@ -23,10 +23,10 @@ acceptance:
   - "[C-21.FR-8] Each rule takes its value from its source when the site is built: the error classes from the `ErrorClass` enum of `api/bridge.yaml`; confirming a press at most 3 seconds after it and keeping each `Idempotency-Key` per token for at least 24 hours from the description of `api/bridge.yaml`; the edit-window margin and the longest wait of `rate_limited` from `bridge.edit_window_margin` and `bridge.retry_after_max` in defaults.md; and the sources of truth are `api/openapi.yaml` and `api/bridge.yaml`, which the build publishes under `api/` beside the pages of the same version."
   - "[C-21.FR-8] Every page of the navigation has a Markdown version at its source path under `docs/` — `messengers/bridge.md` for `messengers/bridge/`, `reference/index.md` for the section page `reference/` — byte for byte its source, and one entry in the document map of `llms.txt`, in the order of the navigation, with its title and the first sentence of its first paragraph, linked to the Markdown version."
   - "[C-21.FR-8] `site/llms-full.txt` holds every page of the navigation once, in the order of the navigation, each after a line with its absolute `.md` URL, with relative links made absolute; the rendered API and Bridge protocol references are no pages and have no Markdown version, and `llms.txt` names their specifications instead."
-  - "[C-21.FR-8] Every link of `llms.txt` points into the same version of the site, `<site_url><version>/`, with the version from `DOCS_VERSION` — `latest` by default, the published minor in the publishing workflow — or to a repository under `https://github.com/muster-io/`; `docspublish` copies the `llms.txt` of the version that the root redirects to into the root of the published site, so that `https://muster-io.github.io/muster/llms.txt` answers (`docspublish_test.go`)."
-  - "[C-21.FR-8, C-21.AC-4] `make docs`, and so `make docs-check`, fails naming the file when a phrase, a setting, an enum or a page that `docs/llms.txt.tmpl` names is no longer in its source, when an anchor it links is no `id` of the built page, when a page of the navigation has no title, when a link of `llms.txt` or `llms-full.txt` into the site does not resolve under `site/`, and when `llms.txt` is larger than 32 KiB (`llmsgen_test.go`, Verification)."
-  - "[C-21.AC-4] On the built site, `llms.txt` links to the Markdown version of every page of the navigation and every one of its links resolves under `site/`; `llms-full.txt` holds every page and is smaller than 1 MiB, under about 262,000 tokens at 4 bytes a token."
-  - "[C-21.FR-8] The home page points AI agents to `llms.txt`."
+  - "[C-21.FR-8] Every link of `llms.txt` points into the same version of the site, `<site_url><version>/`, with the version from `DOCS_VERSION` — `latest` by default, the published minor in the publishing workflow — or to a repository under `https://github.com/muster-io/`; `docspublish` copies the `llms.txt` of the version that the root redirects to into the root of the published site, so that `https://muster-io.github.io/muster/llms.txt` answers, and removes the root copy when that version has none (`docspublish_test.go`)."
+  - "[C-21.FR-8, C-21.AC-4] `make docs`, and so `make docs-check`, fails naming the file when a phrase, a setting, an enum or a page that `docs/llms.txt.tmpl` names is no longer in its source, when an anchor it links is no `id` of the built page, when a page of the navigation has no title, when a link of `llms.txt` or `llms-full.txt` into the site does not resolve under `site/`, when `llms.txt` is larger than 32 KiB, and when `llms-full.txt` is 1 MiB or larger (`llmsgen_test.go`, Verification)."
+  - "[C-21.AC-4] On the built site, `llms.txt` links to the Markdown version of every page of the navigation and every one of its links resolves under `site/`; `llms-full.txt` holds every page and is smaller than 1 MiB, under about 262,000 tokens at 4 bytes a token (`llmsgen_test.go`, Verification)."
+  - "[C-21.FR-8] The home page points AI agents to `llms.txt` (Verification)."
 verify: "make ci docs-check"
 operator_attention: false
 issue: 287
@@ -93,7 +93,8 @@ issue: 287
   - `quote "<file>" "<phrase>"` — the phrase, which the file must contain, compared with runs of white space collapsed;
   - `setting "<area.setting>"` — the value of that row of `design/prd/l1/defaults.md`, the value cell up to its first
     `:`, such as `60 s`;
-  - `enum "<file>" "<schema>"` — the values of `components.schemas.<schema>.enum`, in order, each in backticks;
+  - `enum "<file>" "<schema>"` — the values of `components.schemas.<schema>.enum`, in order, each in backticks and
+    joined with `", "` — `` `transient`, `rate_limited`, `gone`, `forbidden`, `invalid` `` for `ErrorClass`;
   - `map` — the document map, which the template calls once.
 - **`llms.txt`**, in this order:
   1. `# Muster` and a block quote: what Muster is, in the words of the home page; that this file is the canonical
@@ -104,40 +105,46 @@ issue: 287
      | Rule | Value | Source | Function |
      |---|---|---|---|
      | Sources of truth | `api/bridge.yaml` for the Bridge protocol, `api/openapi.yaml` for the HTTP API; where a page and a specification disagree, the specification wins | ADR-0008, ADR-0017, C-22.FR-20 | `spec` |
-     | Error classes | a failure is an RFC 9457 problem whose `class` is `transient`, `rate_limited`, `gone`, `forbidden` or `invalid`; a missing channel is `forbidden`, never `gone`; only the bridge decides `gone` | `ErrorClass` and the description of `api/bridge.yaml`; C-22.FR-8 | `enum`, `quote` |
+     | Error classes | a failure is an RFC 9457 problem whose `class` is one of `transient`, `rate_limited`, `gone`, `forbidden`, `invalid`; a missing channel is `forbidden`, never `gone`; only the bridge decides `gone` | `ErrorClass` and the description of `api/bridge.yaml`; C-22.FR-8 | `enum`, `quote` |
      | Waits | `rate_limited` carries `Retry-After`; a longer wait than `bridge.retry_after_max` (15 min) counts as `transient` | defaults.md; C-22.FR-8 | `setting` |
      | Presses | the bridge confirms a press to its messenger itself, at most 3 seconds after the press, before Muster has seen it; Muster answers later with `answerEvent` | the description of `api/bridge.yaml` (Presses); ADR-0017; C-22.FR-23 — a duty of the bridge, not a setting of Muster | `quote` |
      | Idempotency | every request that creates something carries `Idempotency-Key`; the bridge stores each key per token with its successful result for at least 24 hours and answers a repeat with `replayed: true` | the description of `api/bridge.yaml` (Idempotency); Muster's side is `bridge.event_dedup_window` | `quote` |
      | Edit windows | a messenger that limits edits is declared with `limits.edit_max_age_seconds`; Muster stops editing `bridge.edit_window_margin` (60 s) before it and publishes the Alert Group again on its next change of status; an edit the messenger refuses for its age is `gone` with the `reason` `edit_window_closed` | `Limits` and `Problem` of `api/bridge.yaml`; defaults.md; C-22.FR-9 | `quote`, `setting` |
-     | Finishing a bridge | a bridge is finished only when `muster bridge check` passes against it; use a bridge library instead of writing the protocol | C-22.FR-21, C-22.FR-25 | `page` |
+     | Finishing a bridge | a bridge is finished only when `muster bridge check` passes against it; a bridge written in Go or Python uses that language's bridge library, and one in another language follows the protocol steps of Write a bridge | C-22.FR-21, C-22.FR-25 | `page` |
 
   3. `## Scenarios`, one `###` heading each, with the pages to read in order and the commands that finish it:
      - **Write a bridge in Go**: Write a bridge (its Go library and example bridge), Messengers → Bridge, Reference →
        Bridge protocol and `api/bridge.yaml`; `go get github.com/muster-io/muster-bridge-go` and the library's
        repository, whose README and `AGENTS.md` guide the work; finished when `muster bridge check` passes.
-     - **Write a bridge in Python**: Write a bridge (its Python section, S-060), the same protocol pages;
-       `pip install muster-bridge` and the repository `muster-io/muster-bridge-python`, with its `AGENTS.md`; finished
-       when `muster bridge check` passes.
+     - **Write a bridge in Python**: Write a bridge (its Python section, S-060), the same protocol pages; the repository
+       `muster-io/muster-bridge-python`, with its `AGENTS.md`, and the install line as Write a bridge gives it, taken
+       with `quote` — `pip install muster-bridge` once the libraries are released with L1, and an install from a clone
+       of the repository until then (D366) — so that `llms.txt` never names a package that PyPI does not have yet and
+       follows the page when the release drops the clone; finished when `muster bridge check` passes.
      - **Connect Alertmanager**: Quick start, Alertmanager → Connect Alertmanager and Heartbeat, Concepts → Snapshot
        semantics.
      - **Automate through the API**: Reference → API with its conventions and tokens, `api/openapi.yaml` (also served by
        every Muster at `/api/v1/openapi.yaml`), Concepts → statuses and commands, Operations → CLI.
   4. `## Document map`, written by `map`: one `###` heading per top-level section of the navigation, a nested section a
-     level lower, and per page `- [<title>](<Markdown URL>): <description>` in the order of the navigation. The title is
-     the page's title in the navigation when it has one, otherwise its first `#` heading; the description is the first
-     sentence of the first paragraph after it, skipping headings, comments, admonitions and fenced blocks, and is left
-     out when the page has no such paragraph.
+     level lower, and per page `- [<title>](<Markdown URL>): <description>` in the order of the navigation. A top-level
+     page outside any section keeps its place in that order: before the first section — Home and Quick start — directly
+     under `## Document map`; after a section, under a `###` heading of its own title, so that it is not read as part of
+     the section before it. The title is the page's title in the navigation when it has one, otherwise its first `#`
+     heading; the description is the first sentence of the first paragraph after it, skipping headings, comments,
+     admonitions and fenced blocks, and is left out when the page has no such paragraph.
   5. `## Optional`: `llms-full.txt` with its size.
 - **Checks** (`llmsgen`, C-21.AC-4): it exits non-zero, naming the file and what is wrong, when a template function
   fails as above, when the template does not call `map` exactly once, when a page of the navigation does not exist or
   has no title, when a link of `llms.txt` or `llms-full.txt` under the version's base URL does not resolve to a file
   under `site/`, when a link of `llms.txt` leaves the site other than to a repository under
-  `https://github.com/muster-io/`, and when `llms.txt` is larger than 32 KiB. It prints the sizes of `llms.txt` and
-  `llms-full.txt` and the token estimate of the latter. Because `make docs-check` runs `make docs`, it fails the same
-  way in CI.
+  `https://github.com/muster-io/`, when `llms.txt` is larger than 32 KiB, and when `llms-full.txt` is 1 MiB (1,048,576
+  bytes) or larger. It prints the sizes of `llms.txt` and `llms-full.txt` and the token estimate of the latter. Because
+  `make docs-check` runs `make docs`, it fails the same way in CI.
 - **Root of the published site** (`docspublish`): after writing the redirect, it copies `<target>/<redirect>/llms.txt`
   to `<target>/llms.txt` when that version has one — the newest release, or `latest/` while none is published — so the
-  root answers `https://muster-io.github.io/muster/llms.txt` with links into that version.
+  root answers `https://muster-io.github.io/muster/llms.txt` with links into that version. When that version has none,
+  it removes `<target>/llms.txt`, so that a copy left by an earlier publication never points into another version than
+  the one the root redirects to.
 - **Make targets** (`Makefile`, AGENTS.md): `make docs` gains the `llmsgen` step and `DOCS_VERSION`; `make docs-serve`
   serves the pages without the outputs of `llmsgen`, which only `make docs` writes; AGENTS.md's rows for `make docs` and
   `make docs-check` say so.
@@ -148,26 +155,30 @@ issue: 287
 
 1. Write `llmsgen` without the template: the navigation, the Markdown versions, `llms-full.txt`, the document map, the
    copied specifications and the link checks, with fixtures of a small site. Check: `llmsgen_test.go` — the order of a
-   nested navigation, titles from the navigation and from headings, descriptions, absolute links in `llms-full.txt`, a
-   page without a title, a broken link.
+   nested navigation, top-level pages before and after a section, titles from the navigation and from headings,
+   descriptions, absolute links in `llms-full.txt`, a page without a title, a broken link, an `llms-full.txt` of 1 MiB.
 2. Add the template functions and write `docs/llms.txt.tmpl` with the rules and scenarios. Check: `llmsgen_test.go` —
    each function with a present and a missing value, `map` called twice; `make docs` writes `site/llms.txt`.
 3. Wire the Makefile, `exclude_docs`, `docs.yml`, the root copy of `docspublish`, the home page and AGENTS.md. Check:
-   `docspublish_test.go` (the root copy follows the redirect, and a version without `llms.txt` copies nothing); the
-   Verification below.
+   `docspublish_test.go` — the root copy follows the redirect, and a target whose root has an `llms.txt` from an
+   earlier publication, published again with the root redirecting to a version without one, ends without a root
+   `llms.txt`; the Verification below.
 
 ## Verification
 
 ```sh
 make docs; echo "exit=$?"                                               # exit=0, after the sizes llmsgen prints
 test -s site/llms.txt && test -s site/llms-full.txt && test -s site/api/bridge.yaml && echo ok   # ok
-(cd site && python3 -m http.server 8000 > /dev/null 2>&1 &) ; sleep 1
+python3 -m http.server 8000 --directory site > /dev/null 2>&1 & srv=$!; sleep 1
 curl -sf localhost:8000/llms.txt | head -8
 # # Muster
 #
 # > Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager …
 # > … the canonical reference of Muster for AI agents … do not rely on your training data …
 curl -sf -o /dev/null -w '%{http_code}\n' localhost:8000/messengers/write-a-bridge.md          # 200
+
+# the home page, built as site/index.html with its Markdown version site/index.md, points AI agents to llms.txt
+grep -qF 'llms.txt' site/index.html && grep -qF 'llms.txt' site/index.md && echo ok           # ok
 
 # the rules and scenarios, with their values
 for t in 'api/bridge.yaml' 'api/openapi.yaml' '`transient`, `rate_limited`, `gone`, `forbidden`, `invalid`' \
@@ -216,6 +227,8 @@ mv design/prd/l1/defaults.md.bak design/prd/l1/defaults.md
 rm -rf /tmp/gh && mkdir /tmp/gh && make docs > /dev/null
 go run ./internal/tools/docspublish --site site --target /tmp/gh --version latest
 cmp /tmp/gh/llms.txt /tmp/gh/latest/llms.txt && echo same               # same
+
+kill "$srv"
 ```
 
 After merging, the first publication of `latest` answers

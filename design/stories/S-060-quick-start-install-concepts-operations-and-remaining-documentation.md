@@ -40,7 +40,7 @@ acceptance:
   - "[C-21.AC-2] The nightly workflow runs the commands of Quick start, exactly as the page shows them, on a fresh runner and reaches a running Muster: `/health/ready` answers `200` and the bootstrap Admin signs in — against the `edge` image of `master` always, and against the last release once one exists."
   - "[C-19.FR-3] Operations → Monitoring tells users to send the critical chart rules through an Alertmanager route that bypasses Muster, with an example route, and explains the rule values and the dashboard flags."
   - "[C-21.FR-5] Every new page is in English and draws its diagrams as Mermaid."
-  - "[C-22.FR-23] Write a bridge has the Python bridge library beside the Go one — `pip install muster-bridge`, a `Messenger` for the messenger, `BridgeApp` served by uvicorn or mounted into a FastAPI application, and `muster bridge check` against it — and Quick start's next steps and the README's roadmap and licence sections name both libraries and the example bridge, checked against the list in Verification."
+  - "[C-22.FR-23] Write a bridge has the Python bridge library beside the Go one — `pip install muster-bridge` (until the libraries are released with L1, `pip install .` in a clone of its repository, D366), a `Messenger` for the messenger, `BridgeApp` served by uvicorn or mounted into a FastAPI application, and `muster bridge check` against it — and Quick start's next steps and the README's roadmap and licence sections name both libraries and the example bridge, checked against the list in Verification."
 verify: "make ci docs-check"
 operator_attention: false
 issue: 60
@@ -111,13 +111,16 @@ issue: 60
   commands", republication past an edit window in "Broken Destinations", the Leader's Bridge polling in "High
   availability" and `muster bridge check` in the CLI page — and link to Messengers → Bridge and Write a bridge (S-074,
   S-081, S-079) instead of repeating them.
-- **Bridge libraries** (C-22.FR-23, C-22.FR-25, D343): the Python library is published when this story starts (S-084),
-  after S-079 wrote Write a bridge with the Go library. Write a bridge gains the Python library's section beside the Go
-  one — `pip install muster-bridge`, a `Messenger` of `async` methods, `BridgeApp` served by uvicorn or mounted into a
-  FastAPI application with its `lifespan`, the reporting calls, and `muster bridge check` against it — taken from the
-  library's README; Quick start's next steps name both libraries for a messenger Muster does not support; the
-  README's L1 roadmap names Bridges with the libraries for Go and Python, and its licence section says that
-  `api/bridge.yaml` is MIT and that the libraries and the example bridge are MIT in repositories of their own.
+- **Bridge libraries** (C-22.FR-23, C-22.FR-25, D343): both libraries are merged in their repositories when this story
+  starts: S-079 wrote Write a bridge with the Go library, and S-084 built the Python library beside it, after S-078 and
+  S-083 (D369). Neither is released before L1 is complete (D366), so PyPI has no `muster-bridge` until then. Write a
+  bridge gains the Python library's section beside the Go one — `pip install muster-bridge` (until the release,
+  `pip install .` in a clone of the repository, as the library's README says), a `Messenger` of `async` methods,
+  `BridgeApp` served by uvicorn or mounted into a FastAPI application with its `lifespan`, the reporting calls, and
+  `muster bridge check` against it — taken from the library's README; Quick start's next steps name both libraries for a
+  messenger Muster does not support; the README's L1 roadmap names Bridges with the libraries for Go and Python, and its
+  licence section says that `api/bridge.yaml` is MIT and that the libraries and the example bridge are MIT in
+  repositories of their own.
 
 ## Steps
 
@@ -147,7 +150,8 @@ T operations/backup-and-restore.md 'muster doctor'; T operations/upgrades.md dow
 T operations/key-rotation.md 'rotate-key'; T operations/key-rotation.md 'Not active yet'; T operations/key-rotation.md CSRF
 T operations/high-availability.md Leader; T operations/monitoring.md 'bypass'
 T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor'; T operations/cli.md 'muster bridge check'
-T messengers/write-a-bridge.md 'pip install muster-bridge'; T messengers/write-a-bridge.md BridgeApp
+T messengers/write-a-bridge.md 'pip install muster-bridge'; T messengers/write-a-bridge.md 'pip install .'
+T messengers/write-a-bridge.md BridgeApp
 T quick-start.md muster-bridge-go; T quick-start.md muster-bridge-python
 #                                                                       (no output)
 grep -c 'muster-bridge-go\|muster-bridge-python' README.md                 # 2 or more

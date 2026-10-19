@@ -61,8 +61,9 @@ alert Muster can raise; AI agents find the same documentation in a form made for
   windows, and that a bridge is finished only when `muster bridge check` passes against it), scenarios (writing a
   bridge in Go and in Python, connecting Alertmanager, automating through the API) that name the pages to read, and a
   map of every page linked to its Markdown version; `llms-full.txt`, the text of every page in the order of the
-  navigation; and a Markdown version of every page at its URL with `.md`. The values of the rules come from their
-  sources, and `make docs-check` fails when a rule, a scenario or the map no longer matches the pages, the
+  navigation; and a Markdown version of every page at its source path under the site, which is the page's URL with `.md`
+  for an ordinary page and `index.md` under the URL for a section page or the home page. The values of the rules come
+  from their sources, and `make docs-check` fails when a rule, a scenario or the map no longer matches the pages, the
   specifications or [defaults](defaults.md).
 
 ## UI
