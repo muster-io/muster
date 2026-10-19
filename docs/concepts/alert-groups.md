@@ -55,13 +55,14 @@ of you is current:
 
 | Mark | Meaning |
 |---|---|
-| Green dot, "Live" | Live updates are on. On a narrow screen only the dot shows. |
+| Green dot, "Live" | Live updates are on. |
 | Grey dot, "Connecting…" | The page has loaded and is connecting. The text shows once this has taken 5 seconds. |
 | Amber dot, "Reconnecting…" | The connection has been lost for 5 seconds, and the browser keeps trying again. |
 | Red dot, "Offline" | The connection has been lost for 30 seconds, or the page has not connected within 30 seconds of loading. |
 
-A drop shorter than 5 seconds, such as a Muster replica restarting, leaves the mark as it was. Press the mark to read
-what its state means: in every state but "Live" it says that what you see may be out of date, while reconnecting or
+On a narrow screen, such as a phone, only the dot shows, whatever the state, so that the navigation keeps its room. A
+drop shorter than 5 seconds, such as a Muster replica restarting, leaves the mark as it was. Press the mark to read its
+state and what it means: in every state but "Live" it says that what you see may be out of date, while reconnecting or
 offline it names the time the connection was lost, and when offline it offers to reload the page. As soon as the
 connection is back, the list and the page are read again, so they show everything that happened meanwhile. The mark
 sends nothing to Muster.

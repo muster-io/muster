@@ -8,15 +8,18 @@
 // "Offline" after runFor(25 s) more, while the browser keeps reconnecting every 3 s on the real clock. Once the route
 // is removed, a reconnect reaches `muster dev`, the mark turns "Live" and the list is read again without a reload: the
 // Alert Group the fake Alertmanager created meanwhile gets its row, and the Firing count of the spec's Integration
-// grows by one. A loss of 4 s on the page clock leaves "Live". At 360 × 740, in English and in Russian, the offline text
-// shows in the header of the list and of an Alert Group page without horizontal scrolling, "Reload page" loads the page
-// again, and in live only the dot shows. The requests of the page are the stream and its reads; while the mark changes,
+// grows by one. A loss of 4 s on the page clock leaves "Live". At 360 × 740, in English and in Russian, the mark shows
+// only its dot in every state, in the header of the list and of an Alert Group page, while the status region holds
+// "Reconnecting…" and then "Offline"; the main navigation keeps the width it had in live, the page does not scroll
+// horizontally, pressing the mark shows the state as the title of the popover, "Reload page" loads the page again, and
+// at 1280 px "Live" shows beside the dot. The requests of the page are the stream and its reads; while the mark changes,
 // the page reads nothing it had not read before, and nothing about the connection itself.
 
-import { type Page, type Request, type Route, expect, test } from "@playwright/test";
+import { type Locator, type Page, type Request, type Route, expect, test } from "@playwright/test";
 
 import {
   APP,
+  SUBPIXEL,
   adminApi,
   createRoute,
   deleteRoute,
@@ -326,6 +329,7 @@ const TEXTS = {
     lost: /^No live updates since \d{2}:\d{2}\. What you see may be out of date; it is read again as soon as the connection is back\.$/,
     reload: "Reload page",
     heading: "Alert Groups",
+    navigation: "Main",
   },
   ru: {
     live: "Онлайн",
@@ -334,6 +338,7 @@ const TEXTS = {
     lost: /^Нет обновлений в реальном времени с \d{2}:\d{2}\. Данные на странице могут быть устаревшими; они перечитаются, как только связь вернётся\.$/,
     reload: "Перезагрузить страницу",
     heading: "Группы алертов",
+    navigation: "Основная",
   },
 } as const;
 
@@ -356,8 +361,69 @@ async function signInIn(page: Page, language: "en" | "ru"): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
 }
 
+async function boxOf(locator: Locator, what: string) {
+  const b = await locator.boundingBox();
+  expect(b, what).not.toBeNull();
+  return b ?? { x: 0, y: 0, width: 0, height: 0 };
+}
+
+/** The boxes of the main navigation and of its first link, as the header lays them out now. */
+async function navigationLayout(page: Page, name: string) {
+  const navigation = page.getByRole("navigation", { name, exact: true });
+  return {
+    navigation: await boxOf(navigation, "the main navigation"),
+    link: await boxOf(navigation.getByRole("link").first(), "the first link of the navigation"),
+  };
+}
+
+type NavigationLayout = Awaited<ReturnType<typeof navigationLayout>>;
+
+/**
+ * The mark takes no more room than in live: the main navigation is as wide as it was then, and its first link is as
+ * wide as it was then and lies whole inside it.
+ */
+async function expectNavigationAsInLive(
+  page: Page,
+  name: string,
+  live: NavigationLayout,
+): Promise<void> {
+  const now = await navigationLayout(page, name);
+  expect(
+    Math.abs(now.navigation.width - live.navigation.width),
+    `the navigation is ${now.navigation.width} px wide, ${live.navigation.width} px in live`,
+  ).toBeLessThanOrEqual(SUBPIXEL);
+  expect(now.link.width, "the width of the first link").toBeGreaterThanOrEqual(
+    live.link.width - SUBPIXEL,
+  );
+  expect(now.link.x).toBeGreaterThanOrEqual(now.navigation.x - SUBPIXEL);
+  expect(now.link.x + now.link.width).toBeLessThanOrEqual(
+    now.navigation.x + now.navigation.width + SUBPIXEL,
+  );
+}
+
+/**
+ * Below the sm breakpoint the mark shows only its dot: the text is in the status region for screen readers, in the
+ * DOM once, and not on the screen.
+ */
+async function expectOnlyTheDot(page: Page, text: string): Promise<void> {
+  await expect(mark(page)).toHaveRole("status");
+  await expect(mark(page)).toHaveText(text);
+  await expect(mark(page).getByRole("button", { name: text, exact: true })).toBeVisible();
+  await expect(mark(page).getByTestId("live-indicator-dot")).toBeVisible();
+  expect(await textShown(page)).toBe(false);
+}
+
+/** Pressed, the mark shows the state as the title of the popover, which names the dialog. */
+async function openPopover(page: Page, text: string): Promise<Locator> {
+  await mark(page).getByRole("button", { name: text, exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: text, exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: text, exact: true })).toBeVisible();
+  return dialog;
+}
+
 for (const language of ["en", "ru"] as const) {
-  test(`360 px wide in ${language === "en" ? "English" : "Russian"}: the offline text in the header of the list and of an Alert Group page, in live only the dot`, async ({
+  test(`360 px wide in ${language === "en" ? "English" : "Russian"}: only the dot in the header of the list and of an Alert Group page, the navigation as wide as in live`, async ({
     page,
   }) => {
     const text = TEXTS[language];
@@ -366,7 +432,7 @@ for (const language of ["en", "ru"] as const) {
     await page.clock.install();
     await signInIn(page, language);
 
-    // 7. The list: "Reconnecting…", then the offline text in the header, without horizontal scrolling.
+    // 7. The list in live: only the dot; the layout of the navigation the other states must keep.
     const lost = await routeStream(page, "abort");
     await page.goto("/alert-groups");
     await expect(page.getByRole("heading", { name: text.heading, level: 1 })).toBeVisible();
@@ -376,59 +442,75 @@ for (const language of ["en", "ru"] as const) {
     await pauseClock(page);
     lost.first.released.fire();
     await expect(mark(page)).toHaveAttribute("data-state", "live");
+    await expectOnlyTheDot(page, text.live);
+    const live = await navigationLayout(page, text.navigation);
     await lost.second.arrived.fired;
+
+    // Reconnecting: still only the dot, the text in the status region and in the title of the popover.
     await page.clock.runFor(5_000);
     await expect(mark(page)).toHaveAttribute("data-state", "reconnecting");
-    await expect(mark(page)).toHaveText(text.reconnecting);
-    expect(await textShown(page)).toBe(true);
+    await expectOnlyTheDot(page, text.reconnecting);
+    await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-reconnecting-${language}-360`);
+    // The popover closes with an animation that waits for the page's frames, so the clock runs while it is open and
+    // stops again before the rest of the 30 s; the state turns offline only once they have passed.
+    await page.clock.resume();
+    const reconnecting = await openPopover(page, text.reconnecting);
+    await expect(reconnecting.getByText(text.lost)).toBeVisible();
+    await expect(page.getByRole("button", { name: text.reload })).toHaveCount(0);
+    await expectNoHorizontalScroll(page);
+    await shot(page, `live-indicator-popover-reconnecting-${language}-360`);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: text.reconnecting, exact: true })).toHaveCount(0);
+    await pauseClock(page);
+    await expect(mark(page)).toHaveAttribute("data-state", "reconnecting");
+
+    // Offline: the same.
     await page.clock.runFor(25_000);
     await expect(mark(page)).toHaveAttribute("data-state", "offline");
-    const header = page.getByRole("banner");
-    await expect(header.getByText(text.offline, { exact: true })).toBeVisible();
-    expect(await textShown(page)).toBe(true);
+    await expectOnlyTheDot(page, text.offline);
+    await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-offline-${language}-360-list`);
 
     await page.clock.resume();
-    await mark(page).getByRole("button", { name: text.offline }).click();
-    await expect(page.getByText(text.lost)).toBeVisible();
+    const offline = await openPopover(page, text.offline);
+    await expect(offline.getByText(text.lost)).toBeVisible();
     await expect(page.getByRole("button", { name: text.reload })).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await shot(page, `live-indicator-popover-${language}-360`);
+    await shot(page, `live-indicator-popover-offline-${language}-360`);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: text.reload })).toHaveCount(0);
 
-    // The Alert Group page, opened from the list: still offline, the text in its header.
+    // The Alert Group page, opened from the list: still offline, only the dot in its header.
     await row.getByRole("link").click();
     await expect(page.getByRole("heading", { name: FIRST_TITLE, level: 1 })).toBeVisible();
     await expect(mark(page)).toHaveAttribute("data-state", "offline");
-    await expect(header.getByText(text.offline, { exact: true })).toBeVisible();
+    await expectOnlyTheDot(page, text.offline);
+    await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-offline-${language}-360-page`);
 
     // "Reload page" loads the page again, which starts connecting; the stream is still out of reach.
-    await mark(page).getByRole("button", { name: text.offline }).click();
+    await openPopover(page, text.offline);
     const reloaded = page.waitForEvent("load");
     await page.getByRole("button", { name: text.reload }).click();
     await reloaded;
     await expect(page.getByRole("heading", { name: FIRST_TITLE, level: 1 })).toBeVisible();
     await expect(mark(page)).toHaveAttribute("data-state", "connecting");
 
-    // Live: only the dot shows, the region still holds the text for screen readers; from 640 px up the text shows. The
-    // browser's next attempt reaches `muster dev` within 3 s, or the shell's new stream within 10 s.
+    // Live again: only the dot, the region still holds the text for screen readers; from 640 px up the text shows.
+    // The browser's next attempt reaches `muster dev` within 3 s, or the shell's new stream within 10 s.
     await lost.unroute();
     await expect(mark(page)).toHaveAttribute("data-state", "live", { timeout: 20_000 });
-    await expect(mark(page)).toHaveRole("status");
-    await expect(mark(page)).toHaveText(text.live);
-    await expect(mark(page).getByRole("button", { name: text.live })).toBeVisible();
-    await expect(mark(page).getByTestId("live-indicator-dot")).toBeVisible();
-    expect(await textShown(page)).toBe(false);
+    await expectOnlyTheDot(page, text.live);
+    await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-live-${language}-360`);
     await page.setViewportSize({ width: 1280, height: 800 });
     await expect.poll(() => textShown(page)).toBe(true);
+    const header = page.getByRole("banner");
     await expect(header.getByText(text.live, { exact: true })).toBeVisible();
     await shot(page, `live-indicator-live-${language}-1280`);
     expect(csp).toEqual([]);
