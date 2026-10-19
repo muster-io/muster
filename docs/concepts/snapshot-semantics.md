@@ -15,7 +15,7 @@ Receiving is store-first. Muster checks the Integration token and the size, stor
 answers `202`. A worker then processes it, on any replica, and everything that follows is a chain of small steps:
 
 ```mermaid
-flowchart LR
+flowchart TD
   am["Alertmanager"] -- "Snapshot" --> ingest["Ingest"]
   ingest --> stored[("Stored Snapshot")]
   stored --> processing["Processing"]
