@@ -2612,10 +2612,12 @@ creates it. Neither the Helm chart nor the compose example backs up the database
 <dd><code>MUSTER_DATABASE_HOST</code>, <code>MUSTER_DATABASE_PORT</code> (default <code>5432</code>), <code>MUSTER_DATABASE_NAME</code>, <code>MUSTER_DATABASE_USER</code>,
 <code>MUSTER_DATABASE_PASSWORD</code> or <code>MUSTER_DATABASE_PASSWORD_FILE</code>, <code>MUSTER_DATABASE_SSLMODE</code> (default <code>prefer</code>)</dd>
 </dl>
-<p>When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
-<code>sslmode</code> into the connection and takes the password only from it, so <code>PGPORT</code>, <code>PGSSLMODE</code>, <code>PGPASSWORD</code> and
-<code>PGPASSFILE</code> change nothing. The database driver still reads the other <code>PG*</code> variables, such as <code>PGSSLROOTCERT</code>, for
-what the connection leaves out: leave them unset. Any secret can come from a <code>*_FILE</code> variable.</p>
+<p>When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every <code>PG*</code> variable,
+such as <code>PGHOST</code>, <code>PGSSLMODE</code>, <code>PGSSLROOTCERT</code>, <code>PGOPTIONS</code> and <code>PGPASSFILE</code>, and the password file <code>~/.pgpass</code>. Give
+any other libpq setting as a parameter of the URL instead, such as <code>sslrootcert</code>, <code>options</code> or <code>target_session_attrs</code>.
+Only libpq's default certificate files still apply when the URL names none: <code>~/.postgresql/root.crt</code>, and
+<code>~/.postgresql/postgresql.crt</code> with <code>postgresql.key</code>; these are files, not variables, and the Muster image has none. Any
+secret can come from a <code>*_FILE</code> variable.</p>
 <p>Prefer the fields when the host, user and name are plain values and only the password is a secret: the Helm chart does
 exactly that, with <code>database.host</code>, <code>database.port</code>, <code>database.name</code>, <code>database.user</code> and <code>database.sslmode</code> as values
 and the password from a key of the Secret as <code>MUSTER_DATABASE_PASSWORD_FILE</code>. Use the URL when you need a setting that
@@ -2747,8 +2749,9 @@ queries fail with errors about missing prepared statements. Set <code>max_prepar
 you: <code>muster doctor</code> reports each connection as encrypted or not, and a start with an unencrypted connection logs a
 warning. For anything but a single machine, set <code>require</code> at least, and <code>verify-full</code> where you can: the certificate then
 proves that the server is yours.</p>
-<p><code>verify-ca</code> and <code>verify-full</code> check against the root certificates of the system, or against the file named by
-<code>sslrootcert</code> in <code>MUSTER_DATABASE_URL</code>, which must exist in the container. The fields form has no such setting. With
+<p><code>verify-ca</code> and <code>verify-full</code> check against the file named by <code>sslrootcert</code> in <code>MUSTER_DATABASE_URL</code>, which must exist
+in the container; without it, against <code>~/.postgresql/root.crt</code> when that file exists, and otherwise against the root
+certificates of the system. The fields form has no such setting. With
 <code>MUSTER_DATABASE_SESSION_HOST</code> and <code>MUSTER_DATABASE_SESSION_PORT</code>, the session connection takes the <code>sslmode</code> of the
 main connection; a <code>MUSTER_DATABASE_SESSION_URL</code> carries its own, <code>prefer</code> when it names none.</p>
 
