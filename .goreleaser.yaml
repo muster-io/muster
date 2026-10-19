@@ -58,11 +58,11 @@ dockers_v2:
     dockerfile: Dockerfile
     images:
       - ghcr.io/muster-io/muster
-    # latest follows the newest release only: a prerelease (and the snapshot, whose version has a prerelease part)
-    # renders the empty tag, which goreleaser drops.
+    # latest follows the newest release only. A prerelease tag and a snapshot render the empty tag, which goreleaser
+    # drops. .Prerelease comes from the git tag, so a snapshot needs .IsSnapshot as well.
     tags:
       - "v{{ .Version }}"
-      - '{{ if not .Prerelease }}latest{{ end }}'
+      - '{{ if and (not .IsSnapshot) (not .Prerelease) }}latest{{ end }}'
     platforms:
       - linux/amd64
       - linux/arm64
