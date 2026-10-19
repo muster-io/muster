@@ -339,6 +339,274 @@ PASS answer
 
 The package documentation on pkg.go.dev describes what the library does for every operation.
 
+### The Python library
+
+The Python library is `muster-bridge` on PyPI, and its import package is `muster_bridge`. It needs Python 3.11 or
+newer and depends only on Starlette, httpx and pydantic 2. Like the Go library, it is released from its own repository,
+`muster-bridge-python`, under the MIT licence and without a CLA.
+
+```sh
+pip install muster-bridge
+```
+
+The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
+`pip install muster-bridge` finds nothing: install it from a clone of its repository with `pip install .`. Its version
+is `0.x` until Muster's first release; from then, `1.x` speaks protocol version 1.
+
+```sh
+git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
+python3 -m venv .venv && . .venv/bin/activate
+pip install .
+```
+
+The library serves the protocol as an ASGI application, `BridgeApp`, and calls your code with `async` methods on the
+event loop that serves the bridge. Call your messenger with an asynchronous client, or move a blocking call off the
+loop with `asyncio.to_thread`.
+
+**1. Implement `Messenger`.** It is a protocol of five coroutines, each given the name of the bot whose token Muster
+sent: `post_message`, `edit_message`, `reply_in_thread`, `check_channel` and `answer_event`. Define them with
+`async def`. The sketch below is for Parley, the same fictional messenger; its asynchronous client `ParleyClient`
+stands for whatever library your messenger has.
+
+```python
+from muster_bridge import (
+    AnswerShownShownAs,
+    Mention,
+    MessageContent,
+    MessageEdited,
+    MessageInput,
+    MessagePosted,
+    ReportedEvent,
+    ThreadReplyInput,
+    ThreadReplyPosted,
+    replace_mentions,
+)
+
+
+def mention(m: Mention) -> str:
+    """Write a mention of a person as Parley does."""
+    return f"<@{m.external_id}>"
+
+
+class ParleyMessenger:
+    """The bridge's calls to the fictional messenger Parley."""
+
+    def __init__(self, api: ParleyClient) -> None:
+        self.api = api
+
+    async def post_message(self, bot: str, message: MessageInput) -> MessagePosted:
+        body = replace_mentions(message.body, message.mentions, mention)
+        try:
+            message_id = await self.api.send(message.channel_id, render(message.title, body))
+        except ParleyError as error:
+            raise classify(error) from error
+        return MessagePosted(message_id=message_id)
+
+    async def edit_message(self, bot: str, message_id: str, content: MessageContent) -> MessageEdited:
+        try:
+            await self.api.edit(message_id, render(content.title, content.body))
+        except ParleyError as error:
+            raise classify(error) from error
+        return MessageEdited()
+
+    async def reply_in_thread(self, bot: str, message_id: str, reply: ThreadReplyInput) -> ThreadReplyPosted:
+        body = replace_mentions(reply.body, reply.mentions, mention)
+        try:
+            reply_id, thread = await self.api.reply(message_id, reply.thread_ref, body)
+        except ParleyError as error:
+            raise classify(error) from error
+        return ThreadReplyPosted(message_id=reply_id, thread_ref=thread)
+
+    async def check_channel(self, bot: str, channel_id: str) -> str:
+        try:
+            return await self.api.channel_name(channel_id)
+        except ParleyError as error:
+            raise classify(error) from error
+
+    async def answer_event(self, bot: str, event: ReportedEvent, text: str) -> AnswerShownShownAs:
+        """Answer an Account link in its direct chat, a Thread message in its Thread, and a press privately."""
+        try:
+            if event.type == "account_link":
+                await self.api.send_direct(event.chat, text)
+                return AnswerShownShownAs.direct
+            if event.type == "thread_message":
+                await self.api.reply(event.message_id, event.thread_ref, text)
+                return AnswerShownShownAs.thread
+            await self.api.whisper(event.chat, text)
+            return AnswerShownShownAs.ephemeral
+        except ParleyError as error:
+            raise classify(error) from error
+```
+
+For the features you declare, also implement `UserFinder` (`find_user`, when `user_lookup` is not `none`),
+`DirectMessenger` (`send_direct_message`, when the bridge offers direct messages) and `Deleter` (`delete_message`, when
+it offers deletion). `BridgeApp` raises `ConfigError` for a configuration whose features lack their methods, or whose
+`info` would not match the protocol, and names every reason.
+
+**2. Answer failures with error classes.** A method raises `Transient`, `RateLimited` (with the wait `retry_after` in
+seconds, and `scope` `"channel"` or `"bot"`), `Gone` (with `edit_window_closed=True` for an edit that the messenger
+refuses only for the message's age), `Forbidden` or `Invalid`. Each takes a `detail` that Muster shows the Admin, so
+keep secrets out of it. Any other exception is answered as `transient`, with a generic detail that carries none of its
+text.
+
+```python
+from muster_bridge import BridgeError, Forbidden, Gone, Invalid, RateLimited, Transient
+
+
+def classify(error: ParleyError) -> BridgeError:
+    """Tell Muster what a failure of Parley means. Only the bridge knows."""
+    match error.code:
+        case "slow_down":
+            return RateLimited("Parley asks to slow down.", retry_after=error.retry_in, scope="channel")
+        case "message_not_found" | "thread_removed":
+            return Gone("The message no longer exists.")
+        case "edit_too_old":
+            return Gone("The message can no longer be edited.", edit_window_closed=True)
+        case "channel_not_found" | "not_a_member" | "bot_banned" | "no_permission":
+            return Forbidden("The bot is not a member of this channel.")
+        case "user_blocked_bot":
+            return Forbidden("This person cannot receive a message from the bot.")
+        case "text_too_long" | "bad_request":
+            return Invalid("Parley refused the request.")
+        case _:
+            return Transient("Parley is not available.")
+```
+
+**3. Create the bridge with `BridgeApp`.** Give its `Config` the bot's token in `bots`, the features in
+`capabilities` and the limits in `limits`, and serve the `BridgeApp` with uvicorn or another ASGI server.
+
+```python
+from pathlib import Path
+
+import uvicorn
+
+from muster_bridge import (
+    Bot,
+    BridgeApp,
+    ButtonStyle,
+    Capabilities,
+    CapabilitiesButtons,
+    CapabilitiesPrivateAnswer,
+    CapabilitiesThreadMessages,
+    Config,
+    Limits,
+)
+
+token = Path("/run/secrets/muster-token").read_text(encoding="utf-8").strip()
+
+config = Config(
+    name="parley-bridge",
+    version="0.1.0",
+    messenger_name="Parley",
+    bots=[Bot(name="main", token=token)],
+    limits=Limits(max_body_length=4000, edit_max_age_seconds=None),
+    capabilities=Capabilities(
+        buttons=CapabilitiesButtons(
+            max_per_message=5,
+            max_per_row=5,
+            data_max_bytes=64,
+            styles=[ButtonStyle.primary, ButtonStyle.success, ButtonStyle.neutral, ButtonStyle.danger],
+        ),
+        thread_messages=CapabilitiesThreadMessages.all,
+        private_answers=[CapabilitiesPrivateAnswer.ephemeral],
+    ),
+    user_lookup="none",
+)
+bridge = BridgeApp(config, ParleyMessenger(ParleyClient()))
+
+uvicorn.run(bridge, host="127.0.0.1", port=8095)
+```
+
+`max_body_length` is the longest `body` that your bridge always accepts, after its own rendering; the protocol's
+smallest value is 500, and the library takes at most 100000. `Limits` also needs `edit_max_age_seconds`, how long the
+bot can edit a message after posting it, or `None` when edits never expire. A member of `Capabilities` left `None` is
+a feature the bridge does not offer, and Muster never calls an operation that the bridge did not declare.
+
+To serve the bridge under a path of a Starlette or FastAPI application, mount it there and pass its `lifespan` to the
+application. The base URL of the Bridge Connection then ends with that path.
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI(lifespan=bridge.lifespan)
+app.mount("/bridge", bridge)
+```
+
+Starlette runs the lifespan of the top-level application only, and the bridge's lifespan starts and stops its pushers.
+An application with a lifespan of its own enters the bridge's in it, with `async with bridge.lifespan(app):`. A
+`BridgeApp` has one lifespan, and its end stops the pushers for good: a program or a test that starts the application
+again makes a new `BridgeApp`.
+
+!!! warning "A read timeout above 75 seconds"
+    `pollEvents` holds a request open for up to 60 seconds. uvicorn sets no timeout that cuts such a request short, but
+    a proxy in front of the bridge needs a read timeout above 75 seconds. A shorter one cuts a poll off without an
+    answer, and its events reach Muster late.
+
+**4. Report what happens in the messenger.** When a person presses a button, writes in a Thread, deletes a message of
+the bot or writes to the bot, await `bridge.press(...)`, `bridge.thread_message(...)`, `bridge.message_deleted(...)`
+or `bridge.direct_message(...)`, all four coroutines, in the event loop that serves the bridge. Each queues
+the event and returns at once, so confirm a press to your messenger within its deadline whatever Muster does. Give the
+messenger's own id of the update as `update_id`: an update that the messenger delivers twice is then queued once.
+
+```python
+from muster_bridge import BridgeApp, Person
+
+
+async def on_press(bridge: BridgeApp, update_id: str, message_id: str, data: str, chat: str, who: Person) -> None:
+    """Report a press in Parley.
+
+    chat is what answer_event needs to whisper to the person; the library keeps it with the event and never sends it
+    to Muster.
+    """
+    # ... confirm the press to Parley first, then report it. press returns at once.
+    await bridge.press("main", message_id=message_id, user=who, data=data, update_id=update_id, chat=chat)
+```
+
+`chat` comes back as `ReportedEvent.chat` when Muster answers the event; `thread_message` and `direct_message` take
+one too. `Person` and the other models validate when they are built, so cut a display name to 200 characters before you
+build the `Person` of a report. A report raises `UnknownBotError` for a bot that the `Config` lacks, `NotOfferedError`
+for a feature that the bridge does not offer, and `InvalidEventError` for an event that would not match the protocol.
+From another thread, hand the coroutine to the event loop with `asyncio.run_coroutine_threadsafe`.
+
+A direct message whose whole text is an Account link token becomes an `account_link` event; any other direct message is
+ignored.
+
+**5. Turn Mention markers into mentions.** `replace_mentions(body, mentions, render)` replaces each marker
+`[@Name](muster-mention:ref)` by what `render` returns for its entry in `mentions`, as the sketch above does. For a
+bridge without `native_mentions`, pass `None` as `render` and the markers become plain names.
+
+**6. Push, if you want it.** Give a bot a `PushTarget` with the callback address that its Bridge Connection shows and
+the push secret you entered on it, in `Bot(push=...)` or later with `bridge.set_push(bot, target)`, from the thread of
+the event loop that serves the bridge. The end of the bridge's lifespan, or `await bridge.aclose()`, stops the
+pushers; the events stay queued for polling.
+
+**7. Use a `Store` that survives restarts.** `MemoryStore`, the default, keeps the idempotency keys and the queued
+events in memory. A restart forgets them: a retried request that Muster sends after the restart then posts a second
+message, and events that Muster has not collected are lost. Implement the protocol `Store` over your database and pass
+it as `Config(store=...)`. Long polls and pushes are woken in the process that queued an event, so with several
+processes over one store, run each bot in one process only.
+
+**8. Check it.** Run `muster bridge check` against your bridge (see [Test your bridge](#test-your-bridge)).
+
+The library's repository has a complete bridge in one file, `examples/memory_bridge.py`: its messenger lives in memory
+and writes every message the bot posts to the log. In the clone, with the library installed as above, install uvicorn
+beside it and run the example with a token, the one a Bridge Connection in Muster would hold:
+
+```sh
+pip install uvicorn
+printf example-token > /tmp/bt
+python examples/memory_bridge.py --token-file /tmp/bt
+```
+
+Like the Go library's example, it listens on `127.0.0.1:18095`, knows the channels `alerts` and `ops` and the people
+`alice` and `bob`, and offers every feature of the protocol, or only those that `BRIDGE_FEATURES` lists. The `curl`
+calls and the `muster bridge check` command of [the Go library](#the-go-library) give the same answers against it.
+Outside the protocol, the example serves `POST /demo/press`, which presses the first button of a message as a person,
+so that a script can play the person of an interactive check. It has no authentication of its own: keep it on
+loopback.
+
+The library's README and the docstrings of the package describe what the library does for every operation.
+
 ### The example bridge
 
 The **example bridge** is built on the Go library and lives in its repository, in `examples/chat`. It is a small chat

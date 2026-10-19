@@ -73,22 +73,47 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Quick start: quick-start.md
+  - Install:
+      - install/helm.md
+      - install/database.md
   - Alertmanager:
       - integrations/alertmanager.md
       - integrations/heartbeat.md
+      - integrations/grafana.md
   - Messengers:
+      - messengers/index.md
       - messengers/mattermost.md
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
+      - messengers/proxies.md
       - messengers/bridge.md
       - messengers/write-a-bridge.md
       - messengers/account-links.md
   - Outgoing webhooks:
       - outgoing-webhooks/events.md
       - outgoing-webhooks/templates.md
+      - outgoing-webhooks/recipes.md
   - Sign-in:
+      - sign-in/index.md
       - sign-in/oidc-keycloak.md
+      - sign-in/totp.md
+      - sign-in/closed-networks.md
+  - Concepts:
+      - concepts/alert-groups.md
+      - concepts/routes-and-group-keys.md
+      - concepts/snapshot-semantics.md
+      - concepts/loud-and-quiet.md
+      - concepts/statuses-and-commands.md
+      - concepts/broken-destinations.md
   - Operations:
+      - operations/backup-and-restore.md
+      - operations/upgrades.md
+      - operations/key-rotation.md
+      - operations/high-availability.md
+      - operations/monitoring.md
+      - operations/outgoing-heartbeat.md
+      - operations/cli.md
       - operations/request-log.md
       - Runbooks:
           - operations/runbooks/index.md

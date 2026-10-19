@@ -11,7 +11,11 @@ files_touched:
   - docs/install/helm.md
   - docs/install/database.md
   - docs/integrations/alertmanager.md
+  - docs/integrations/grafana.md
+  - docs/messengers/index.md
   - docs/messengers/proxies.md
+  - docs/outgoing-webhooks/recipes.md
+  - docs/sign-in/index.md
   - docs/sign-in/totp.md
   - docs/sign-in/closed-networks.md
   - docs/concepts/alert-groups.md
@@ -30,6 +34,7 @@ files_touched:
   - docs/messengers/write-a-bridge.md
   - docs/index.md
   - README.md
+  - AGENTS.md
   - mkdocs.yml
   - test/docs/quickstart.sh
   - Makefile
@@ -56,6 +61,9 @@ issue: 60
 - Install, the missing parts of Alertmanager and Sign-in, proxies, Concepts and Operations.
 - The Python bridge library's section of Write a bridge, and the bridge libraries in Quick start's next steps and in
   the README's roadmap and licence sections.
+- Maintainer queue (D375): the statement that the web UI and API work only after sign-in, in the README and Sign-in; a
+  table of what each Destination type can do, on the Messengers page; outgoing-webhook recipes; Grafana Alerting through
+  an external Alertmanager.
 
 **OUT**
 
@@ -76,7 +84,11 @@ issue: 60
   | Install | `install/helm.md` | Helm values, an existing Secret for the master keys and passwords, ingress and Gateway API routes, the two public addresses (`MUSTER_PUBLIC_URL`, `MUSTER_INGEST_URL`), replicas and the PodDisruptionBudget |
   | Install | `install/database.md` | the database as a URL or as fields, external PostgreSQL with a CloudNativePG `Cluster` example, notes for managed PostgreSQL, the session connection for PgBouncer (and, for the main connection in transaction mode, PgBouncer 1.21 or newer with `max_prepared_statements` above 0), TLS modes |
   | Alertmanager | `integrations/alertmanager.md` (extended) | repeat intervals of 5–15 minutes, `max_alerts: 0`, Static labels, advice against Instance labels in informational alerts, besides the existing receiver, route and HA pair settings |
+  | Alertmanager | `integrations/grafana.md` | Grafana Alerting: Grafana-managed alert rules sent to an external Alertmanager that has the Muster receiver, why not Grafana's webhook contact point, and the labels Grafana adds; maintainer queue (D375) |
+  | Messengers | `messengers/index.md` | the Destination types and Connections, and a table of what each Destination type can do: buttons, Threads, Loud and Quiet, Mentions, Account links, rate limits, edit windows, Storms, proxies and checks; maintainer queue (D375) |
   | Messengers | `messengers/proxies.md` | the proxy of each client, the three types, authentication, what the outbound address policy checks through a proxy |
+  | Outgoing webhooks | `outgoing-webhooks/recipes.md` | recipes built only from the events and template modes: a phone call or an SMS, a status page, a second chat, an issue tracker; maintainer queue (D375) |
+  | Sign-in | `sign-in/index.md` | the web UI and the API work only after sign-in, the endpoints open without it, the Roles, the ways to sign in, and the Account links that people make themselves; maintainer queue (D375) |
   | Sign-in | `sign-in/totp.md`, `sign-in/closed-networks.md` | TOTP and its policy, recovery codes, resets; installations whose IdP Muster cannot reach: local users with TOTP |
   | Concepts | `concepts/*.md` | Alert Groups; Routes and Group keys; Snapshot semantics (Gone, Stale, Heartbeat, truncation); Loud and Quiet; statuses and commands with ack timeouts, Reminders and auto-unacknowledge; Broken Destinations and recovery |
   | Operations | `operations/backup-and-restore.md` | backing up the database and the master keys separately, the restore order, `muster doctor` after a restore |
@@ -99,8 +111,15 @@ issue: 60
 - **Quick start check** (C-21.AC-2; `test/docs/quickstart.sh`, `make quickstart-check`, `.github/workflows/nightly.yml`):
   the script extracts the shell blocks of `docs/quick-start.md` marked `<!-- quickstart -->` and runs them in order in an
   empty directory on a fresh runner with only Docker, then waits for `/health/ready` and signs in as the bootstrap Admin
-  with the password the page sets. `make quickstart-check` takes `MUSTER_IMAGE` and `QUICKSTART_REF`: the image the
-  compose file runs and the Git ref the download reads in place of the release tag. The nightly job runs
+  with the password the page sets. `/health/ready` is served on the internal listener (`:8082`), which the compose
+  example does not publish, and the Muster image has no shell, so the script probes it from the compose network: it runs
+  busybox `wget` in the `postgres` container of the same compose project against `http://muster:8082/health/ready`
+  until it answers `200`, within `QUICKSTART_READY_TIMEOUT` (180 seconds by default). It then signs in with
+  `POST /api/v1/sessions` on `MUSTER_PUBLIC_URL`, with the login and password it reads from the `.env` the page wrote,
+  and expects `201` and an active Admin session. It always removes the compose project with its volume, prints the
+  containers' logs when it fails, and never prints the passwords or the key. `make quickstart-check` takes
+  `MUSTER_IMAGE` and `QUICKSTART_REF`: the image the compose file runs and the Git ref the download reads in place of
+  the release tag; `AGENTS.md` lists the target in its Make targets table. The nightly job runs
   `scripts/ci/docker-hub-mirror.sh` first, as the other Docker jobs do, then two legs: `master` — `MUSTER_IMAGE`
   `ghcr.io/muster-io/muster:edge` and the ref `master`; release — the page as written, skipped with a notice while the
   repository has no release (`gh release view` finds none).
@@ -119,8 +138,8 @@ issue: 60
   `BridgeApp` served by uvicorn or mounted into a FastAPI application with its `lifespan`, the reporting calls, and
   `muster bridge check` against it — taken from the library's README; Quick start's next steps name both libraries for a
   messenger Muster does not support; the README's L1 roadmap names Bridges with the libraries for Go and Python, and its
-  licence section says that `api/bridge.yaml` is MIT and that the libraries and the example bridge are MIT in
-  repositories of their own.
+  licence section says that `api/bridge.yaml` is MIT and that the libraries are MIT in repositories of their own, as is
+  the example bridge, which is not a repository of its own but `examples/chat` in `muster-bridge-go`.
 
 ## Steps
 
@@ -153,6 +172,10 @@ T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor';
 T messengers/write-a-bridge.md 'pip install muster-bridge'; T messengers/write-a-bridge.md 'pip install .'
 T messengers/write-a-bridge.md BridgeApp
 T quick-start.md muster-bridge-go; T quick-start.md muster-bridge-python
+T messengers/index.md 'What each Destination type can do'; T messengers/index.md 'Edit window'
+T integrations/grafana.md 'external Alertmanager'; T integrations/grafana.md grafana_folder
+T outgoing-webhooks/recipes.md 'A status page'; T outgoing-webhooks/recipes.md 'An issue tracker'
+T sign-in/index.md 'works only after sign-in'; T sign-in/index.md Responder
 #                                                                       (no output)
 grep -c 'muster-bridge-go\|muster-bridge-python' README.md                 # 2 or more
 grep -c 'example bridge' README.md                                          # 1 or more

@@ -284,3 +284,61 @@ jobs:
           fi
           docker compose -f deploy/compose/docker-compose.yml down -v || true
           docker compose -f deploy/dev/docker-compose.yml down -v || true
+
+  # Quick start (docs/quick-start.md) as a new user follows it, on a fresh runner with only Docker: its commands run in an
+  # empty directory, then /health/ready must answer 200 and the bootstrap Admin sign in. The master leg runs the edge
+  # image with the compose example of master; the release leg runs the page exactly as written, which downloads the
+  # compose example of the release tag the page names, and is skipped until that tag is a published release.
+  quick-start:
+    name: quick-start (${{ matrix.leg }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: master
+            image: ghcr.io/muster-io/muster:edge
+            ref: master
+          - leg: release
+            image: ''
+            ref: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: look for a release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEG: ${{ matrix.leg }}
+        run: |
+          set -euo pipefail
+          if [ "$LEG" != release ]; then
+            echo "run=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The tag of the download line that release-please updates, as the page names it.
+          tag=$(sed -n 's|.*raw\.githubusercontent\.com/muster-io/muster/\(v[^/]*\)/deploy/compose/docker-compose\.yml.*x-release-please-version.*|\1|p' \
+            docs/quick-start.md | head -n 1)
+          if [ -z "$tag" ]; then
+            echo "::error::docs/quick-start.md has no marked download line with a release tag."
+            exit 1
+          fi
+          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null) &&
+            [ "$draft" = false ]; then
+            echo "checking Quick start as written against the release $tag"
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::Quick start names $tag, which is not a published release yet: the release leg is skipped."
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
+      - name: pull Docker Hub images through the mirror
+        if: steps.release.outputs.run == 'true'
+        run: ./scripts/ci/docker-hub-mirror.sh
+      - name: run Quick start
+        if: steps.release.outputs.run == 'true'
+        env:
+          MUSTER_IMAGE: ${{ matrix.image }}
+          QUICKSTART_REF: ${{ matrix.ref }}
+        run: make quickstart-check

@@ -134,10 +134,15 @@ E2E_REPLICAS ?= 1
 PLAYWRIGHT_INSTALL_FLAGS ?=
 # Flags of the load test, such as LOAD_TEST_FLAGS="-rate 50 -duration 1m".
 LOAD_TEST_FLAGS ?=
+# make quickstart-check: the image the compose example runs and the Git ref its download reads, in place of the release
+# image and the release tag that Quick start names, such as MUSTER_IMAGE=ghcr.io/muster-io/muster:edge
+# QUICKSTART_REF=master. Left empty, the page is checked exactly as written.
+MUSTER_IMAGE ?=
+QUICKSTART_REF ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
-	vulncheck mutation helm-check rules-test compose-check dev-db dev e2e e2e-go e2e-web load-test ci clean web-browsers docs \
-	docs-serve docs-check docs-api docs-vendor demo
+	vulncheck mutation helm-check rules-test compose-check quickstart-check dev-db dev e2e e2e-go e2e-web load-test ci clean \
+	web-browsers docs docs-serve docs-check docs-api docs-vendor demo
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -391,6 +396,13 @@ rules-test: $(HELM) $(PROMTOOL) ## Render the chart's alert rules and run their 
 compose-check: ## Check the compose example with docker compose config, without and with .env.example
 	$(DOCKER) compose -f deploy/compose/docker-compose.yml config --quiet
 	$(DOCKER) compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
+
+# Runs the commands of docs/quick-start.md in an empty directory, waits for /health/ready and signs in as the bootstrap
+# Admin, then removes the compose project with its volume. The project is named muster-quickstart-check, so a Quick
+# start installation of the project muster on the same machine is never touched. It needs Docker with the compose
+# plugin, curl and openssl, and port 8080 free. The nightly workflow runs it on a fresh runner.
+quickstart-check: ## Run the commands of Quick start with Docker, wait for ready and sign in as the bootstrap Admin
+	MUSTER_IMAGE="$(MUSTER_IMAGE)" QUICKSTART_REF="$(QUICKSTART_REF)" ./test/docs/quickstart.sh
 
 dev-db: ## Start the development PostgreSQL on 127.0.0.1:55432
 	$(DOCKER) compose -f $(DEV_COMPOSE) up -d --wait
