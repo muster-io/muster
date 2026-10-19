@@ -32,15 +32,19 @@ of each Alert Group there up to date until the Alert Group is resolved.
 
 - [Quick start](quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
   in about five minutes.
-- [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, and watch the path from it with
-  a [Heartbeat](integrations/heartbeat.md).
+- [Install](install/helm.md): run Muster in production with [Helm](install/helm.md) and an external
+  [PostgreSQL](install/database.md).
+- [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, watch the path from it with a
+  [Heartbeat](integrations/heartbeat.md), and send [Grafana Alerting](integrations/grafana.md) through it.
 - [Messengers](messengers/mattermost.md): connect [Mattermost](messengers/mattermost.md) and
   [Telegram](messengers/telegram.md), reach any other messenger through a [Bridge](messengers/bridge.md) (and
-  [write one](messengers/write-a-bridge.md)), and [link your messenger accounts](messengers/account-links.md).
+  [write one](messengers/write-a-bridge.md)), [link your messenger accounts](messengers/account-links.md), and set a
+  [proxy](messengers/proxies.md) for a client.
 - [Outgoing webhooks](outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](outgoing-webhooks/templates.md).
-- [Sign-in](sign-in/oidc-keycloak.md): sign in with OpenID Connect, shown with Keycloak.
+- [Sign-in](sign-in/index.md): Roles and ways to sign in; [OpenID Connect with Keycloak](sign-in/oidc-keycloak.md),
+  [TOTP](sign-in/totp.md), and [closed networks](sign-in/closed-networks.md).
 - [Runbooks](operations/runbooks/index.md): what each alert about Muster means and how to fix it.
 - [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values, the API
   and the Bridge protocol.

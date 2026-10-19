@@ -92,13 +92,74 @@ A critical alert goes to `muster-prod-eu` and `oncall`, any other alert to `must
 last line, a warning would reach only Muster. `amtool config routes test --config.file=alertmanager.yml
 severity=warning` prints the receivers an alert reaches; it should list Muster and your default receiver.
 
-- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet). Muster learns from the repeats that
-  alerts still fire, and resolves an alert as Gone once its Alertmanager group stopped listing it for up to two repeat
-  intervals. A long repeat interval does not reduce noise in Muster — Muster controls noise itself, with one message
-  per Alert Group that it edits — it only makes Muster slower to notice that an alert is Gone.
+- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet). See
+  [Repeat intervals](#repeat-intervals) for why.
 
 Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and
 the Stored Snapshots as received.
+
+## Repeat intervals
+
+Keep the `repeat_interval` of the route that sends to Muster between **5 and 15 minutes**. It is a setting of the
+route, not of the receiver, so a route that sends only some alerts to Muster can have its own.
+
+Muster learns from the repeats. An Alertmanager group sends a Snapshot again each time `repeat_interval` elapses, and
+Muster measures the gaps between those Snapshots. Two rules depend on them:
+
+- An Alert is **Gone** when at least two consecutive Snapshots of its Alertmanager group, and at least
+  `processing.gone_min_absence` (5 minutes), do not list it any more. This is how Muster notices an alert that
+  Alertmanager dropped without a `resolved` notification.
+- An Alert goes **Stale** when its Alertmanager group sends no Snapshot at all for `processing.stale_after_factor`
+  (3) times the learned repeat interval, for example when the group is silenced in Alertmanager. It applies only while
+  the Integration's [Heartbeat](heartbeat.md) is live. Until Muster has learned the interval, it waits
+  `processing.stale_after_unlearned` (25 hours).
+
+With 10 minutes, an Alert of a silenced group goes Stale after about 30 minutes. With a daily interval it takes three
+days, and the Integration page warns about an interval longer than `processing.long_repeat_warning` (1 hour) and shows
+the route to put in Alertmanager. A short interval does not make Muster noisy: Muster sends one message per Alert Group
+and edits it, so a repeat changes nothing that people see. It only makes Muster faster to notice that an alert is gone.
+
+The routes Muster has learned, with their intervals and the time each needs to resolve by absence, are on the
+Integration page.
+
+## Send every alert of the group
+
+Set `max_alerts: 0` on the webhook configuration, as the snippet does. Alertmanager's default is no limit, but a
+`max_alerts` above 0 makes it keep only the first alerts of a group in each notification and count the rest in
+`truncatedAlerts`. A truncated Snapshot lists only part of the Alertmanager group, so Muster cannot tell an alert that is
+missing from one that was cut off. It never takes a truncated Snapshot as proof of absence: it keeps the unlisted Alerts
+firing as long as Snapshots of that group keep arriving, which can keep a resolved Alert open. It raises the Internal
+alert `MusterSnapshotTruncated` for the Integration and counts the Snapshot in
+`muster_ingest_truncated_snapshots_total`. If you see that alert, set `max_alerts: 0` on the receiver and reload
+Alertmanager; the [runbook](../operations/runbooks/MusterSnapshotTruncated.md) has the steps.
+
+## Static labels
+
+Static labels belong to the Integration, not to Alertmanager. Add them in the Integration's settings, such as
+`cluster=prod-eu`; Muster adds them to every Alert of the Integration before it routes the Alert, so a Route and a Group
+key can use them as if the rules had set them.
+
+- Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
+  default Group key of a Route includes `cluster`, so Alert Groups of different clusters stay apart.
+- An Alert that already has the label keeps its own value. Muster then warns about the label on the Alert and in its
+  Alert Group's Timeline, and the Alerts view of the Integration shows the warning. A Static label never overwrites a
+  label that a rule set.
+
+## Instance labels in informational alerts
+
+**Instance labels** are the labels that change when the process that reports an Alert restarts, such as `pod` and
+`instance`. The Organization lists them in `organization.instance_labels` (by default `pod`, `instance`, `container`
+and `endpoint`).
+
+Keep them out of informational alerts, the ones with a long repeat interval that nobody needs to act on at once. A
+restarted pod reports the same problem under a new `pod` label, which is a different Alert. Muster recognises that
+case: it records a **Replacement**, a Quiet event in the Timeline that names the label that differs, and the Alert Group
+page suggests fixing the rule. But every restart still adds an Alert and a Timeline entry to an Alert Group that was
+meant to be calm, and if the label is also in the Route's Group key, each pod gets an Alert Group of its own.
+
+Aggregate the label away in the rule instead, for example `sum without(pod, instance) (...)` in the expression. Keep the label where it helps a person find the culprit, in
+an annotation rather than a label. For alerts about one particular pod that people must act on, Instance labels are fine:
+there each pod is a separate problem.
 
 ## Start delay
 

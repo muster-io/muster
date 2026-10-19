@@ -74,13 +74,18 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick start: quick-start.md
+  - Install:
+      - install/helm.md
+      - install/database.md
   - Alertmanager:
       - integrations/alertmanager.md
       - integrations/heartbeat.md
+      - integrations/grafana.md
   - Messengers:
       - messengers/mattermost.md
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
+      - messengers/proxies.md
       - messengers/bridge.md
       - messengers/write-a-bridge.md
       - messengers/account-links.md
@@ -88,7 +93,10 @@ nav:
       - outgoing-webhooks/events.md
       - outgoing-webhooks/templates.md
   - Sign-in:
+      - sign-in/index.md
       - sign-in/oidc-keycloak.md
+      - sign-in/totp.md
+      - sign-in/closed-networks.md
   - Operations:
       - operations/request-log.md
       - Runbooks:
