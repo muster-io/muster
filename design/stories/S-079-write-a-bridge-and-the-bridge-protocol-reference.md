@@ -42,8 +42,8 @@ issue: 237
 
 - Messengers → Bridge, for Admins (S-074, with its edit windows from S-081), and the Bridge section of Account links
   (S-076); the remaining sections of the site (S-060).
-- The Python bridge library's section of Write a bridge, which S-060 adds once S-084 has published the library; the
-  libraries' own READMEs (S-083, S-084, S-085).
+- The Python bridge library's section of Write a bridge, which S-060 adds; the Python library itself (S-084), built
+  beside this story (D369); the libraries' own READMEs (S-083, S-084, S-085).
 
 ## Contracts
 
@@ -142,7 +142,9 @@ None.
   guide does not age with any vendor's API.
 - The page leads with the libraries (D343): most bridge authors should not write idempotency, the event queue and
   signed pushes again. The Go library and the example exist when this story starts (S-083, S-085); the Python library
-  comes after it (S-084), and S-060 adds its section.
+  (S-084) depends on S-078 and S-083, not on this story, and is built beside it (D369); S-060, which follows both, adds
+  its section. Neither library is released before L1 is complete (D366), hence `go get` without a version and the
+  `edge` image of the example.
 - The blocking compatibility check of `api/bridge.yaml` moved here from S-073 after the second plan review of the Bridge
   phase (D335): the protocol is frozen once it is published, not while the Bridge stories implement it for the first
   time, when a defect they find would otherwise need a new major path although nothing is released.
