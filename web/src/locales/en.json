@@ -2176,6 +2176,10 @@
       "oidcDisabled": "OIDC sign-in is turned off. Sign in with your login and password.",
       "unknown": "Sign-in failed. Try again."
     },
+    "insecure": {
+      "description": "This page is open over plain http, where the browser drops the session cookie, so signing in brings you back here. Open Muster over HTTPS, or through an SSH tunnel to localhost.",
+      "title": "Sign-in needs HTTPS or localhost"
+    },
     "login": "Login",
     "or": "or",
     "password": "Password",
