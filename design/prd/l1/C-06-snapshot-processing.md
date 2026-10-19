@@ -6,8 +6,8 @@
 no false resolutions from HA duplicates, restarts or truncation, and no loud surprises from restarted rule evaluators.
 This capability also provides the Internal alert mechanism and shows what Muster learned about each Integration.
 
-Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); ids in the form `F-NNN` refer to
-[verified facts](../../facts.md#alertmanager).
+Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); ids in the form `F-NNN` refer to the
+verified facts of [Alertmanager](../../facts.md#alertmanager) and [Grafana](../../facts.md#grafana).
 
 ## Scenarios
 
@@ -29,6 +29,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
    and then 9 of 10 firing alerts, and the next one all 10; the alert missing from the first two stays firing.
 10. Both instances of an Alertmanager HA pair restart while 20 alerts of a group resolve. The one `all alerts resolved`
     Snapshot lists 6 of them, and Alertmanager never sends the others; Muster resolves all 20.
+11. The two replicas of a Grafana HA pair evaluate a rule each on its own, so their copies of one alert carry the
+    `startsAt` 07:27:00 and 07:27:10, and Muster keeps the later one. The rule is paused, and the resolve comes from the
+    other replica, with 07:27:00; Muster resolves the Alert, and its next firing is a new one.
+12. A Grafana contact point with Max alerts 5 sends a Snapshot of an Alertmanager group of 30 alerts with
+    `status: resolved` and `truncatedAlerts: 25`: it lists 5 resolved alerts while 20 of the others still fire. Muster
+    resolves the 5 and keeps the Alerts it does not list alive.
 
 ## Functional requirements
 
@@ -37,25 +43,41 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   Alertmanager groups of an Integration at the same time (D285). Two Snapshots that list a common fingerprint keep
   their arrival order, and the deletion marker of an Integration waits for every earlier Snapshot of it and holds back
   every later one.
-- **C-06.FR-2** Each Snapshot is split into Alerts by fingerprint. Processing is idempotent per Alert on
-  `fingerprint + status + startsAt`; a duplicate Snapshot, such as the identical copy from the other instance of an HA
-  pair (F-037), changes nothing.
+- **C-06.FR-2** Each Snapshot is split into Alerts by fingerprint, taken from the body when it has one: Grafana's
+  covers a hidden label of the rule and cannot be computed from the labels (F-107). Processing is idempotent per Alert
+  on `fingerprint + status + startsAt`; a duplicate Snapshot, such as the identical copy from the other instance of an
+  HA pair (F-037), changes nothing.
 - **C-06.FR-3** Static labels are added to every Alert first. If an Alert already has the label, its own value wins and
   the Alert carries a warning naming the label (shown in its Alert Group's Timeline from C-09). Processing then emits
   Alert changes — a new firing, a resolution with its reason, a Continuation, an annotation change — which C-08 routes
   and C-09 groups; until those capabilities are merged, the changes are recorded on the Alerts only.
 - **C-06.FR-4** An Alert sent as `resolved` is resolved at once — from C-09 on, in the latest Alert Group in which that
-  fingerprint still fires. A `resolved` for an Alert that is already resolved, or for an earlier firing of it (an older
-  `startsAt` than its current one), changes nothing: it is not counted as dropped and never reopens or starts anything.
-  Prometheus re-sends a resolved alert for about 15 minutes, so the same `resolved` arrives several times, also inside
-  later firing Snapshots (F-046). Any other `resolved` for a fingerprint that fires nowhere is dropped and counted in
+  fingerprint still fires. A `resolved` with an older `startsAt` than the Alert's current one is a resolve of the
+  current firing when its `endsAt` is later than the current `startsAt`, because the two firings overlap: the replicas
+  of a Grafana HA pair evaluate rules each on its own, so their copies of one alert can carry different `startsAt`
+  (F-111). Otherwise — without an `endsAt`, or with one not later than the current `startsAt` — it is a resolve of an
+  earlier firing (D383). A `resolved` for an Alert that is already resolved, or for an earlier firing of it, changes
+  nothing: it is not counted as dropped and never reopens or starts anything. Alertmanager merges overlapping firings of
+  one fingerprint into one alert with the earliest `startsAt` (F-053), so a firing that starts exactly when the previous
+  one ended is a firing of its own, and with one rule evaluator a resolve it sends of an earlier firing ends before the
+  next firing starts; with an HA pair of rule evaluators, whose alerts it can replace instead of merging, a resolve with
+  an older `startsAt` can end after the next firing started, and the Alert resolves, as it does when Muster kept
+  Alertmanager's merged `startsAt`. Prometheus re-sends a resolved alert for about 15 minutes, and Grafana keeps a
+  resolved alert in its group as long (F-109), so the same `resolved` arrives several times, also inside later firing
+  Snapshots (F-046). Any other `resolved` for a fingerprint that fires nowhere is dropped and counted in
   `muster_ingest_resolved_dropped_total{integration}`. Resolved Alerts never create Alerts or Alert Groups.
 - **C-06.FR-21** A Snapshot with `status: resolved` — the one Alertmanager sends with `notification_reason`
   `all alerts resolved` — resolves at once every Alert still firing in its Alertmanager group, including the Alerts it
   does not list, as if each were listed as `resolved` (FR-4). After a restart of both instances of an HA pair, that
   Snapshot can list only some of the resolved alerts, and Alertmanager never sends the others (F-044); a truncated one
   leaves out its tail (F-048). The `status` of any other Snapshot is that of the whole Alertmanager group, so a `firing`
-  Snapshot can list resolved Alerts; each Alert's own `status` decides for it.
+  Snapshot can list resolved Alerts; each Alert's own `status` decides for it. A truncated Snapshot from Grafana is the
+  exception: Grafana computes `status` from the alerts it lists, not from the whole Alertmanager group, and sends
+  `status: resolved` while alerts it left out still fire (F-110). A Snapshot whose body has a top-level `orgId` that is
+  not null is from Grafana, which always sends one; Alertmanager never does (F-105). A truncated Snapshot
+  (`truncatedAlerts > 0`) from Grafana with `status: resolved` resolves only the Alerts it lists as resolved, each by its
+  own `status` (FR-4), and its unlisted Alerts stay alive as FR-6 says; an untruncated one resolves its whole
+  Alertmanager group like Alertmanager's (D383).
 - **C-06.FR-5** An Alert is Gone in an Alertmanager group once it has been missing from consecutive Snapshots of its
   `groupKey` — at least two — for at least `processing.gone_min_absence`, counted from the first Snapshot that missed it
   to the latest one; a later Snapshot that misses it decides again, and one that lists it ends the count. Snapshots of
@@ -65,23 +87,25 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   instance of an HA pair is covered by the duplicate window, because the other instance sends the full Snapshot 15
   seconds later (F-041).
 - **C-06.FR-6** A Snapshot with `truncatedAlerts > 0` never counts as evidence of absence; Alertmanager keeps the first
-  alerts in its sort order and counts resolved ones in `truncatedAlerts` too (F-048). A `groupKey` is truncated from
-  such a Snapshot until its first untruncated Snapshot, or until no Snapshot of it has arrived for longer than
-  `stale_after`. While it is truncated, its unlisted Alerts stay alive as long as Snapshots of that Alertmanager group
-  arrive. While any `groupKey` of an Integration is truncated, the Internal alert `MusterSnapshotTruncated` is raised
-  for that Integration; it is resolved when none is left. Every truncated Snapshot is counted in
-  `muster_ingest_truncated_snapshots_total{integration}`.
+  alerts in its sort order and counts resolved ones in `truncatedAlerts` too (F-048), and so does Grafana (F-110). A
+  `groupKey` is truncated from such a Snapshot until its first untruncated Snapshot, or until no Snapshot of it has
+  arrived for longer than `stale_after`. While it is truncated, its unlisted Alerts stay alive as long as Snapshots of
+  that Alertmanager group arrive. While any `groupKey` of an Integration is truncated, the Internal alert
+  `MusterSnapshotTruncated` is raised for that Integration; it is resolved when none is left. Every truncated Snapshot
+  is counted in `muster_ingest_truncated_snapshots_total{integration}`.
 - **C-06.FR-7** An Alert that appears in several Alertmanager groups is resolved by absence only when it is Gone or
   Stale in every one of them. Sibling Alertmanager routes with identical matchers and `continue: true` share one
   `groupKey`, so their Snapshots are one Alertmanager group to Muster (F-049). A reload of Alertmanager that changes a
   route's matchers starts a new `groupKey` and silences the old one for good, so the Alerts it listed go Stale there
-  while the new `groupKey` keeps them alive (F-036).
+  while the new `groupKey` keeps them alive (F-036). In Grafana, a change of the notification settings of a rule with
+  simplified routing does the same (F-106).
 - **C-06.FR-8** Each Alert and `groupKey` pair has a `last_seen_at`. `stale_after` is `processing.stale_after_factor`
   times the repeat interval learned for the Alertmanager route of that `groupKey`, learned from the gaps between
-  Snapshots whose `notification_reason` is `repeat interval elapsed` (F-050) or, for Alertmanager versions without that
-  field, between identical Snapshots; near-duplicates within the duplicate window are ignored. The learned interval is
-  the median of the recent gaps: single gaps range from just above the route's `repeat_interval` in an HA pair whose
-  instances tick out of phase to `repeat_interval + 2 × group_interval` after a reload of Alertmanager, around a steady
+  Snapshots whose `notification_reason` is `repeat interval elapsed` (F-050) or, for senders without that field —
+  Alertmanager before v0.32 and Grafana (F-105, F-108) — between identical Snapshots; near-duplicates within the
+  duplicate window are ignored. The learned interval is the median of the recent gaps: single gaps range from just
+  above the route's `repeat_interval` in an HA pair whose instances tick out of phase to
+  `repeat_interval + 2 × group_interval` after a reload of Alertmanager, around a steady
   `repeat_interval + group_interval` (F-033 to F-035), and three learned intervals cover the longest of them. Until an
   interval is learned, `stale_after` is `processing.stale_after_unlearned`. Stale is what resolves the Alerts of an
   Alertmanager group that sends nothing at all — silenced, inhibited or muted as a whole (F-045); an alert that resolves
@@ -151,7 +175,8 @@ subcommand `muster ingest replay`.
 
 ## Acceptance
 
-Each statement is checked with the fake Alertmanager, through the Integration's Alerts view or its API.
+Each statement is checked with the fake Alertmanager, or with bodies captured from Grafana (C-06.AC-17, C-06.AC-18),
+through the Integration's Alerts view or its API.
 
 - **C-06.AC-1** An Alert missing from one Snapshot stays firing; missing from the next one too, received at least
   `processing.gone_min_absence` after the first, it resolves as Gone with the reason of FR-10.
@@ -190,6 +215,15 @@ Each statement is checked with the fake Alertmanager, through the Integration's 
   at T, T+60 s and T+120 s that list 3, 9 and 10 of its 10 firing Alerts, Alert A missing from the first two, leave
   every Alert firing. If A is instead missing from Snapshots at T, T+60 s and T+6 min, it stays firing until T+6 min
   and is Gone then.
+- **C-06.AC-16** The HA pair of scenario 11: a firing Alert whose current `startsAt` is 07:27:10, listed as `resolved`
+  with the `startsAt` 07:27:00 and the `endsAt` 07:42:04, resolves with the reason `resolved`, and its next firing is a
+  new firing, not a Continuation. A `resolved` with an older `startsAt` and an `endsAt` before the current `startsAt`,
+  equal to it, or none leaves the Alert firing and records no Alert change; C-06.AC-13 and C-06.AC-14 still hold.
+- **C-06.AC-17** With 10 Alerts firing in one `groupKey`, a Snapshot with a top-level `orgId`, `status: resolved` and
+  `truncatedAlerts: 5` that lists 5 of them as resolved resolves those 5 and leaves the other 5 firing; the same
+  Snapshot without `orgId` resolves all 10.
+- **C-06.AC-18** The bodies that a Grafana HA pair sent in the test of F-111, processed in their order, fail no Snapshot
+  and leave every Alert in the state of the latest of them that lists it.
 
 ## Related ADRs
 

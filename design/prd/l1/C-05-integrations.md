@@ -2,8 +2,9 @@
 
 [L1 index](../L1.md) · Stage: Observe · UI: yes · Depends on: C-02, C-03
 
-**Goal.** An Admin connects an Alertmanager cluster in minutes — an Integration with tokens, a ready Alertmanager
-receiver snippet and optional Static labels — behind an ingestion endpoint that never loses a webhook it accepted.
+**Goal.** An Admin connects an Alertmanager cluster, or Grafana Alerting through its webhook contact point, in minutes
+— an Integration with tokens, a ready Alertmanager receiver snippet and optional Static labels — behind an ingestion
+endpoint that never loses a webhook it accepted.
 
 Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
@@ -18,6 +19,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 4. The Admin deletes an old Integration; its tokens stop working at once.
 5. A misconfigured sender posts 40 MB; it gets `413`, and the request is counted for the chart rule
    `MusterIngestRejected` (C-19).
+6. The Admin creates the Integration "grafana-prod" for a Grafana HA pair and a token. In Grafana, following the
+   documentation, they add a webhook contact point with the ingest URL, the token as the credentials of the
+   `Authorization` scheme `Bearer` and Max alerts 0, and point a notification policy at it with a `repeat_interval` of
+   10 minutes; Snapshots arrive as from an Alertmanager.
 
 ## Functional requirements
 
@@ -68,7 +73,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   evaluator, plus a margin: about 2.5 minutes or more with a 1-minute evaluation interval, because Prometheus re-sends
   firing alerts only every 2 minutes and 90 seconds still let a partial Snapshot through
   ([F-043](../../facts.md#restarts-and-resolves)); a shorter delay lets a restarted Alertmanager send partial
-  Snapshots.
+  Snapshots. It also describes connecting Grafana Alerting both ways (D383): through an external Alertmanager, and
+  directly, with a webhook contact point to the ingest URL — the token as the credentials of the `Authorization` scheme
+  `Bearer`, Max alerts 0, resolved messages on, no custom payload ([F-105](../../facts.md#payload-and-grouping)) — and
+  a notification policy with a `repeat_interval` of 5–15 minutes that keeps Grafana's default grouping and lets Muster
+  group, because after a restart of Grafana a group of rules with different evaluation intervals sends Snapshots
+  without the slower rules' alerts until their first evaluation ([F-112](../../facts.md#ha-pairs-and-restarts)); one
+  Integration per Grafana cluster and organization, an HA pair being one
+  ([F-106](../../facts.md#payload-and-grouping)).
 - **C-05.FR-12** Each Integration exports `muster_integration_info{integration,name}`.
 
 ## UI

@@ -123,10 +123,17 @@ func firing(fp string, startsAt time.Time) PayloadAlert {
 }
 
 func resolved(fp string, startsAt time.Time) PayloadAlert {
+	return resolvedAt(fp, startsAt, startsAt.Add(time.Hour))
+}
+
+// resolvedAt is a resolve as Alertmanager sends it, endsAt the time of the resolve; the zero time is a resolve without
+// endsAt.
+func resolvedAt(fp string, startsAt, endsAt time.Time) PayloadAlert {
 	a := firing(fp, startsAt)
 	a.Status = StatusResolved
-	end := startsAt.Add(time.Hour)
-	a.EndsAt = &end
+	if !endsAt.IsZero() {
+		a.EndsAt = &endsAt
+	}
 	return a
 }
 
@@ -147,7 +154,9 @@ func kinds(e *engine) []string {
 	return out
 }
 
-// TestAlertRules covers every row of the Alerts table of the contract (C-06.FR-2, FR-4, FR-11, FR-12).
+// TestAlertRules covers every row of the Alerts table of the contract (C-06.FR-2, FR-4, FR-11, FR-12, C-06.AC-16).
+// A row listed as resolved is applied alone in a firing Snapshot, and again in a Snapshot with status resolved of the
+// groupKey in which a firing seed has an active presence, where its own row decides it.
 func TestAlertRules(t *testing.T) {
 	older, same, newer := t0.Add(-time.Hour), t0, t0.Add(time.Hour)
 	type seed struct {
@@ -189,39 +198,112 @@ func TestAlertRules(t *testing.T) {
 			[]string{"resolved:a:resolved"}, StatusResolved, ResolveResolved, 1, older, 0},
 		{"resolved, already resolved", &seed{StatusResolved, ResolveResolved, same}, resolved("a", same),
 			[]string{}, StatusResolved, ResolveResolved, 1, same, 0},
+		// The resolve's endsAt, an hour after its startsAt, equals the newer startsAt: the firings do not overlap.
 		{"resolved, firing with a newer startsAt", &seed{StatusFiring, "", newer}, resolved("a", same),
 			[]string{}, StatusFiring, "", 1, newer, 0},
+		{"resolved, firing with a newer startsAt that the resolve's endsAt is later than: the firings overlap",
+			&seed{StatusFiring, "", newer}, resolvedAt("a", same, newer.Add(time.Second)),
+			[]string{"resolved:a:resolved"}, StatusResolved, ResolveResolved, 1, newer, 0},
+		{"resolved, firing with a newer startsAt that the resolve's endsAt is before", &seed{StatusFiring, "", newer},
+			resolvedAt("a", same, newer.Add(-time.Second)), []string{}, StatusFiring, "", 1, newer, 0},
+		{"resolved, firing with a newer startsAt, the resolve without endsAt", &seed{StatusFiring, "", newer},
+			resolvedAt("a", same, time.Time{}), []string{}, StatusFiring, "", 1, newer, 0},
 		{"resolved, no row: dropped", nil, resolved("a", same), []string{}, "", "", 0, time.Time{}, 1},
+	} {
+		for _, status := range []string{StatusFiring, StatusResolved} {
+			name := tt.name
+			if status == StatusResolved {
+				if tt.listed.Status != StatusResolved {
+					continue
+				}
+				name += ", in a resolved Snapshot"
+			}
+			t.Run(name, func(t *testing.T) {
+				s := newSim()
+				if tt.seed != nil {
+					a := &alert{ID: s.id(), Fingerprint: "a", Labels: map[string]string{"name": "a"},
+						Annotations: map[string]string{}, Status: tt.seed.status, StartsAt: tt.seed.startsAt, Episode: 1,
+						FiredAt: t0.Add(-2 * time.Hour), LastSeenAt: t0.Add(-time.Minute)}
+					if tt.seed.status == StatusResolved {
+						at := t0.Add(-time.Minute)
+						a.ResolvedAt, a.Reason = &at, tt.seed.reason
+					}
+					s.alerts["a"], s.byID[a.ID] = a, a
+					if status == StatusResolved && tt.seed.status == StatusFiring {
+						g := &group{ID: s.id(), LastSnapshotAt: t0.Add(-time.Minute)}
+						s.groups[gk] = g
+						s.presences[[2]int64{a.ID, g.ID}] = &presence{AlertID: a.ID, State: PresenceListed}
+					}
+				}
+				p := snap("repeat interval elapsed", tt.listed)
+				p.Status = status
+				e := s.send(t0, p)
+				if got := kinds(e); !slices.Equal(got, tt.changes) {
+					t.Errorf("changes %v, want %v", got, tt.changes)
+				}
+				if e.stats.Dropped != tt.dropped {
+					t.Errorf("dropped %d, want %d", e.stats.Dropped, tt.dropped)
+				}
+				a := s.alerts["a"]
+				if tt.status == "" {
+					if a != nil {
+						t.Fatalf("a resolve created an alert: %+v", a)
+					}
+					return
+				}
+				if a.Status != tt.status || a.Reason != tt.reason || a.Episode != tt.episode ||
+					!a.StartsAt.Equal(tt.starts) {
+					t.Errorf("alert %s/%s episode %d starts %v, want %s/%s %d %v", a.Status, a.Reason, a.Episode,
+						a.StartsAt, tt.status, tt.reason, tt.episode, tt.starts)
+				}
+			})
+		}
+	}
+}
+
+// TestOverlappingResolve is C-06.AC-16, the HA pair of scenario 11 (F-111): an Alert kept with the startsAt 07:27:10 of
+// one replica resolves by the other replica's resolve with the startsAt 07:27:00 and the endsAt 07:42:04, alone, in a
+// Snapshot with status resolved and in a late Snapshot, and its next firing is a new firing, not a Continuation.
+func TestOverlappingResolve(t *testing.T) {
+	at := func(hms string) time.Time {
+		v, err := time.Parse(time.DateTime, "2026-10-19 "+hms)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	for _, tt := range []struct {
+		name   string
+		status string
+		late   bool
+	}{
+		{"alone", StatusFiring, false},
+		{"in a resolved Snapshot", StatusResolved, false},
+		{"in a late Snapshot", StatusFiring, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newSim()
-			if tt.seed != nil {
-				a := &alert{ID: s.id(), Fingerprint: "a", Labels: map[string]string{"name": "a"},
-					Annotations: map[string]string{}, Status: tt.seed.status, StartsAt: tt.seed.startsAt, Episode: 1,
-					FiredAt: t0.Add(-2 * time.Hour), LastSeenAt: t0.Add(-time.Minute)}
-				if tt.seed.status == StatusResolved {
-					at := t0.Add(-time.Minute)
-					a.ResolvedAt, a.Reason = &at, tt.seed.reason
-				}
-				s.alerts["a"], s.byID[a.ID] = a, a
+			s.send(at("07:27:39"), snap("", firing("x", at("07:27:10"))))
+			if e := s.send(at("07:31:57"), snap("", firing("x", at("07:27:00")))); len(e.changes) != 0 {
+				t.Fatalf("the other replica's copy: %v", kinds(e))
 			}
-			e := s.send(t0, snap("repeat interval elapsed", tt.listed))
-			if got := kinds(e); !slices.Equal(got, tt.changes) {
-				t.Errorf("changes %v, want %v", got, tt.changes)
+			if tt.late {
+				s.send(at("07:45:00"), snap("", firing("x", at("07:27:10"))))
 			}
-			if e.stats.Dropped != tt.dropped {
-				t.Errorf("dropped %d, want %d", e.stats.Dropped, tt.dropped)
+			p := snap("", resolvedAt("x", at("07:27:00"), at("07:42:04")))
+			p.Status = tt.status
+			e := s.send(at("07:42:28"), p)
+			a := s.alert(t, "x")
+			if got := kinds(e); e.late != tt.late || !slices.Equal(got, []string{"resolved:x:resolved"}) ||
+				a.Status != StatusResolved ||
+				a.Reason != ResolveResolved || a.EndsAt == nil || !a.EndsAt.Equal(at("07:42:04")) ||
+				e.stats.Resolved != 1 || e.stats.Dropped != 0 {
+				t.Fatalf("the resolve: %v, %+v, %+v", got, e.stats, a)
 			}
-			a := s.alerts["a"]
-			if tt.status == "" {
-				if a != nil {
-					t.Fatalf("a resolve created an alert: %+v", a)
-				}
-				return
-			}
-			if a.Status != tt.status || a.Reason != tt.reason || a.Episode != tt.episode || !a.StartsAt.Equal(tt.starts) {
-				t.Errorf("alert %s/%s episode %d starts %v, want %s/%s %d %v", a.Status, a.Reason, a.Episode,
-					a.StartsAt, tt.status, tt.reason, tt.episode, tt.starts)
+			e = s.send(at("07:57:17"), snap("", firing("x", at("07:57:00"))))
+			if got := kinds(e); !slices.Equal(got, []string{"fired:x"}) || a.Status != StatusFiring || a.Episode != 2 ||
+				!a.StartsAt.Equal(at("07:57:00")) || e.stats.Continued != 0 {
+				t.Errorf("the next firing: %v, %+v", got, a)
 			}
 		})
 	}
@@ -300,12 +382,14 @@ func TestHACopies(t *testing.T) {
 // resolves all 20; the Alert of another groupKey still fires.
 func TestResolvedGroup(t *testing.T) {
 	s := newSim()
+	// Alertmanager sends a resolve with endsAt the time of the resolve.
+	end := t0.Add(30 * time.Second)
 	var all, six []PayloadAlert
 	for i := range 20 {
 		fp := string(rune('A' + i))
 		all = append(all, firing(fp, t0))
 		if i < 6 {
-			six = append(six, resolved(fp, t0))
+			six = append(six, resolvedAt(fp, t0, end))
 		}
 	}
 	s.send(t0, snap("first notification", all...))
@@ -326,9 +410,10 @@ func TestResolvedGroup(t *testing.T) {
 	if s.alert(t, "other").Status != StatusFiring {
 		t.Error("the alert of the other groupKey resolved")
 	}
-	// An Alert listed as resolved with an older startsAt keeps its newer firing, also in a resolved group.
+	// An Alert listed as resolved with an older startsAt keeps its newer firing, also in a resolved group: the resolve
+	// ended before the newer firing started.
 	s.send(t0.Add(2*time.Minute), snap("first notification", firing("A", t0.Add(time.Minute))))
-	p = snap(ReasonAllResolved, resolved("A", t0))
+	p = snap(ReasonAllResolved, resolvedAt("A", t0, end))
 	p.Status = StatusResolved
 	s.send(t0.Add(3*time.Minute), p)
 	if a := s.alert(t, "A"); a.Status != StatusFiring || a.Episode != 2 {
@@ -336,20 +421,71 @@ func TestResolvedGroup(t *testing.T) {
 	}
 }
 
+// TestTruncatedResolvedFromGrafana is C-06.FR-21 and C-06.AC-17: with 10 Alerts firing in one groupKey, a truncated
+// Snapshot from Grafana with status resolved that lists 5 of them as resolved resolves those 5 and leaves the other 5
+// firing, the groupKey truncated; the same Snapshot from Alertmanager, and an untruncated one from Grafana, resolve all
+// 10.
+func TestTruncatedResolvedFromGrafana(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		grafana   bool
+		truncated int64
+		left      int
+	}{
+		{"truncated, from Grafana", true, 5, 5},
+		{"truncated, from Alertmanager", false, 5, 0},
+		{"untruncated, from Grafana", true, 0, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSim()
+			var all, five []PayloadAlert
+			for i := range 10 {
+				fp := string(rune('A' + i))
+				all = append(all, firing(fp, t0))
+				if i < 5 {
+					five = append(five, resolvedAt(fp, t0, t0.Add(time.Minute)))
+				}
+			}
+			first := snap("", all...)
+			first.Grafana = tt.grafana
+			s.send(t0, first)
+			p := snap("", five...)
+			p.Status, p.Grafana, p.TruncatedAlerts = StatusResolved, tt.grafana, tt.truncated
+			e := s.send(t0.Add(2*time.Minute), p)
+			left := 0
+			for i, a := range all {
+				got := s.alert(t, a.Fingerprint)
+				switch {
+				case got.Status == StatusFiring && i >= 5:
+					left++
+				case got.Status != StatusResolved || got.Reason != ResolveResolved:
+					t.Errorf("%s: %s/%s", a.Fingerprint, got.Status, got.Reason)
+				}
+			}
+			if left != tt.left || e.stats.Resolved != 10-tt.left || e.stats.Dropped != 0 ||
+				s.groups[gk].Truncated != (tt.truncated > 0) {
+				t.Errorf("%d firing, %+v, truncated %v", left, e.stats, s.groups[gk].Truncated)
+			}
+		})
+	}
+}
+
 // TestRepeatedResolves is C-06.AC-14 and F-046: a resolve arriving again, alone and inside firing Snapshots of its
 // groupKey, changes nothing and is not counted; a resolve with the old startsAt leaves a new firing firing.
 func TestRepeatedResolves(t *testing.T) {
 	s := newSim()
+	// Alertmanager sends a resolve with endsAt the time of the resolve, and sends it again with the same endsAt.
+	res := resolvedAt("a", t0, t0.Add(90*time.Second))
 	s.send(t0, snap("first notification", firing("a", t0), firing("b", t0)))
-	e := s.send(t0.Add(2*time.Minute), snap("some alerts resolved", resolved("a", t0), firing("b", t0)))
+	e := s.send(t0.Add(2*time.Minute), snap("some alerts resolved", res, firing("b", t0)))
 	if e.stats.Resolved != 1 {
 		t.Fatalf("resolved %d", e.stats.Resolved)
 	}
 	for i, p := range []Payload{
-		snap("some alerts resolved", resolved("a", t0)),
-		snap("repeat interval elapsed", resolved("a", t0), firing("b", t0)),
-		snap("some alerts resolved", resolved("a", t0), firing("b", t0)),
-		snap("repeat interval elapsed", resolved("a", t0), firing("b", t0)),
+		snap("some alerts resolved", res),
+		snap("repeat interval elapsed", res, firing("b", t0)),
+		snap("some alerts resolved", res, firing("b", t0)),
+		snap("repeat interval elapsed", res, firing("b", t0)),
 	} {
 		e := s.send(t0.Add(time.Duration(4+2*i)*time.Minute), p)
 		if len(e.changes) != 0 || e.stats.Dropped != 0 {
@@ -357,7 +493,7 @@ func TestRepeatedResolves(t *testing.T) {
 		}
 	}
 	s.send(t0.Add(15*time.Minute), snap("new alerts added", firing("a", t0.Add(14*time.Minute)), firing("b", t0)))
-	e = s.send(t0.Add(16*time.Minute), snap("some alerts resolved", resolved("a", t0), firing("b", t0)))
+	e = s.send(t0.Add(16*time.Minute), snap("some alerts resolved", res, firing("b", t0)))
 	if a := s.alert(t, "a"); a.Status != StatusFiring || a.Episode != 2 || len(e.changes) != 0 {
 		t.Errorf("after the old resolve: %+v, %v", a, kinds(e))
 	}

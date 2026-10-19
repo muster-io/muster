@@ -22,7 +22,9 @@ Muster sits after Alertmanager and does not replace it ([ADR-0002]). Rule evalua
 alerts into Alertmanager, which keeps inhibition, the deduplication of redundant evaluators and Alertmanager silences.
 Each Alertmanager cluster, usually an HA pair, is one Integration ([C-05]): an Alertmanager receiver sends its
 Snapshots to Muster's ingestion endpoint, and a second receiver on a dedicated Alertmanager route sends an always-firing
-`Watchdog` alert as the Integration's Heartbeat ([C-07]). Muster needs no inbound access to Alertmanager.
+`Watchdog` alert as the Integration's Heartbeat ([C-07]). Muster needs no inbound access to Alertmanager. Grafana
+Alerting sends the same Snapshots from its built-in Alertmanager through a webhook contact point, one Integration per
+Grafana cluster and organization ([ADR-0002], [C-05]).
 
 Muster delivers Alert Groups to Mattermost through its REST API with a bot account, and Mattermost calls Muster back
 when someone presses a button ([ADR-0013], [C-13]). It delivers to Telegram through the Bot API — at
@@ -454,7 +456,7 @@ sequenceDiagram
     PW->>DB: claim an Integration, SKIP LOCKED, lease; read its oldest unprocessed Stored Snapshots<br/>one per Alertmanager group at a time, up to processing.parallel_groups
     PW->>PW: split into Alerts by fingerprint, add Static labels
     loop each Alert listed in the Snapshot
-        alt status resolved, the Alert already resolved or this an earlier firing of it
+        alt status resolved, the Alert already resolved or this an earlier firing of it<br/>an older startsAt and no endsAt later than the current startsAt
             PW->>PW: a re-sent resolve, nothing changes
         else status resolved
             PW->>GR: resolve it in the latest Alert Group where it fires<br/>or drop and count when it fires nowhere
@@ -468,7 +470,7 @@ sequenceDiagram
             PW->>PW: idempotent, only last_seen_at and annotations are refreshed
         end
     end
-    opt Snapshot status resolved, all alerts resolved
+    opt Snapshot status resolved, all alerts resolved, unless a truncated one from Grafana
         PW->>GR: resolve every Alert still firing in this groupKey, listed or not
     end
     PW->>PW: per groupKey, count misses of unlisted Alerts<br/>merge with a Snapshot inside the duplicate window, a truncated one proves nothing

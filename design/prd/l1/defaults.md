@@ -77,7 +77,7 @@ table in the same pull request.
 |---|---|---|---|---|
 | `integration.connection_mode` | `webhook-only` (the only mode in L1) | Integration | C-05 | decided |
 | Static labels | none | Integration | C-05 | decided |
-| `integration.duplicate_window` | 45 s (the copies of an HA pair came 0 to 15 s apart, [F-038 to F-040](../../facts.md#ha-pairs)) | Integration | C-05 | decided |
+| `integration.duplicate_window` | 45 s (the copies of an HA pair came 0 to 15 s apart, [F-038 to F-040](../../facts.md#ha-pairs), and up to 18.6 s apart from Grafana, [F-111](../../facts.md#ha-pairs-and-restarts)) | Integration | C-05 | decided |
 | `ingest.body_limit` | 16 MB | built in | C-05 | decided |
 | `snippet.repeat_interval` | 10 min (recommended range 5–15 min) | snippet | C-05 | decided |
 | `processing.gone_min_absence` | 5 min, from the first Snapshot that missed the Alert (Prometheus re-sends firing alerts only every 2 min at a 1-min evaluation interval, [F-043](../../facts.md#restarts-and-resolves)) | built in | C-06 | decided |

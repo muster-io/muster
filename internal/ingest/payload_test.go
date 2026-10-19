@@ -4,10 +4,16 @@
 package ingest
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 )
 
 func TestParsePayload(t *testing.T) {
@@ -46,6 +52,104 @@ func TestParsePayload(t *testing.T) {
 	p, err = ParsePayload([]byte(`{"groupKey":"{}:{}","status":"resolved","alerts":[]}`))
 	if err != nil || p.HasReason || p.TruncatedAlerts != 0 || len(p.Alerts) != 0 {
 		t.Errorf("minimal payload = %+v, %v", p, err)
+	}
+}
+
+// capturedBody is one line of the fixtures in testdata/grafana: a body as Grafana sent it, with its time of arrival and
+// the receiver's path.
+type capturedBody struct {
+	Recv time.Time       `json:"recv"`
+	Path string          `json:"path"`
+	Body json.RawMessage `json:"body"`
+}
+
+func readCaptured(t *testing.T, name string) []capturedBody {
+	t.Helper()
+	f, err := os.Open(filepath.Join("testdata", "grafana", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	var out []capturedBody
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 1<<20)
+	for sc.Scan() {
+		var c capturedBody
+		if err := json.Unmarshal(sc.Bytes(), &c); err != nil {
+			t.Fatalf("%s line %d: %v", name, len(out)+1, err)
+		}
+		out = append(out, c)
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestParsePayloadGrafana is C-06.FR-8 and C-06.FR-21: every body Grafana 13.2.4 sent on the development stand parses
+// as a Snapshot from Grafana without notification_reason, each alert with the fingerprint of the body, Grafana's other
+// fields accepted and not read; a body of the fake Alertmanager, and one whose orgId is null, is not from Grafana.
+func TestParsePayloadGrafana(t *testing.T) {
+	for name, n := range map[string]int{"ha-main.jsonl": 84, "trunc.jsonl": 6} {
+		bodies := readCaptured(t, name)
+		if len(bodies) != n {
+			t.Fatalf("%s: %d bodies, want %d", name, len(bodies), n)
+		}
+		for i, c := range bodies {
+			p, err := ParsePayload(c.Body)
+			if err != nil {
+				t.Fatalf("%s line %d: %v", name, i+1, err)
+			}
+			var raw struct {
+				Alerts []struct {
+					Fingerprint string `json:"fingerprint"`
+				} `json:"alerts"`
+			}
+			if err := json.Unmarshal(c.Body, &raw); err != nil {
+				t.Fatal(err)
+			}
+			if !p.Grafana || p.HasReason || len(p.Alerts) == 0 || len(p.Alerts) != len(raw.Alerts) {
+				t.Fatalf("%s line %d: grafana %v, reason %v, %d alerts", name, i+1, p.Grafana, p.HasReason,
+					len(p.Alerts))
+			}
+			for j, a := range p.Alerts {
+				if a.Fingerprint == "" || a.Fingerprint != raw.Alerts[j].Fingerprint {
+					t.Errorf("%s line %d alert %d: fingerprint %q, want %q", name, i+1, j, a.Fingerprint,
+						raw.Alerts[j].Fingerprint)
+				}
+			}
+		}
+	}
+	// Grafana's fingerprint covers the hidden __alert_rule_uid__ (F-107): the labels alone hash to another one.
+	p, err := ParsePayload(readCaptured(t, "ha-main.jsonl")[2].Body)
+	if err != nil || p.Alerts[0].Labels["alertname"] != "SpikeMem" || p.Alerts[0].Fingerprint != "0b7e255d753c35de" ||
+		Fingerprint(p.Alerts[0].Labels) == p.Alerts[0].Fingerprint {
+		t.Errorf("SpikeMem: %+v, %v", p.Alerts, err)
+	}
+	am := fakealertmanager.New().Webhook(1, time.Date(2026, 10, 19, 7, 27, 0, 0, time.UTC))
+	var head struct {
+		Version string          `json:"version"`
+		OrgID   json.RawMessage `json:"orgId"`
+	}
+	if err := json.Unmarshal(am, &head); err != nil || head.Version != "4" || head.OrgID != nil {
+		t.Fatalf("the fake Alertmanager's body: version %q, orgId %s, %v", head.Version, head.OrgID, err)
+	}
+	if p, err := ParsePayload(am); err != nil || p.Grafana || len(p.Alerts) != 1 {
+		t.Errorf("the fake Alertmanager's body: grafana %v, %d alerts, %v", p.Grafana, len(p.Alerts), err)
+	}
+	for _, tt := range []struct {
+		name, body string
+		grafana    bool
+	}{
+		{"orgId null", `{"version":"1","groupKey":"g","status":"firing","orgId":null,"alerts":[]}`, false},
+		{"orgId a number", `{"version":"1","groupKey":"g","status":"firing","orgId":1,"alerts":[]}`, true},
+		{"orgId a string", `{"groupKey":"g","status":"firing","orgId":"1","alerts":[]}`, true},
+		{"orgId an object", `{"groupKey":"g","status":"firing","orgId":{"id":1},"alerts":[]}`, true},
+	} {
+		p, err := ParsePayload([]byte(tt.body))
+		if err != nil || p.Grafana != tt.grafana {
+			t.Errorf("%s: grafana %v, %v; want %v", tt.name, p.Grafana, err, tt.grafana)
+		}
 	}
 }
 

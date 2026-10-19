@@ -24,8 +24,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-02 Process startup and runtime | Foundation | 36 | S-005, S-006, S-007, S-008, S-009 | yes | 36 of 36 |
 | C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015, S-072 | yes | 58 of 58 |
 | C-04 API tokens | Foundation | 17 | S-016, S-017 | yes | 17 of 17 |
-| C-05 Integrations | Observation | 18 | S-018, S-019 | yes | 18 of 18 |
-| C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022, S-065 | yes | 36 of 36 |
+| C-05 Integrations | Observation | 18 | S-018, S-019, S-096 | yes | 18 of 18 |
+| C-06 Snapshot processing | Observation | 39 | S-020, S-021, S-022, S-065, S-096 | yes | 39 of 39 |
 | C-07 Heartbeat | Observation | 12 | S-023, S-024 | yes | 12 of 12 |
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
 | C-09 Alert Group lifecycle | Observation | 51 | S-028, S-029, S-030, S-031, S-065, S-095 | yes | 51 of 51 |
@@ -205,7 +205,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-05
 
-[Integrations](../prd/l1/C-05-integrations.md) · Observation · stories: S-018, S-019
+[Integrations](../prd/l1/C-05-integrations.md) · Observation · stories: S-018, S-019, S-096
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -218,7 +218,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-05.FR-7 | S-018 (part), S-019 (part), S-020 (part), S-022 (part), S-024 | complete | the Heartbeat state joins with C-07 (S-024) |
 | C-05.FR-8 | S-018 (part), S-019, S-021 (part), S-028 | complete | the effects on Alerts and Alert Groups come with C-06 and C-09 (S-021, S-028) |
 | C-05.FR-10 | S-018 | complete |  |
-| C-05.FR-11 | S-018 | complete |  |
+| C-05.FR-11 | S-018, S-096 (part) | complete | connecting Grafana directly and through an external Alertmanager, added with D383 |
 | C-05.FR-12 | S-018 | complete |  |
 | C-05.AC-1 | S-018 | complete |  |
 | C-05.AC-2 | S-018 | complete |  |
@@ -230,19 +230,19 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-06
 
-[Snapshot processing](../prd/l1/C-06-snapshot-processing.md) · Observation · stories: S-020, S-021, S-022, S-065
+[Snapshot processing](../prd/l1/C-06-snapshot-processing.md) · Observation · stories: S-020, S-021, S-022, S-065, S-096
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-06.FR-1 | S-020, S-065 (part) | complete | S-065 changes the order from per Integration to per Alertmanager group |
 | C-06.FR-2 | S-020 | complete |  |
 | C-06.FR-3 | S-020 (part), S-028 | complete | the warning in the Timeline needs Alert Groups (C-09, S-028) |
-| C-06.FR-4 | S-020 (part), S-028 | complete | resolving in the latest Alert Group needs Alert Groups (C-09, S-028) |
-| C-06.FR-21 | S-020 | complete |  |
+| C-06.FR-4 | S-020 (part), S-028, S-096 (part) | complete | resolving in the latest Alert Group needs Alert Groups (C-09, S-028); the resolve of an overlapping firing comes with S-096 (D383) |
+| C-06.FR-21 | S-020, S-096 (part) | complete | the truncated Snapshot from Grafana comes with S-096 (D383) |
 | C-06.FR-5 | S-020 | complete |  |
 | C-06.FR-6 | S-020 (part), S-021, S-023 | complete | the time-based end of truncation needs the liveness clock of C-07 (S-023) |
 | C-06.FR-7 | S-020 (part), S-023 | complete | Stale in each `groupKey` needs the Heartbeat of C-07 (S-023) |
-| C-06.FR-8 | S-020 (part), S-023 | complete | the Stale scan needs the Heartbeat of C-07 (S-023) |
+| C-06.FR-8 | S-020 (part), S-023, S-096 (part) | complete | the Stale scan needs the Heartbeat of C-07 (S-023); Snapshots from Grafana, without `notification_reason`, in S-096 |
 | C-06.FR-9 | S-023 | complete | the Heartbeat is C-07 (S-023) |
 | C-06.FR-10 | S-020 (part), S-023 | complete | the Stale reason needs the Heartbeat of C-07 (S-023) |
 | C-06.FR-11 | S-020 | complete |  |
@@ -270,6 +270,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-06.AC-13 | S-020 | complete |  |
 | C-06.AC-14 | S-020 | complete |  |
 | C-06.AC-15 | S-020 | complete |  |
+| C-06.AC-16 | S-096 | complete | added with D383 |
+| C-06.AC-17 | S-096 | complete |  |
+| C-06.AC-18 | S-096 | complete |  |
 
 ## C-07
 
@@ -837,7 +840,7 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |
 | NFR-10 Retention | S-008, S-029, S-055 | partitions dropped by retention (S-008); batched deletes of summary rows and details (S-029, with the other owners of unpartitioned tables); editing the periods (S-055) |
 | NFR-11 Upgrades | S-003, S-006, S-060 | semantic versions through release-please (S-003); expand/contract migrations and the refusal of a newer schema (S-006); the upgrade page (S-060) |
-| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073) |
+| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073, S-096 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Grafana Alerting's webhook contact point (S-096); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073) |
 | NFR-13 API | S-002, S-010, S-011 | spec-first generation (S-002); RFC 9457 errors with pointers, UTC and `public_id` in URLs (S-010); optimistic locking with `ETag` and `If-Match`, and cursor pagination without `OFFSET` (S-011) |
 | NFR-14 Quality | S-001, S-002, S-004, S-014 | the coverage gate (S-001); the nightly mutation report (S-002); end-to-end tests with fake servers (S-004) and a real browser (S-014); evidence for every acceptance statement in each pull request (section 7 of the [README](README.md#7-lifecycle)) |
 | NFR-15 Phone width | S-030 | the Alert Group list and page at 360 CSS pixels, checked end to end at that width |

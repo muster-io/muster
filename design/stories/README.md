@@ -130,7 +130,7 @@ current.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
   check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
-  S-091, and last the pre-release stories S-092 to S-095. The architecture lints of ADR-0016 exist from the first story
+  S-091, and last the pre-release stories S-092 to S-096. The architecture lints of ADR-0016 exist from the first story
   that contains code.
 
 ## 4. Shared contracts
@@ -250,8 +250,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
 | Bridge | C-22, C-23, S-087 of C-13, and S-060 and S-091 of C-21 | S-073 – S-081, S-083 – S-090, S-060, S-091 | 19 |
-| Pre-release | S-092 – S-094 of C-10, S-095 of C-09 | S-092 – S-095 | 4 |
-| **L1** | 23 | | **95** |
+| Pre-release | S-092 – S-094 of C-10, S-095 of C-09, S-096 of C-06 | S-092 – S-096 | 5 |
+| **L1** | 23 | | **96** |
 
 ### Foundation
 
@@ -382,6 +382,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-093](S-093-snooze-presets-on-messenger-buttons-and-in-text-commands.md) | C-10 | Snooze presets on the buttons of Mattermost, Telegram and Bridges, and in Text commands (BE) | be | S-092, S-075, S-082 |
 | [S-094](S-094-snooze-presets-in-the-snooze-dialog-and-the-working-week-settings.md) | C-10 | Snooze presets in the Snooze dialog and the bulk Snooze, and the working day and week on the General page (FE) | fe | S-092, S-033, S-056 |
 | [S-095](S-095-live-updates-mark-in-the-header.md) | C-09 | The mark of the live updates in the header — connecting, live, reconnecting and offline (FE) | fe | S-030, S-072 |
+| [S-096](S-096-grafana-direct-intake.md) | C-06 | Snapshots directly from Grafana Alerting's webhook contact point (BE) | be | S-020, S-028, S-060, S-091 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -470,6 +471,14 @@ because together they touched about 60 files: S-092 the rule, the settings and t
 Mattermost, Telegram and Bridges and the Text commands, on the messengers of the earlier phases; S-094 the Snooze
 dialog, the bulk Snooze and the General page. S-095, the mark, is one frontend story with no change to the server.
 They come last, in that order; S-093 and S-094 each need only S-092, and S-095 needs none of them.
+
+S-096 was added when the maintainer took Grafana Alerting's webhook contact point into L1 as a second source (D383),
+after a live test of Grafana OSS 13.2.4 showed that its built-in Alertmanager keeps what Snapshot processing relies on
+— a `groupKey` that names the route and the group, the whole group in every Snapshot, repeats at the
+`repeat_interval` — and found two cases that Muster read wrongly: the resolve that the other replica of a Grafana HA
+pair sends with an older `startsAt`, and the `status` of a truncated Snapshot, which Grafana computes from the alerts it
+lists (F-105 to F-112). It belongs to C-06, whose rules it changes, and is one backend story with the page Connect
+Grafana. It comes after S-095 and needs none of S-092 to S-095.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

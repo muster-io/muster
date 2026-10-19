@@ -22,20 +22,23 @@ import type { AlertState } from './alertState';
 import type { Labels } from './labels';
 
 /**
- * Alertmanager webhook payload (version 4), a Snapshot, as Muster expects to read it during processing. It documents the payload only: the ingestion endpoints do not validate against it and store the body as received, so a payload that differs in details, or is not JSON at all, is a processing error of that Snapshot, never a rejected request.
+ * Alertmanager webhook payload, a Snapshot, as Muster expects to read it during processing: the payload of Alertmanager (version 4), and the payload of the webhook contact point of Grafana Alerting (version `"1"`), whose built-in Alertmanager sends the same format with additions. Fields this schema does not name are ignored, Grafana's `title`, `message`, `state` and `appVersion` and its per-alert fields included. It documents the payload only: the ingestion endpoints do not validate against it and store the body as received, so a payload that differs in details, or is not JSON at all, is a processing error of that Snapshot, never a rejected request.
  */
 export interface AlertmanagerWebhook {
+  /** `"4"` from Alertmanager, `"1"` from Grafana's webhook contact point. Not read. */
   version?: string;
   groupKey: string;
-  /** Number of alerts Alertmanager left out because of `max_alerts`. */
+  /** Number of alerts left out because of Alertmanager's `max_alerts`, or because of Max alerts of Grafana's webhook contact point. */
   truncatedAlerts?: number;
+  /** The id of the Grafana organization. Only Grafana's webhook contact point sends it, and a Snapshot whose `orgId` is present and not null is a Snapshot from Grafana. Grafana computes `status` from the alerts it lists, so a truncated Snapshot from Grafana with `status: resolved` resolves only the Alerts it lists as resolved, and the Alerts it leaves out stay firing; an untruncated one, like Alertmanager's, resolves its whole Alertmanager group. */
+  orgId?: number;
   status: AlertState;
   receiver?: string;
   groupLabels?: Labels;
   commonLabels?: Labels;
   commonAnnotations?: Labels;
   externalURL?: string;
-  /** Present in newer Alertmanager versions; one value marks a repeat. */
+  /** Present in newer Alertmanager versions; one value marks a repeat. Grafana does not send it, and its repeats are learned from identical Snapshots. */
   notification_reason?: string;
   alerts: AlertmanagerAlert[];
   [key: string]: unknown;

@@ -28,15 +28,20 @@ const (
 	StatusResolved = "resolved"
 )
 
-// Payload is an Alertmanager webhook as processing reads it (AlertmanagerWebhook in the API specification).
+// Payload is an Alertmanager webhook as processing reads it (AlertmanagerWebhook in the API specification), from
+// Alertmanager or from the webhook contact point of Grafana Alerting, whose built-in Alertmanager sends the same format
+// with additions (F-105).
 type Payload struct {
 	GroupKey        string
 	Status          string
 	TruncatedAlerts int64
-	// Reason is notification_reason; HasReason is false for an Alertmanager that does not send it.
+	// Reason is notification_reason; HasReason is false for an Alertmanager that does not send it, and for Grafana.
 	Reason    string
 	HasReason bool
-	Alerts    []PayloadAlert
+	// Grafana marks a Snapshot from Grafana: its body has a top-level orgId that is not null, which Grafana always
+	// sends and Alertmanager never does (C-06.FR-21).
+	Grafana bool
+	Alerts  []PayloadAlert
 }
 
 // PayloadAlert is one Alert of a Payload. Fingerprint is the payload's, or computed from the labels as received.
@@ -67,6 +72,7 @@ type wireWebhook struct {
 	Status          *string           `json:"status"`
 	TruncatedAlerts *int64            `json:"truncatedAlerts"`
 	Reason          *string           `json:"notification_reason"`
+	OrgID           json.RawMessage   `json:"orgId"`
 	Alerts          []json.RawMessage `json:"alerts"`
 }
 
@@ -83,6 +89,15 @@ type wireAlert struct {
 // ParsePayload reads an Alertmanager webhook. groupKey, status and alerts are required, and every Alert needs labels,
 // status and startsAt; truncatedAlerts, notification_reason and fingerprint are optional (C-06.FR-20). Anything else
 // is a *PayloadError that names what is wrong.
+//
+// The parser is tolerant, so that Grafana's webhook contact point is read as it is (F-105): version is not read ("4"
+// from Alertmanager, "1" from Grafana), and unknown fields are ignored — Grafana's top-level title, message, state and
+// appVersion, and per alert values (an object or null), valueString, silenceURL, dashboardURL, panelURL, ruleUID,
+// orgId and imageURL included. Grafana sends no notification_reason and no routeLabels, so HasReason is false and
+// repeats are learned from identical Snapshots (C-06.FR-8, F-108). The top-level orgId is read as raw JSON, so that its
+// type never fails a body. fingerprint is taken from the body: Grafana's covers the hidden label __alert_rule_uid__
+// (F-107), so Fingerprint, used only for a body without one, never stands in for it. generatorURL is kept as it is,
+// for Grafana the rule's page.
 func ParsePayload(body []byte) (Payload, error) {
 	if !json.Valid(body) {
 		var v any
@@ -107,7 +122,8 @@ func ParsePayload(body []byte) (Payload, error) {
 	case hasNUL(*w.GroupKey) || (w.Reason != nil && hasNUL(*w.Reason)):
 		return Payload{}, payloadError("the webhook has a NUL character, which PostgreSQL cannot store")
 	}
-	p := Payload{GroupKey: *w.GroupKey, Status: *w.Status, Alerts: make([]PayloadAlert, 0, len(w.Alerts))}
+	p := Payload{GroupKey: *w.GroupKey, Status: *w.Status, Alerts: make([]PayloadAlert, 0, len(w.Alerts)),
+		Grafana: len(w.OrgID) > 0 && !bytes.Equal(w.OrgID, []byte("null"))}
 	if w.TruncatedAlerts != nil {
 		p.TruncatedAlerts = *w.TruncatedAlerts
 	}
