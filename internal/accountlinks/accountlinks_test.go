@@ -421,8 +421,7 @@ func (s *fakeStore) GetTelegramRequestByHash(_ context.Context, a dbgen.GetTeleg
 		if a.OrgID == org && r.messenger == MessengerTelegram && bytes.Equal(r.hash, a.SecretHash) {
 			u, _ := s.user(r.userID)
 			return dbgen.GetTelegramRequestByHashRow{ID: r.id, UserID: r.userID, ConnectionID: r.connID,
-				ExpiresAt: r.expires, ConsumedAt: ts(r.consumed), VoidedAt: ts(r.voided), UserPublicID: u.publicID,
-				ConnectionPublicID: s.conn(r.connID).publicID}, nil
+				UserPublicID: u.publicID, ConnectionPublicID: s.conn(r.connID).publicID}, nil
 		}
 	}
 	return dbgen.GetTelegramRequestByHashRow{}, pgx.ErrNoRows

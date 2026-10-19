@@ -31,8 +31,7 @@ func (s *fakeStore) GetBridgeTokenRequestByHash(_ context.Context, a dbgen.GetBr
 			bytes.Equal(r.hash, a.SecretHash) {
 			u, _ := s.user(r.userID)
 			return dbgen.GetBridgeTokenRequestByHashRow{ID: r.id, UserID: r.userID, ConnectionID: r.connID,
-				ExpiresAt: r.expires, ConsumedAt: ts(r.consumed), VoidedAt: ts(r.voided), UserPublicID: u.publicID,
-				ConnectionPublicID: s.conn(r.connID).publicID}, nil
+				UserPublicID: u.publicID, ConnectionPublicID: s.conn(r.connID).publicID}, nil
 		}
 	}
 	return dbgen.GetBridgeTokenRequestByHashRow{}, pgx.ErrNoRows
@@ -234,11 +233,17 @@ func TestStartBridge(t *testing.T) {
 // ({login})" and logged once the caller logs; the same token again, an unknown one, an expired one and one of another
 // Connection link nothing, are answered that the link is invalid or expired — in English for an unknown token, in the
 // bound User's language otherwise — and are recorded as link_rejected. A new link replaces the User's earlier one for
-// the same Connection; a second Bridge Connection is a second identity space.
+// the same Connection; a second Bridge Connection is a second identity space. The link locks the User before the
+// request, as the deletion of the User does before it voids the request, and a request pruned between its read and its
+// lock is an unknown token.
 func TestLinkBridge(t *testing.T) {
 	e := newEnv(t)
 	tok := e.startBR(t, alice, brPID)
+	e.store.locks = nil
 	out, err := e.s.LinkBridge(t.Context(), BridgeConnection{ID: brID, PublicID: brPID}, tok, aliceBR)
+	if !slices.Equal(e.store.locks, []string{"user", "request"}) {
+		t.Errorf("locked %q: the User first, as a deletion does", e.store.locks)
+	}
 	if err != nil || out.Answer != "Linked to Muster user Alice Smith (alice)" || len(e.store.links) != 1 {
 		t.Fatalf("LinkBridge = %+v, %v", out, err)
 	}
@@ -286,6 +291,15 @@ func TestLinkBridge(t *testing.T) {
 			got.Details["user"] != nil || got.Details["username"] != nil || got.Details["display_name"] != "Bob Brown" {
 			t.Errorf("an unknown token: %q, %+v", answer, got)
 		}
+	}
+	// A request pruned between its read and its lock is an unknown token too, answered in English.
+	tok = e.startBR(t, bob, brPID)
+	e.store.fail["LockLinkRequest"] = pgx.ErrNoRows
+	answer = e.sendBR(t, brID, brPID, tok, BridgeAccount{ExternalID: "u-bob", DisplayName: "Bob Brown"}, nil)
+	delete(e.store.fail, "LockLinkRequest")
+	if got := e.lastEntry(); answer != invalidText || got.Details["reason"] != ReasonTokenUnknown ||
+		got.Details["user"] != nil || len(e.store.links) != 1 {
+		t.Errorf("a pruned request: %q, %+v", answer, got)
 	}
 	// An expired token, answered in the bound User's language.
 	tok = e.startBR(t, bob, brPID)
@@ -409,9 +423,9 @@ func TestLinkBridgeConflict(t *testing.T) {
 
 // TestLinkBridgeFailures: a database failure links nothing and leaves the event to come again.
 func TestLinkBridgeFailures(t *testing.T) {
-	for _, name := range []string{"GetLinkConnection", "GetBridgeTokenRequestByHash", "LockLinkUser", "InsertAuditEntry",
-		"GetAccountLinkBySpace", "GetUserLinkInSpace", "DeleteAccountLink", "InsertAccountLink", "ConsumeLinkRequest",
-		"Notify"} {
+	for _, name := range []string{"GetLinkConnection", "GetBridgeTokenRequestByHash", "LockLinkUser", "LockLinkRequest",
+		"InsertAuditEntry", "GetAccountLinkBySpace", "GetUserLinkInSpace", "DeleteAccountLink", "InsertAccountLink",
+		"ConsumeLinkRequest", "Notify"} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			e.addLink(aliceID, MessengerBridge, brID, "u-old", nil)

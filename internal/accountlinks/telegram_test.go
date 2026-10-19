@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -139,12 +141,18 @@ func TestStartTelegram(t *testing.T) {
 // TestLinkTelegram is C-18.FR-2, AC-1 and FR-9: `/start <token>` links the account that sent it, the bot replies with
 // the User's name and login, the link is recorded and the hint that names it goes to the User; the same token again
 // links nothing, is answered that the link is invalid or expired and recorded as link_rejected with token_used, as
-// are an unknown token, an expired one and one of another Connection.
+// are an unknown token, an expired one and one of another Connection. The link locks the User before the request, as
+// the deletion of the User does before it voids the request, and a request pruned between its read and its lock is an
+// unknown token.
 func TestLinkTelegram(t *testing.T) {
 	e := newEnv(t)
 	tok := e.start(t, alice)
 	var r replies
+	e.store.locks = nil
 	e.slash(t, tgID, tgPID, tok, TelegramAccount{ID: 7001, Username: "alice_t"}, &r)
+	if !slices.Equal(e.store.locks, []string{"user", "request"}) {
+		t.Errorf("locked %q: the User first, as a deletion does", e.store.locks)
+	}
 	if r.last() != "Linked to Muster user Alice Smith (alice)" || len(e.store.links) != 1 ||
 		e.store.links[0].external != "7001" || *e.store.links[0].username != "alice_t" ||
 		e.store.links[0].userID != aliceID || e.store.reqs[0].consumed == nil {
@@ -181,6 +189,15 @@ func TestLinkTelegram(t *testing.T) {
 	if got := e.lastEntry(); r.last() != invalidText || got.Details["reason"] != ReasonTokenUnknown ||
 		got.Details["user"] != nil || got.Details["username"] != nil {
 		t.Errorf("an unknown token: %q, %+v", r.last(), got)
+	}
+	// A request pruned between its read and its lock is an unknown token too, and links nothing.
+	tok = e.start(t, bob)
+	e.store.fail["LockLinkRequest"] = pgx.ErrNoRows
+	e.slash(t, tgID, tgPID, tok, TelegramAccount{ID: 7003}, &r)
+	delete(e.store.fail, "LockLinkRequest")
+	if got := e.lastEntry(); r.last() != invalidText || got.Details["reason"] != ReasonTokenUnknown ||
+		got.Details["user"] != nil || len(e.store.links) != 1 {
+		t.Errorf("a pruned request: %q, %+v", r.last(), got)
 	}
 	// An expired token.
 	tok = e.start(t, alice)
@@ -296,9 +313,9 @@ func TestLinkTelegramConflict(t *testing.T) {
 
 // TestLinkTelegramFailures: a database failure links nothing, replies nothing and leaves the update to come again.
 func TestLinkTelegramFailures(t *testing.T) {
-	for _, name := range []string{"GetLinkConnection", "GetTelegramRequestByHash", "LockLinkUser", "InsertAuditEntry",
-		"GetAccountLinkBySpace", "GetUserLinkInSpace", "DeleteAccountLink", "InsertAccountLink", "ConsumeLinkRequest",
-		"Notify"} {
+	for _, name := range []string{"GetLinkConnection", "GetTelegramRequestByHash", "LockLinkUser", "LockLinkRequest",
+		"InsertAuditEntry", "GetAccountLinkBySpace", "GetUserLinkInSpace", "DeleteAccountLink", "InsertAccountLink",
+		"ConsumeLinkRequest", "Notify"} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			e.addLink(aliceID, MessengerTelegram, tgID, "7000", nil)
