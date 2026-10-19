@@ -156,7 +156,8 @@ var descriptions = map[string]string{
 		"base64 keys of 32 bytes separated by commas, such as the output of `openssl rand -base64 32`; the file " +
 		"form holds one key per line. Required.",
 	"MUSTER_PUBLIC_URL": "The address of Muster for people and messengers, an absolute `http://` or `https://` URL. " +
-		"Required.",
+		"Required. Browsers keep the session only over `https://` or on `localhost`, so an `http://` address on " +
+		"another host is logged as `public_url_insecure` at start.",
 	"MUSTER_INGEST_URL": "The address Alertmanager sends its notifications to, an absolute `http://` or `https://` " +
 		"URL; unset, `MUSTER_PUBLIC_URL`.",
 	"MUSTER_LISTEN_APP":      "The listen address of the app listener: the UI and the API.",
@@ -302,6 +303,21 @@ func Load(environ []string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// SecureContext reports whether browsers treat the pages of u as a secure context, where they keep the Secure session
+// cookie: https, or http on a loopback host — localhost, a name under .localhost, either with a trailing dot,
+// 127.0.0.0/8 or ::1.
+func SecureContext(u *url.URL) bool {
+	if u.Scheme == "https" {
+		return true
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 func findConflicts(vars map[string]string) []Conflict {
