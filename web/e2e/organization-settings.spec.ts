@@ -8,8 +8,8 @@
 // the Snooze presets in the web UI); Retention shows the server's retention_order refusal at the summaries field;
 // Severity levels lists the unmapped value P5 and maps it; Outbound addresses saves a denied network and refuses an
 // entry that is not one; Keyring follows an activation by the CLI without a reload; Security saves the token grace and
-// shows a conflict; a Responder sees only Lookup tables and Link rules. The spec puts the Organization and the outbound
-// address policy back as it found them, and no Content Security Policy violation occurs.
+// shows a conflict; a Responder sees only Lookup tables and Link rules. The spec puts the Organization, the Admin's
+// language and the outbound address policy back as it found them, and no Content Security Policy violation occurs.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -125,22 +125,31 @@ test.afterAll(async () => {
   });
 });
 
-/** Sets the language of the Admin's profile; null follows the browser. */
-async function adminLanguage(language: "ru" | null): Promise<void> {
+/** The language of a profile; null follows the browser. */
+type Language = "en" | "ru" | null;
+
+/** The start of the working day and the first day of the week of the Organization. */
+interface WorkingWeek {
+  workday_start: string;
+  week_start: string;
+}
+
+/** Sets the language of the Admin's profile, keeping the rest of it. */
+async function adminLanguage(language: Language): Promise<void> {
   await withAdmin(async (admin) => {
     const me = await admin.call<{ user: { name: string } }>("GET", "/api/v1/me");
     await admin.call("PUT", "/api/v1/me", { name: me.user.name, language });
   });
 }
 
-/** Puts back the start of the working day and the first day of the week of `muster dev`: 09:00 and Monday. */
-async function restoreWorkingWeek(): Promise<void> {
+/** Sets the start of the working day and the first day of the week, keeping the rest of the Organization. */
+async function setWorkingWeek({ workday_start, week_start }: WorkingWeek): Promise<void> {
   await withAdmin(async (admin) => {
     const org = await admin.call<Organization & { etag: string }>("GET", "/api/v1/organization");
     await admin.call(
       "PUT",
       "/api/v1/organization",
-      { ...organizationInput(org), workday_start: "09:00", week_start: "monday" },
+      { ...organizationInput(org), workday_start, week_start },
       { "If-Match": org.etag },
     );
   });
@@ -231,6 +240,15 @@ test("General saves the working day and week, which the Snooze presets name, and
         )
       ).items[0]?.alert_group ?? { id: "", number: 0 },
   );
+  // What the test changes, read first and put back exactly as read.
+  const saved = await withAdmin(async (admin) => {
+    const me = await admin.call<{ user: { language?: Language } }>("GET", "/api/v1/me");
+    const org = await admin.call<WorkingWeek>("GET", "/api/v1/organization");
+    return {
+      language: me.user.language ?? null,
+      week: { workday_start: org.workday_start, week_start: org.week_start },
+    };
+  });
   await signInAdmin(page);
   try {
     // 4. "Start of the working day" 08:30 and "First day of the week" Sunday under the time zone → "Saved.".
@@ -293,8 +311,8 @@ test("General saves the working day and week, which the Snooze presets name, and
     }
     await shot(page, "general-working-week-snooze-ru");
   } finally {
-    await adminLanguage(null);
-    await restoreWorkingWeek();
+    await adminLanguage(saved.language);
+    await setWorkingWeek(saved.week);
   }
   expect(csp).toEqual([]);
 });

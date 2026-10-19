@@ -3,12 +3,13 @@
 
 // The Snooze dialog in a real browser, against a stubbed API: the Route's durations as quick choices and none in a
 // bulk Snooze; the Snooze presets after them, labelled from the Organization's settings, each with the end that
-// listSnoozePresets answers for the user's time zone, sent as a preset with that time zone, offered without their ends
-// while the ends are read or cannot be; "No end" shows its warning and keeps "Snooze" disabled until "I understand" is
+// listSnoozePresets answers for the user's time zone, read afresh on every open, sent as a preset with that time zone,
+// offered without their ends while the ends are read or cannot be; "No end" shows its warning and keeps "Snooze" disabled until "I understand" is
 // ticked, then sends no_end; "Until" takes a date and a time in the user's time zone, sends them in UTC and refuses an
 // end in the past; and the Russian texts.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useState } from "react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
@@ -79,7 +80,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function renderDialog(props: { durations?: number[]; bulk?: boolean } = {}) {
+/** The dialog as a page opens it: open at first, closed by its own buttons, and opened again by "Open". */
+function Reopenable({
+  durations,
+  onSnooze,
+}: {
+  durations?: number[];
+  onSnooze: (request: SnoozeRequest) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open
+      </button>
+      <SnoozeDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Snooze #412"
+        durations={durations}
+        pending={false}
+        onSnooze={onSnooze}
+      />
+    </>
+  );
+}
+
+async function renderDialog(
+  props: { durations?: number[]; bulk?: boolean; reopenable?: boolean } = {},
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const read: SessionRead = {
     session: {
@@ -99,15 +128,19 @@ async function renderDialog(props: { durations?: number[]; bulk?: boolean } = {}
   await render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={queryClient}>
-        <SnoozeDialog
-          open
-          onOpenChange={() => {}}
-          title="Snooze #412"
-          durations={props.durations}
-          bulk={props.bulk}
-          pending={false}
-          onSnooze={(r) => sent.push(r)}
-        />
+        {props.reopenable === true ? (
+          <Reopenable durations={props.durations} onSnooze={(r) => sent.push(r)} />
+        ) : (
+          <SnoozeDialog
+            open
+            onOpenChange={() => {}}
+            title="Snooze #412"
+            durations={props.durations}
+            bulk={props.bulk}
+            pending={false}
+            onSnooze={(r) => sent.push(r)}
+          />
+        )}
       </QueryClientProvider>
     </I18nextProvider>,
   );
@@ -174,6 +207,23 @@ describe("SnoozeDialog", () => {
     await expect.element(tomorrow).toBeChecked();
     await dialog.getByRole("button", { name: "Snooze" }).click();
     expect(sent).toEqual([{ preset: "tomorrow", time_zone: ZONE }]);
+  });
+
+  test("reads the ends afresh on every open and never shows those of an earlier open", async () => {
+    const { dialog } = await renderDialog({ durations: [3600], reopenable: true });
+    await expect
+      .element(dialog.getByTestId("snooze-preset-end-tomorrow"))
+      .toHaveTextContent("Ends Oct 20, 2026, 09:00");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect.element(dialog).not.toBeInTheDocument();
+    presets = () => undefined;
+    await page.getByRole("button", { name: "Open", exact: true }).click();
+    await expect
+      .element(dialog.getByRole("radio", { name: "Until tomorrow 09:00", exact: true }))
+      .toBeInTheDocument();
+    const read = `?time_zone=${encodeURIComponent(ZONE)}`;
+    await vi.waitFor(() => expect(presetReads).toEqual([read, read]));
+    await expect.element(dialog.getByTestId("snooze-preset-end-tomorrow")).not.toBeInTheDocument();
   });
 
   test("labels the presets from the Organization's settings while the ends are read", async () => {

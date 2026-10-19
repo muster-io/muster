@@ -248,7 +248,9 @@ function SnoozeForm({
               label={c.label}
               detail={c.detail}
               testId={`snooze-choice-${choiceKey(c.choice)}`}
-              detailTestId={`snooze-preset-end-${choiceKey(c.choice)}`}
+              detailTestId={
+                c.choice.kind === "preset" ? `snooze-preset-end-${c.choice.preset}` : undefined
+              }
             />
           ))}
         </div>

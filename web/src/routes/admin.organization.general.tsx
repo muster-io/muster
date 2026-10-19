@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { type Organization, Weekday } from "../api/gen/model";
+import { unreachable } from "../components/destination-test-panel";
 import {
   Field,
   errorText,
@@ -58,8 +59,10 @@ function weekdayName(t: TFunction, day: Weekday): string {
       return t("weekdays.friday");
     case "saturday":
       return t("weekdays.saturday");
-    default:
+    case "sunday":
       return t("weekdays.sunday");
+    default:
+      return unreachable(day);
   }
 }
 

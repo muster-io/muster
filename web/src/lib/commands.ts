@@ -112,8 +112,13 @@ function presetDay(t: TFunction, day: Weekday): string {
       return t("commands.snooze.presetDay.friday");
     case "saturday":
       return t("commands.snooze.presetDay.saturday");
-    default:
+    case "sunday":
       return t("commands.snooze.presetDay.sunday");
+    default: {
+      // A day the API adds fails the type check here instead of reading as Sunday.
+      const unknown: never = day;
+      return String(unknown);
+    }
   }
 }
 
