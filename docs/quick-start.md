@@ -13,6 +13,11 @@ flowchart LR
 
 ## Start Muster
 
+!!! note "Before the first release"
+    Until Muster's first release, the tag in the download command below does not exist yet. Download from `master`
+    instead, by replacing the tag in the URL with `master`, and add `MUSTER_IMAGE=ghcr.io/muster-io/muster:edge` to
+    `.env`: `edge` is the development image built from the newest commit on `master`.
+
 Download the compose example into a new directory:
 
 <!-- quickstart -->
@@ -50,11 +55,6 @@ docker compose up -d --wait
 ```
 
 Muster creates its schema at the first start. One port, `8080`, serves the web UI, the API and ingestion.
-
-!!! note "Before the first release"
-    Until Muster's first release, the tag in the download command does not exist yet. Download from `master` instead,
-    by replacing the tag in the URL with `master`, and add `MUSTER_IMAGE=ghcr.io/muster-io/muster:edge` to `.env`:
-    `edge` is the development image built from the newest commit on `master`.
 
 ## Sign in
 
@@ -104,8 +104,9 @@ route:
 
 Its URL comes from `MUSTER_PUBLIC_URL`, because the compose example serves ingestion on the same address. When your
 Alertmanager runs on another machine, set `MUSTER_PUBLIC_URL` in `.env` to an address that both Alertmanager and your
-browser reach, run `docker compose up -d --wait` again, and create the token after that. [Connect Alertmanager](integrations/alertmanager.md) explains every line of the configuration,
-the catch-all child route to keep last, and the start delay.
+browser reach, run `docker compose up -d --wait` again, and create the token after that.
+[Connect Alertmanager](integrations/alertmanager.md) explains every line of the configuration, the catch-all child
+route to keep last, and the start delay.
 
 ## Send a test alert
 
@@ -160,7 +161,7 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 - **Connect your Alertmanager** as [Connect Alertmanager](integrations/alertmanager.md) describes, and watch the path
   from it with a [Heartbeat](integrations/heartbeat.md).
 - **Learn how Muster groups alerts** in [Concepts](concepts/alert-groups.md).
-- **Run it in production**: [install with Helm](install/helm.md), and read [Operations](operations/backup-and-restore.md)
-  for backups, upgrades and monitoring.
+- **Run it in production**: [install with Helm](install/helm.md), and read
+  [Operations](operations/backup-and-restore.md) for backups, upgrades and monitoring.
 
 `docker compose down` stops Muster and keeps its data; `docker compose down -v` deletes the database too.

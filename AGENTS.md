@@ -195,6 +195,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |
 | `make e2e` | the end-to-end suites, Go and then Playwright (`web/e2e`); `E2E_REPLICAS=2` runs the Go suite with two replicas | S-004, S-014 |
 | `make e2e-go`, `make e2e-web` | one of the two suites, as the CI jobs `e2e-go` and `e2e-web` run them side by side | S-004, S-014 |
+| `make quickstart-check` | run the commands of Quick start in an empty directory with Docker, wait for `/health/ready` and sign in as the bootstrap Admin; `MUSTER_IMAGE` and `QUICKSTART_REF` replace the image and the Git ref of the download | S-060 |
 | `make load-test` | the load test against `muster dev` | S-004 |
 | `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
