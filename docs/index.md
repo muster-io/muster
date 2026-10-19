@@ -30,6 +30,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 
 ## Sections
 
+- [Quick start](quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
+  in about five minutes.
 - [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, and watch the path from it with
   a [Heartbeat](integrations/heartbeat.md).
 - [Messengers](messengers/mattermost.md): connect [Mattermost](messengers/mattermost.md) and

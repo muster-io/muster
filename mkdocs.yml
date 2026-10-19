@@ -73,6 +73,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Quick start: quick-start.md
   - Alertmanager:
       - integrations/alertmanager.md
       - integrations/heartbeat.md
