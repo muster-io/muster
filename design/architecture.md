@@ -167,13 +167,14 @@ Telegram, a reverse proxy or a self-hosted Bot API server set as the Connection'
 
 | Every replica | The Leader only |
 |---|---|
-| the three listeners, the API and the SSE stream | Telegram `getUpdates` long polling (in the default update mode) |
+| the three listeners, the API and the SSE stream | Telegram `getUpdates` long polling (in the default update mode) and Bridge `pollEvents` polling (in the poll mode, [C-22].FR-11) |
 | Snapshot processing, at most one Stored Snapshot per Alertmanager group at a time | the Heartbeat lost and Stale checks |
-| the delivery worker, the Broken probes and the interactive path | partition maintenance and retention |
-| timer rows: ack timeouts, Reminders, Snooze ends, Reopen window ends, Grace period ends; background re-checks of OIDC users | database gauges (`muster_alert_groups`, queue depths, Broken) |
-| the key record of the replica, refreshed every 30 s | the "alive" mark and the downtime record after an outage |
+| the delivery worker, the Broken probes and the interactive path | partition maintenance and retention: dropping partitions, and deleting resolved Alerts of the Alerts view, Alert Groups past their retention, Thread replies and outgoing webhook events |
+| timer rows: ack timeouts, Reminders, Snooze ends, Reopen window ends, Grace period ends; background re-checks of OIDC users | database gauges (`muster_ingest_backlog`, `muster_alert_groups`, queue depths, Broken, Storms) |
+| the key record of the replica, refreshed every 30 s | the "alive" mark and the downtime record after an outage; pruning the records of gone replicas and short-lived rows |
 | | the outgoing heartbeat; the `MusterOIDCSecretExpiring` check ([C-19].FR-5) |
 | | re-signing the buttons of open Root messages after a key rotation (`rerender_after_rotation`, [C-20].FR-7) |
+| | pruning the Request log to its bounds (`request_log_pruning`, [C-23].FR-4) |
 
 ---
 
@@ -981,7 +982,7 @@ sequenceDiagram
     PG->>PG: the silent session ends within leader.server_bound, the lock is released
     B->>PG: try the advisory lock
     PG-->>B: granted
-    B->>B: Leader: Telegram polling, Bridge polling, Heartbeat lost and Stale checks,<br/>partitions, gauges, alive mark, outgoing heartbeat,<br/>OIDC secret expiry check
+    B->>B: Leader: Telegram polling, Bridge polling, Heartbeat lost and Stale checks,<br/>partitions, retention and pruning, gauges, alive mark,<br/>outgoing heartbeat, OIDC secret expiry check,<br/>re-render after a key rotation, Request log pruning
     Note over B,PG: rows leased by A are claimed again when their lease runs out
     Note over A,B: A process frozen beyond the bound can overlap with its successor for a moment, so every Leader task<br/>is safe to run twice: Telegram answers a second poller with 409, a Bridge event is claimed once by its id,<br/>partitions and Stale resolutions are idempotent.
 ```

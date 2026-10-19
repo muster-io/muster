@@ -40,7 +40,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
-| C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
+| C-21 Documentation site and runbooks | Operations | 11 | S-057, S-058, S-060, S-091 | yes | 11 of 11 |
 | C-22 Bridge | Bridge | 51 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084 | yes | 51 of 51 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090 | yes | 13 of 13 |
 
@@ -714,7 +714,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-21
 
-[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057, S-058, S-060
+[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057, S-058, S-060, S-091
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -724,9 +724,11 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-21.FR-4 | S-057 | complete |  |
 | C-21.FR-5 | S-057 (part), S-058 (part), S-060 (part) | complete |  |
 | C-21.FR-7 | S-058 | complete |  |
+| C-21.FR-8 | S-091 | complete |  |
 | C-21.AC-1 | S-057 (part), S-058 (part), S-059 | complete | verified by S-059: the chart's `runbook_url`s exist once the chart renders its rules |
 | C-21.AC-2 | S-060 | complete |  |
 | C-21.AC-3 | S-058 | complete |  |
+| C-21.AC-4 | S-091 | complete |  |
 
 ## C-22
 

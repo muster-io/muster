@@ -5,6 +5,8 @@
 - Amended: 2026-10-03 — Internal alerts carry entities by id with a separate name label; closed label sets listed in
   the catalogue; dropped `resolved` notifications and template rendering time in the catalogue; Snapshots that failed
   processing
+- Amended: 2026-10-19 — `bridge` joins the values of the `transport` label and Bridge polling the Leader's tasks that
+  `MusterNoLeader` names, as the metric catalogue and ADR-0007 have had them since Bridge Connections (ADR-0017)
 
 ## Context
 
@@ -35,9 +37,9 @@ code turns into noise nobody reads.
 - A future hosted mode that serves several Organizations turns the entity labels off with a switch.
 - All other labels take values from closed sets defined in code (`outcome`, `reason`, `command`, `transport`, `kind`,
   …); the catalogue in the product requirements lists each set, and adding a value is a reviewed change like adding a
-  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram` — or `system` for
-  every transition Muster starts itself: on a timer, or because of ingestion, such as a Reopen, a resolve by the system
-  or a rise to Urgent.
+  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram`, `bridge` — or
+  `system` for every transition Muster starts itself: on a timer, or because of ingestion, such as a Reopen, a resolve
+  by the system or a rise to Urgent.
 
 **Histograms.** Metrics use the VictoriaMetrics/metrics library with **Prometheus-compatible `le` histograms only**,
 with buckets chosen for each kind of latency (ingestion, delivery, messenger APIs, template rendering). An architecture
@@ -70,8 +72,8 @@ them, so sums are not multiplied by the number of replicas.
 The reference page of all metrics is generated from the registry in code, and CI checks that it is current.
 
 **Chart rules and dashboard.** The chart ships alert rules, rendered only when the Prometheus or VictoriaMetrics CRDs
-are present. Critical: `MusterDown`, `MusterNoLeader` (the Leader's tasks — Telegram polling, the Heartbeat lost and
-Stale checks, partition maintenance, the outgoing heartbeat — have stopped), `MusterDeliveryFailing`,
+are present. Critical: `MusterDown`, `MusterNoLeader` (the Leader's tasks — Telegram and Bridge polling, the Heartbeat
+lost and Stale checks, partition maintenance, the outgoing heartbeat — have stopped), `MusterDeliveryFailing`,
 `MusterDestinationBroken`, `MusterHeartbeatLost`. Warning: `MusterDeliverySlow`, `MusterDeliveryQueueGrowing`,
 `MusterIngestBacklog`, `MusterIngestRejected` (an oversized ingestion request, or more unauthorized ones than a
 threshold, so that a single scanner request does not fire it), `MusterTemplateError`, `MusterClockSkew`,

@@ -10,6 +10,8 @@
   (ADR-0017); it is safe to run twice, because an event polled twice is handled once by its id
 - Amended: 2026-10-18 — pruning the Request log to its bounds (`request_log_pruning`) is a Leader task; it is safe to
   run twice, because it only deletes records past the bounds
+- Amended: 2026-10-19 — the Decision, Health and Consequences name Bridge polling beside Telegram polling, and every
+  task of the closed list, the retention deletes included: the earlier amendments had added tasks to the Context only
 
 ## Context
 
@@ -21,8 +23,9 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 - polling the events of Bridge Connections in the poll mode (ADR-0017), so that one cursor per Connection is kept in
   one place;
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
-- creating and dropping partitions, and pruning short-lived rows (ended sessions, expired requests and links) and the
-  records of gone replicas;
+- creating and dropping partitions; deleting what the retention periods remove outside partitions — resolved Alerts of
+  the Alerts view, Alert Groups past their retention, Thread replies and outgoing webhook events; and pruning
+  short-lived rows (ended sessions, expired requests and links) and the records of gone replicas;
 - pruning the Request log to the newest records of each Connection and outgoing webhook and to its age bound;
 - gauges computed from the database;
 - a periodic "alive" mark that tells a restarted Muster how long it was down;
@@ -49,6 +52,7 @@ replica delays nothing beyond its lease.
 
 **One Leader** holds a **session advisory lock with a constant key** on a dedicated connection and runs only the tasks
 listed in the Context: Telegram polling, Bridge polling, the Heartbeat lost and Stale checks, partition maintenance,
+the retention deletes, the pruning of short-lived rows, of the records of gone replicas and of the Request log,
 database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key
 rotation (later also polling Alertmanager in the `pull` Connection mode). This list is closed: new singleton work is
 added to it by a reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica
@@ -62,10 +66,10 @@ shorter than that bound, stops all singleton work at once and closes the lock co
 again later. So the old Leader normally stops before PostgreSQL can hand the lock to another replica. A process frozen
 for longer than the bound can still overlap with its successor for a moment, so every singleton task must be safe to run
 twice: Telegram rejects a second poller with `409 Conflict`, which the poller answers by backing off — it never counts
-against the Connection or marks anything Broken; partition changes and Stale resolutions are idempotent, Internal alerts
-are deduplicated by fingerprint, and an extra outgoing heartbeat is harmless. Defaults: a ping every 5 seconds, a
-fencing deadline of 15 seconds and a server-side bound of 30 seconds, so a handover after a node loss takes well under a
-minute.
+against the Connection or marks anything Broken; a Bridge event polled twice is handled once by its id; partition
+changes, Stale resolutions and deletes past a bound are idempotent, Internal alerts are deduplicated by fingerprint, and
+an extra outgoing heartbeat is harmless. Defaults: a ping every 5 seconds, a fencing deadline of 15 seconds and a
+server-side bound of 30 seconds, so a handover after a node loss takes well under a minute.
 
 **Downtime.** The Leader writes an "alive" mark every 30 seconds. After a full outage, the next Leader learns how long
 Muster was down and adds a Timeline entry to open Alert Groups; overdue timer rows are claimed like any others and fire
@@ -83,16 +87,17 @@ without anyone having to run HA in production.
 
 **Health.** Liveness performs no checks; readiness checks only the database. Unreachable messengers or Alertmanagers
 raise alerts; they do not take replicas out of load balancing. The `muster_leader` metric shows which replica leads.
-The chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram polling, the
-Heartbeat lost and Stale checks, partition maintenance and pruning, the database gauges, the outgoing heartbeat and the OIDC secret
-expiry check have stopped, while ingestion, delivery and timers keep working.
+The chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram and Bridge polling,
+the Heartbeat lost and Stale checks, partition maintenance, retention and pruning, the database gauges, the outgoing
+heartbeat, the OIDC secret expiry check and the re-render after a key rotation have stopped, while ingestion, delivery
+and timers keep working.
 
 ## Consequences
 
 - HTTP and all workers, timers included, scale horizontally; only the few singleton tasks do not, which is fine at the
   volumes of the first release.
-- A Leader change pauses Telegram polling, the periodic checks and the outgoing heartbeat for at most the handover
-  bound; no ack timeout or Reminder waits for it.
+- A Leader change pauses Telegram and Bridge polling, the periodic checks and the outgoing heartbeat for at most the
+  handover bound; no ack timeout or Reminder waits for it.
 - The Leader's own database connection becomes a liveness signal: a Leader that cannot reach PostgreSQL stops leading
   within seconds, even if its process keeps running.
 - Installations whose main connection goes through PgBouncer in transaction mode must provide a second, session-capable

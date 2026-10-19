@@ -72,12 +72,17 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
 - **C-02.FR-8** Each replica records the key ids it holds every `replica.key_record_refresh` and counts as live while
   its record is younger than `replica.live_expiry`. A running replica that sees an active key it does not hold stops
   with the canary error.
-- **C-02.FR-10** One replica becomes Leader through a session advisory lock and runs only the singleton tasks: Telegram
-  and Bridge polling, the Heartbeat lost and Stale checks, partition maintenance, database gauges, the "alive" mark, the
-  outgoing heartbeat and the OIDC client secret expiry check that raises `MusterOIDCSecretExpiring` (C-19.FR-5) — each
-  added by its capability; nothing else runs only on the Leader. The Leader pings over the lock session every
-  `leader.ping_interval` and stops all singleton work if no ping succeeded for `leader.fencing_timeout`; the server ends
-  a silent lock session within `leader.server_bound` (ADR-0007).
+- **C-02.FR-10** One replica becomes Leader through a session advisory lock and runs only the singleton tasks, each
+  added by its capability: partition maintenance (FR-11) and the "alive" mark (FR-12); the pruning of the records of
+  gone replicas and of short-lived rows; the database gauges — the ingestion backlog, the open Alert Groups, and the
+  pending deliveries with the Broken Destinations and active Storms; the retention of the Alerts view (C-06.FR-19), of
+  Alert Groups (C-09.FR-16), of Thread replies and of outgoing webhook events; the Heartbeat lost check (C-07.FR-8) and
+  the Stale scan (C-06); Telegram polling (C-14) and Bridge polling (C-22.FR-11); the OIDC client secret expiry check
+  that raises `MusterOIDCSecretExpiring` (C-19.FR-5); the outgoing heartbeat (C-19.FR-7); the re-render of open Root
+  messages after a key rotation (C-20.FR-7); and the pruning of the Request log (C-23.FR-4). Nothing else runs only on
+  the Leader. The Leader pings over the lock session every `leader.ping_interval` and stops all singleton work if no
+  ping succeeded for `leader.fencing_timeout`; the server ends a silent lock session within `leader.server_bound`
+  (ADR-0007).
 - **C-02.FR-11** The Leader creates partitions ahead of time — Stored Snapshots daily, Timeline entries and other events
   monthly — and enforces the retention periods of the Organization (`retention.*`) by dropping whole partitions.
 - **C-02.FR-12** The Leader writes an "alive" mark every `leader.alive_mark_interval`. After downtime, the next Leader
