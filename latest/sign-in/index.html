@@ -2442,6 +2442,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sign-in-needs-https-or-localhost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sign-in needs HTTPS or localhost
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#link-your-messenger-accounts" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2530,6 +2541,26 @@ not signed in. What is open is a short list of endpoints that cannot ask for a s
 <p>Operations that change one's own account, such as the password, TOTP, tokens and Account links, need the web session; a
 token is refused there.</p>
 <p>When the identity provider is in a network that Muster cannot reach, see <a href="closed-networks/">Closed networks</a>.</p>
+<h2 id="sign-in-needs-https-or-localhost">Sign-in needs HTTPS or localhost<a class="headerlink" href="#sign-in-needs-https-or-localhost" title="Permanent link">&para;</a></h2>
+<p>The session cookie is <code>Secure</code>, so browsers keep it only on a page served over HTTPS or from the browser's own machine:
+<code>localhost</code>, a name under <code>.localhost</code>, <code>127.0.0.1</code> or <code>[::1]</code>. On plain <code>http://</code> to any other address, such as
+<code>http://192.0.2.10:8080</code>, the browser drops the cookie and every sign-in returns to the sign-in page. Muster says so in
+two places:</p>
+<ul>
+<li>the sign-in page shows "Sign-in needs HTTPS or localhost" above the form when the browser does not treat the page as
+  secure;</li>
+<li>the server logs <a href="../reference/log-events/#public_url_insecure"><code>public_url_insecure</code></a> at WARN when it starts with
+  <code>MUSTER_PUBLIC_URL</code> set to an <code>http://</code> address on any other host.</li>
+</ul>
+<p>There are two ways out:</p>
+<ul>
+<li><strong>HTTPS.</strong> Put a reverse proxy or an <a href="../install/helm/#ingress">Ingress</a> with a certificate in front of the app
+  port 8080, set <code>MUSTER_PUBLIC_URL</code> to its <code>https://</code> address and restart Muster.</li>
+<li><strong>An SSH tunnel to localhost</strong>, to try Muster on another machine without a certificate. On your own machine, run
+  <code>ssh -L 8080:localhost:8080 &lt;host&gt;</code>, keep it open and browse to <code>http://localhost:8080</code>, with <code>MUSTER_PUBLIC_URL</code>
+  set to <code>http://localhost:8080</code>. Safari may drop the cookie on <code>localhost</code> too: if sign-in still returns to the
+  sign-in page there, use HTTPS or another browser.</li>
+</ul>
 <h2 id="link-your-messenger-accounts">Link your messenger accounts<a class="headerlink" href="#link-your-messenger-accounts" title="Permanent link">&para;</a></h2>
 <p>A button in Mattermost or Telegram acts as a Muster User only if the person who presses it has linked their messenger
 account to their User. People do it themselves, from their profile, as <a href="../messengers/account-links/">Link your messenger

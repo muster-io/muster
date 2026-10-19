@@ -80,7 +80,7 @@ The master keys of the Keyring, which protect the secrets stored in the database
 
 no default
 
-The address of Muster for people and messengers, an absolute `http://` or `https://` URL. Required.
+The address of Muster for people and messengers, an absolute `http://` or `https://` URL. Required. Browsers keep the session only over `https://` or on `localhost`, so an `http://` address on another host is logged as `public_url_insecure` at start.
 
 ### `MUSTER_INGEST_URL`
 

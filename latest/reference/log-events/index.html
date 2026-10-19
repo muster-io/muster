@@ -3089,6 +3089,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#public_url_insecure" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>public_url_insecure</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reminder_skipped" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4469,6 +4480,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#public_url_insecure" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>public_url_insecure</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reminder_skipped" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5092,6 +5114,9 @@ the event.</p>
 <h3 id="process_stopped"><code>process_stopped</code><a class="headerlink" href="#process_stopped" title="Permanent link">&para;</a></h3>
 <p>INFO · no fields · C-02</p>
 <p>The server process stopped after a graceful shutdown.</p>
+<h3 id="public_url_insecure"><code>public_url_insecure</code><a class="headerlink" href="#public_url_insecure" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>host</code> · C-03</p>
+<p>MUSTER_PUBLIC_URL is a plain http:// address on a host other than localhost, a name under .localhost, 127.0.0.0/8 or ::1. The session cookie is Secure, so browsers drop it there and every sign-in returns to the sign-in page. Serve Muster over HTTPS through a reverse proxy or an Ingress, or open it through an SSH tunnel to localhost (ssh -L 8080:localhost:8080 to the host, then http://localhost:8080), and set MUSTER_PUBLIC_URL to that https:// or http://localhost:port address so that the warning stops. host is the host and port of MUSTER_PUBLIC_URL.</p>
 <h3 id="reminder_skipped"><code>reminder_skipped</code><a class="headerlink" href="#reminder_skipped" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>group</code>, <code>reason</code> · C-17</p>
 <p>A Reminder came due and was dropped with its timer: group is the public_id of the Alert Group and reason not_acknowledged when it is no longer acknowledged or policy_off when its Route's Reminders are off.</p>

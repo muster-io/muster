@@ -3015,7 +3015,7 @@ value of a secret, a variable marked so below.</p>
 <p>The master keys of the Keyring, which protect the secrets stored in the database: base64 keys of 32 bytes separated by commas, such as the output of <code>openssl rand -base64 32</code>; the file form holds one key per line. Required.</p>
 <h3 id="muster_public_url"><code>MUSTER_PUBLIC_URL</code><a class="headerlink" href="#muster_public_url" title="Permanent link">&para;</a></h3>
 <p>no default</p>
-<p>The address of Muster for people and messengers, an absolute <code>http://</code> or <code>https://</code> URL. Required.</p>
+<p>The address of Muster for people and messengers, an absolute <code>http://</code> or <code>https://</code> URL. Required. Browsers keep the session only over <code>https://</code> or on <code>localhost</code>, so an <code>http://</code> address on another host is logged as <code>public_url_insecure</code> at start.</p>
 <h3 id="muster_ingest_url"><code>MUSTER_INGEST_URL</code><a class="headerlink" href="#muster_ingest_url" title="Permanent link">&para;</a></h3>
 <p>no default</p>
 <p>The address Alertmanager sends its notifications to, an absolute <code>http://</code> or <code>https://</code> URL; unset, <code>MUSTER_PUBLIC_URL</code>.</p>
