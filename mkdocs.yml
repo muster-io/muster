@@ -80,6 +80,11 @@ nav:
   - Install:
       - install/helm.md
       - install/database.md
+      - install/versions.md
+  - Configure:
+      - configure/messages-and-templates.md
+      - configure/organization.md
+      - configure/api-tokens.md
   - Integrations:
       - integrations/alertmanager.md
       - integrations/grafana.md
