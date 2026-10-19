@@ -61,14 +61,38 @@ The ack timeout runs only while an Alert Group is Firing, and an Alert Group is 
 Each carries its reason, which you see on the Alert Group page, in its Timeline and, in a messenger, in the Root
 message or a Thread reply.
 
-| Transition | When | Reason you see |
-|---|---|---|
-| Open → Resolved | The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](snapshot-semantics.md), or its Integration was deleted. This also ends a Snooze. | The reason of the last Alert |
-| Resolved by the system → previous status | An Alert with the same Route and Group key values fires within the Reopen window. | The Reopen, with the Reopen count |
-| Snoozed → Firing | The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated. | The Snooze ended |
-| Snoozed or Acknowledged → Firing | A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the default). | The rise to Urgent |
-| Acknowledged → Firing | The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering. | "No answer to the last two Reminders" |
-| Acknowledged → Firing | The Owner was disabled or deleted. | "The owner was disabled" or "The owner was deleted" |
+Open → Resolved
+:   reason you see: the reason of the last Alert
+
+    The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](snapshot-semantics.md), or
+    its Integration was deleted. This also ends a Snooze.
+
+Resolved by the system → previous status
+:   reason you see: the Reopen, with the Reopen count
+
+    An Alert with the same Route and Group key values fires within the Reopen window.
+
+Snoozed → Firing
+:   reason you see: the Snooze ended
+
+    The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.
+
+Snoozed or Acknowledged → Firing
+:   reason you see: the rise to Urgent
+
+    A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert
+    Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the
+    default).
+
+Acknowledged → Firing
+:   reason you see: "No answer to the last two Reminders"
+
+    The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.
+
+Acknowledged → Firing
+:   reason you see: "The owner was disabled" or "The owner was deleted"
+
+    The Owner was disabled or deleted.
 
 ## Commands
 
@@ -114,10 +138,11 @@ Every command is a Quiet event except the Takeover. See [Loud and Quiet](loud-an
 A **Snooze preset** ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
 end when the command runs:
 
-| Preset | API value | Ends at |
-|---|---|---|
-| Until tomorrow 09:00 | `tomorrow` | the next start of the working day |
-| Until Monday 09:00 | `week_start` | the next start of the working day on the first day of the week |
+Until tomorrow 09:00
+:   API value: `tomorrow` · ends at: the next start of the working day
+
+Until Monday 09:00
+:   API value: `week_start` · ends at: the next start of the working day on the first day of the week
 
 "Next" is strictly after now. With the working day starting at 09:00:
 
@@ -143,10 +168,15 @@ who pressed or wrote, and otherwise in the Organization's.
 **Settings.** Two Organization settings define the presets, as the fields `workday_start` and `week_start` of the
 organization in the API:
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `organization.workday_start` | `09:00` | the start of the working day, `HH:MM` on the 24-hour clock |
-| `organization.week_start` | `monday` | the first day of the week, `monday` to `sunday` |
+`organization.workday_start`
+:   default: `09:00`
+
+    The start of the working day, `HH:MM` on the 24-hour clock.
+
+`organization.week_start`
+:   default: `monday`
+
+    The first day of the week, `monday` to `sunday`.
 
 **API.** A Snooze takes `preset`, `tomorrow` or `week_start`, as a third choice beside `until` and `no_end`, with an
 optional `time_zone`:
@@ -199,14 +229,26 @@ command is recorded in the Audit log with its actor and the Transport.
 The **Transport** is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
 to all of them.
 
-| Transport | How | Notes |
-|---|---|---|
-| Web UI | buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve | everything above, including bulk commands, Notes and Unresolve |
-| API | `POST` to `/api/v1/alert-groups/{id}/acknowledge` and its siblings, with a session or a token | the same; see the [API reference](../reference/api.md) |
-| Mattermost | a button on the message | Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it |
-| Telegram | an inline button on the message | the same |
-| Bridge | a button on the message, if the bridge declares `buttons`; or a **Text command** in the Thread, if it declares `thread_messages` | the same |
-| `system` | Muster itself | the automatic transitions above, shown in the Timeline |
+Web UI
+:   how: buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve · notes: everything above,
+    including bulk commands, Notes and Unresolve
+
+API
+:   how: `POST` to `/api/v1/alert-groups/{id}/acknowledge` and its siblings, with a session or a token · notes: the
+    same; see the [API reference](../reference/api.md)
+
+Mattermost
+:   how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it
+
+Telegram
+:   how: an inline button on the message · notes: the same
+
+Bridge
+:   how: a button on the message, if the bridge declares `buttons`; or a **Text command** in the Thread, if it declares
+    `thread_messages` · notes: the same
+
+`system`
+:   how: Muster itself · notes: the automatic transitions above, shown in the Timeline
 
 Messengers never offer Unresolve or Notes, and never a Snooze with no end. A person who presses a button in a messenger
 must have linked their messenger account to their Muster user; see [Link your messenger

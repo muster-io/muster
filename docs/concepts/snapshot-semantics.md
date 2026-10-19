@@ -174,12 +174,17 @@ Once an Alert has resolved by any route, the next firing of the same fingerprint
 Every Alert resolved by Muster carries one of four reasons, which the Integration's Alerts view shows and the metric
 `muster_alerts_resolved_total` counts:
 
-| Reason | Meaning |
-|---|---|
-| `resolved` | Alertmanager sent `resolved`, for the Alert or for its whole group. |
-| `gone` | Missing from at least two consecutive Snapshots for the minimum absence. |
-| `stale` | Its group sent nothing for three learned repeat intervals, with a live Heartbeat. |
-| `integration_deleted` | Its Integration was deleted. |
+`resolved`
+:   Alertmanager sent `resolved`, for the Alert or for its whole group.
+
+`gone`
+:   Missing from at least two consecutive Snapshots for the minimum absence.
+
+`stale`
+:   Its group sent nothing for three learned repeat intervals, with a live Heartbeat.
+
+`integration_deleted`
+:   Its Integration was deleted.
 
 When the last Alert of an Alert Group resolves, the Alert Group is resolved by the system with the reason of the last
 one. See [Alert Groups](alert-groups.md#reopening) for what happens if the problem returns. If processing ever misbehaves,

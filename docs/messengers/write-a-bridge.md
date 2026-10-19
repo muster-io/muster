@@ -929,19 +929,44 @@ Content-Type: application/json
 The `capabilities` of `info` declare the optional features. A missing member means the feature is not offered, and
 Muster adapts:
 
-| Feature | Without it |
-|---|---|
-| `buttons` | Muster sends no buttons. When the bridge has `thread_messages`, a Root message that is not resolved ends with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write **Text commands** in the Thread. Without either, the link to Muster is the only way to act. |
-| `thread_messages` | Muster receives no Text commands. `all` reports every message of a person in a Thread of a message of the bot, `mentions_only` only those that mention the bot (the commands line then says "mentioning the bot"). |
-| `direct_messages` with `bot_can_start`, and a `user_lookup` other than `none` | Account links work by token only: the person sends the token to the bot. With both, a person can also link by a code that the bot sends. |
-| `private_answers` | Muster's answer to a press appears in the Thread of the message instead of privately. `ephemeral` is a message only the person sees, `popup` a short plain-text pop-up. |
-| `native_mentions` | A Mention marker is rendered as the person's name in plain text, which notifies nobody. |
-| `quiet_messages` | A Quiet message (`notify: false`) is posted as an ordinary message, without Mentions. |
-| `status_color` | The bridge shows the `emoji` of the status instead of the `color`. |
-| `deletion_events` | Muster learns that a Root message was deleted from `gone` on its next edit or Thread reply, instead of at once. |
-| `delete` | Muster L1 never deletes messages, so nothing changes. |
-| `link_url_template` | The profile shows the Account link token without a link that opens the bot. |
-| `edit_max_age_seconds` | A value of `null` means Muster edits a Root message for as long as its Alert Group changes. |
+`buttons`
+:   Without it: Muster sends no buttons. When the bridge has `thread_messages`, a Root message that is not resolved ends
+    with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write **Text
+    commands** in the Thread. Without either, the link to Muster is the only way to act.
+
+`thread_messages`
+:   Without it: Muster receives no Text commands. `all` reports every message of a person in a Thread of a message of
+    the bot, `mentions_only` only those that mention the bot (the commands line then says "mentioning the bot").
+
+`direct_messages` with `bot_can_start`, and a `user_lookup` other than `none`
+:   Without it: Account links work by token only: the person sends the token to the bot. With both, a person can also
+    link by a code that the bot sends.
+
+`private_answers`
+:   Without it: Muster's answer to a press appears in the Thread of the message instead of privately. `ephemeral` is a
+    message only the person sees, `popup` a short plain-text pop-up.
+
+`native_mentions`
+:   Without it: a Mention marker is rendered as the person's name in plain text, which notifies nobody.
+
+`quiet_messages`
+:   Without it: a Quiet message (`notify: false`) is posted as an ordinary message, without Mentions.
+
+`status_color`
+:   Without it: the bridge shows the `emoji` of the status instead of the `color`.
+
+`deletion_events`
+:   Without it: Muster learns that a Root message was deleted from `gone` on its next edit or Thread reply, instead of
+    at once.
+
+`delete`
+:   Without it: Muster L1 never deletes messages, so nothing changes.
+
+`link_url_template`
+:   Without it: the profile shows the Account link token without a link that opens the bot.
+
+`edit_max_age_seconds`
+:   Without it: a value of `null` means Muster edits a Root message for as long as its Alert Group changes.
 
 A bridge sends `press` events only with `buttons`, `thread_message` events only with `thread_messages`, and
 `message_deleted` events only with `deletion_events`. Muster handles every event type whatever its copy of `info`
@@ -1081,11 +1106,15 @@ Content-Type: application/json
 The bridge shows `text` to the person who caused the event `event_id`, as plain text of at most 500 characters, and
 answers where:
 
-| The event | Where the bridge shows the answer |
-|---|---|
-| a `press` | privately (`ephemeral` or `popup`) when the messenger allows it, with `private_answers`, and the press is recent enough; otherwise in the Thread of the message (`thread`) |
-| a `thread_message` | in that Thread (`thread`), never as a pop-up |
-| an `account_link` | in the direct chat it came from (`direct`) |
+A `press`
+:   Privately (`ephemeral` or `popup`) when the messenger allows it, with `private_answers`, and the press is recent
+    enough; otherwise in the Thread of the message (`thread`).
+
+A `thread_message`
+:   In that Thread (`thread`), never as a pop-up.
+
+An `account_link`
+:   In the direct chat it came from (`direct`).
 
 An event that the bridge no longer knows, or can no longer answer anywhere, is `gone`.
 
@@ -1130,13 +1159,32 @@ Connection. It drops a press or a Text command whose `occurred_at` is more than 
 Errors are RFC 9457 problems (`application/problem+json`) with a `class` member that **the bridge chooses**, because
 only the bridge knows what its messenger's codes mean. Muster acts on the class:
 
-| `class` | Means | Muster |
-|---|---|---|
-| `transient` | a temporary failure: the messenger is down, a timeout | retries with exponential backoff; repeated failures make the Destination Broken |
-| `rate_limited` | the messenger or the bridge throttles; send `Retry-After` in seconds | waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted as a failure; a wait longer than 15 minutes, or none given, is treated as `transient` |
-| `gone` | the message no longer exists: deleted, or its Thread is gone | publishes the Alert Group again once; with `reason` `edit_window_closed`, treats the message as past its edit window |
-| `forbidden` | the channel is missing, the bot was removed from it or lacks a right, the bot was blocked | marks the Destination Broken until a check succeeds |
-| `invalid` | the request cannot succeed as sent: too long, malformed, an unknown id | ends that delivery as Not delivered, without retrying |
+`transient`
+:   A temporary failure: the messenger is down, a timeout.
+
+    Muster retries with exponential backoff; repeated failures make the Destination Broken.
+
+`rate_limited`
+:   The messenger or the bridge throttles; send `Retry-After` in seconds.
+
+    Muster waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted
+    as a failure; a wait longer than 15 minutes, or none given, is treated as `transient`.
+
+`gone`
+:   The message no longer exists: deleted, or its Thread is gone.
+
+    Muster publishes the Alert Group again once; with `reason` `edit_window_closed`, treats the message as past its edit
+    window.
+
+`forbidden`
+:   The channel is missing, the bot was removed from it or lacks a right, the bot was blocked.
+
+    Muster marks the Destination Broken until a check succeeds.
+
+`invalid`
+:   The request cannot succeed as sent: too long, malformed, an unknown id.
+
+    Muster ends that delivery as Not delivered, without retrying.
 
 The problem members are `title`, `status`, an optional `detail`, the `class`, and for `rate_limited` a `scope` of
 `channel` (the default) or `bot`. The `detail` is shown to the Admin as the reason, as untrusted text, so write it for a
@@ -1173,28 +1221,46 @@ channel."), and Muster probes it with `checkChannel` until the channel works aga
 **An answer without a `class`.** Muster still classifies a problem without a `class`, or an answer that is not a
 problem, by its status, so a plain framework error does no harm:
 
-| Status | Class |
-|---|---|
-| `401`, `403` | `forbidden` |
-| `408` | `transient` |
-| `429`, and `503` with `Retry-After` | `rate_limited` |
-| other `5xx`, timeouts and network errors | `transient` |
-| `404`, `410`, a redirect and everything else | `invalid` |
+`401`, `403`
+:   class: `forbidden`
+
+`408`
+:   class: `transient`
+
+`429`, and `503` with `Retry-After`
+:   class: `rate_limited`
+
+Other `5xx`, timeouts and network errors
+:   class: `transient`
+
+`404`, `410`, a redirect and everything else
+:   class: `invalid`
 
 No status is ever read as `gone`. Muster also follows no redirects, and treats one as a configuration error.
 
 **An example mapping.** Parley, a fictional messenger, answers its own error codes. The bridge for Parley maps them
 like this, as the `classify` function above does:
 
-| Parley says | Class | Why |
-|---|---|---|
-| `502`, a timeout, `unavailable` | `transient` | the messenger is down |
-| `slow_down`, with `retry_in` seconds | `rate_limited` | send `Retry-After`; use `scope` `bot` if the limit holds for the whole account |
-| `message_not_found`, `thread_removed` | `gone` | the message or its Thread is deleted |
-| `edit_too_old` | `gone` with `reason` `edit_window_closed` | the message exists, but cannot be edited any more |
-| `channel_not_found`, `not_a_member`, `bot_banned`, `no_permission` | `forbidden` | the channel is unusable until somebody fixes it |
-| `text_too_long`, `bad_request` | `invalid` | this request cannot succeed |
-| `user_blocked_bot` on a direct message | `forbidden` | the account cannot receive a message from the bot |
+`502`, a timeout, `unavailable`
+:   class: `transient` · why: the messenger is down
+
+`slow_down`, with `retry_in` seconds
+:   class: `rate_limited` · why: send `Retry-After`; use `scope` `bot` if the limit holds for the whole account
+
+`message_not_found`, `thread_removed`
+:   class: `gone` · why: the message or its Thread is deleted
+
+`edit_too_old`
+:   class: `gone` with `reason` `edit_window_closed` · why: the message exists, but cannot be edited any more
+
+`channel_not_found`, `not_a_member`, `bot_banned`, `no_permission`
+:   class: `forbidden` · why: the channel is unusable until somebody fixes it
+
+`text_too_long`, `bad_request`
+:   class: `invalid` · why: this request cannot succeed
+
+`user_blocked_bot` on a direct message
+:   class: `forbidden` · why: the account cannot receive a message from the bot
 
 ### Edit windows
 
@@ -1252,12 +1318,25 @@ The bridge reports what people do in the messenger as events. Every event has a 
 spaces, because it travels as the `webhook-id` header of a push. A bridge delivers every event at least once, so
 Muster deduplicates.
 
-| `type` | When | Needs |
-|---|---|---|
-| `press` | a person pressed a button of a message of the bot, already confirmed to the messenger | `buttons` |
-| `thread_message` | a person, never the bot itself, wrote in the Thread of a message of the bot | `thread_messages` |
-| `account_link` | a person sent the bot an Account link token, or opened the `link_url_template` link | always |
-| `message_deleted` | a message of the bot was deleted in the messenger | `deletion_events` |
+`press`
+:   needs: `buttons`
+
+    A person pressed a button of a message of the bot, already confirmed to the messenger.
+
+`thread_message`
+:   needs: `thread_messages`
+
+    A person, never the bot itself, wrote in the Thread of a message of the bot.
+
+`account_link`
+:   needs: always
+
+    A person sent the bot an Account link token, or opened the `link_url_template` link.
+
+`message_deleted`
+:   needs: `deletion_events`
+
+    A message of the bot was deleted in the messenger.
 
 ```json
 {
@@ -1351,11 +1430,14 @@ each event, one per request, to the callback address that the Connection shows:
 
 The request is signed as [Standard Webhooks](https://www.standardwebhooks.com/) specifies:
 
-| Header | Value |
-|---|---|
-| `webhook-id` | the event's `id`, kept across retries |
-| `webhook-timestamp` | the Unix time of this attempt, in seconds |
-| `webhook-signature` | `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` |
+`webhook-id`
+:   The event's `id`, kept across retries.
+
+`webhook-timestamp`
+:   The Unix time of this attempt, in seconds.
+
+`webhook-signature`
+:   `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>`.
 
 The push secret is `whsec_` followed by the base64 of at least 24 random bytes. The HMAC key is **the decoded bytes**:
 strip the prefix `whsec_` and base64-decode the rest. The signed content is the three values joined with full stops,
@@ -1578,16 +1660,29 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
   --forbidden-channel nobot --handle alice --no-interactive
 ```
 
-| Flag | Does |
-|---|---|
-| `--token-file <file>` | the bridge's token, alone in the file (required) |
-| `--channel <id>` | a channel the bot can post to (required) |
-| `--forbidden-channel <id>` | a channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped |
-| `--handle <handle>` | a person to look up and write to; without it `user_lookup` and `direct_message` are skipped |
-| `--push-listen <addr>` | where the push listener listens, `127.0.0.1:0` by default |
-| `--push-url <url>` | where the bridge reaches the push listener, the listener's own address by default |
-| `--push-secret-file <file>` | the push secret, `whsec_` and base64, instead of a generated one |
-| `--no-interactive` | skip `press` and `push`, which need a person |
+`--token-file <file>`
+:   The bridge's token, alone in the file (required).
+
+`--channel <id>`
+:   A channel the bot can post to (required).
+
+`--forbidden-channel <id>`
+:   A channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped.
+
+`--handle <handle>`
+:   A person to look up and write to; without it `user_lookup` and `direct_message` are skipped.
+
+`--push-listen <addr>`
+:   Where the push listener listens, `127.0.0.1:0` by default.
+
+`--push-url <url>`
+:   Where the bridge reaches the push listener, the listener's own address by default.
+
+`--push-secret-file <file>`
+:   The push secret, `whsec_` and base64, instead of a generated one.
+
+`--no-interactive`
+:   Skip `press` and `push`, which need a person.
 
 Flags may come before or after the URL. The check prints one line per step as it ends: `PASS <step>`,
 `FAIL <step>: <reason>` or `SKIP <step>: <why>`. The steps run in this order: `info`, `channel_check`, `post`,

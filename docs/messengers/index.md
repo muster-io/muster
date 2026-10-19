@@ -19,29 +19,124 @@ decides which Alert Groups reach which Destinations; see [Routes and Group keys]
 
 ## What each Destination type can do
 
-Every cell is true for this release. A cell that depends on the bridge says "if the bridge declares it": a Bridge offers
-only what its `info` announces, and Muster adapts to the rest. [Write a bridge](write-a-bridge.md) lists the features.
+Every entry is true for this release. An entry that depends on the bridge says "if the bridge declares it": a Bridge
+offers only what its `info` announces, and Muster adapts to the rest. [Write a bridge](write-a-bridge.md) lists the
+features.
 
-| | Mattermost | Telegram | Bridge | Outgoing webhook, events mode | Outgoing webhook, template mode |
-|---|---|---|---|---|---|
-| Needs a Connection | yes | yes | yes | no | no |
-| One message per Alert Group, kept up to date | yes | yes | yes | no: one request per event | yes, through your requests |
-| Edits of the Root message | yes | yes | yes, until the bridge's edit window | no | yes, through the `update` request |
-| Buttons | yes | yes | if the bridge declares `buttons` | no | no |
-| Without buttons | the web UI and the API | the web UI and the API | [Text commands](../concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares `thread_messages`; otherwise the web UI and the API | the web UI and the API | the web UI and the API |
-| Thread | replies under the Root message | the comments of the Root message, in the channel's discussion group | replies under the Root message | no: each event is separate | optional `reply_in_thread`, with an optional `open_thread` |
-| Loud | a new post with Mentions | a new message | a new message that the bridge posts with `notify` | `notify` is true | `.Notify` is true |
-| Quiet | an edit, or a post without a Mention | an edit, or a message sent with `disable_notification` | an edit, or a message without a notification if the bridge declares `quiet_messages` | `notify` is false | `.Notify` is false |
-| Mentions | nobody, `@channel` `@all` `@here`, users, Mattermost groups | nobody, users | nobody, users | nobody, everyone, users, groups, as data | the same, as data |
-| Account links | yes: a code the bot sends by direct message | yes: a link that opens the bot | yes: a token sent to the bot, and a code if the bridge can find people and send direct messages | not needed: no one presses anything | not needed |
-| Rate limits | Connection 5 requests/s; Destination the same by default | Connection 15 messages/s; Destination 10 requests/min, sends and edits together | Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares | Destination 5 requests/s | Destination 5 requests/s |
-| Edit window | none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it | none for the bot's own messages | the bridge declares it, or none; Muster publishes a new Root message past it | not applicable | the chat's own; Muster does not know it |
-| Storms | one Storm summary per Route | one Storm summary per Route | one Storm summary per Route | every event is sent, no summary | one Storm summary |
-| Proxy | on the Connection | on the Connection | on the Connection | on the Destination | on the Destination |
-| Destination check | yes | yes | yes, `checkChannel`, which posts nothing | no | no |
-| Test message and preview | yes | yes | yes | yes, sends the event `test` | yes, sends the `create` request |
+Needs a Connection
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
 
-Notes on the cells:
+One message per Alert Group, kept up to date
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — no: one request per event
+    - Outgoing webhook, template mode — yes, through your requests
+
+Edits of the Root message
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes, until the bridge's edit window
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — yes, through the `update` request
+
+Buttons
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — if the bridge declares `buttons`
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
+
+Without buttons
+:   - Mattermost — the web UI and the API
+    - Telegram — the web UI and the API
+    - Bridge — [Text commands](../concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares
+      `thread_messages`; otherwise the web UI and the API
+    - Outgoing webhook, events mode — the web UI and the API
+    - Outgoing webhook, template mode — the web UI and the API
+
+Thread
+:   - Mattermost — replies under the Root message
+    - Telegram — the comments of the Root message, in the channel's discussion group
+    - Bridge — replies under the Root message
+    - Outgoing webhook, events mode — no: each event is separate
+    - Outgoing webhook, template mode — optional `reply_in_thread`, with an optional `open_thread`
+
+Loud
+:   - Mattermost — a new post with Mentions
+    - Telegram — a new message
+    - Bridge — a new message that the bridge posts with `notify`
+    - Outgoing webhook, events mode — `notify` is true
+    - Outgoing webhook, template mode — `.Notify` is true
+
+Quiet
+:   - Mattermost — an edit, or a post without a Mention
+    - Telegram — an edit, or a message sent with `disable_notification`
+    - Bridge — an edit, or a message without a notification if the bridge declares `quiet_messages`
+    - Outgoing webhook, events mode — `notify` is false
+    - Outgoing webhook, template mode — `.Notify` is false
+
+Mentions
+:   - Mattermost — nobody, `@channel` `@all` `@here`, users, Mattermost groups
+    - Telegram — nobody, users
+    - Bridge — nobody, users
+    - Outgoing webhook, events mode — nobody, everyone, users, groups, as data
+    - Outgoing webhook, template mode — the same, as data
+
+Account links
+:   - Mattermost — yes: a code the bot sends by direct message
+    - Telegram — yes: a link that opens the bot
+    - Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages
+    - Outgoing webhook, events mode — not needed: no one presses anything
+    - Outgoing webhook, template mode — not needed
+
+Rate limits
+:   - Mattermost — Connection 5 requests/s; Destination the same by default
+    - Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together
+    - Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares
+    - Outgoing webhook, events mode — Destination 5 requests/s
+    - Outgoing webhook, template mode — Destination 5 requests/s
+
+Edit window
+:   - Mattermost — none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it
+    - Telegram — none for the bot's own messages
+    - Bridge — the bridge declares it, or none; Muster publishes a new Root message past it
+    - Outgoing webhook, events mode — not applicable
+    - Outgoing webhook, template mode — the chat's own; Muster does not know it
+
+Storms
+:   - Mattermost — one Storm summary per Route
+    - Telegram — one Storm summary per Route
+    - Bridge — one Storm summary per Route
+    - Outgoing webhook, events mode — every event is sent, no summary
+    - Outgoing webhook, template mode — one Storm summary
+
+Proxy
+:   - Mattermost — on the Connection
+    - Telegram — on the Connection
+    - Bridge — on the Connection
+    - Outgoing webhook, events mode — on the Destination
+    - Outgoing webhook, template mode — on the Destination
+
+Destination check
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes, `checkChannel`, which posts nothing
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
+
+Test message and preview
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — yes, sends the event `test`
+    - Outgoing webhook, template mode — yes, sends the `create` request
+
+Notes on the entries:
 
 - **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
   default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of

@@ -105,17 +105,38 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `version` | `1`. |
-| `event` | The lifecycle event, one of the names below. |
-| `notify` | `true` exactly when the event is Loud. |
-| `mentions` | Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`, `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet event. |
-| `sequence` | The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps, and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer". |
-| `occurred_at` | When the event was recorded. |
-| `actor` | Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name` used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`, for example `timer`. |
-| `alert_group` | The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`, `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster. |
-| `alerts` | One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason. |
+`version`
+:   `1`.
+
+`event`
+:   The lifecycle event, one of the names below.
+
+`notify`
+:   `true` exactly when the event is Loud.
+
+`mentions`
+:   Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`,
+    `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet
+    event.
+
+`sequence`
+:   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
+    and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".
+
+`occurred_at`
+:   When the event was recorded.
+
+`actor`
+:   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`,
+    for example `timer`.
+
+`alert_group`
+:   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
+    `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.
+
+`alerts`
+:   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
 
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
@@ -125,26 +146,59 @@ Every row of the lifecycle event tables is one event, Quiet ones and those with 
 included. What delivery itself does — a Publication, a Storm summary, a final edit — is not a lifecycle event and is
 never sent.
 
-| `event` | `notify` |
-|---|---|
-| `created` | true |
-| `alerts_added` | true while firing; false while acknowledged or snoozed |
-| `alert_replaced`, `alert_resolved`, `alert_continued`, `annotations_changed`, `severity_raised` | false |
-| `urgency_raised` | true when the rise ends a Snooze or removes the acknowledgement; false otherwise |
-| `reopened` | true while firing or acknowledged; false while snoozed |
-| `snooze_ended` | true |
-| `resolved` | false |
-| `moved_to_default_route` | false |
-| `acknowledged` | false |
-| `takeover` | true |
-| `unacknowledged` | true when disabling or deleting the Owner released it; false for the Command |
-| `unresolved`, `snoozed`, `unsnoozed`, `note_added` | false |
-| `ack_timeout` | true |
-| `unclaimed` | false |
-| `reminder` | true |
-| `reminder_answered` | false |
-| `auto_unacknowledged` | true |
-| `notices_missed` | true |
+`created`
+:   `notify`: true
+
+`alerts_added`
+:   `notify`: true while firing; false while acknowledged or snoozed
+
+`alert_replaced`, `alert_resolved`, `alert_continued`, `annotations_changed`, `severity_raised`
+:   `notify`: false
+
+`urgency_raised`
+:   `notify`: true when the rise ends a Snooze or removes the acknowledgement; false otherwise
+
+`reopened`
+:   `notify`: true while firing or acknowledged; false while snoozed
+
+`snooze_ended`
+:   `notify`: true
+
+`resolved`
+:   `notify`: false
+
+`moved_to_default_route`
+:   `notify`: false
+
+`acknowledged`
+:   `notify`: false
+
+`takeover`
+:   `notify`: true
+
+`unacknowledged`
+:   `notify`: true when disabling or deleting the Owner released it; false for the Command
+
+`unresolved`, `snoozed`, `unsnoozed`, `note_added`
+:   `notify`: false
+
+`ack_timeout`
+:   `notify`: true
+
+`unclaimed`
+:   `notify`: false
+
+`reminder`
+:   `notify`: true
+
+`reminder_answered`
+:   `notify`: false
+
+`auto_unacknowledged`
+:   `notify`: true
+
+`notices_missed`
+:   `notify`: true
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.
@@ -166,13 +220,21 @@ New event names and new fields are added within `version` 1. Removing a field or
 
 ## How the answer counts
 
-| Answer | Outcome |
-|---|---|
-| `2xx` | Delivered. |
-| `429` or `503` with `Retry-After` | The same event is sent again exactly when asked. |
-| `408`, any other `5xx`, a timeout or a network error | Retried with backoff; after `delivery.transient_budget` the Destination becomes Broken. |
-| `401`, `403`, `404`, `410` | The Destination becomes Broken; the event waits and is the probe. |
-| `400`, `413`, `422`, a redirect, any other answer | That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never followed; the error names its target. |
+`2xx`
+:   Delivered.
+
+`429` or `503` with `Retry-After`
+:   The same event is sent again exactly when asked.
+
+`408`, any other `5xx`, a timeout or a network error
+:   Retried with backoff; after `delivery.transient_budget` the Destination becomes Broken.
+
+`401`, `403`, `404`, `410`
+:   The Destination becomes Broken; the event waits and is the probe.
+
+`400`, `413`, `422`, a redirect, any other answer
+:   That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never
+    followed; the error names its target.
 
 Requests go through the outbound address policy: a URL that resolves to a link-local, cloud metadata, multicast or
 unspecified address is refused under every policy, and loopback and private addresses need an allowed network. A

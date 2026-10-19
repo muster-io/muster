@@ -533,9 +533,12 @@ docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the
 docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes; llms.txt and the Markdown versions only make docs writes
 	$(ZENSICAL) serve --config-file mkdocs.yml
 
-# generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page.
-docs-check: ## Fail on stale generated files, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
+# generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page. tablecheck then
+# fails on a table under docs/ that holds inline code longer than 24 characters, which does not fit a table column on a
+# phone: such entries are laid out as a definition list, a block per entry.
+docs-check: ## Fail on stale generated files and on long inline code in tables, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
 	$(MAKE) --no-print-directory generate-check
+	$(GO) run ./internal/tools/tablecheck docs
 	$(MAKE) --no-print-directory docs
 
 ci: lint lint-arch generate-check licenses test-race build ## Run the pull-request tier locally
