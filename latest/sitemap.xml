@@ -4,10 +4,40 @@
         <loc>https://muster-io.github.io/muster/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/concepts/alert-groups/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/concepts/broken-destinations/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/concepts/loud-and-quiet/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/concepts/routes-and-group-keys/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/concepts/snapshot-semantics/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/concepts/statuses-and-commands/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/install/database/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/install/helm/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/integrations/alertmanager/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/integrations/grafana/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/integrations/heartbeat/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/messengers/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/messengers/account-links/</loc>
@@ -19,6 +49,9 @@
         <loc>https://muster-io.github.io/muster/messengers/mattermost/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/messengers/proxies/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/messengers/telegram-restricted-networks/</loc>
       </url>
       <url>
@@ -26,6 +59,24 @@
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/messengers/write-a-bridge/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/backup-and-restore/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/cli/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/high-availability/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/key-rotation/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/monitoring/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/outgoing-heartbeat/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/operations/request-log/</loc>
@@ -76,10 +127,19 @@
         <loc>https://muster-io.github.io/muster/operations/runbooks/MusterTemplateError/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/operations/upgrades/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/outgoing-webhooks/events/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/outgoing-webhooks/recipes/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/outgoing-webhooks/templates/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/quick-start/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/reference/</loc>
@@ -106,6 +166,15 @@
         <loc>https://muster-io.github.io/muster/reference/metrics/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/sign-in/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/sign-in/closed-networks/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/sign-in/oidc-keycloak/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/sign-in/totp/</loc>
       </url>
 </urlset>

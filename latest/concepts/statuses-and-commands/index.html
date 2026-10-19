@@ -1,0 +1,3236 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/concepts/statuses-and-commands/">
+      
+      
+      
+        <link rel="prev" href="../loud-and-quiet/">
+      
+      
+        <link rel="next" href="../broken-destinations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Statuses and commands - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Statuses and commands
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Quick start
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Install
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/helm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install with Helm
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The database
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alertmanager
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Alertmanager
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Grafana Alerting
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../messengers/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram-restricted-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/proxies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Proxies
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/write-a-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../sign-in/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_7">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/oidc-keycloak/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/totp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  TOTP
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/closed-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Closed networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Concepts
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_8">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Concepts
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alert-groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alert Groups
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../routes-and-group-keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Routes and Group keys
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../snapshot-semantics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Snapshot semantics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../loud-and-quiet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Loud and Quiet
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Statuses and commands
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Statuses and commands
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-four-statuses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The four statuses
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The four statuses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transitions-muster-makes-on-its-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Transitions Muster makes on its own
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-may" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Who may
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-a-command-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where a command comes from
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where a command comes from">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-each-button-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What each button does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#text-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Text commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ack-timeouts-reminders-and-auto-unacknowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ack timeouts, Reminders and auto-unacknowledge
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ack timeouts, Reminders and auto-unacknowledge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ack-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ack timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reminders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reminders
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-unacknowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Auto-unacknowledge
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../broken-destinations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Broken Destinations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Operations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/backup-and-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Backup and restore
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/upgrades/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Upgrades
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/key-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Key rotation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/high-availability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  High availability
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Monitoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/outgoing-heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/request-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Request log
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9_9" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../operations/runbooks/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runbooks
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_9_9" id="__nav_9_9_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_9_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_9_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Runbooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDown/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDown
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNoLeader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNoLeader
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryFailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryFailing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDestinationBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDestinationBroken
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterHeartbeatLost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliverySlow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliverySlow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryQueueGrowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryQueueGrowing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestBacklog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestBacklog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestRejected/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterTemplateError/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterTemplateError
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterClockSkew/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterClockSkew
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterLoginFailures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterSnapshotTruncated/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterSnapshotTruncated
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterOIDCSecretExpiring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterOIDCSecretExpiring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10" id="__nav_10_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_10">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-values/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/bridge-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bridge protocol
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-four-statuses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The four statuses
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The four statuses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transitions-muster-makes-on-its-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Transitions Muster makes on its own
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-may" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Who may
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-a-command-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where a command comes from
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Where a command comes from">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-each-button-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What each button does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#text-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Text commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ack-timeouts-reminders-and-auto-unacknowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ack timeouts, Reminders and auto-unacknowledge
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ack timeouts, Reminders and auto-unacknowledge">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ack-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ack timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reminders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reminders
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-unacknowledge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Auto-unacknowledge
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="statuses-and-commands">Statuses and commands<a class="headerlink" href="#statuses-and-commands" title="Permanent link">&para;</a></h1>
+<p>An Alert Group is always in one of four statuses, and only a few things move it from one to another. Some are
+<strong>Commands</strong> that a person gives, from the web UI, the API, a button in a messenger, or a Text command in a Thread. The
+others are transitions that Muster makes on its own, always with a reason you can read.</p>
+<h2 id="the-four-statuses">The four statuses<a class="headerlink" href="#the-four-statuses" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Firing</strong></td>
+<td>The Alert Group has a live problem and nobody has taken it.</td>
+</tr>
+<tr>
+<td><strong>Acknowledged</strong></td>
+<td>A person has taken it and is handling it. That person is its <strong>Owner</strong>.</td>
+</tr>
+<tr>
+<td><strong>Snoozed</strong></td>
+<td>It is set aside until a chosen time, or with no end. Muster stays quiet about it meanwhile.</td>
+</tr>
+<tr>
+<td><strong>Resolved</strong></td>
+<td>It is closed, by a person or by Muster because its Alerts are gone.</td>
+</tr>
+</tbody>
+</table>
+<p>New Alerts that join an open Alert Group change its status only through a rise to Urgent, and edits of a Route never
+change a status. Only the transitions below do.</p>
+<pre class="mermaid"><code>stateDiagram-v2
+    state "Resolved by the system" as ResolvedBySystem
+    state "Resolved by a user" as ResolvedByUser
+
+    [*] --&gt; Firing : created
+    Firing --&gt; Acknowledged : Acknowledge
+    Snoozed --&gt; Acknowledged : Acknowledge
+    Acknowledged --&gt; Acknowledged : Takeover
+    Acknowledged --&gt; Firing : Unacknowledge
+    Acknowledged --&gt; Firing : auto-unacknowledge (system)
+    Acknowledged --&gt; Firing : rise to Urgent (system)
+    Firing --&gt; Snoozed : Snooze
+    Acknowledged --&gt; Snoozed : Snooze
+    Snoozed --&gt; Snoozed : Snooze with a new end
+    Snoozed --&gt; Firing : Unsnooze
+    Snoozed --&gt; Firing : Snooze ends (system)
+    Snoozed --&gt; Firing : rise to Urgent (system)
+    Firing --&gt; ResolvedByUser : Resolve
+    Acknowledged --&gt; ResolvedByUser : Resolve
+    Snoozed --&gt; ResolvedByUser : Resolve
+    Firing --&gt; ResolvedBySystem : all Alerts resolved (system)
+    Acknowledged --&gt; ResolvedBySystem : all Alerts resolved (system)
+    Snoozed --&gt; ResolvedBySystem : all Alerts resolved (system)
+    ResolvedBySystem --&gt; Firing : Reopen (system)
+    ResolvedBySystem --&gt; Acknowledged : Reopen (system)
+    ResolvedBySystem --&gt; Snoozed : Reopen (system)
+    ResolvedByUser --&gt; Firing : Unresolve
+    ResolvedBySystem --&gt; [*] : Reopen window ends
+    ResolvedByUser --&gt; [*] : Grace period ends</code></pre>
+<p>Resolved appears twice because the two ways back differ. After the system resolved an Alert Group, it <strong>reopens</strong> by
+itself if the problem returns within the Reopen window. After a person resolved it, nothing reopens it; the person can
+<strong>Unresolve</strong> it, or Muster starts a new Alert Group if the Alerts still fire after the Grace period. See
+<a href="../alert-groups/#reopening">Reopening</a>.</p>
+<p>The ack timeout runs only while an Alert Group is Firing, and an Alert Group is <strong>Unclaimed</strong> after its last notice. See
+<a href="#ack-timeouts-reminders-and-auto-unacknowledge">Ack timeouts, Reminders and auto-unacknowledge</a>.</p>
+<h3 id="transitions-muster-makes-on-its-own">Transitions Muster makes on its own<a class="headerlink" href="#transitions-muster-makes-on-its-own" title="Permanent link">&para;</a></h3>
+<p>Each carries its reason, which you see on the Alert Group page, in its Timeline and, in a messenger, in the Root
+message or a Thread reply.</p>
+<table>
+<thead>
+<tr>
+<th>Transition</th>
+<th>When</th>
+<th>Reason you see</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open → Resolved</td>
+<td>The last Alert resolved: Alertmanager sent <code>resolved</code>, or the Alert went <a href="../snapshot-semantics/">Gone or Stale</a>, or its Integration was deleted. This also ends a Snooze.</td>
+<td>The reason of the last Alert</td>
+</tr>
+<tr>
+<td>Resolved by the system → previous status</td>
+<td>An Alert with the same Route and Group key values fires within the Reopen window.</td>
+<td>The Reopen, with the Reopen count</td>
+</tr>
+<tr>
+<td>Snoozed → Firing</td>
+<td>The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.</td>
+<td>The Snooze ended</td>
+</tr>
+<tr>
+<td>Snoozed or Acknowledged → Firing</td>
+<td>A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert Group was already Urgent, and removes an acknowledgement when the Route has <code>route.urgent_rise_removes_ack</code> on (the default).</td>
+<td>The rise to Urgent</td>
+</tr>
+<tr>
+<td>Acknowledged → Firing</td>
+<td>The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.</td>
+<td>"No answer to the last two Reminders"</td>
+</tr>
+<tr>
+<td>Acknowledged → Firing</td>
+<td>The Owner was disabled or deleted.</td>
+<td>"The owner was disabled" or "The owner was deleted"</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Allowed from</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Acknowledge</strong></td>
+<td>Firing, Snoozed</td>
+<td>The caller becomes the Owner. It ends a Snooze. By the current Owner it changes nothing. By another user it is a <strong>Takeover</strong>.</td>
+</tr>
+<tr>
+<td><strong>Unacknowledge</strong></td>
+<td>Acknowledged</td>
+<td>The Alert Group is Firing again, without an Owner, and the ack timeout starts over. Any user who may acknowledge can do it, not only the Owner.</td>
+</tr>
+<tr>
+<td><strong>Resolve</strong></td>
+<td>Firing, Acknowledged, Snoozed</td>
+<td>The Alert Group is Resolved by the person. A Note can come with it.</td>
+</tr>
+<tr>
+<td><strong>Unresolve</strong></td>
+<td>Resolved by a person</td>
+<td>The Alert Group is Firing again without an Owner. Web UI and API only.</td>
+</tr>
+<tr>
+<td><strong>Snooze</strong></td>
+<td>Firing, Acknowledged, Snoozed</td>
+<td>The Alert Group is Snoozed until a time in the future, or with no end. A Snooze with a new end changes the end.</td>
+</tr>
+<tr>
+<td><strong>Unsnooze</strong></td>
+<td>Snoozed</td>
+<td>The Alert Group is Firing again without an Owner, and the ack timeout starts over.</td>
+</tr>
+<tr>
+<td><strong>Add Note</strong></td>
+<td>any</td>
+<td>A Note appears in the Timeline with its author. Web UI and API only.</td>
+</tr>
+<tr>
+<td><strong>Still on it</strong></td>
+<td>Acknowledged, while a Reminder waits</td>
+<td>The Owner answers the Reminder. See below.</td>
+</tr>
+</tbody>
+</table>
+<p>Details:</p>
+<ul>
+<li><strong>Takeover.</strong> Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
+  is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
+  button.</li>
+<li><strong>Snooze.</strong> The web UI and the API accept any future time, or no end. The API makes you say which: a request names
+  either <code>until</code> or <code>no_end</code>. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone
+  unsnoozes it". Messengers offer the Route's <strong>Snooze durations</strong> as separate buttons or a menu (<code>route.snooze_durations</code>:
+  1 hour, 4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).</li>
+<li><strong>Unresolve</strong> is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
+  when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
+  already resolved.</li>
+<li><strong>Notes</strong> are up to 4,000 characters (<code>alert_group.note_max_length</code>).</li>
+<li><strong>Bulk commands.</strong> In the list, select up to 100 Alert Groups (<code>alert_group.bulk_max</code>) and run Acknowledge, Resolve,
+  Snooze or Unsnooze on all of them. Each goes through the rules on its own and the result lists the outcome per Alert
+  Group. One refusal never stops the others. A bulk Acknowledge skips an Alert Group that another user owns ("skipped:
+  owned by {Owner}"), so it never takes over by accident.</li>
+<li><strong>Refusals</strong> carry a stable code and a message, such as "already resolved", "not acknowledged" or "not permitted". The
+  API answers <code>409</code> for a precondition and <code>403</code> for a permission.</li>
+<li>Commands on one Alert Group are serialized. Two people acknowledging at the same moment leave the later one as Owner and
+  one Takeover in the Timeline.</li>
+</ul>
+<p>Every command is a Quiet event except the Takeover. See <a href="../loud-and-quiet/">Loud and Quiet</a>.</p>
+<h3 id="who-may">Who may<a class="headerlink" href="#who-may" title="Permanent link">&para;</a></h3>
+<p>A <strong>Responder</strong> or an <strong>Admin</strong> may acknowledge, resolve, snooze and add Notes. A <strong>Viewer</strong> may read and may not act:
+the command is refused. A <strong>Service account</strong> may run the commands its Role allows, except Acknowledge and Still on it,
+because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
+command is recorded in the Audit log with its actor and the Transport.</p>
+<h2 id="where-a-command-comes-from">Where a command comes from<a class="headerlink" href="#where-a-command-comes-from" title="Permanent link">&para;</a></h2>
+<p>The <strong>Transport</strong> is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
+to all of them.</p>
+<table>
+<thead>
+<tr>
+<th>Transport</th>
+<th>How</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Web UI</td>
+<td>buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve</td>
+<td>everything above, including bulk commands, Notes and Unresolve</td>
+</tr>
+<tr>
+<td>API</td>
+<td><code>POST</code> to <code>/api/v1/alert-groups/{id}/acknowledge</code> and its siblings, with a session or a token</td>
+<td>the same; see the <a href="../../reference/api/">API reference</a></td>
+</tr>
+<tr>
+<td>Mattermost</td>
+<td>a button on the message</td>
+<td>Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it</td>
+</tr>
+<tr>
+<td>Telegram</td>
+<td>an inline button on the message</td>
+<td>the same</td>
+</tr>
+<tr>
+<td>Bridge</td>
+<td>a button on the message, if the bridge declares <code>buttons</code>; or a <strong>Text command</strong> in the Thread, if it declares <code>thread_messages</code></td>
+<td>the same</td>
+</tr>
+<tr>
+<td><code>system</code></td>
+<td>Muster itself</td>
+<td>the automatic transitions above, shown in the Timeline</td>
+</tr>
+</tbody>
+</table>
+<p>Messengers never offer Unresolve or Notes, and never a Snooze with no end. A person who presses a button in a messenger
+must have linked their messenger account to their Muster user; see <a href="../../messengers/account-links/">Link your messenger
+accounts</a>. A press from an unlinked account changes nothing, and the person is told
+privately how to link it.</p>
+<h3 id="what-each-button-does">What each button does<a class="headerlink" href="#what-each-button-does" title="Permanent link">&para;</a></h3>
+<p>The buttons of a Root message depend on the status of its Alert Group:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Buttons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Firing</td>
+<td><strong>Ack</strong>, <strong>Resolve</strong>, <strong>Snooze</strong></td>
+</tr>
+<tr>
+<td>Acknowledged</td>
+<td><strong>Unack</strong>, <strong>Resolve</strong>, <strong>Snooze</strong></td>
+</tr>
+<tr>
+<td>Snoozed</td>
+<td><strong>Ack</strong>, <strong>Unsnooze</strong>, <strong>Resolve</strong></td>
+</tr>
+<tr>
+<td>Resolved</td>
+<td>none; a link "Open in Muster"</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Ack</strong> takes the Alert Group: you become its Owner, the Reminders start, and the message shows who has it. If somebody
+  else has it, Ack takes it over from them.</li>
+<li><strong>Unack</strong> gives it back. The Alert Group becomes Firing again with no Owner, and the ack timeout starts over.</li>
+<li><strong>Resolve</strong> closes the Alert Group by hand. If Alerts still fire, the message shows "⚠ N alerts still firing in
+  Alertmanager", and after the Grace period the Alerts that still fire start a new Alert Group.</li>
+<li><strong>Snooze</strong> sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for each. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says so.</li>
+<li><strong>Unsnooze</strong> ends the Snooze early. The Alert Group becomes Firing again.</li>
+<li>On a <strong>Reminder</strong>, <strong>Still on it</strong> tells Muster you are still handling the Alert Group, and <strong>Unack</strong> gives it up.</li>
+<li>A <strong>Storm summary</strong> and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
+  status, but pressing them changes nothing: you get "This is a test message; nothing was changed".</li>
+</ul>
+<p>A press edits the Root message to show the result. A press that Muster refuses, such as a Resolve by a Viewer, is answered
+privately to the person who pressed, and nothing changes.</p>
+<h3 id="text-commands">Text commands<a class="headerlink" href="#text-commands" title="Permanent link">&para;</a></h3>
+<p>Some messengers have no buttons, or a bridge does not offer them. A <strong>Text command</strong> is a Command written as a reply in a
+Thread. Only a <strong>Bridge</strong> Destination takes them, and only when the bridge declares <code>thread_messages</code>. A Root message
+that is not resolved then ends with a line such as "Reply in the Thread: ack · resolve · snooze 1h".</p>
+<p>A reply is a Text command when its whole text, trimmed, in any case and with an optional leading <code>/</code>, is one of:</p>
+<table>
+<thead>
+<tr>
+<th>Text command</th>
+<th>Same in Russian</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ack</code></td>
+<td><code>взял</code></td>
+<td>Acknowledge</td>
+</tr>
+<tr>
+<td><code>unack</code></td>
+<td><code>отпускаю</code></td>
+<td>Unacknowledge</td>
+</tr>
+<tr>
+<td><code>resolve</code></td>
+<td><code>решено</code></td>
+<td>Resolve</td>
+</tr>
+<tr>
+<td><code>snooze &lt;duration&gt;</code></td>
+<td><code>отложить &lt;duration&gt;</code></td>
+<td>Snooze</td>
+</tr>
+<tr>
+<td><code>unsnooze</code></td>
+<td><code>вернуть</code></td>
+<td>Unsnooze</td>
+</tr>
+<tr>
+<td><code>still on it</code></td>
+<td><code>ещё работаю</code> (also <code>еще работаю</code>)</td>
+<td>Still on it</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>&lt;duration&gt;</code> is one of the Route's Snooze durations, written in minutes, hours or days: <code>30m</code>, <code>4h</code> or <code>1d</code>, and
+<code>30м</code>, <code>4ч</code> or <code>1д</code> in Russian. Every word works whatever the Route's language is. The writer needs an Account link, and
+the same permissions as for a button.</p>
+<p>Muster answers a Text command in the Thread, for example "Done: Acknowledged #42", or with the reason it refused. A
+duration that is not one of the Route's is answered "Snooze for one of: …". <strong>Any other text is ignored and never
+answered</strong>, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts on
+the Alert Group like any other, also when the message is past its <a href="../../messengers/bridge/#edit-windows">edit window</a>.
+A Text command older than an hour (<code>bridge.event_max_age</code>) is dropped. If the bridge forwards only the messages that
+mention its bot, the line says "mentioning the bot", and the command must mention it. See <a href="../../messengers/write-a-bridge/#events">Write a
+bridge</a> for how a bridge reports a Thread message.</p>
+<h2 id="ack-timeouts-reminders-and-auto-unacknowledge">Ack timeouts, Reminders and auto-unacknowledge<a class="headerlink" href="#ack-timeouts-reminders-and-auto-unacknowledge" title="Permanent link">&para;</a></h2>
+<p>Three timers make sure nobody forgets: one for an Alert Group nobody has taken, one for an Alert Group somebody took and
+then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the On-call profile turns
+the first two on and the Informational profile turns everything off.</p>
+<h3 id="ack-timeout">Ack timeout<a class="headerlink" href="#ack-timeout" title="Permanent link">&para;</a></h3>
+<p>The ack timeout runs while an Alert Group is Firing. It starts at the Alert Group's first Publication in a Destination, and
+starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve stop it.</p>
+<p>When nobody acknowledges, Muster sends up to three <strong>notices</strong>, at doubling intervals from the Route's first interval
+(<code>route.ack_timeout</code>, 15 minutes on an On-call Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
+Each is a Loud Thread reply that Mentions whom the Destination's <code>ack_timeout</code> setting says. After the last notice the
+Alert Group is <strong>Unclaimed</strong>: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
+filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.</p>
+<p>An Alert Group that has not been published, as when its Route has no Destination or only Broken ones, has no ack timeout
+until its first Publication.</p>
+<h3 id="reminders">Reminders<a class="headerlink" href="#reminders" title="Permanent link">&para;</a></h3>
+<p>When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (<code>route.reminders</code>, on an On-call
+Route). The first <strong>Reminder</strong> comes 4 hours after the acknowledgement, and each next interval doubles up to 24 hours: at 4,
+12, 28 and 52 hours, then every 24 hours. Each is a Loud Thread reply that Mentions the Owner, with the buttons <strong>Still
+on it</strong> and <strong>Unack</strong>.</p>
+<ul>
+<li><strong>Still on it</strong> is recorded in the Timeline and does not change the interval. The Owner can also answer from the Alert
+  Group page or the API.</li>
+<li>A <strong>Takeover</strong> starts the Reminders over for the new Owner. A Reopen into acknowledged continues them. A snoozed Alert
+  Group gets none. There are no quiet hours.</li>
+<li>An Owner who is disabled or deleted loses the acknowledgement: the Alert Group becomes Firing without an Owner, and the
+  ack timeout starts over.</li>
+<li>After Muster was down, the overdue notices of one Alert Group collapse into one Loud Thread reply that says how many
+  were missed.</li>
+<li>Buttons on Reminders are signed like the others, but are not updated after a key rotation. Once the old key is removed,
+  a press is answered "This button has expired; use the buttons on the Alert Group's message".</li>
+</ul>
+<h3 id="auto-unacknowledge">Auto-unacknowledge<a class="headerlink" href="#auto-unacknowledge" title="Permanent link">&para;</a></h3>
+<p>If an Owner goes home and says nothing, the Alert Group would stay acknowledged forever. <strong>Auto-unacknowledge</strong>
+(<code>route.auto_unacknowledge</code>, off by default) takes it back. The Owner answers a Reminder by pressing <strong>Still on it</strong>, by
+running any command on the Alert Group or by adding a Note before the next Reminder is due. When the Owner has answered
+neither of the last two Reminders (<code>timers.auto_unacknowledge_after</code>), the next Reminder is not sent. Instead Muster
+unacknowledges the Alert Group with the reason "No answer to the last two Reminders". It becomes Firing without an Owner,
+a Loud Thread reply gives the reason and Mentions the Owner, and the ack timeout starts over.</p>
+<p>For example, Carol acknowledges at 10:00 and goes home. She answers neither the Reminder at 14:00 nor the one at 22:00.
+At 14:00 the next day, instead of a third Reminder, Muster unacknowledges the Alert Group and Mentions Carol, and the
+ack timeout notices begin again.</p>
+<p>The Alert Group page shows the next scheduled notice or Reminder.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+  
+    <script src="../../assets/vendor/mermaid/mermaid.min.js"></script>
+  
+  
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+
+  </body>
+</html>
