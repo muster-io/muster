@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -72,6 +72,7 @@ type migrator interface {
 
 // Open prepares the main pool and the session settings without connecting; Check connects.
 func Open(ctx context.Context, main, session config.Database) (*DB, error) {
+	ignorePGEnvironment()
 	poolConfig, err := pgxpool.ParseConfig(string(main.URL))
 	if err != nil {
 		return nil, fmt.Errorf("the main database connection: %w", err)
@@ -100,24 +101,27 @@ func defaultMaxConns(cpus int) int32 {
 	return int32(max(MinPoolConns, min(cpus, math.MaxInt32)))
 }
 
-// onlyFromURL undoes what pgx took from the PG* variables and the password file rather than from the URL: the
-// password, the connect timeout and the application name (ADR-0010: only MUSTER_* variables are read).
+// ignorePGEnvironment removes every PG* variable from the environment of the process. pgx fills in from them whatever
+// the URL leaves out (TLS files, options, target_session_attrs, a service file, the port and more), while Muster reads
+// only MUSTER_* variables (ADR-0010): each of those settings is a parameter of the URL instead.
+func ignorePGEnvironment() {
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "PG") {
+			_ = os.Unsetenv(name) // never fails on Linux or macOS
+		}
+	}
+}
+
+// onlyFromURL drops the password pgx read from the password file ~/.pgpass, which it reads for a URL without a
+// password even with no PG* variable set, and gives a URL without connect_timeout Muster's connect timeout.
 func onlyFromURL(c *pgx.ConnConfig, raw logging.Secret) {
 	u, err := url.Parse(string(raw))
 	if err != nil {
 		return // pgx parsed it, so it is a URL
 	}
 	c.Password, _ = u.User.Password()
-	c.ConnectTimeout = connectTimeout
-	if s := u.Query().Get("connect_timeout"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 {
-			c.ConnectTimeout = time.Duration(n) * time.Second
-		}
-	}
-	if name := u.Query().Get("application_name"); name != "" {
-		c.RuntimeParams["application_name"] = name
-	} else {
-		delete(c.RuntimeParams, "application_name")
+	if c.ConnectTimeout == 0 {
+		c.ConnectTimeout = connectTimeout
 	}
 }
 
