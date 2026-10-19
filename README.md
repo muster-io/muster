@@ -9,20 +9,28 @@
 
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It turns Alertmanager's
 notifications into Alert Groups — one problem with a number, a status and an Owner — and shows each Alert Group as one
-editable message in Mattermost, in Telegram or through an outgoing webhook. People acknowledge, resolve and snooze an
-Alert Group from the chat or the web UI, and Muster keeps its message current, sends a Loud update only when someone
-has to react and records everything in a Timeline and an Audit log.
+editable message in Mattermost, in Telegram, in any other messenger through a Bridge, or through an outgoing webhook.
+People acknowledge, resolve and snooze an Alert Group from the chat or the web UI, and Muster keeps its message
+current, sends a Loud update only when someone has to react and records everything in a Timeline and an Audit log.
 
 <p align="center"><img src="docs/assets/demo.gif" alt="An Alert Group arrives in the Muster web UI, is acknowledged from its page and resolves" width="960"></p>
 
 Muster is an open alternative to Grafana IRM for teams that run Prometheus-style monitoring and want their alerting
 path to keep working inside their own network. One binary and one PostgreSQL database are a complete installation.
 
+The whole web UI and the API work only after [sign-in](docs/sign-in/index.md) — with a password, through OpenID
+Connect, or with a token for automation — and each User's Role, Admin, Responder or Viewer, decides what they see and
+change. People link their messenger accounts to their User themselves, with
+[Account links](docs/messengers/account-links.md), so that a button pressed in a messenger acts as them.
+
 ## Status
 
-Muster is designed, and its implementation is starting. **It is not usable yet**: there is no release, and the binary
-only prints its version. The product requirements, architecture decisions, database schema, API specification and the
-story contracts that the implementation follows are in [`design/`](design/) and [`api/`](api/).
+The first release, L1, is being completed: the features listed under L1 below are implemented, and there is no release
+yet. Each commit on `master` is built into a development image, and `ghcr.io/muster-io/muster:edge` is the newest. To
+try it, follow [Quick start](docs/quick-start.md) with its note for the time before the first release; the
+[documentation](https://muster-io.github.io/muster/) covers installing, connecting Alertmanager and messengers, and
+running Muster. The product requirements, architecture decisions, database schema, API specification and the story
+contracts that the implementation follows are in [`design/`](design/) and [`api/`](api/).
 
 ## Roadmap
 
@@ -31,9 +39,14 @@ Muster is built in four layers. Each layer is usable on its own and is the base 
 - **L1 — Alert Groups in messengers (the first release).** Alertmanager webhooks read as Snapshots, with a Heartbeat
   per Integration; Routes and Group keys built in the UI; the Alert Group lifecycle — Firing, Acknowledged, Resolved,
   Snoozed — with Reopen, visible reasons and a Timeline; a web UI that also works on a phone; commands from the web UI,
-  the API, Mattermost and Telegram; one reconciled Root message per Destination, with Threads and Storm summaries;
-  outgoing webhooks; ack timeouts and Reminders; local and OIDC sign-in, TOTP, Personal access tokens, Service accounts
-  and an Audit log; Muster's own metrics, alert rules and Internal alerts. See [L1](design/prd/L1.md).
+  the API, Mattermost, Telegram and Bridges; one reconciled Root message per Destination, with Threads and Storm
+  summaries; Bridges to any other messenger over the Bridge protocol, with the bridge libraries for Go,
+  [`muster-bridge-go`](https://github.com/muster-io/muster-bridge-go), and for Python,
+  [`muster-bridge-python`](https://github.com/muster-io/muster-bridge-python), and the example bridge in
+  `examples/chat` of `muster-bridge-go`; outgoing webhooks; ack timeouts and Reminders; local and OIDC sign-in, TOTP,
+  Account links, Personal access tokens, Service accounts and an Audit log; Muster's own metrics, alert rules and
+  Internal alerts; a Quick start with Docker Compose, a Helm chart and the
+  [documentation site](https://muster-io.github.io/muster/). See [L1](design/prd/L1.md).
 - **L2 — On-call parity.** Schedules, rotations, escalations and paging the person on call; asking Alertmanager
   directly; a generic inbound webhook; backup Destinations; Alertmanager silence sync; a Terraform provider and an MCP
   server. See [L2](design/prd/L2.md).
@@ -75,3 +88,9 @@ Muster, people and coding agents alike. Contributions are accepted under the [Co
 
 Muster is licensed under the [GNU Affero General Public License, version 3 only](LICENSE) (AGPL-3.0-only).
 Third-party code is listed in [`NOTICE`](NOTICE).
+
+The Bridge protocol specification, [`api/bridge.yaml`](api/bridge.yaml), is licensed under the MIT License, so that a
+bridge may stay closed. The bridge libraries, [`muster-bridge-go`](https://github.com/muster-io/muster-bridge-go) and
+[`muster-bridge-python`](https://github.com/muster-io/muster-bridge-python), and the example bridge, in
+`examples/chat` of `muster-bridge-go`, are MIT licensed too, in repositories of their own that take contributions
+without a CLA.
