@@ -178,9 +178,14 @@ func (e *engine) apply(pa PayloadAlert) {
 		switch {
 		case a == nil:
 			e.stats.Dropped++
-		case a.Status == StatusResolved, a.StartsAt.After(pa.StartsAt):
-			// A re-sent resolve, or one of an earlier firing: nothing changes and nothing is counted.
+		case a.Status == StatusResolved:
+			// A re-sent resolve: nothing changes and nothing is counted.
+		case a.StartsAt.After(pa.StartsAt) && (pa.EndsAt == nil || !pa.EndsAt.After(a.StartsAt)):
+			// A resolve of an earlier firing, without an end or with one not later than the current startsAt: nothing
+			// changes and nothing is counted.
 		default:
+			// A resolve of the current firing, or of a firing that overlaps it: the replicas of a Grafana HA pair
+			// evaluate rules each on its own, so their copies of one alert can carry different startsAt (F-111).
 			e.resolve(a, ResolveResolved, "", pa.EndsAt)
 		}
 		return
@@ -280,7 +285,8 @@ func (e *engine) refresh(a *alert, pa PayloadAlert, labels map[string]string, co
 
 // resolveGroup resolves every Alert still firing with an active presence in the groupKey of a Snapshot with
 // status resolved, listed or not, as if each were listed as resolved (C-06.FR-21); an Alert listed as resolved has
-// been decided by its own row.
+// been decided by its own row, which also resolves it when its firing overlaps the listed one (C-06.FR-4), and keeps
+// it firing when the listed resolve is of an earlier firing.
 func (e *engine) resolveGroup() {
 	for _, p := range e.sortedPresences() {
 		a := e.byID[p.AlertID]

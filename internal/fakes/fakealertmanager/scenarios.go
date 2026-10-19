@@ -313,7 +313,8 @@ func Scenarios() []Scenario {
 					Episodes: map[string]int64{"g/a": 1}, Dropped: count(0)}),
 				fire(s(840), "g", "a", map[string]string{"instance": "a"}),
 				notify(s(840), "g", "new alerts added", NotifyOptions{}),
-				Step{At: s(900), Group: "g", Alert: "a", StartsAt: at(0),
+				// Prometheus re-sends the resolve with its original endsAt, before the new firing started.
+				Step{At: s(900), Group: "g", Alert: "a", StartsAt: at(0), EndsAt: at(s(120)),
 					PutAlert: &AlertSpec{Labels: map[string]string{"instance": "a"}, Status: "resolved"}},
 				notify(s(900), "g", "some alerts resolved", NotifyOptions{}),
 				expect(s(900), Expect{Firing: []string{"g/a", "g/b"}, Episodes: map[string]int64{"g/a": 2},
