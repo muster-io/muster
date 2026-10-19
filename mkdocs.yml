@@ -16,11 +16,12 @@ site_dir: site
 strict: true
 
 # brand/README.md is the notes on the Muster mark, not a page; the requirements files pin the toolchain; overrides/
-# holds the theme's template overrides.
+# holds the theme's template overrides; llms.txt.tmpl is the template of llms.txt, which llmsgen renders after the build.
 exclude_docs: |
   brand/README.md
   requirements.*
   overrides/
+  llms.txt.tmpl
 
 validation:
   nav:

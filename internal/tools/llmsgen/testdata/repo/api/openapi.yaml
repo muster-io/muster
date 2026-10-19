@@ -1,0 +1,10 @@
+openapi: 3.1.2
+info:
+  title: Fixture API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [firing, resolved]

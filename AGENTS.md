@@ -199,8 +199,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make load-test` | the load test against `muster dev` | S-004 |
 | `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
-| `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`; the same, served on `localhost:8000` | S-057 |
-| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, and on a broken link or anchor | S-057, S-058, S-059 |
+| `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`, then write `llms.txt`, `llms-full.txt` and the Markdown version of every page for AI agents into `site/`, with links into `DOCS_VERSION` (`latest` by default); the same pages, served on `localhost:8000`, without those outputs, which only `make docs` writes | S-057, S-091 |
+| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, on a broken link or anchor, and when `docs/llms.txt.tmpl` names a value, a page or an anchor that its source no longer has | S-057, S-058, S-059, S-091 |
 
 ### Development mode
 

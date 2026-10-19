@@ -1,0 +1,21 @@
+{{- /* SPDX-License-Identifier: AGPL-3.0-only */ -}}
+{{- /* Copyright The Muster Authors */ -}}
+# Fixture
+
+> {{quote "docs/index.md" "Fixture is a small site for llmsgen."}} This file covers version {{.Version}}.
+
+## Rules
+
+- Sources of truth: {{spec "api/bridge.yaml"}} and {{spec "api/openapi.yaml"}}.
+- Error classes: {{enum "api/bridge.yaml" "ErrorClass"}}.
+- Presses: {{quote "api/bridge.yaml" "at most 3 seconds"}}.
+- Waits: {{setting "bridge.retry_after_max"}}; edit windows: {{setting "bridge.edit_window_margin"}}; plain: {{setting "plain.value"}}.
+- Read [the deep part]({{page "section/nested/deep.md#deep-part"}}) and https://github.com/muster-io/muster-bridge-go.
+
+## Document map
+
+{{map}}
+
+## Optional
+
+- [Full text]({{.Base}}llms-full.txt): {{.FullBytes}} bytes, about {{.FullTokens}} tokens.
