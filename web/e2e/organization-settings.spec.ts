@@ -3,11 +3,13 @@
 
 // The Organization settings pages against `muster dev`: Verification steps 1 to 7 of their story. The main navigation
 // has one "Organization" entry whose sub-navigation leads to every settings page; General saves the time zone of
-// messages; Retention shows the server's retention_order refusal at the summaries field; Severity levels lists the
-// unmapped value P5 and maps it; Outbound addresses saves a denied network and refuses an entry that is not one;
-// Keyring follows an activation by the CLI without a reload; Security saves the token grace and shows a conflict; a
-// Responder sees only Lookup tables and Link rules. The spec puts the Organization and the outbound address policy
-// back as it found them, and no Content Security Policy violation occurs.
+// messages, and the start of the working day and the first day of the week, which the Snooze dialog's presets then
+// name in English and in Russian, and shows the API's refusal of an empty start at its field (step 4 of the story of
+// the Snooze presets in the web UI); Retention shows the server's retention_order refusal at the summaries field;
+// Severity levels lists the unmapped value P5 and maps it; Outbound addresses saves a denied network and refuses an
+// entry that is not one; Keyring follows an activation by the CLI without a reload; Security saves the token grace and
+// shows a conflict; a Responder sees only Lookup tables and Link rules. The spec puts the Organization, the Admin's
+// language and the outbound address policy back as it found them, and no Content Security Policy violation occurs.
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -54,6 +56,9 @@ const STALE = "Someone else changed these settings. Reload to see them.";
 const RETENTION_ORDER = "Keep Alert Group summaries at least as long as alert details.";
 const P5_BANNER = "These values have no mapping and count as warning: P5.";
 const NO_PERMISSION = "You do not have permission to see this page.";
+const WORKING_WEEK_HINT = "Snooze presets end at this time and on this day.";
+const INVALID_FORMAT = "This value has the wrong format.";
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 type Organization = Record<string, unknown> & {
   outgoing_heartbeat: { proxy: Record<string, unknown> };
@@ -120,6 +125,36 @@ test.afterAll(async () => {
   });
 });
 
+/** The language of a profile; null follows the browser. */
+type Language = "en" | "ru" | null;
+
+/** The start of the working day and the first day of the week of the Organization. */
+interface WorkingWeek {
+  workday_start: string;
+  week_start: string;
+}
+
+/** Sets the language of the Admin's profile, keeping the rest of it. */
+async function adminLanguage(language: Language): Promise<void> {
+  await withAdmin(async (admin) => {
+    const me = await admin.call<{ user: { name: string } }>("GET", "/api/v1/me");
+    await admin.call("PUT", "/api/v1/me", { name: me.user.name, language });
+  });
+}
+
+/** Sets the start of the working day and the first day of the week, keeping the rest of the Organization. */
+async function setWorkingWeek({ workday_start, week_start }: WorkingWeek): Promise<void> {
+  await withAdmin(async (admin) => {
+    const org = await admin.call<Organization & { etag: string }>("GET", "/api/v1/organization");
+    await admin.call(
+      "PUT",
+      "/api/v1/organization",
+      { ...organizationInput(org), workday_start, week_start },
+      { "If-Match": org.etag },
+    );
+  });
+}
+
 function nav(page: Page, name: string) {
   return page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
 }
@@ -179,6 +214,106 @@ test("one Organization entry leads to General, which saves the time zone of mess
   const newest = page.getByRole("table", { name: "Audit log" }).getByRole("row").nth(1);
   await expect(newest).toContainText("organization.updated");
   await expect(newest.getByTestId("audit-diff")).toContainText("Europe/Berlin");
+  expect(csp).toEqual([]);
+});
+
+test("General saves the working day and week, which the Snooze presets name, and refuses an empty start", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const csp = watchCsp(page);
+  // A firing Alert Group, whose Snooze dialog offers the presets.
+  const integration = await fakeIntegration("org-week");
+  await fam("PUT", "/groups/owk", {
+    receiver: "org-week",
+    route: "{}",
+    labels: { alertname: "OrgWeek" },
+  });
+  await fam("PUT", "/groups/owk/alerts/w1", { labels: { team: "org-week" } });
+  await notify(integration, "owk", { reason: "first notification" });
+  const group = await withAdmin(
+    async (admin) =>
+      (
+        await admin.call<{ items: { alert_group?: { id: string; number: number } }[] }>(
+          "GET",
+          `/api/v1/integrations/${integration}/alerts`,
+        )
+      ).items[0]?.alert_group ?? { id: "", number: 0 },
+  );
+  // What the test changes, read first and put back exactly as read.
+  const saved = await withAdmin(async (admin) => {
+    const me = await admin.call<{ user: { language?: Language } }>("GET", "/api/v1/me");
+    const org = await admin.call<WorkingWeek>("GET", "/api/v1/organization");
+    return {
+      language: me.user.language ?? null,
+      week: { workday_start: org.workday_start, week_start: org.week_start },
+    };
+  });
+  await signInAdmin(page);
+  try {
+    // 4. "Start of the working day" 08:30 and "First day of the week" Sunday under the time zone → "Saved.".
+    await page.goto("/admin/organization/general");
+    const start = page.getByLabel("Start of the working day");
+    const week = page.getByLabel("First day of the week");
+    await expect(start).toHaveValue("09:00");
+    await expect(week).toHaveValue("monday");
+    await expect(week.locator("option")).toHaveText(WEEKDAYS);
+    await expect(start).toHaveAccessibleDescription(WORKING_WEEK_HINT);
+    await expect(week).toHaveAccessibleDescription(WORKING_WEEK_HINT);
+    await start.fill("08:30");
+    await week.selectOption("sunday");
+    await save(page);
+    await expect(page.getByTestId("general-status")).toHaveText("Saved.");
+    await shot(page, "general-working-week-en");
+    const org = await withAdmin((admin) =>
+      admin.call<{ workday_start: string; week_start: string }>("GET", "/api/v1/organization"),
+    );
+    expect([org.workday_start, org.week_start]).toEqual(["08:30", "sunday"]);
+
+    // The Snooze dialog of an Alert Group names them.
+    await page.goto(`/alert-groups/${group.id}`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `Snooze #${group.number}` });
+    await expect(dialog.getByTestId("snooze-preset-end-week_start")).toContainText("08:30");
+    for (const name of ["Until tomorrow 08:30", "Until Sunday 08:30"]) {
+      await expect(dialog.getByRole("radio", { name, exact: true })).toBeAttached();
+    }
+    await shot(page, "general-working-week-snooze-en");
+
+    // "Start of the working day" cleared → "Save" → the API's refusal at the field.
+    await page.goto("/admin/organization/general");
+    await start.fill("");
+    await save(page);
+    await expect(start).toHaveAttribute("aria-invalid", "true");
+    await expect(start).toHaveAccessibleDescription(`${INVALID_FORMAT} ${WORKING_WEEK_HINT}`);
+    await expect(page.getByText(INVALID_FORMAT, { exact: true })).toHaveCount(1);
+    await expect(start).toBeFocused();
+    await expect(page.getByTestId("general-status")).toHaveText("");
+    await shot(page, "general-working-week-refused-en");
+
+    // In Russian: the General page and «До завтра 08:30», «До воскресенья 08:30».
+    await adminLanguage("ru");
+    await page.reload();
+    await expect(page.getByLabel("Начало рабочего дня")).toHaveValue("08:30");
+    await expect(page.getByLabel("Первый день недели").locator("option:checked")).toHaveText(
+      "Воскресенье",
+    );
+    await expect(
+      page.getByText("В это время и в этот день заканчиваются пресеты откладывания."),
+    ).toBeVisible();
+    await shot(page, "general-working-week-ru");
+    await page.goto(`/alert-groups/${group.id}`);
+    await page.getByRole("button", { name: "Отложить", exact: true }).click();
+    const russian = page.getByRole("dialog", { name: `Отложить #${group.number}` });
+    await expect(russian.getByTestId("snooze-preset-end-tomorrow")).toContainText("Закончится");
+    for (const name of ["До завтра 08:30", "До воскресенья 08:30"]) {
+      await expect(russian.getByRole("radio", { name, exact: true })).toBeAttached();
+    }
+    await shot(page, "general-working-week-snooze-ru");
+  } finally {
+    await adminLanguage(saved.language);
+    await setWorkingWeek(saved.week);
+  }
   expect(csp).toEqual([]);
 });
 

@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // The bar of a selection in the Alert Group list (C-10.FR-14): how many Alert Groups are selected and "Acknowledge",
-// "Resolve" (with an optional Note), "Snooze" ("Until" or "No end", no Route durations) and "Unsnooze", each only with
-// its Permission. More than alert_group.bulk_max selected disables them with "Select at most 100 Alert Groups.". The
-// result lists every Alert Group with its outcome; the rows read themselves again afterwards. It fits 360 pixels.
+// "Resolve" (with an optional Note), "Snooze" (the Snooze presets, "Until" or "No end"; no Route durations) and
+// "Unsnooze", each only with its Permission. More than alert_group.bulk_max selected disables them with "Select at
+// most 100 Alert Groups.". The result lists every Alert Group with its outcome; the rows read themselves again
+// afterwards. It fits 360 pixels.
 
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";

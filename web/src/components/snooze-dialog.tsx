@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Snooze dialog (C-10.FR-6): the Route's Snooze durations as quick choices ("1 h", "4 h", "24 h"), "Until" with
+// The Snooze dialog (C-10.FR-6, FR-18): the Route's Snooze durations as quick choices ("1 h", "4 h", "24 h"), the
+// Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00" from the Organization's settings, each with the end the
+// server computes for the user's time zone when the dialog opens (sent as `{"preset", "time_zone"}`), "Until" with
 // native date and time inputs in the user's time zone (D250), sent as `until` in UTC, and "No end", which shows the
 // warning of reference.md and enables "Snooze" only once "I understand" is ticked (sent as `{"no_end": true}`). A bulk
-// Snooze has no Route, so it offers "Until" and "No end" only. A phone shows the dialog as a full-screen sheet.
+// Snooze has no Route, so it offers no durations. A phone shows the dialog as a full-screen sheet.
 
 import { TZDate } from "@date-fns/tz";
 import { TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { SnoozeRequest } from "../api/gen/model";
-import { SHEET, snoozeDurationLabel } from "../lib/commands";
+import { useListSnoozePresets } from "../api/gen/endpoints/alert-groups/alert-groups";
+import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
+import { SnoozePreset, type SnoozeRequest, type Weekday } from "../api/gen/model";
+import { SHEET, snoozeDurationLabel, snoozePresetLabel } from "../lib/commands";
 import { useTimeFormat } from "../lib/time";
 import { useNow } from "./relative-time";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -30,9 +34,10 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { cn } from "./ui/utils";
 
-/** The choice of the dialog: a quick duration in seconds, an end of the user's choosing, or no end. */
+/** The choice of the dialog: a quick duration in seconds, a Snooze preset, an end of the user's choosing, or no end. */
 export type SnoozeChoice =
   | { kind: "duration"; seconds: number }
+  | { kind: "preset"; preset: SnoozePreset }
   | { kind: "until" }
   | { kind: "no_end" };
 
@@ -75,16 +80,22 @@ function defaultUntil(now: number): Date {
   return new Date(Math.ceil((now + 60 * 60 * 1000) / quarter) * quarter);
 }
 
-/** The request of a choice at an instant, or undefined while it cannot be sent. */
+/**
+ * The request of a choice at an instant, or undefined while it cannot be sent. A preset names the user's time zone, in
+ * which the server computes its end.
+ */
 export function snoozeRequest(
   choice: SnoozeChoice,
   until: Date | undefined,
   understood: boolean,
   now: number,
+  timeZone: string,
 ): SnoozeRequest | undefined {
   switch (choice.kind) {
     case "duration":
       return { until: new Date(now + choice.seconds * 1000).toISOString() };
+    case "preset":
+      return { preset: choice.preset, time_zone: timeZone };
     case "until":
       return until === undefined || until.getTime() <= now
         ? undefined
@@ -94,45 +105,92 @@ export function snoozeRequest(
   }
 }
 
-const choiceKey = (c: SnoozeChoice) => (c.kind === "duration" ? `d${c.seconds}` : c.kind);
+function choiceKey(c: SnoozeChoice): string {
+  switch (c.kind) {
+    case "duration":
+      return `d${c.seconds}`;
+    case "preset":
+      return c.preset;
+    default:
+      return c.kind;
+  }
+}
 
+/** A choice of the dialog; a preset's pill has its end on a second line, which the radio names as its description. */
 function ChoicePill({
   name,
   checked,
   onSelect,
-  children,
+  label,
+  detail,
   testId,
+  detailTestId,
 }: {
   name: string;
   checked: boolean;
   onSelect: () => void;
-  children: ReactNode;
+  label: string;
+  detail?: string;
   testId: string;
+  detailTestId?: string;
 }) {
+  const id = useId();
   return (
     <label
       className={cn(
-        "inline-flex h-9 cursor-pointer items-center rounded-lg border px-3 text-sm font-medium whitespace-nowrap has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
+        "inline-flex min-h-9 max-w-full cursor-pointer flex-col justify-center rounded-lg border px-3 py-1 text-sm font-medium has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
         checked
           ? "border-primary bg-primary text-primary-foreground"
           : "bg-background hover:bg-muted",
       )}
       data-testid={testId}
     >
-      <input type="radio" name={name} className="sr-only" checked={checked} onChange={onSelect} />
-      {children}
+      <input
+        type="radio"
+        name={name}
+        className="sr-only"
+        checked={checked}
+        onChange={onSelect}
+        aria-labelledby={`${id}-label`}
+        aria-describedby={detail === undefined ? undefined : `${id}-detail`}
+      />
+      <span id={`${id}-label`} className="whitespace-nowrap">
+        {label}
+      </span>
+      {detail !== undefined && (
+        <span
+          id={`${id}-detail`}
+          className={cn(
+            "text-xs font-normal",
+            checked ? "text-primary-foreground/80" : "text-muted-foreground",
+          )}
+          data-testid={detailTestId}
+        >
+          {detail}
+        </span>
+      )}
     </label>
   );
 }
 
+/** A Snooze preset as the dialog offers it: its label and, once the server has answered, the end it would set. */
+interface PresetChoice {
+  preset: SnoozePreset;
+  label: string;
+  /** The end as the user reads it, "Ends Oct 20, 2026, 09:00"; undefined while it is read or when it cannot be. */
+  end?: string;
+}
+
 function SnoozeForm({
   durations,
+  presets,
   bulk,
   pending,
   error,
   onSnooze,
 }: {
   durations: readonly number[];
+  presets: readonly PresetChoice[];
   bulk: boolean;
   pending: boolean;
   error?: ReactNode;
@@ -142,26 +200,29 @@ function SnoozeForm({
   const id = useId();
   const { timeZone } = useTimeFormat();
   const quick = [...new Set(durations)].filter((s) => s > 0).toSorted((a, b) => a - b);
-  const first = quick[0];
-  const [choice, setChoice] = useState<SnoozeChoice>(
-    first === undefined ? { kind: "until" } : { kind: "duration", seconds: first },
-  );
+  const choices: { choice: SnoozeChoice; label: string; detail?: string }[] = [
+    ...quick.map((seconds) => ({
+      choice: { kind: "duration", seconds } as const,
+      label: snoozeDurationLabel(t, seconds),
+    })),
+    ...presets.map((p) => ({
+      choice: { kind: "preset", preset: p.preset } as const,
+      label: p.label,
+      detail: p.end,
+    })),
+    { choice: { kind: "until" }, label: t("commands.snooze.until") },
+    { choice: { kind: "no_end" }, label: t("commands.snooze.noEnd") },
+  ];
+  // The first choice is chosen: the shortest duration, else the first preset.
+  const [choice, setChoice] = useState<SnoozeChoice>(() => choices[0]?.choice ?? { kind: "until" });
   const [initial] = useState(() => dateTimeParts(defaultUntil(Date.now()), timeZone));
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
   const [understood, setUnderstood] = useState(false);
   const until = instantOf(date, time, timeZone);
   const now = useNow();
-  const request = snoozeRequest(choice, until, understood, now);
+  const request = snoozeRequest(choice, until, understood, now, timeZone);
   const untilInvalid = choice.kind === "until" && request === undefined;
-  const choices: { choice: SnoozeChoice; label: string }[] = [
-    ...quick.map((seconds) => ({
-      choice: { kind: "duration", seconds } as const,
-      label: snoozeDurationLabel(t, seconds),
-    })),
-    { choice: { kind: "until" }, label: t("commands.snooze.until") },
-    { choice: { kind: "no_end" }, label: t("commands.snooze.noEnd") },
-  ];
   return (
     <form
       noValidate
@@ -169,7 +230,7 @@ function SnoozeForm({
       onSubmit={(e) => {
         e.preventDefault();
         // The quick durations count from the moment of the press.
-        const sent = snoozeRequest(choice, until, understood, Date.now());
+        const sent = snoozeRequest(choice, until, understood, Date.now(), timeZone);
         if (sent !== undefined && !pending) {
           onSnooze(sent);
         }
@@ -184,10 +245,13 @@ function SnoozeForm({
               name={`${id}-choice`}
               checked={choiceKey(c.choice) === choiceKey(choice)}
               onSelect={() => setChoice(c.choice)}
+              label={c.label}
+              detail={c.detail}
               testId={`snooze-choice-${choiceKey(c.choice)}`}
-            >
-              {c.label}
-            </ChoicePill>
+              detailTestId={
+                c.choice.kind === "preset" ? `snooze-preset-end-${c.choice.preset}` : undefined
+              }
+            />
           ))}
         </div>
       </fieldset>
@@ -279,6 +343,69 @@ export interface SnoozeDialogProps {
   onSnooze: (request: SnoozeRequest) => void;
 }
 
+/**
+ * The content of the open dialog, mounted only while it is open: each opening reads the ends of the presets afresh, for
+ * the user's time zone and on the server's clock. The labels come from the Organization's settings, and from the
+ * settings the ends were computed with once those are read. The form waits for the Organization as it waits for the
+ * Route's durations, so that it never starts over; without either answer the presets have no label and are left out.
+ */
+function SnoozeContent({
+  durations,
+  loading,
+  bulk,
+  pending,
+  error,
+  onSnooze,
+}: {
+  durations: readonly number[];
+  loading: boolean;
+  bulk: boolean;
+  pending: boolean;
+  error?: ReactNode;
+  onSnooze: (request: SnoozeRequest) => void;
+}) {
+  const { t } = useTranslation();
+  const { timeZone, dateTime } = useTimeFormat();
+  const organization = useGetOrganization();
+  const ends = useListSnoozePresets(
+    { time_zone: timeZone },
+    { query: { staleTime: 0, gcTime: 0 } },
+  );
+  if (loading || organization.isPending) {
+    return (
+      <p className="text-sm text-muted-foreground" role="status">
+        {t("common.loading")}
+      </p>
+    );
+  }
+  const settings: { workday_start: string; week_start: Weekday } | undefined =
+    ends.data ?? organization.data;
+  const presets: PresetChoice[] =
+    settings === undefined
+      ? []
+      : Object.values(SnoozePreset).map((preset) => {
+          const until = ends.data?.items.find((i) => i.preset === preset)?.until;
+          return {
+            preset,
+            label: snoozePresetLabel(t, preset, settings.workday_start, settings.week_start),
+            end:
+              until === undefined
+                ? undefined
+                : t("commands.snooze.presetEnds", { time: dateTime(until) }),
+          };
+        });
+  return (
+    <SnoozeForm
+      durations={durations}
+      presets={presets}
+      bulk={bulk}
+      pending={pending}
+      error={error}
+      onSnooze={onSnooze}
+    />
+  );
+}
+
 export function SnoozeDialog({
   open,
   onOpenChange,
@@ -298,19 +425,14 @@ export function SnoozeDialog({
           <DialogTitle className="pr-8 wrap-anywhere">{title}</DialogTitle>
           <DialogDescription>{t("commands.snooze.description")}</DialogDescription>
         </DialogHeader>
-        {loading ? (
-          <p className="text-sm text-muted-foreground" role="status">
-            {t("common.loading")}
-          </p>
-        ) : (
-          <SnoozeForm
-            durations={durations}
-            bulk={bulk}
-            pending={pending}
-            error={error}
-            onSnooze={onSnooze}
-          />
-        )}
+        <SnoozeContent
+          durations={durations}
+          loading={loading}
+          bulk={bulk}
+          pending={pending}
+          error={error}
+          onSnooze={onSnooze}
+        />
       </DialogContent>
     </Dialog>
   );

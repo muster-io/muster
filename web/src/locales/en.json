@@ -552,6 +552,18 @@
       "noEndWarning": "This Alert Group stays snoozed until someone unsnoozes it.",
       "noEndWarningBulk": "These Alert Groups stay snoozed until someone unsnoozes them.",
       "past": "The Snooze end must be in the future.",
+      "presetDay": {
+        "friday": "Friday",
+        "monday": "Monday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "thursday": "Thursday",
+        "tuesday": "Tuesday",
+        "wednesday": "Wednesday"
+      },
+      "presetEnds": "Ends {{time}}",
+      "presetTomorrow": "Until tomorrow {{time}}",
+      "presetWeekStart": "Until {{day}} {{time}}",
       "time": "Time",
       "timeZone": "Time zone: {{zone}}",
       "title": "Snooze #{{number}}",
@@ -1531,7 +1543,10 @@
       "name": "Name",
       "timeZone": "Time zone of messages",
       "timeZoneHint": "Times in messages use this time zone. Each user sees the web UI in their own time zone.",
-      "timeZoneSearch": "Search time zones"
+      "timeZoneSearch": "Search time zones",
+      "weekStart": "First day of the week",
+      "workdayStart": "Start of the working day",
+      "workingWeekHint": "Snooze presets end at this time and on this day."
     },
     "keyring": {
       "active": "Active",
@@ -1710,6 +1725,7 @@
       "browserTimeZone": "Browser time zone ({{zone}})",
       "hint": "Changes apply at once.",
       "language": "Language",
+      "presetTimeZoneHint": "Snooze presets pressed in messengers end in this time zone. While it follows the browser, they use the Organization's time zone, {{zone}}.",
       "timeZone": "Time zone",
       "title": "Language and time zone"
     },
@@ -2630,5 +2646,14 @@
       "off": "Off",
       "on": "On"
     }
+  },
+  "weekdays": {
+    "friday": "Friday",
+    "monday": "Monday",
+    "saturday": "Saturday",
+    "sunday": "Sunday",
+    "thursday": "Thursday",
+    "tuesday": "Tuesday",
+    "wednesday": "Wednesday"
   }
 }

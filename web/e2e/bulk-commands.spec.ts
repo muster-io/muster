@@ -4,8 +4,8 @@
 // Bulk commands from the Alert Group list against `muster dev`: Verification step 6 of their story. The fake
 // Alertmanager sends the group bulk to the Integration "cmd-bulk" on the Route "bulk", three firing Alert Groups, one
 // of them acknowledged by the Admin. Bob selects all three and acknowledges them: two are done and the Admin's is
-// skipped. Then a Snooze of the selection offers no Route durations, an Unsnooze and a Resolve with a Note run on all
-// three, and a second Resolve lists each as already resolved.
+// skipped. Then a Snooze of the selection offers no Route durations, the Snooze presets first, an Unsnooze and a
+// Resolve with a Note run on all three, and a second Resolve lists each as already resolved.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -174,11 +174,13 @@ test("a bulk Snooze, Unsnooze and Resolve, then a Resolve of resolved ones", asy
   await openList(page);
   await page.getByRole("button", { name: "Select", exact: true }).click();
 
-  // Snooze: no Route durations, "Until" by default.
+  // Snooze: no Route durations; the presets, "Until" and "No end", the first preset by default.
   await runOnAll(page, "Snooze");
   const snooze = page.getByRole("dialog", { name: "Snooze 3 Alert Groups" });
-  await expect(snooze.getByRole("radio")).toHaveCount(2);
-  await expect(snooze.getByRole("radio", { name: "Until", exact: true })).toBeChecked();
+  await expect(snooze.getByRole("radio")).toHaveCount(4);
+  await expect(
+    snooze.getByRole("radio", { name: "Until tomorrow 09:00", exact: true }),
+  ).toBeChecked();
   await snooze.getByRole("button", { name: "Snooze", exact: true }).click();
   const done = sorted(groups.map((g) => `#${g.number}: done`));
   expect(await resultLines(page, "Snooze")).toEqual(done);
