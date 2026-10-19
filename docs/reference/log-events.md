@@ -452,6 +452,12 @@ INFO · no fields · C-02
 
 The server process stopped after a graceful shutdown.
 
+### `public_url_insecure`
+
+WARN · fields: `host` · C-03
+
+MUSTER_PUBLIC_URL is a plain http:// address on a host other than localhost, a name under .localhost, 127.0.0.0/8 or ::1. The session cookie is Secure, so browsers drop it there and every sign-in returns to the sign-in page. Serve Muster over HTTPS through a reverse proxy or an Ingress and set MUSTER_PUBLIC_URL to its https:// address, or open it through an SSH tunnel to localhost: ssh -L 8080:localhost:8080 to the host, then http://localhost:8080. host is the host and port of MUSTER_PUBLIC_URL.
+
 ### `reminder_skipped`
 
 INFO · fields: `group`, `reason` · C-17

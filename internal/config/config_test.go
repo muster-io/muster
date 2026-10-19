@@ -483,3 +483,34 @@ func TestVariables(t *testing.T) {
 		}
 	}
 }
+
+func TestSecureContext(t *testing.T) {
+	for _, tt := range []struct {
+		url  string
+		want bool
+	}{
+		{"http://192.0.2.10:8080", false},
+		{"http://10.0.0.5", false},
+		{"http://muster.example.org", false},
+		{"http://[2001:db8::1]:8080", false},
+		{"http://localhost.example.org:8080", false},
+		{"http://localhost:8080", true},
+		{"http://LOCALHOST:8080", true},
+		{"http://muster.localhost:8080", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://127.0.0.5", true},
+		{"http://[::1]:8080", true},
+		{"https://192.0.2.10:8443", true},
+		{"https://muster.example.org", true},
+	} {
+		t.Run(tt.url, func(t *testing.T) {
+			c, err := config.Load(environ(with(base(), "MUSTER_PUBLIC_URL", tt.url)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := config.SecureContext(c.PublicURL); got != tt.want {
+				t.Errorf("SecureContext(%s) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}

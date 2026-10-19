@@ -244,6 +244,16 @@ var BootstrapAdminMissing = newEvent("bootstrap_admin_missing", LevelWarn, "C-03
 		"Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run "+
 		"muster admin reset-password.")
 
+// PublicURLInsecure is logged at the start of the server when browsers would drop the Secure session cookie on
+// MUSTER_PUBLIC_URL: http on a host that is not a loopback host.
+var PublicURLInsecure = newEvent("public_url_insecure", LevelWarn, "C-03",
+	"MUSTER_PUBLIC_URL is a plain http:// address on a host other than localhost, a name under .localhost, "+
+		"127.0.0.0/8 or ::1. The session cookie is Secure, so browsers drop it there and every sign-in returns to the "+
+		"sign-in page. Serve Muster over HTTPS through a reverse proxy or an Ingress and set MUSTER_PUBLIC_URL to its "+
+		"https:// address, or open it through an SSH tunnel to localhost: ssh -L 8080:localhost:8080 to the host, "+
+		"then http://localhost:8080. host is the host and port of MUSTER_PUBLIC_URL.",
+	"host")
+
 // APIRequestFailed is logged when an API request fails with an unexpected error and answers 500.
 var APIRequestFailed = newEvent("api_request_failed", LevelError, "C-03",
 	"An API request failed with an unexpected error, usually because the database was unavailable, and answered "+

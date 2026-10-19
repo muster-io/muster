@@ -617,6 +617,9 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !config.SecureContext(cfg.PublicURL) {
+		log.Log(ctx, logging.PublicURLInsecure, logging.F("host", cfg.PublicURL.Host))
+	}
 	// Development mode accepts the published development key: muster dev, also with --replica.
 	k, err := loadKeyring(ctx, cfg, opts.Development)
 	if err != nil {

@@ -974,6 +974,49 @@ func TestMigrateOnStart(t *testing.T) {
 	}
 }
 
+func TestPublicURLInsecure(t *testing.T) {
+	for _, tt := range []struct {
+		url  string
+		want bool
+	}{
+		{"http://192.0.2.10:8080", true},
+		{"http://muster.example.org", true},
+		{"http://localhost:8080", false},
+		{"http://127.0.0.1:8080", false},
+		{"https://192.0.2.10:8443", false},
+	} {
+		t.Run(tt.url, func(t *testing.T) {
+			var out syncBuffer
+			_, cancel, done := running(t, options(&fakeDB{}, &out, env("MUSTER_PUBLIC_URL="+tt.url)))
+			cancel()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			var warned []map[string]any
+			for _, l := range out.events(t) {
+				if l["event"] == "public_url_insecure" {
+					warned = append(warned, l)
+				}
+			}
+			switch {
+			case !tt.want && len(warned) != 0:
+				t.Errorf("logged %v", warned)
+			case tt.want && (len(warned) != 1 || warned[0]["level"] != "WARN" ||
+				warned[0]["host"] != strings.TrimPrefix(tt.url, "http://")):
+				t.Errorf("public_url_insecure lines %v, want one WARN with the host", warned)
+			}
+		})
+	}
+	// The other commands serve no pages, so they do not warn.
+	var out syncBuffer
+	if err := Migrate(t.Context(), options(&fakeDB{}, &out, env("MUSTER_PUBLIC_URL=http://192.0.2.10:8080"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(out.events(t)); slices.Contains(got, "public_url_insecure") {
+		t.Errorf("muster migrate logged %v", got)
+	}
+}
+
 func TestStartupFailures(t *testing.T) {
 	var lc net.ListenConfig
 	busy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")

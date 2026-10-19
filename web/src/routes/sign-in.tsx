@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The sign-in page (C-03.FR-24, FR-25): the local form, the OIDC button while OIDC is enabled, and the texts of the
-// errors the OIDC callback redirects with. Its child /sign-in/totp asks for the second factor in the same frame.
+// The sign-in page (C-03.FR-24, FR-25): the local form, the OIDC button while OIDC is enabled, the texts of the errors
+// the OIDC callback redirects with, and a warning on plain http to a host other than localhost, where the browser
+// drops the Secure session cookie. Its child /sign-in/totp asks for the second factor in the same frame.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +16,7 @@ import { z } from "zod";
 import { useCreateSession, useGetSignInOptions } from "../api/gen/endpoints/sessions/sessions";
 import { CreateSessionBody } from "../api/gen/zod/sessions/sessions.zod";
 import { AuthLayout } from "../components/app-shell";
+import { InsecureContextAlert } from "../components/insecure-context-alert";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button, buttonVariants } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -115,6 +117,7 @@ function SignInForm() {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <InsecureContextAlert />
         {message !== undefined && !signIn.isError && (
           <Alert variant={search.error !== undefined ? "destructive" : "default"}>
             <AlertDescription className="text-current">{message}</AlertDescription>
