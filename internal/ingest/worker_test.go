@@ -721,6 +721,47 @@ func TestWorkerLogsFailedIntegration(t *testing.T) {
 	}
 }
 
+// stopInClaim ends the worker's ctx while a claim commits, as a stop that cuts off the answer of the commit: like
+// pgx, the claim then reports the end of the ctx it was given, although the lease was taken.
+type stopInClaim struct {
+	*fakeProcess
+	stop   context.CancelFunc
+	claims int
+}
+
+func (f *stopInClaim) ClaimIntegrations(ctx context.Context, l db.Lease, orgID int64, ids []int64,
+	limit int32) ([]Claimed, error) {
+	f.claims++
+	claimed, err := f.fakeProcess.ClaimIntegrations(ctx, l, orgID, ids, limit)
+	f.stop()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return claimed, err
+}
+
+// TestWorkerStopDuringClaim: a claim that the worker's stop interrupts still returns the Integrations it leased, so
+// that the worker releases them before Run returns; a claim after the stop leases nothing.
+func TestWorkerStopDuringClaim(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	store := &stopInClaim{fakeProcess: newFakeProcess(), stop: stop}
+	store.add(10, t0, body(wireAlertOf("db-a", "firing")))
+	p := newTestProcessor(store, clock.NewManual(t0), &bytes.Buffer{}, nil)
+	w := &Worker{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1}, nil },
+		Processor:     func(int64) (*Processor, bool) { return p, true },
+		Log:           logging.New(&syncBuffer{}, logging.LevelInfo),
+	}
+	w.Run(ctx)
+	if store.claims != 1 || !slices.Equal(store.released, []int64{5}) || w.holds(1, 5) {
+		t.Errorf("%d claims, released %v", store.claims, store.released)
+	}
+	store.add(11, t0.Add(time.Minute), body(wireAlertOf("db-a", "firing")))
+	if _, err := p.Drain(ctx); !errors.Is(err, context.Canceled) || store.claims != 1 {
+		t.Errorf("a claim after the stop: %v, %d claims", err, store.claims)
+	}
+}
+
 // syncBuffer is a bytes.Buffer safe for the worker's goroutines.
 type syncBuffer struct {
 	mu sync.Mutex

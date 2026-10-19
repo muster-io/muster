@@ -441,7 +441,7 @@ func (c *Client) call(ctx context.Context, k clientKey, httpMethod, method strin
 	var env envelope
 	if err := json.Unmarshal(res.Body, &env); err != nil || len(env.Result) == 0 || json.Unmarshal(env.Result, out) != nil {
 		return Result{Status: res.Status, Outcome: delivery.Outcome{Kind: delivery.OutcomeUnknown,
-			Error: outbound.Untrusted(method + ": the answer is not the expected JSON")}}
+			Error: outbound.Untrusted(method + ": the answer is not the expected JSON"), Status: res.Status}}
 	}
 	return r
 }
@@ -527,7 +527,7 @@ func resultOf(res outbound.Result, err error) Result {
 		r.Outcome = delivery.Outcome{Kind: delivery.OutcomeOK}
 		return r
 	}
-	r.Outcome.Error = outbound.Untrusted(err.Error())
+	r.Outcome.Error, r.Outcome.Status = outbound.Untrusted(err.Error()), res.Status
 	r.Blocked = res.Outcome == outbound.OutcomeBlocked
 	if oe, ok := errors.AsType[*outbound.Error](err); ok {
 		r.Network, r.Detail = oe.Network, oe.Detail
@@ -538,6 +538,7 @@ func resultOf(res outbound.Result, err error) Result {
 			code = res.Status
 		}
 		r.Outcome.Error = outbound.Untrusted("Telegram answered " + strconv.Itoa(code) + ": " + r.Description)
+		r.Outcome.Status = code
 	}
 	switch res.Outcome {
 	case outbound.OutcomeRetryAfter:

@@ -110,6 +110,9 @@ func attemptsLeft(err error) int {
 func TestMattermostLink(t *testing.T) {
 	e := newEnv(t)
 	st := e.startMM(t, bob, " @Bob ")
+	if !slices.Equal(e.store.locks, []string{"user", "requests"}) {
+		t.Errorf("a new request locked %q: the User before the pending requests it voids", e.store.locks)
+	}
 	if !strings.HasPrefix(st.RequestPublicID, "AR") || !st.ExpiresAt.Equal(t0.Add(10*time.Minute)) ||
 		st.AttemptsRemaining != 5 || len(e.mm.sent) != 1 || e.mm.sent[0].user != "u-bob" ||
 		!strings.HasPrefix(e.mm.sent[0].text, "Вы запросили связывание учётной записи с Muster. Никому не сообщайте этот код.") {
@@ -122,7 +125,11 @@ func TestMattermostLink(t *testing.T) {
 		r.messenger != MessengerMattermost || strings.Contains(e.log.String(), code) {
 		t.Fatalf("stored %+v", r)
 	}
+	e.store.locks = nil
 	l, err := e.s.ConfirmMattermost(t.Context(), bob, st.RequestPublicID, strings.ToLower(code))
+	if !slices.Equal(e.store.locks, []string{"user", "request"}) {
+		t.Errorf("locked %q: the User first, as a new request does", e.store.locks)
+	}
 	if err != nil || l.Messenger != MessengerMattermost || l.ExternalID != "u-bob" || *l.Username != "bob" ||
 		l.ConnectionPublicID != mmPID || l.ConnectionName != "mm" || !strings.HasPrefix(l.PublicID, "AK") {
 		t.Fatalf("Confirm = %+v, %v", l, err)

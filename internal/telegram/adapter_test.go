@@ -520,6 +520,27 @@ func TestResponseMapping(t *testing.T) {
 	}
 }
 
+// TestOutcomeStatus: a refused send reports the error_code of the answer as its status, also when the refusal came in
+// a 200, and an answer that is not JSON its HTTP status, which the delivery_attempt line logs as code (C-11.FR-17).
+func TestOutcomeStatus(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   int
+	}{
+		{502, `{"ok":false,"error_code":502,"description":"Bad Gateway"}`, 502},
+		{200, `{"ok":false,"error_code":400,"description":"Bad Request: message text is empty"}`, 400},
+		{200, "<html>proxy</html>", 200},
+	} {
+		e := newAdapter(t)
+		fault(t, e.fake, "sendMessage", c.status, c.body, 1)
+		if o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring)); o.Kind == delivery.OutcomeOK ||
+			o.Status != c.want {
+			t.Errorf("%d %s = %+v, want the status %d", c.status, c.body, o, c.want)
+		}
+	}
+}
+
 // TestMarkupRejectedIsSentPlain: after "can't parse entities" the same text goes again without parse_mode, as plain
 // text with its keyboard (C-11.FR-8).
 func TestMarkupRejectedIsSentPlain(t *testing.T) {

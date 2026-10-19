@@ -69,7 +69,7 @@ func (p *Processor) StaleScan(ctx context.Context) error {
 	var errs []error
 	for _, id := range ids {
 		// One claim at a time, so that the scan holds up the processing of one Integration at most.
-		claimed, err := p.store.ClaimIntegrations(ctx, p.lease, p.orgID, []int64{id}, 1)
+		claimed, err := p.leaseIntegrations(ctx, []int64{id}, 1)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("claim the integration: %w", err))
 			continue

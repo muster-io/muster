@@ -834,24 +834,107 @@ func TestIntegrationRequestLog(t *testing.T) {
 	})
 }
 
+// TestIntegrationAlertsOrgLastSeenIndex runs 0014 over an Organization with 90 days of Alerts: up adds
+// alerts_org_last_seen_idx, through which the values seen of the severity label range over the last 14 days of the
+// Organization's Alerts; down drops it; up again adds it.
+func TestIntegrationAlertsOrgLastSeenIndex(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 13)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, i.public_id, i.public_id, 'webhook_only', '{}', 45, false, 300, 'not_configured',
+				'2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('NT0000000000A1'), ('NT0000000000A2')) AS i (public_id)`)
+		e.exec(t, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels, annotations, status, starts_at,
+			fired_at, first_seen_at, last_seen_at, updated_at)
+			SELECT i.org_id, i.id, i.public_id || '-' || n, jsonb_build_object('severity', 'P' || n % 5), '{}',
+				'firing', at, at, at, at, at
+			FROM integrations i, generate_series(1, 3000) AS n,
+				LATERAL (SELECT timestamptz '2026-10-05' - n * interval '43 minutes' AS at) seen`)
+		e.exec(t, `ANALYZE alerts`)
+		index := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'alerts'
+				AND indexname = 'alerts_org_last_seen_idx' AND indexdef LIKE '%(org_id, last_seen_at)'`)
+		}
+		plan := func(t *testing.T) string {
+			t.Helper()
+			tx, err := e.d.Pool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(t.Context())) }()
+			if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan = off`); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := tx.Query(t.Context(), `EXPLAIN SELECT (labels ->> 'severity')::text AS value,
+				count(*)::bigint AS alerts
+				FROM alerts
+				WHERE org_id = (SELECT id FROM organizations) AND last_seen_at >= timestamptz '2026-09-21'
+					AND labels ->> 'severity' <> ''
+				GROUP BY 1 ORDER BY alerts DESC, value LIMIT 500`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var lines []string
+			for rows.Next() {
+				var l string
+				if err := rows.Scan(&l); err != nil {
+					t.Fatal(err)
+				}
+				lines = append(lines, l)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			return strings.Join(lines, "\n")
+		}
+		if got := index(t); got != 0 {
+			t.Fatal("before 0014: alerts_org_last_seen_idx exists")
+		}
+		if p := plan(t); strings.Contains(p, "alerts_org_last_seen_idx") {
+			t.Fatalf("before 0014: %s", p)
+		}
+
+		e.step(t, 1)
+		if got := index(t); got != 1 {
+			t.Errorf("after up: %d indexes", got)
+		}
+		if p := plan(t); !strings.Contains(p, "alerts_org_last_seen_idx") {
+			t.Errorf("after up the values seen do not range over alerts_org_last_seen_idx:\n%s", p)
+		}
+
+		e.step(t, -1)
+		if got := index(t); got != 0 {
+			t.Error("after down: alerts_org_last_seen_idx is left")
+		}
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 14 || index(t) != 1 {
+			t.Errorf("up again: version %d, dirty %v, %v, %d indexes", v, dirty, err, index(t))
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (13)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (14)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":13`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":14`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":13`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":14`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -867,10 +950,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (13)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (14)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":13`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":14`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

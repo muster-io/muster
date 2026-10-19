@@ -125,7 +125,7 @@ func (w *Worker) raiser(org int64) *internalalerts.Raiser {
 func plain(resend func() Outcome) Outcome {
 	out := resend()
 	if out.Kind == OutcomeMarkupRejected {
-		return Outcome{Kind: OutcomeUnknown, Error: outbound.Untrusted(failure(out, plainRejected))}
+		return Outcome{Kind: OutcomeUnknown, Error: outbound.Untrusted(failure(out, plainRejected)), Status: out.Status}
 	}
 	return out
 }

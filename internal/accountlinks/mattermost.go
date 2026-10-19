@@ -248,7 +248,8 @@ func (s *Service) ConfirmMattermost(ctx context.Context, r Requester, requestPub
 var errRejected = errors.New("the link code was rejected")
 
 // confirmMattermost is the part of ConfirmMattermost that holds the limiter token; with errRejected it returns the
-// attempts the request has left.
+// attempts the request has left. It locks the User before the request, as StartMattermost locks the User before it
+// voids the User's pending requests, so that a confirmation and a new request of one User do not deadlock.
 func (s *Service) confirmMattermost(ctx context.Context, b MattermostBot, r Requester, req dbgen.GetLinkRequestRow,
 	code string) (Link, int, error) {
 	a := account{messenger: MessengerMattermost, conn: connRef{id: req.ConnectionID,
@@ -263,12 +264,13 @@ func (s *Service) confirmMattermost(ctx context.Context, b MattermostBot, r Requ
 	)
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		reason, left, old = "", 0, nil
+		var err error
+		if u, err = q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID}); err != nil {
+			return fmt.Errorf("lock the user: %w", err)
+		}
 		row, err := q.LockLinkRequest(ctx, dbgen.LockLinkRequestParams{OrgID: s.cfg.OrgID, ID: req.ID})
 		if err != nil {
 			return fmt.Errorf("lock the link request: %w", err)
-		}
-		if u, err = q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID}); err != nil {
-			return fmt.Errorf("lock the user: %w", err)
 		}
 		now := s.now()
 		switch {

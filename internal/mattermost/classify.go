@@ -66,5 +66,5 @@ func edited(ctx context.Context, c *Client, class outbound.Class, id string, r R
 
 // gone is the outcome of a Root message that no longer exists, with the masked text of the answer that said so.
 func gone(r Result) delivery.Outcome {
-	return delivery.Outcome{Kind: delivery.OutcomeGone, Error: r.Outcome.Error}
+	return delivery.Outcome{Kind: delivery.OutcomeGone, Error: r.Outcome.Error, Status: r.Status}
 }

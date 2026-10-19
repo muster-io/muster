@@ -387,6 +387,22 @@ func TestPostResponseMapping(t *testing.T) {
 	}
 }
 
+// TestOutcomeStatus: a refused post and an edit of a post that is gone report the HTTP status of the answer, which the
+// delivery_attempt line logs as code (C-11.FR-17).
+func TestOutcomeStatus(t *testing.T) {
+	e := newAdapter(t)
+	ctx := t.Context()
+	m := root(messages.ColourFiring)
+	fault(t, e.fake, fakeserver.Fault{Path: "/api/v4/posts", Status: 502, Times: 1})
+	if out := e.adapter.Publish(ctx, call(1), m); out.Kind != delivery.OutcomeTransient || out.Status != 502 {
+		t.Errorf("502 = %+v", out)
+	}
+	if out := e.adapter.Update(ctx, call(1), "missing-post", m); out.Kind != delivery.OutcomeGone ||
+		out.Status != 404 {
+		t.Errorf("an edit of a post that is gone = %+v", out)
+	}
+}
+
 // TestEdits is C-13.AC-12 and F-058: a 404 on an edit is a Root message that is gone; a 403 is followed by the plain
 // read of the post, whose 404 makes it gone, whose 200 keeps the 403 Fatal, and whose other answers are classified;
 // a reply under a deleted Root message is refused with 400 and is gone at once, without a read.
