@@ -804,13 +804,15 @@ func TestTelegramPresses(t *testing.T) {
 	e.notify("t1", "first notification")
 	g := e.groupOf("p1")
 	post := e.rootPost(g)
-	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00",
+		"Until Monday 09:00")
 
 	// C-14.AC-18, FR-4, C-10.FR-3: the answer first, then the edit with the keyboard of the new state.
 	if got := e.press(post, 5001, "Ack", ""); got.Text != "Done: Acknowledge" || !got.OK {
 		t.Fatalf("answer %+v", got)
 	}
-	e.keyboardOf(post, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	e.keyboardOf(post, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00",
+		"Until Monday 09:00")
 	reqs := e.requests()
 	if answered, edited := lastIndex(reqs, "answerCallbackQuery"), lastIndex(reqs, "editMessageText"); answered < 0 ||
 		edited < answered {
@@ -852,7 +854,8 @@ func TestTelegramPresses(t *testing.T) {
 		got.AfterMs < 13000 || got.AfterMs >= 15000 {
 		t.Errorf("an answer just before the deadline %+v", got)
 	}
-	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00",
+		"Until Monday 09:00")
 	if got := e.press(post, 5001, "Resolve", `,"pressed_ms_ago":16000`); got.OK ||
 		got.Description != faketelegram.DescriptionQueryTooOld {
 		t.Errorf("an answer after the deadline %+v", got)
@@ -902,7 +905,8 @@ func TestTelegramPresses(t *testing.T) {
 	// C-14.AC-4: back in long polling, a press that arrives after the Connection received no updates for longer than
 	// telegram.press_max_age changes nothing and is logged; the next press is handled.
 	e.setMode("long_polling")
-	e.keyboardOf(post2, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	e.keyboardOf(post2, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00",
+		"Until Monday 09:00")
 	e.press(post2, 5001, "Snooze 4 h", "")
 	e.keyboardOf(post2, "Ack", "Unsnooze", "Resolve")
 	answers := len(e.answers())

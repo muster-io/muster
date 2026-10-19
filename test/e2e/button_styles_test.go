@@ -93,8 +93,8 @@ func waitStyles(t *testing.T, what, want string, styles func() string) {
 func TestButtonStyles(t *testing.T) {
 	h := Start(t, DevProcess)
 	e := reminderEnv(t, h, h.Replicas[0])
-	const snooze = " snooze0:- snooze1:- snooze2:-"
-	const tgSnooze = " [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"
+	const snooze = " snooze0:- snooze1:- snooze2:- snoozetomorrow:- snoozeweek:-"
+	const tgSnooze = " [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-] [Until tomorrow 09:00:-, Until Monday 09:00:-]"
 
 	g := e.fire("s1", "HostDown", "t", true)
 	n, post := e.number(g), e.rootPost(g)
