@@ -1,7 +1,8 @@
 # The command line
 
 The `muster` binary is the server and its command line. Without a command it runs the server. The commands are for
-emergencies, for setup and for diagnosis; everything else is in the web UI and the API.
+emergencies, for setup and for diagnosis; everything else is in the web UI and the API. `muster help` lists them; its
+output, abridged:
 
 ```text
 Usage: muster [command]
@@ -94,9 +95,10 @@ muster admin reset-totp --actor <name> <login>
 Emergency access when no Admin can sign in. Flags come before the login.
 
 - `reset-password` reads the new password from standard input: without echo after a prompt on a terminal, otherwise the
-  first line. It sets it on the account with that login and ends the account's sessions.
-- `reset-totp` removes the TOTP and the recovery codes of the account, for a lost second factor, and ends its sessions.
-  Under a TOTP policy that covers the account, it enrols again at the next sign-in. See [TOTP](../sign-in/totp.md).
+  first line. It sets it on the User with that login and ends the User's sessions. On a User who signs in through
+  OpenID Connect, it also removes the OIDC identity, so the User signs in with the password from then on.
+- `reset-totp` removes the TOTP and the recovery codes of the User, for a lost second factor, and ends their sessions.
+  Under a TOTP policy that covers the User, they enrol again at the next sign-in. See [TOTP](../sign-in/totp.md).
 
 ```sh
 printf '%s\n' "$NEW_PASSWORD" | kubectl -n muster exec -i deploy/muster -- \
@@ -111,7 +113,8 @@ muster ingest replay --since <duration> [--integration <name>] --actor <name>
 
 Reprocesses Stored Snapshots, for example after a bug in processing was fixed.
 
-- `--since` is the period back from now, such as `1h` or `90m`. It must lie within the retention of Stored Snapshots.
+- `--since` is the period back from now, such as `1h` or `90m`. A period longer than the retention of Stored Snapshots
+  is cut to it.
 - `--integration` limits the replay to the Integration with that name.
 
 The command sets the Stored Snapshots of the period back to pending in one transaction and records `ingest.replayed` in

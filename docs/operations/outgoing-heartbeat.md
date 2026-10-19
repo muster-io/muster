@@ -9,11 +9,10 @@ path *to* Muster.
 ## Pick a service
 
 Any service that expects a regular HTTP request and alerts when it misses, and that sits outside the cluster Muster runs
-in, will do. Open tools that offer it:
+in, will do:
 
 - **Uptime Kuma**: a monitor of the type *Push*; it gives a URL and alerts when no call arrives within the interval.
-- **Healthchecks**, self-hosted: a check with a period and a grace time.
-- Any similar tool that accepts a `GET` and alerts when it stops.
+- Any dead man's switch service that accepts an HTTP `GET` and alerts when the calls stop.
 
 Set its expected period a little above Muster's interval of 1 minute, such as 2 or 3 minutes, so that a single slow call
 does not alert. Send its alert somewhere that does not depend on Muster.

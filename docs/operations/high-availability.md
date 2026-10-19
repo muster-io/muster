@@ -52,7 +52,7 @@ sequenceDiagram
   Note over A: "the node of A is lost"
   Note over A: "A stops its Leader tasks after 15 s without a ping"
   PG-->>PG: "ends the silent session within 30 s, the lock is free"
-  B->>PG: "try the lock: taken"
+  B->>PG: "try the lock: acquired"
   Note over B: "B is the Leader: muster_leader is 1"
   B->>PG: "writes the alive mark, runs the Leader tasks"
 ```
@@ -69,8 +69,10 @@ when no replica has led for 2 minutes; see [its runbook](runbooks/MusterNoLeader
 While there is no Leader:
 
 - **Bridge** Connections in the `poll` mode and Telegram Connections in the long polling mode receive no button presses and
-  no Text commands. A press or Text command older than `bridge.event_max_age` (1 hour) when a Leader returns is dropped unanswered. Connections in the
-  `push` mode of a Bridge and the webhook mode of Telegram keep working.
+  no Text commands. When a Leader returns, a Bridge press or Text command older than `bridge.event_max_age` (1 hour) is
+  dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
+  `telegram.press_max_age` (1 hour) before it. Connections in the `push` mode of a Bridge and the webhook mode of
+  Telegram keep working.
 - No Integration becomes Heartbeat lost and no Alert goes Stale.
 - Partition maintenance, retention and pruning pause; the gauges that only the Leader exports go stale.
 - The outgoing heartbeat stops, so a [dead man's switch](outgoing-heartbeat.md) alerts you.
@@ -86,7 +88,8 @@ recovering.
 ## The session connection
 
 The Leader lock and the `LISTEN` connections need a real session. If the main database connection goes through PgBouncer
-in transaction mode, set `MUSTER_DATABASE_SESSION_URL` (in the chart, `database.sessionHost`) to an endpoint that reaches
+in transaction mode, set `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT` (in the chart,
+`database.sessionHost` and `database.sessionPort`), or `MUSTER_DATABASE_SESSION_URL`, to an endpoint that reaches
 PostgreSQL directly or through a pooler in session mode. At start, Muster checks that advisory locks and `LISTEN` work
 over it and stops with an error that names the setting otherwise. See [PgBouncer](../install/database.md#pgbouncer).
 

@@ -7,8 +7,10 @@ which mode it uses and why.
 !!! note "These are sketches"
     The recipes show the shape of a setup, not a tested integration. The endpoints, fields and header names of the other
     system are examples, taken from the public documentation of an open tool. They change between versions and settings,
-    so check them against the documentation of the version you run, and use **Send test message** and **Preview** on the
-    Destination before you rely on it. Everything about Muster in them is real: the modes, the fields the templates read,
+    so check them against the documentation of the version you run, and use **Preview** and **Send test message** on
+    the Destination before you rely on it. In template mode, **Send test message** makes a real `create` request: on a
+    status page or in an issue tracker it opens a real incident or issue, so send the first ones to a status page nobody
+    reads or to a test repository. Everything about Muster in them is real: the modes, the fields the templates read,
     the extraction rules, the Secrets and the signature.
 
 Common to all four:
@@ -32,15 +34,16 @@ that only for the changes that need a human, and you want to send it once. The e
 carries `notify`, which is true exactly when the change is [Loud](../concepts/loud-and-quiet.md), and a `webhook-id` that
 stays the same across retries.
 
-Template mode does not fit here. It always has an `update` request, which sends again whenever the Alert Group changes,
-and a call provider has nothing to update. It cannot decide to skip an event either.
+Template mode does not fit here. It always has an `update` request, which sends again whenever its rendered `update`
+changes, and a call provider has nothing to update. It cannot decide to skip an event either.
 
 Muster cannot know your provider's request, so put a small **relay** between them. The relay checks the signature, drops
 duplicates, picks the events worth a call, and calls the provider.
 
-1. Create a Destination of type `webhook`, mode `events`, with the relay's URL and a Secret `token` for the relay's own
-   credential, as in [Create the Destination](events.md#create-the-destination). Keep the Signing secret that the answer
-   shows once, and give it to the relay.
+1. Create a Destination of type `webhook`, mode `events`, with the relay's URL, as in
+   [Create the Destination](events.md#create-the-destination). The relay below checks only the signature, so it needs
+   the Secret `token` and its header from that example only when something in front of it asks for a credential. Keep
+   the Signing secret that the answer shows once, and give it to the relay.
 2. Create a Route that matches what should ring a phone, with the Destination, and an On-call profile.
 3. Run the relay. This sketch is Python; the `verify` function is the one on [Verify the
    signature](events.md#verify-the-signature):
@@ -79,13 +82,15 @@ What to know:
 
 - **Which events.** `created` is a new Alert Group, `ack_timeout` a notice that nobody took it, and `reopened` a problem
   that returned. Leave out `alerts_added` and `reminder`, which are Loud too but only worth a message. The relay can
-  also skip an Alert Group that is already acknowledged: every event carries its current `status`.
+  also skip an Alert Group that is already acknowledged: every event carries the Alert Group's `status` as it was when
+  the event was recorded.
 - **Answer honestly.** `2xx` marks the event delivered. A `5xx` makes Muster send the same event again with the same
   `webhook-id`. A `400` or `422` drops that one event. `401`, `403`, `404` and `410` make the Destination
   [Broken](../concepts/broken-destinations.md), which is right for a relay that is misconfigured. See [How the answer
   counts](events.md#how-the-answer-counts).
-- **Test it.** **Send test message** sends the event `test`, which is not in `CALL_ON`. Add it for the first run, then
-  remove it.
+- **Test it.** **Send test message** sends the event `test` with `notify` false. For the first run, add `"test"` to
+  `CALL_ON` and replace `event["notify"]` in the condition with `(event["notify"] or event["event"] == "test")`, then
+  change both back.
 
 ## A status page
 
@@ -144,8 +149,7 @@ posts the replies of the Thread.
 
 This sketch uses the REST API of Rocket.Chat as the example. A `POST` to `chat.postMessage` answers with the message under
 `message`, with its `_id` and its room id `rid`; `chat.update` edits it; a message with a `tmid` is a reply in its thread.
-Create the Secrets `token` and `user_id` for the bot user's token and id. Zulip works the same way, with a form-encoded
-body: set the header `Content-Type: application/x-www-form-urlencoded` and build the body with `urlquery`.
+Create the Secrets `token` and `user_id` for the bot user's token and id.
 
 `create`:
 
@@ -267,7 +271,8 @@ What to know:
 - **One issue per Alert Group.** A Route that takes many Alert Groups opens many issues. Narrow its Matchers, or choose a
   Group key that groups more.
 - **If the extraction finds nothing,** the `create` still counts as delivered, the Timeline records the missing value, and
-  every later request that reads it fails as a template error. Check the answer in the **Send test message** result.
+  every later request that reads it fails as a template error. Check the answer in the **Send test message** result,
+  sent to a test repository.
 - **A tracker whose answer carries no id** cannot be driven this way. Use the events mode with a relay that remembers the
   id of the issue for each `alert_group.id`, and does what the recipe above does with the events `created`, `resolved` and
   `reopened`.

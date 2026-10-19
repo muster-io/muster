@@ -39,8 +39,10 @@ again.
 ## Checks take the same path
 
 The connection check of a Connection, and the test of a Destination, go through the saved proxy just as real traffic
-does. If the check works, delivery works by the same route. A token that is already stored goes only to the saved
-address of its Connection, through its saved proxy.
+does. If the check works, delivery works by the same route. A check run from the form before saving uses the proxy in
+the form instead. A token that is already stored goes only to the saved address of its Connection, through its saved
+proxy: with a changed but unsaved address or proxy and no token typed, the check makes only a probe without the
+token.
 
 ## What the outbound address policy checks
 

@@ -398,8 +398,9 @@ compose-check: ## Check the compose example with docker compose config, without 
 	$(DOCKER) compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
 
 # Runs the commands of docs/quick-start.md in an empty directory, waits for /health/ready and signs in as the bootstrap
-# Admin, then removes the compose project with its volume; it needs Docker with the compose plugin, curl and openssl,
-# and port 8080 free. The nightly workflow runs it on a fresh runner.
+# Admin, then removes the compose project with its volume. The project is named muster-quickstart-check, so a Quick
+# start installation of the project muster on the same machine is never touched. It needs Docker with the compose
+# plugin, curl and openssl, and port 8080 free. The nightly workflow runs it on a fresh runner.
 quickstart-check: ## Run the commands of Quick start with Docker, wait for ready and sign in as the bootstrap Admin
 	MUSTER_IMAGE="$(MUSTER_IMAGE)" QUICKSTART_REF="$(QUICKSTART_REF)" ./test/docs/quickstart.sh
 

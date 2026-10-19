@@ -543,8 +543,8 @@ again makes a new `BridgeApp`.
     answer, and its events reach Muster late.
 
 **4. Report what happens in the messenger.** When a person presses a button, writes in a Thread, deletes a message of
-the bot or writes to the bot, call `await bridge.press(...)`, `bridge.thread_message(...)`,
-`bridge.message_deleted(...)` or `bridge.direct_message(...)`, from the event loop that serves the bridge. Each queues
+the bot or writes to the bot, await `bridge.press(...)`, `bridge.thread_message(...)`, `bridge.message_deleted(...)`
+or `bridge.direct_message(...)`, all four coroutines, in the event loop that serves the bridge. Each queues
 the event and returns at once, so confirm a press to your messenger within its deadline whatever Muster does. Give the
 messenger's own id of the update as `update_id`: an update that the messenger delivers twice is then queued once.
 

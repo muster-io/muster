@@ -22,8 +22,8 @@ Each User and Service account has one of three Roles, each a fixed set of Permis
 | Role | May |
 |---|---|
 | Admin | everything: also configures Integrations, Routes, Connections and Destinations, manages Users, the OIDC settings, Service accounts, the Organization's settings, and reads the Audit log and the System status |
-| Responder | reads everything that concerns Alert Groups, and acts on them: acknowledges, resolves, snoozes and adds Notes |
-| Viewer | reads Alert Groups, Alerts, and the configuration, with secret values masked |
+| Responder | what a Viewer reads, and acts on Alert Groups: acknowledges and takes over, resolves, snoozes, adds Notes and answers Reminders |
+| Viewer | reads Alert Groups, Alerts, Integrations, Routes, Connections, Destinations, Link rules and Lookup tables, with secret values masked |
 
 Every signed-in person also manages their own profile: password, TOTP, Account links and Personal access tokens. Every operation in the [API reference](../reference/api.md) names the Permission it needs.
 
@@ -36,8 +36,8 @@ Every signed-in person also manages their own profile: password, TOTP, Account l
   decides what they may do. [Sign-in with Keycloak](oidc-keycloak.md) is a complete walkthrough.
 - **TOTP.** A second step with a one-time code from an authenticator app, for local and OIDC users alike; the
   Organization can require it. See [TOTP](totp.md).
-- **Personal access tokens.** A person creates them in the profile for scripts. A token acts as its owner, with at most
-  the owner's Permissions, and can be narrowed to fewer. It can expire, and the Audit log names the token with the
+- **Personal access tokens.** A person creates them in the profile for scripts. A token acts as its User, with at most
+  that User's Permissions, and can be narrowed to fewer. It can expire, and the Audit log names the token with the
   person.
 - **Service accounts.** An identity that is not a person, for automation such as a pipeline. It has a Role and any number
   of tokens, cannot sign in to the web UI, and cannot become the Owner of an Alert Group.

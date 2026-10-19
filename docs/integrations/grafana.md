@@ -31,13 +31,13 @@ planned for a later layer of Muster. Until then, use an Alertmanager between Gra
 In Grafana, two settings are needed, and both must be on.
 
 1. Add the Alertmanager as a data source: **Connections** → **Data sources** → **Alertmanager**. Set the
-   **Implementation** (Prometheus, for a plain Alertmanager) and the **HTTP URL**, and turn on **Receive Grafana
-   Alerts**.
+   **Alertmanager Implementation** (Prometheus, for a plain Alertmanager) and the **HTTP URL**, and turn on **Receive
+   Grafana Alerts**.
 2. In **Alerting** → **Settings** (called Administration in some versions), enable that Alertmanager so that it shows
    that it receives Grafana-managed alerts.
 
 From then on Grafana forwards all its Grafana-managed alerts to the Alertmanager. The same data source in a
-provisioning file:
+provisioning file, which covers step 1 only; step 2 is still done in **Alerting** → **Settings**:
 
 ```yaml
 apiVersion: 1

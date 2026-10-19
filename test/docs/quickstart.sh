@@ -15,8 +15,13 @@
 #
 # This is a check of a live system, so it waits in real time, with a deadline. It always removes the compose project
 # with its volume, prints the logs of the containers when it fails, and never prints the passwords or the key.
+#
+# The compose project gets a name of its own, which takes precedence over the name in the compose file, so that the
+# check never touches a real Quick start installation on the same machine, the project "muster" and its volume.
 
 set -euo pipefail
+
+export COMPOSE_PROJECT_NAME=muster-quickstart-check
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 page="$root/docs/quick-start.md"

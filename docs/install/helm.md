@@ -36,7 +36,8 @@ helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
     ```
 
     The chart in the repository has the version `0.0.0`, and its `image.tag` defaults to `appVersion`, which names no
-    existing image. A release sets both to its tag.
+    existing image. A release sets the chart's version to its tag without the `v`, such as `1.2.3`, and `appVersion` to
+    the tag itself, such as `v1.2.3`.
 
 ## Create the Secret
 
@@ -60,8 +61,8 @@ kubectl -n muster create secret generic muster \
 
 The pods mount the Secret as files and read the values through `MUSTER_SECRET_KEYS_FILE`,
 `MUSTER_DATABASE_PASSWORD_FILE` and `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`, so no secret appears in the pod's
-environment. The chart reads **one** Secret, so the database password goes into it as well, even when another operator,
-such as CloudNativePG, keeps its own copy.
+environment, except the whole database URL when you name its key in `database.urlKey`. The chart reads **one** Secret,
+so the database password goes into it as well, even when another operator, such as CloudNativePG, keeps its own copy.
 
 !!! warning "Keep a copy of the master key"
     Muster refuses to start on a database without the key that wrote it, and a restored database is useless without it.
@@ -84,7 +85,7 @@ database:
   sslmode: require
 
 publicURL: https://muster.example.org
-ingestURL: https://ingest.muster.example.org
+ingestURL: https://ingest.example.org
 
 bootstrapAdmin:
   email: admin@example.org
@@ -139,7 +140,7 @@ that people and machines really use, or the links it builds will be wrong.
 Muster serves ingestion on its own listener (`8081`) apart from the web UI and the API (`8080`), and the chart gives
 each a Service. A separate address for ingestion lets you expose the two differently: the web UI only inside the company
 network, and ingestion to Alertmanagers in other networks, or the other way round, with different TLS settings, rate
-limits and firewall rules on each. It also keeps a flood of Snapshots away from the web UI's address. When you have no
+limits and firewall rules on each. It also keeps a burst of Snapshots away from the web UI's address. When you have no
 such need, give both the same host name and send the paths `/api/v1/ingest`, `/api/v1/heartbeat` and
 `/api/v1/callbacks/` (with everything below them) to the ingest Service and everything else to the app Service, as
 [Connect Alertmanager](../integrations/alertmanager.md#behind-a-reverse-proxy) describes.
@@ -186,8 +187,8 @@ Leader among them does the few jobs that must run only once. With more than one 
 - Spread the pods over nodes with `topologySpreadConstraints` or `affinity`.
 - If the main database connection goes through PgBouncer in transaction mode, set `database.sessionHost` (and
   `sessionPort`) to a session-capable endpoint. See [the database](database.md#pgbouncer).
-- Keep the clocks of all nodes in sync with NTP; Muster compares them with the database's clock and raises an alert on a
-  skew.
+- Keep the clocks of all nodes in sync with NTP; Muster compares them with the database's clock and logs a warning on a
+  skew, and the chart rule `MusterClockSkew` raises an alert.
 
 Rolling updates run between adjacent minor versions only, and the init container of each new pod applies the database
 migrations before the pod starts. Take a backup first.

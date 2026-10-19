@@ -39,8 +39,8 @@ What you can tune:
   delivery latency; `MusterClockSkew`: the skew), `size` (`MusterDeliveryQueueGrowing`), `backlog` and `delaySeconds`
   (`MusterIngestBacklog`), `unauthorized` (`MusterIngestRejected`) and `failures` (`MusterLoginFailures`).
 
-The defaults, with the expression of each rule, are in the [chart values reference](../reference/chart-values.md), and
-each rule has its [runbook](runbooks/index.md). The rules are covered by unit tests in CI.
+The defaults are in the [chart values reference](../reference/chart-values.md), and the expression of each rule is on
+its [runbook](runbooks/index.md) page. The rules are covered by unit tests in CI.
 
 The five rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
 `MusterDestinationBroken` and `MusterHeartbeatLost`. The others are `warning`.
@@ -53,41 +53,35 @@ The five rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `Mus
     for them, to a receiver you trust to work when Muster does not.
 
 The chart rules carry the labels `alertname` (starting with `Muster`) and `severity: critical` or `warning`, plus the
-labels Prometheus adds from the series. Match on both, and put the route **before** the route that sends everything to
-Muster, with `continue: false` (the default) so that the alert stops there:
+labels Prometheus adds from the series. Match on both, and put the bypass route **first**, above the route that sends
+everything to Muster, with `continue` false (the default) so that the alert stops there. Here it is added to the
+configuration of [Connect Alertmanager](../integrations/alertmanager.md), whose receivers `muster-prod-eu`, `oncall`
+and `default` stay as they are:
 
 ```yaml
 route:
-  receiver: muster
-  group_by: [alertname, namespace]
+  receiver: default
   routes:
     - receiver: platform-direct          # not Muster
-      matchers:
-        - alertname=~"Muster.+"
-        - severity="critical"
-      continue: false
-    - receiver: muster                   # everything else
-      continue: false
+      matchers: ['alertname=~"Muster.+"', 'severity="critical"']
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    - receiver: oncall
+      matchers: ['severity="critical"']
+    - receiver: default
 
 receivers:
-  - name: muster
-    webhook_configs:
-      - url: https://ingest.muster.example.org/api/v1/ingest
-        send_resolved: true
-        max_alerts: 0
-        http_config:
-          authorization:
-            type: Bearer
-            credentials: mstr_int_…                       # the Integration token, see Connect Alertmanager
+  # ... muster-prod-eu, oncall and default
   - name: platform-direct
     webhook_configs:
-      - url: https://chat.example.org/hooks/<id>          # a chat, a pager or a mail gateway of your own
+      - url: https://chat.example.org/hooks/<id>          # a chat or a pager of your own
         send_resolved: true
 ```
 
 The matchers use `alertname=~"Muster.+"` for the rules of this chart; `severity="critical"` limits the bypass to the ones
-that need it, so the warnings still reach Muster. Point the receiver `platform-direct` at a path that does not depend on Muster. The `muster` receiver is the one from
-[Connect Alertmanager](../integrations/alertmanager.md).
+that need it, so the warnings still reach Muster, and every other alert still reaches Muster and your own receivers.
+Point the receiver `platform-direct` at a path that does not depend on Muster.
 
 The Internal alerts of Muster itself do not go through Alertmanager, so this route does not see them.
 
@@ -123,7 +117,8 @@ Use a Destination that does not depend on what the alert reports: not the one th
 of its link.
 
 Two Internal alerts have a chart rule with the same name, `MusterHeartbeatLost` and `MusterDestinationBroken`. The rule is
-the backup for when Muster cannot deliver; the Internal alert is the one with the Integration's labels.
+the backup for when Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration,
+with its Static labels, for `MusterHeartbeatLost`, and the Destination for `MusterDestinationBroken`.
 
 ## Watching that Muster is alive
 

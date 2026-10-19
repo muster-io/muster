@@ -6,7 +6,7 @@ environment. Neither the Helm chart nor the compose example backs up anything, s
 | What | Holds | Without it |
 |---|---|---|
 | the database | Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted | everything is gone |
-| the master keys (`MUSTER_SECRET_KEYS`) | the keys that decrypt the Secrets and sign the buttons in messages | the database starts nowhere: Muster refuses to run, and the Secrets are lost for good |
+| the master keys (`MUSTER_SECRET_KEYS`) | the keys that decrypt the Secrets and sign the buttons in messages | Muster refuses to start on the database, and its encrypted Secrets cannot be read |
 
 ## Why they are kept apart
 
@@ -15,7 +15,8 @@ they reach the database. A backup together with the master keys reveals all of t
 and give them different access: the dump in your backup storage, the keys where you keep your other secrets, such as a
 password manager or the secret store of your cluster.
 
-Losing the keys while keeping the database means you must enter every Secret again. Muster cannot recover them.
+Without the master key that wrote the database, Muster refuses to start on it, and nobody can read the Secrets in it.
+Muster cannot recover them, and it has no way to start that database again with a new key: keep the key safe.
 
 After a [key rotation](key-rotation.md), back up the new key list too. A backup taken before the rotation needs the old
 key to restore.

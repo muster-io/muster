@@ -48,9 +48,9 @@ The edits go through the usual limits of the messengers, so a large backlog take
 ## Remove the old key
 
 The old key is still needed while a Secret or an open Root message depends on it. The Keyring page shows each older
-key as *Still needed*, with the counts, until nothing does; then it says **Key `<id>` is no longer used and can be
-removed from MUSTER_SECRET_KEYS.** `muster doctor` prints the same on its `keyring` line. Only a key that was active
-before is ever called removable.
+key as *Still needed* until nothing does; then it says **Key `<id>` is no longer used and can be removed from
+MUSTER_SECRET_KEYS.** `muster doctor` prints the same on its `keyring` line, with the number of encrypted values and
+open Root messages that still need each key. Only a key that was active before is ever called removable.
 
 Then remove the key from `MUSTER_SECRET_KEYS` and roll the change out. Removing the key before Muster says so breaks
 what still depends on it; the start of a replica that lacks the *active* key fails with "master key does not match the

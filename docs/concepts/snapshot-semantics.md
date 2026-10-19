@@ -102,10 +102,13 @@ it for too long:
 > route.
 
 Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed`, and
-uses the median of the last 9 gaps. Until it has learned an interval, `stale_after` is `processing.stale_after_unlearned`,
-25 hours. With a 10-minute `repeat_interval`, a silenced group's Alerts go Stale after about 30 minutes. With a daily
-interval it takes three days, which is why the Integration page warns about an interval longer than
-`processing.long_repeat_warning` (1 hour). See [Repeat intervals](../integrations/alertmanager.md#repeat-intervals).
+uses the median of the last 9 gaps. Until it has learned an interval, `stale_after` is
+`processing.stale_after_unlearned`, 25 hours. Alertmanager sends a repeat on the first `group_interval` tick after
+`repeat_interval` has elapsed, so the gaps are about `repeat_interval` + `group_interval`. With a 10-minute
+`repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster learns an interval of about 15
+minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily interval it takes more than three
+days, which is why the Integration page warns about an interval longer than `processing.long_repeat_warning` (1 hour).
+See [Repeat intervals](../integrations/alertmanager.md#repeat-intervals).
 
 Gone and Stale both resolve the Alert with the reason "Alertmanager no longer reports this alert — it resolved without
 notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed". If a silenced alert's mute
@@ -127,8 +130,8 @@ signal that proves the path works.
   `MusterHeartbeatLost`.
 
 So with a live Heartbeat and a learned 5-minute interval, an Alert whose group last arrived at T goes Stale at T+15
-minutes. If the Heartbeat was lost from T+5 to T+10 minutes, it goes Stale at T+25 minutes, because those 10 minutes
-did not count.
+minutes. If the last Heartbeat signal also came at T, the Heartbeat was lost at T+5 minutes, and the signal returned at
+T+10 minutes, the Alert goes Stale at T+25 minutes: the 10 minutes from the last signal until its return did not count.
 
 ## Truncation
 
@@ -146,10 +149,10 @@ never be evidence that an Alert is missing.
 
 ## Continuation
 
-A rule evaluator that restarts for longer than the alerts' `endsAt` window makes Alertmanager send the same alerts again,
-with a new `startsAt` and no `resolved` in between. That is a **Continuation**: the Alert stays the same, its start time
-is updated, and nothing is Loud and nothing reopens. Once an Alert has resolved by any route, the next firing of the same
-fingerprint is a new firing.
+A Prometheus restart whose first evaluation falls exactly on the alerts' `endsAt` can make Alertmanager send them again
+with a new `startsAt` and no `resolved` in between. A longer stop gives a `resolved` and a new firing. That first case
+is a **Continuation**: the Alert stays the same, its start time is updated, and nothing is Loud and nothing reopens.
+Once an Alert has resolved by any route, the next firing of the same fingerprint is a new firing.
 
 ## Why an Alert resolved
 

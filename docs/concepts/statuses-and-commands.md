@@ -13,7 +13,8 @@ others are transitions that Muster makes on its own, always with a reason you ca
 | **Snoozed** | It is set aside until a chosen time, or with no end. Muster stays quiet about it meanwhile. |
 | **Resolved** | It is closed, by a person or by Muster because its Alerts are gone. |
 
-New Alerts and edits of a Route never change a status. Only the transitions below do.
+New Alerts that join an open Alert Group change its status only through a rise to Urgent, and edits of a Route never
+change a status. Only the transitions below do.
 
 ```mermaid
 stateDiagram-v2
@@ -63,7 +64,7 @@ message or a Thread reply.
 | Transition | When | Reason you see |
 |---|---|---|
 | Open → Resolved | The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](snapshot-semantics.md), or its Integration was deleted. This also ends a Snooze. | The reason of the last Alert |
-| Resolved → previous status | An Alert with the same Route and Group key values fires within the Reopen window. | The Reopen, with the Reopen count |
+| Resolved by the system → previous status | An Alert with the same Route and Group key values fires within the Reopen window. | The Reopen, with the Reopen count |
 | Snoozed → Firing | The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated. | The Snooze ended |
 | Snoozed or Acknowledged → Firing | A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the default). | The rise to Urgent |
 | Acknowledged → Firing | The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering. | "No answer to the last two Reminders" |
@@ -108,10 +109,10 @@ Every command is a Quiet event except the Takeover. See [Loud and Quiet](loud-an
 
 ### Who may
 
-A **Responder** or an **Admin** may acknowledge, resolve, snooze and add Notes. A **Viewer** may read and may not act: the
-command is refused. A **Service account** may resolve, snooze and add Notes, but cannot acknowledge, because an Owner is
-always a person. A Personal access token acts as its owner. Every command is recorded in the Audit log with its actor and
-the Transport.
+A **Responder** or an **Admin** may acknowledge, resolve, snooze and add Notes. A **Viewer** may read and may not act:
+the command is refused. A **Service account** may run the commands its Role allows, except Acknowledge and Still on it,
+because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
+command is recorded in the Audit log with its actor and the Transport.
 
 ## Where a command comes from
 

@@ -288,7 +288,7 @@ jobs:
   # Quick start (docs/quick-start.md) as a new user follows it, on a fresh runner with only Docker: its commands run in an
   # empty directory, then /health/ready must answer 200 and the bootstrap Admin sign in. The master leg runs the edge
   # image with the compose example of master; the release leg runs the page exactly as written, which downloads the
-  # compose example of the release tag the page names, and is skipped while the repository has no release.
+  # compose example of the release tag the page names, and is skipped until that tag is a published release.
   quick-start:
     name: quick-start (${{ matrix.leg }})
     runs-on: ubuntu-latest
@@ -316,11 +316,21 @@ jobs:
           set -euo pipefail
           if [ "$LEG" != release ]; then
             echo "run=true" >>"$GITHUB_OUTPUT"
-          elif tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null); then
+            exit 0
+          fi
+          # The tag of the download line that release-please updates, as the page names it.
+          tag=$(sed -n 's|.*raw\.githubusercontent\.com/muster-io/muster/\(v[^/]*\)/deploy/compose/docker-compose\.yml.*x-release-please-version.*|\1|p' \
+            docs/quick-start.md | head -n 1)
+          if [ -z "$tag" ]; then
+            echo "::error::docs/quick-start.md has no marked download line with a release tag."
+            exit 1
+          fi
+          if draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null) &&
+            [ "$draft" = false ]; then
             echo "checking Quick start as written against the release $tag"
             echo "run=true" >>"$GITHUB_OUTPUT"
           else
-            echo "::notice::The repository has no release yet: the release leg of Quick start is skipped."
+            echo "::notice::Quick start names $tag, which is not a published release yet: the release leg is skipped."
             echo "run=false" >>"$GITHUB_OUTPUT"
           fi
       - name: pull Docker Hub images through the mirror

@@ -114,10 +114,13 @@ Muster measures the gaps between those Snapshots. Two rules depend on them:
   the Integration's [Heartbeat](heartbeat.md) is live. Until Muster has learned the interval, it waits
   `processing.stale_after_unlearned` (25 hours).
 
-With 10 minutes, an Alert of a silenced group goes Stale after about 30 minutes. With a daily interval it takes three
-days, and the Integration page warns about an interval longer than `processing.long_repeat_warning` (1 hour) and shows
-the route to put in Alertmanager. A short interval does not make Muster noisy: Muster sends one message per Alert Group
-and edits it, so a repeat changes nothing that people see. It only makes Muster faster to notice that an alert is gone.
+Alertmanager sends a repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are
+about `repeat_interval` + `group_interval`. With 10 minutes and Alertmanager's default `group_interval` of 5 minutes,
+Muster learns an interval of about 15 minutes, and an Alert of a silenced group goes Stale after about 45 minutes. With
+a daily interval it takes more than three days, and the Integration page warns about an interval longer than
+`processing.long_repeat_warning` (1 hour) and shows the route to put in Alertmanager. A short interval does not make
+Muster noisy: Muster sends one message per Alert Group and edits it, so a repeat changes nothing that people see. It
+only makes Muster faster to notice that an alert is gone.
 
 The routes Muster has learned, with their intervals and the time each needs to resolve by absence, are on the
 Integration page.
@@ -151,7 +154,8 @@ key can use them as if the rules had set them.
 `instance`. The Organization lists them in `organization.instance_labels` (by default `pod`, `instance`, `container`
 and `endpoint`).
 
-Keep them out of informational alerts, the ones with a long repeat interval that nobody needs to act on at once. A
+Keep them out of informational alerts, the ones nobody needs to act on at once, such as those of a Route with the
+Informational profile. A
 restarted pod reports the same problem under a new `pod` label, which is a different Alert. Muster recognises that
 case: it records a **Replacement**, a Quiet event in the Timeline that names the label that differs, and the Alert Group
 page suggests fixing the rule. But every restart still adds an Alert and a Timeline entry to an Alert Group that was

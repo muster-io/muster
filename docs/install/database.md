@@ -1,9 +1,10 @@
 # The database
 
 Muster keeps everything in PostgreSQL 14 or newer, and nothing else stateful: no Redis and no queue. At start Muster
-refuses an older PostgreSQL and stops with an error that names the cause. It needs no extension. Neither the Helm chart nor the
-compose example backs up the database: see [Backup and restore](../operations/backup-and-restore.md), and
-keep the master key apart from the backups.
+refuses an older PostgreSQL and stops with an error that names the cause. It needs one extension, `pg_trgm`, which ships
+with PostgreSQL and which the database owner can create (a trusted extension since PostgreSQL 13); the first migration
+creates it. Neither the Helm chart nor the compose example backs up the database: see
+[Backup and restore](../operations/backup-and-restore.md), and keep the master key apart from the backups.
 
 ## As a URL or as fields
 
@@ -15,8 +16,10 @@ Give the database to Muster in one of two forms. The settings are in the
 | a URL | `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require` |
 | fields | `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`, `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`) |
 
-When both forms are set, the URL wins and Muster logs a warning that names both. Muster reads only these variables, not
-`PGHOST`, `PGSSLMODE` or `PGPASSFILE`. Any secret can come from a `*_FILE` variable.
+When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
+`sslmode` into the connection and takes the password only from it, so `PGPORT`, `PGSSLMODE`, `PGPASSWORD` and
+`PGPASSFILE` change nothing. The database driver still reads the other `PG*` variables, such as `PGSSLROOTCERT`, for
+what the connection leaves out: leave them unset. Any secret can come from a `*_FILE` variable.
 
 Prefer the fields when the host, user and name are plain values and only the password is a secret: the Helm chart does
 exactly that, with `database.host`, `database.port`, `database.name`, `database.user` and `database.sslmode` as values
@@ -101,7 +104,8 @@ master key, before you rely on it.
 A managed PostgreSQL service works when it offers version 14 or newer and a role that owns an empty database. Check:
 
 - **Version.** PostgreSQL 14 or newer. Muster is tested on 14 and 17.
-- **Extensions.** None are needed. Muster does not use `pg_partman`; it creates its partitions itself.
+- **Extensions.** Only `pg_trgm`; allow it where the service keeps an allow-list of extensions. Muster does not use
+  `pg_partman`; it creates its partitions itself.
 - **Session features.** Muster needs session advisory locks and `LISTEN/NOTIFY`. Plain endpoints of managed services
   provide them. A pooler endpoint that your provider adds in transaction mode does not: see [PgBouncer](#pgbouncer).
 - **Failover.** Name the endpoint that follows the primary, not an instance.
@@ -117,8 +121,8 @@ Muster uses two kinds of database connections:
 
 - The **main connection** carries every query. It may go through PgBouncer in transaction mode.
 - The **session connection** carries what needs a real session: the advisory lock of the Leader, the `LISTEN`
-  connections that wake the workers and feed live updates to the web UI, and the migrations. A transaction pooler would
-  lose all three between statements.
+  connection that wakes the workers and feeds live updates to the web UI, partition maintenance and the migrations. A
+  transaction pooler would lose their session state between statements.
 
 Without a separate setting, the session connection is the main connection. At start, Muster takes an advisory lock over
 it and completes a `LISTEN/NOTIFY` round trip. Behind a transaction pooler this fails within five seconds, and Muster
@@ -133,7 +137,8 @@ PostgreSQL directly or through a pooler in session mode:
 | `MUSTER_DATABASE_SESSION_HOST`, `MUSTER_DATABASE_SESSION_PORT` | only the host and the port; the user, password, database and `sslmode` are those of the main connection |
 
 In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
-use the `Pooler` object in transaction mode, and the session connection the `-rw` Service of the `Cluster`:
+use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the
+session connection the `-rw` Service of the `Cluster`:
 
 ```yaml
 database:
@@ -146,7 +151,7 @@ database:
     Muster's driver uses prepared statements on the main connection. In transaction mode, PgBouncer supports them from
     version **1.21**, and only when `max_prepared_statements` is above 0. An older PgBouncer, or a value of 0, makes
     queries fail with errors about missing prepared statements. Set `max_prepared_statements` to a few hundred, such as
-    `200`, and check with `muster doctor`. A pooler in session mode, or no pooler, needs no such setting.
+    `200`. A pooler in session mode, or no pooler, needs no such setting.
 
 PgBouncer is optional. Most installations connect straight to PostgreSQL, and then no session setting is needed.
 
@@ -169,5 +174,6 @@ warning. For anything but a single machine, set `require` at least, and `verify-
 proves that the server is yours.
 
 `verify-ca` and `verify-full` check against the root certificates of the system, or against the file named by
-`sslrootcert` in `MUSTER_DATABASE_URL`, which must exist in the container. The fields form has no such setting. The
-session connection takes the `sslmode` of the main connection unless `MUSTER_DATABASE_SESSION_URL` names its own.
+`sslrootcert` in `MUSTER_DATABASE_URL`, which must exist in the container. The fields form has no such setting. With
+`MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`, the session connection takes the `sslmode` of the
+main connection; a `MUSTER_DATABASE_SESSION_URL` carries its own, `prefer` when it names none.

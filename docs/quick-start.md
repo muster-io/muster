@@ -15,8 +15,9 @@ flowchart LR
 
 !!! note "Before the first release"
     Until Muster's first release, the tag in the download command below does not exist yet. Download from `master`
-    instead, by replacing the tag in the URL with `master`, and add `MUSTER_IMAGE=ghcr.io/muster-io/muster:edge` to
-    `.env`: `edge` is the development image built from the newest commit on `master`.
+    instead: replace the tag in the URL, the part that starts with `v`, with `master`. Then, after you write `.env`,
+    append the development image to it with `echo MUSTER_IMAGE=ghcr.io/muster-io/muster:edge >> .env`: `edge` is the
+    image built from the newest commit on `master`.
 
 Download the compose example into a new directory:
 
@@ -102,11 +103,13 @@ route:
     # ... your existing child routes
 ```
 
-Its URL comes from `MUSTER_PUBLIC_URL`, because the compose example serves ingestion on the same address. When your
-Alertmanager runs on another machine, set `MUSTER_PUBLIC_URL` in `.env` to an address that both Alertmanager and your
-browser reach, run `docker compose up -d --wait` again, and create the token after that.
-[Connect Alertmanager](integrations/alertmanager.md) explains every line of the configuration, the catch-all child
-route to keep last, and the start delay.
+Its URL comes from `MUSTER_PUBLIC_URL`, because the compose example serves ingestion on the same address. Keep
+`MUSTER_PUBLIC_URL=http://localhost:8080` for your browser on this machine. When your Alertmanager runs on another
+machine, replace `localhost` in the receiver's `url` with an address of this machine that Alertmanager reaches.
+Browsers keep Muster's session only over HTTPS or on `localhost`: to open Muster from other machines, put an HTTPS
+reverse proxy in front of port 8080, set `MUSTER_PUBLIC_URL` in `.env` to its `https://` address and run
+`docker compose up -d --wait` again. [Connect Alertmanager](integrations/alertmanager.md) explains every line of the
+configuration, the catch-all child route to keep last, and the start delay.
 
 ## Send a test alert
 
@@ -150,7 +153,8 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 - **Connect a messenger.** Connect [Mattermost](messengers/mattermost.md) or [Telegram](messengers/telegram.md), add a
   Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
   [Routes and Group keys](concepts/routes-and-group-keys.md). Mattermost sends button presses to `MUSTER_PUBLIC_URL`
-  here, so the Mattermost server must reach that address.
+  here, so the Mattermost server must reach that address: unless it reaches Muster at `http://localhost:8080`, put an
+  HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its `https://` address first.
 - **Use any other messenger through a Bridge.** A [Bridge](messengers/bridge.md) is a small service that connects
   Muster to a messenger it does not support natively. [Write a bridge](messengers/write-a-bridge.md) with the library
   for Go, [muster-bridge-go](https://github.com/muster-io/muster-bridge-go), or for Python,
