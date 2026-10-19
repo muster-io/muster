@@ -2,8 +2,9 @@
 
 [L1 index](../L1.md) · Stage: Operations · UI: yes · Depends on: C-03, C-11, C-13
 
-**Goal.** Admins change Organization-wide behaviour — time zone, Severity levels, urgency, Instance labels, retention
-and the outbound address policy — whose defaults exist since C-02, and rotate the master keys safely.
+**Goal.** Admins change Organization-wide behaviour — time zone, the start of the working day and of the week, Severity
+levels, urgency, Instance labels, retention and the outbound address policy — whose defaults exist since C-02, and
+rotate the master keys safely.
 
 Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
@@ -15,6 +16,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 3. The Admin switches the outbound address policy to strict and allows the network of the internal chat server.
 4. The Admin rotates the master key: adds the new key to every replica's environment, activates it, waits for "the old
    key is no longer needed", and removes it.
+5. The Admin of a team whose week starts on Sunday and whose working day starts at 08:30 sets both; messages then offer
+   "Until tomorrow 08:30" and "Until Sunday 08:30" (C-10.FR-17).
 
 ## Functional requirements
 
@@ -44,15 +47,21 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Alert Group whose buttons another key signed, so their buttons are re-signed. The activation is recorded in the Audit
   log.
 - **C-20.FR-8** Every settings change is audited with a before/after diff and uses optimistic locking.
+- **C-20.FR-9** Admins set the start of the working day (`organization.workday_start`, a time of day `HH:MM` on the
+  24-hour clock) and the first day of the week (`organization.week_start`, `monday` to `sunday`) on the General page,
+  next to the time zone; the Snooze presets end at them (C-10.FR-17). The `organization` read carries both for every
+  signed-in identity, so that the UI can label the presets; an update that omits one keeps it. A change applies to
+  Snoozes set afterwards and never moves one already set; Root messages show the new labels from their next re-render
+  (C-10.FR-18).
 
 ## UI
 
 One "Organization" entry in the main navigation opens a sub-navigation of the Organization pages: General (name, time
-zone), Severity levels (mapping, emoji and colours, values seen), Alert handling ("critical is Urgent", Instance
-labels), Security (the TOTP policy of C-03; the token grace period for OIDC users without an offline token), Outbound
-addresses (outbound address policy, allowed and denied entries), Retention, Keyring (Keyring status), and the pages of
-other capabilities kept with them: Outgoing heartbeat and System status (C-19), Lookup tables and Link rules (C-12),
-and the Audit log (C-03).
+zone, the start of the working day and the first day of the week), Severity levels (mapping, emoji and colours, values
+seen), Alert handling ("critical is Urgent", Instance labels), Security (the TOTP policy of C-03; the token grace period
+for OIDC users without an offline token), Outbound addresses (outbound address policy, allowed and denied entries),
+Retention, Keyring (Keyring status), and the pages of other capabilities kept with them: Outgoing heartbeat and System
+status (C-19), Lookup tables and Link rules (C-12), and the Audit log (C-03).
 
 ## API surface
 
@@ -74,6 +83,9 @@ and the Audit log (C-03).
   signed by the new key, and presses on them work.
 - **C-20.AC-6** An update that sets `retention.alert_group_summaries` below `retention.alert_details` gets `422` with
   `retention_order` and changes nothing; equal periods are accepted.
+- **C-20.AC-7** An update with `workday_start` `24:00` or `9:00`, or with `week_start` `weekend`, is refused with
+  `invalid_format` at the field and changes nothing; `08:30` with `sunday` is accepted, recorded in the Audit log with
+  its before/after diff, and the next `snooze-presets` read ends `week_start` at 08:30 on the next Sunday.
 
 ## Related ADRs
 
@@ -89,3 +101,5 @@ re-signed buttons.
 - **BE** — Organization settings update, values seen, outbound policy editing.
 - **BE** — Keyring status, `rotate-key` and the re-render after a rotation.
 - **FE** — Organization settings pages.
+- Added with the Snooze presets: the start of the working day and of the week, in the API (**BE**) and on the General
+  page (**FE**), with the stories of C-10.FR-17.

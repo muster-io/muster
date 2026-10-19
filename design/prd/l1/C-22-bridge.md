@@ -84,11 +84,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   link or a Mention. The bridge renders the envelope in its messenger's own markup; Muster never writes a messenger's
   markup for a bridge. Thread replies, Storm summaries and test messages use the same body rules.
 - **C-22.FR-5** When `info` declares `buttons`, a Root message carries the buttons of its status
-  ([reference.md](reference.md#buttons-and-links-by-status)), with Snooze durations as separate buttons, and a Reminder
-  carries "Still on it" and "Unack" (C-17.FR-4). Each button has a label, a style hint — Ack and "Still on it"
-  `primary`, Resolve `success`, every other `neutral` — and data of at most 64 printable ASCII bytes that carries the
-  opaque action id, the key id and the signature with the button-signature key (ADR-0011). Muster sends at most
-  `buttons.max_per_message` buttons, dropping Snooze durations from the longest first. Without `buttons`, a message
+  ([reference.md](reference.md#buttons-and-links-by-status)), with Snooze durations and then the Snooze presets
+  (C-10.FR-18) as separate buttons, and a Reminder carries "Still on it" and "Unack" (C-17.FR-4). Each button has a
+  label, a style hint — Ack and "Still on it" `primary`, Resolve `success`, every other `neutral` — and data of at most
+  64 printable ASCII bytes that carries the opaque action id, the key id and the signature with the button-signature
+  key (ADR-0011). Muster sends at most `buttons.max_per_message` buttons, dropping Snooze buttons first: the
+  `week_start` preset, then the `tomorrow` preset, then the durations from the longest. Without `buttons`, a message
   carries none; when the bridge declares `thread_messages`, the body of a Root message that is not resolved ends with
   the line "Reply in the Thread: ack · resolve · snooze {first duration}" for its status (C-22.FR-14) — "Reply in the
   Thread, mentioning the bot: …" when the bridge forwards only messages that mention the bot — in the Route's language;
@@ -174,12 +175,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   Text command when its whole text — trimmed, case-insensitive, with an optional leading `/` — is one of `ack`, `unack`,
   `resolve`, `snooze <duration>`, `unsnooze` and `still on it`, or one of their Russian synonyms
   (`bridge.text_commands`); `<duration>` is one of the Route's Snooze durations (`route.snooze_durations`), written as
-  minutes, hours or days (`30m`, `4h`, `1d`; `30м`, `4ч`, `1д`). Muster maps the writer through their Account link and
-  dispatches the Command for that Alert Group with the Transport `bridge`, exactly as a press; `still on it` answers the
-  open Reminder (C-17.FR-10). It answers through FR-13 with "Done: {command} #N", with the refusal of C-10.FR-2, with
-  the answers of FR-12 for unlinked, Viewer and disabled accounts, and for a duration that is not one of the Route's with
-  "Snooze for one of: {durations}". Any other text is ignored and answered by nothing, and so is a Text command whose
-  `occurred_at` is older than `bridge.event_max_age`. Only Bridge Destinations take Text commands.
+  minutes, hours or days (`30m`, `4h`, `1d`; `30м`, `4ч`, `1д`), or a Snooze preset (C-10.FR-17) — `tomorrow`
+  (`завтра`), or the name of the Organization's first day of the week (`monday` … `sunday`; `понедельник` …
+  `воскресенье`) — which a Route without Snooze durations does not take either (C-10.FR-18). Muster maps the writer
+  through their Account link and dispatches the Command for that Alert Group with the Transport `bridge`, exactly as a
+  press; `still on it` answers the open Reminder (C-17.FR-10). It answers through FR-13 with "Done: {command} #N", with
+  the refusal of C-10.FR-2, with the answers of FR-12 for unlinked, Viewer and disabled accounts, and for a duration
+  that is not one of the Route's with "Snooze for one of: {durations}", which lists the Route's durations and the words
+  of the two presets in the Route's language. Any other text is ignored and answered by nothing, and so is a Text
+  command whose `occurred_at` is older than `bridge.event_max_age`. Only Bridge Destinations take Text commands.
 - **C-22.FR-15** Account links through a Bridge Connection follow C-18 — started only from the signed-in web session
   (C-18.FR-1), one account per User per Connection (the Identity space is the Connection), refusals, unlinking, the
   Audit log with the messenger `bridge` — in two ways:
@@ -384,6 +388,11 @@ Checked against the fake bridge, unless an acceptance statement names the exampl
   of a saved Connection with only the base URL changed, the check makes only the dry probe `GET <base>/v1/info`
   without an `Authorization` header and passes on the fake's `401` problem; against an address that answers `200`
   with HTML it fails with `not_bridge`; no request that carries the stored token reaches the new address.
+- **C-22.AC-27** In the Thread of a firing Alert Group on a Route with the On-call durations, `snooze tomorrow` and
+  `отложить понедельник` from a linked Responder snooze it until the ends of C-10.FR-17 in the profile time zone of the
+  User, else the Organization's, each answered "Done: Snoozed #N"; with the week starting on Monday, `snooze friday` is
+  answered "Snooze for one of: 1h, 4h, 24h, tomorrow, monday". A bridge whose `max_per_message` is 5 gets Ack, Resolve
+  and the three durations on a firing Root message, and one whose limit is 6 also "Until tomorrow 09:00".
 
 ## Related ADRs
 

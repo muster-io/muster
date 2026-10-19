@@ -28,8 +28,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022, S-065 | yes | 36 of 36 |
 | C-07 Heartbeat | Observation | 12 | S-023, S-024 | yes | 12 of 12 |
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
-| C-09 Alert Group lifecycle | Observation | 49 | S-028, S-029, S-030, S-031, S-065 | yes | 49 of 49 |
-| C-10 Commands | Observation | 35 | S-032, S-063, S-033 | yes | 35 of 35 |
+| C-09 Alert Group lifecycle | Observation | 51 | S-028, S-029, S-030, S-031, S-065, S-095 | yes | 51 of 51 |
+| C-10 Commands | Observation | 41 | S-032, S-063, S-033, S-092, S-093, S-094 | yes | 41 of 41 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082 | yes | 19 of 19 |
 | C-13 Mattermost | Shadow | 31 | S-039, S-061, S-040, S-064, S-087 | yes | 31 of 31 |
@@ -39,9 +39,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
 | C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
-| C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
+| C-20 Organization settings and security | Operations | 14 | S-055, S-071, S-056, S-072, S-092, S-094 | yes | 14 of 14 |
 | C-21 Documentation site and runbooks | Operations | 11 | S-057, S-058, S-060, S-091 | yes | 11 of 11 |
-| C-22 Bridge | Bridge | 51 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084 | yes | 51 of 51 |
+| C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090 | yes | 13 of 13 |
 
 ## C-01
@@ -321,7 +321,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-09
 
-[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031, S-065
+[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031, S-065, S-095
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -345,6 +345,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09.FR-17 | S-030 | complete |  |
 | C-09.FR-24 | S-030 (part), S-033 | complete |  |
 | C-09.FR-25 | S-012 (part), S-029 (part), S-030 | complete | S-012 brought the stream forward with the notice and Organization hints |
+| C-09.FR-26 | S-095 | complete | added with D379, after the Bridge phase |
 | C-09.FR-14 | S-028 (part), S-030, S-033, S-034 (part), S-037 (part), S-038 (part), S-064 (part), S-050 (part), S-070 (part) | complete | later sections come with S-038, S-064 and S-050; the delivery section's tooltips in S-070 (D309) |
 | C-09.FR-20 | S-029 (part), S-030 | complete |  |
 | C-09.FR-15 | S-029 (part), S-031 | complete |  |
@@ -374,10 +375,11 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09.AC-23 | S-029 | complete |  |
 | C-09.AC-24 | S-012, S-029 | complete | verified by S-012, which brought the stream forward with C-03, and again by S-029 |
 | C-09.AC-25 | S-029 | complete |  |
+| C-09.AC-26 | S-095 | complete |  |
 
 ## C-10
 
-[Commands](../prd/l1/C-10-commands.md) · Observation · stories: S-032, S-063, S-033
+[Commands](../prd/l1/C-10-commands.md) · Observation · stories: S-032, S-063, S-033, S-092, S-093, S-094
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -396,6 +398,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-10.FR-14 | S-032 (part), S-033 | complete |  |
 | C-10.FR-15 | S-032 (part), S-063 (part) | complete |  |
 | C-10.FR-16 | S-032 (part), S-063 (part), S-033, S-049 (part), S-050 (part) | complete | `still_on_it` is C-17 (S-049, S-050) |
+| C-10.FR-17 | S-092 | complete | added with D379, after the Bridge phase |
+| C-10.FR-18 | S-092 (part), S-093 (part), S-094 (part) | complete | the API (S-092), the buttons and Text commands of the messengers of C-13, C-14 and C-22 (S-093), the dialog (S-094) |
 | C-10.AC-1 | S-032 | complete |  |
 | C-10.AC-2 | S-032 | complete |  |
 | C-10.AC-3 | S-032 | complete |  |
@@ -412,10 +416,14 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-10.AC-14 | S-032 (part), S-033 | complete |  |
 | C-10.AC-15 | S-032 | complete |  |
 | C-10.AC-16 | S-032 (part), S-063 (part) | complete |  |
-| C-10.AC-17 | S-032 | complete |  |
+| C-10.AC-17 | S-032, S-092 (part) | complete | the third choice `preset` comes with S-092 |
 | C-10.AC-18 | S-032 (part), S-063 (part) | complete |  |
 | C-10.AC-19 | S-063 | complete |  |
 | C-10.AC-20 | S-063 | complete |  |
+| C-10.AC-21 | S-092 | complete |  |
+| C-10.AC-22 | S-092 | complete |  |
+| C-10.AC-23 | S-093 | complete | verified with the messengers of C-13 and C-14, which S-093 follows |
+| C-10.AC-24 | S-094 | complete |  |
 
 ## C-11
 
@@ -695,7 +703,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-20
 
-[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056, S-072
+[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056, S-072, S-092, S-094
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -705,12 +713,14 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-20.FR-6 | S-071 (part), S-056 (part) | complete |  |
 | C-20.FR-7 | S-071 | complete |  |
 | C-20.FR-8 | S-055 | complete |  |
+| C-20.FR-9 | S-092 (part), S-094 (part) | complete | added with the Snooze presets (D379): the API in S-092, the General page in S-094 |
 | C-20.AC-1 | S-055 | complete |  |
 | C-20.AC-2 | S-071 (part), S-056 (part) | complete |  |
 | C-20.AC-3 | S-055 | complete |  |
 | C-20.AC-4 | S-055 (part), S-056 (part) | complete |  |
 | C-20.AC-5 | S-071 | complete |  |
 | C-20.AC-6 | S-055 | complete |  |
+| C-20.AC-7 | S-092 | complete |  |
 
 ## C-21
 
@@ -732,7 +742,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-22
 
-[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084
+[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -740,7 +750,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.FR-2 | S-073 (part), S-074 (part), S-077 (part), S-087 (part) | complete | the dry probe in S-087 |
 | C-22.FR-3 | S-080 (part), S-074 (part), S-077 (part) | complete |  |
 | C-22.FR-4 | S-074 | complete |  |
-| C-22.FR-5 | S-074 | complete |  |
+| C-22.FR-5 | S-074, S-093 (part) | complete | the Snooze presets and their place in the drop order come with S-093 |
 | C-22.FR-6 | S-074 | complete |  |
 | C-22.FR-7 | S-074 | complete |  |
 | C-22.FR-8 | S-073 (part), S-074 (part), S-081 (part) | complete |  |
@@ -749,7 +759,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.FR-11 | S-075 | complete |  |
 | C-22.FR-12 | S-075 (part), S-077 (part) | complete |  |
 | C-22.FR-13 | S-075 (part), S-076 (part) | complete |  |
-| C-22.FR-14 | S-075 | complete |  |
+| C-22.FR-14 | S-075, S-093 (part) | complete | the words of the Snooze presets come with S-093 |
 | C-22.FR-15 | S-076 (part), S-077 (part) | complete |  |
 | C-22.FR-16 | S-076 | complete |  |
 | C-22.FR-17 | S-074 (part), S-075 (part), S-077 (part) | complete |  |
@@ -787,6 +797,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.AC-24 | S-079 | complete |  |
 | C-22.AC-25 | S-083 (part), S-085 (part), S-084 (part) | complete |  |
 | C-22.AC-26 | S-087 | complete |  |
+| C-22.AC-27 | S-093 | complete |  |
 
 ## C-23
 

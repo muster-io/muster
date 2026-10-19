@@ -145,6 +145,11 @@ _Avoid_: Reopen (for the manual action), Firing (as an action name)
 Set an Alert Group aside until a chosen time / end that early.
 _Avoid_: Silence, Mute
 
+**Snooze preset**:
+A Snooze that ends at the next start of the working day ("Until tomorrow 09:00") or at the start of the working day on
+the first day of the week ("Until Monday 09:00"), in the person's time zone; the Organization sets both.
+_Avoid_: Calendar snooze, Snooze template
+
 **Reopen**:
 Muster bringing a Resolved Alert Group back on its own because an Alert with the same Route and Group key values fired
 shortly after it closed.
