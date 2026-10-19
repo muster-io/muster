@@ -16,6 +16,10 @@ nothing for as long as it takes an Alert to go Stale.
 
 - The Alerts that Alertmanager left out do not reach their Alert Groups: Muster may show fewer Alerts than fire, miss
   an Alert Group entirely, or keep an Alert open that Alertmanager no longer lists.
+- For Grafana, when a whole group resolves, its last Snapshot lists only the first alerts, up to Max alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again. The Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live Heartbeat; the Heartbeat through Grafana has not been verified (see
+  [Connect Grafana](../../integrations/grafana.md#heartbeat)).
 - Everything else of the Integration keeps working.
 
 ## Diagnosis
@@ -37,5 +41,10 @@ nothing for as long as it takes an Alert to go Stale.
 - Set `max_alerts: 0` on the Alertmanager receiver that sends to Muster, so that every Alert of the group is sent,
   and reload Alertmanager; see [Connect Alertmanager](../../integrations/alertmanager.md).
 - For Grafana, set Max alerts to 0, the default, on the webhook contact point that sends to Muster; see
-  [Connect Grafana](../../integrations/grafana.md#create-a-webhook-contact-point).
-- The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification.
+  [Connect Grafana](../../integrations/grafana.md#create-a-webhook-contact-point). Max alerts 0 does not end the Alerts
+  that a wholly resolved group of Grafana's left firing: they go Stale while the Heartbeat is live, or end once the
+  group fires again and sends untruncated Snapshots. Resolving their Alert Group by hand does not end them either:
+  Alerts still firing when its Grace period ends start a new Alert Group.
+- The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification. A group of
+  Grafana's that resolved wholly sends none until one of its alerts fires again, so its truncation ends as
+  [Meaning](#meaning) says.

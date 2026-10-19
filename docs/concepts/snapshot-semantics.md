@@ -69,8 +69,9 @@ that Alertmanager resolved it, in the latest Alert Group where that fingerprint 
   later than the current `startsAt`: the two firings overlap. The replicas of a Grafana HA pair evaluate the rules each
   on its own, so their copies of one alert can carry different `startsAt`, and the resolve of either replica ends the
   Alert. Without an `endsAt`, or with one not later than the current `startsAt`, it is a resolve of an earlier firing.
-  Alertmanager merges overlapping firings of one alert, so a resolve it sends of an earlier firing ends before the next
-  one starts.
+  Alertmanager merges overlapping firings of one alert, so with one rule evaluator a resolve it sends of an earlier
+  firing ends before the next one starts. With an HA pair of rule evaluators, such as two Prometheus replicas, it can
+  send one that ends later, and Muster resolves the Alert, as it would with the `startsAt` that Alertmanager merged.
 - A `resolved` for a fingerprint that fires nowhere is dropped, and counted.
 - A Snapshot whose status is `resolved`, sent when all the alerts of its group resolved, resolves **every Alert of that
   group** that still fires, also the ones it does not list. After a restart of both Alertmanagers of a pair, such a

@@ -85,7 +85,9 @@ policies:
 ```
 
 Grafana replaces `${MUSTER_TOKEN}` with the variable of its environment when it reads the file, so the token stays out
-of the file. The file leaves out Max alerts (`maxAlerts`), so it is 0.
+of the file. The file leaves out Max alerts (`maxAlerts`), so it is 0. Grafana does not let you edit resources
+provisioned from files in its interface, this contact point and the notification policy tree included: change the
+file, then restart Grafana or reload the provisioned files through its Admin API.
 
 ### Send the alerts with a notification policy
 
@@ -185,7 +187,10 @@ it proves only the network: when Grafana itself stops, its groups fall silent an
   ([runbook](../operations/runbooks/MusterSnapshotTruncated.md)). Grafana computes the status of a Snapshot from the
   alerts it lists, so a truncated Snapshot can say `resolved` while alerts it left out still fire; Muster recognises a
   Snapshot from Grafana by its top-level `orgId`, and a truncated `status: resolved` from Grafana resolves only the
-  Alerts it lists as resolved. Set Max alerts to 0.
+  Alerts it lists as resolved. When a whole group resolves, its last Snapshot too lists only the first alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again: the Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live [Heartbeat](#heartbeat). Set Max alerts to 0; for the Alerts already
+  left firing, see the [runbook](../operations/runbooks/MusterSnapshotTruncated.md#fix).
 - **The Integration page speaks of Alertmanager**, the part that Grafana's built-in one plays. Its Alertmanager routes
   are Grafana's notification policies; its warning about a long repeat interval shows an Alertmanager route, where for
   Grafana you set the `repeat_interval` of the policy; its truncation warning names `max_alerts`, which is Max alerts

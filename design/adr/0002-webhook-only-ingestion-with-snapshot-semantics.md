@@ -132,11 +132,16 @@ the worst moment. After a bug fix, `muster ingest replay --since <duration>` rep
 `groupKey` listed the Alert.
 
 - An Alert sent as `resolved` is resolved at once. A `resolved` for an Alert that is already resolved, or for an
-  earlier firing of it, changes nothing and never reopens anything: it is a re-sent resolve (F-046).
+  earlier firing of it, changes nothing and never reopens anything: it is a re-sent resolve (F-046). A `resolved` with
+  an older `startsAt` than the Alert's current one is of an earlier firing unless its `endsAt` is strictly later than
+  the current `startsAt`; then the two firings overlap and it resolves the Alert, because the replicas of a Grafana HA
+  pair give the copies of one alert different `startsAt` (F-111; D383).
 - A Snapshot with `status: resolved` — sent with `notification_reason` `all alerts resolved` — resolves every Alert
   still firing in its Alertmanager group, also those it does not list, because after a restart of an HA pair the list
   can be partial and the rest never comes (F-044). `status` belongs to the whole Alertmanager group; in any other
-  Snapshot each Alert's own status decides.
+  Snapshot each Alert's own status decides. A truncated Snapshot from Grafana, which has a top-level `orgId` and
+  `truncatedAlerts > 0`, is the exception: Grafana computes its `status` from the alerts it lists, so its
+  `status: resolved` resolves only the Alerts it lists as resolved (F-110; D383).
 - An Alert missing from **two consecutive Snapshots** of its `groupKey`, and missing for at least
   **`processing.gone_min_absence`** (5 minutes) counted from the first Snapshot that missed it, is **Gone** in that
   Alertmanager group; until both hold, each later Snapshot that misses it decides again. A single missing Snapshot is

@@ -75,11 +75,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   ([F-043](../../facts.md#restarts-and-resolves)); a shorter delay lets a restarted Alertmanager send partial
   Snapshots. It also describes connecting Grafana Alerting both ways (D383): through an external Alertmanager, and
   directly, with a webhook contact point to the ingest URL — the token as the credentials of the `Authorization` scheme
-  `Bearer`, Max alerts 0, resolved messages on, no custom payload — and a notification policy with a
-  `repeat_interval` of 5–15 minutes that keeps Grafana's default grouping and lets Muster group, because after a
-  restart of Grafana a group of rules with different evaluation intervals sends Snapshots without the slower rules'
-  alerts until their first evaluation ([F-112](../../facts.md#ha-pairs-and-restarts)); one Integration per Grafana
-  cluster and organisation, an HA pair being one ([F-106](../../facts.md#payload-and-grouping)).
+  `Bearer`, Max alerts 0, resolved messages on, no custom payload ([F-105](../../facts.md#payload-and-grouping)) — and
+  a notification policy with a `repeat_interval` of 5–15 minutes that keeps Grafana's default grouping and lets Muster
+  group, because after a restart of Grafana a group of rules with different evaluation intervals sends Snapshots
+  without the slower rules' alerts until their first evaluation ([F-112](../../facts.md#ha-pairs-and-restarts)); one
+  Integration per Grafana cluster and organization, an HA pair being one
+  ([F-106](../../facts.md#payload-and-grouping)).
 - **C-05.FR-12** Each Integration exports `muster_integration_info{integration,name}`.
 
 ## UI

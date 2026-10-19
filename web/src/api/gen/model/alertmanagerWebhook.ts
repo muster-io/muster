@@ -30,7 +30,7 @@ export interface AlertmanagerWebhook {
   groupKey: string;
   /** Number of alerts left out because of Alertmanager's `max_alerts`, or because of Max alerts of Grafana's webhook contact point. */
   truncatedAlerts?: number;
-  /** The id of the Grafana organisation. Only Grafana's webhook contact point sends it, and a Snapshot whose `orgId` is present and not null is a Snapshot from Grafana. Grafana computes `status` from the alerts it lists, so a truncated Snapshot from Grafana with `status: resolved` resolves only the Alerts it lists as resolved, and the Alerts it leaves out stay firing; an untruncated one, like Alertmanager's, resolves its whole Alertmanager group. */
+  /** The id of the Grafana organization. Only Grafana's webhook contact point sends it, and a Snapshot whose `orgId` is present and not null is a Snapshot from Grafana. Grafana computes `status` from the alerts it lists, so a truncated Snapshot from Grafana with `status: resolved` resolves only the Alerts it lists as resolved, and the Alerts it leaves out stay firing; an untruncated one, like Alertmanager's, resolves its whole Alertmanager group. */
   orgId?: number;
   status: AlertState;
   receiver?: string;

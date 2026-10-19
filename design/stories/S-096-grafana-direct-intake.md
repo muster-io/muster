@@ -11,6 +11,7 @@ files_touched:
   - design/prd/L1.md
   - design/prd/l1/C-05-integrations.md
   - design/prd/l1/C-06-snapshot-processing.md
+  - design/prd/l1/defaults.md
   - design/adr/0002-webhook-only-ingestion-with-snapshot-semantics.md
   - design/facts.md
   - design/architecture.md
@@ -42,7 +43,7 @@ acceptance:
   - "[C-06.FR-4, C-06.FR-8, C-06.AC-18] The 84 bodies the Grafana HA pair sent, stored for a new Integration at their `recv` times on a manual clock and processed in order, on PostgreSQL 14 and 17, fail no Snapshot and leave every Alert in the state of the latest body that lists it: `SpikeDisk` on host `x` (the paused rule) is resolved, `SpikeNoData` on host `n` is resolved by the body of 07:39:27 and fires again at 07:57 as a new firing with `episode` 2, not a Continuation, and the route `{}/{}` has a learned repeat interval between 120 and 155 s (F-108). The test fails on `master` before the change. The 6 bodies of the contact point with Max alerts 5 fail no Snapshot either, and `MusterSnapshotTruncated` fires for their Integration (`grafana_integration_test.go`)."
   - "An Alert Group of Alerts from Grafana links to the rule's page in Grafana, `<root_url>/alerting/grafana/<rule uid>/view?orgId=1`, as `source`, and the built-in Explore rule, with a row of the Lookup table `grafana` for the Alert Group's cluster, writes no link, counts no template error and logs nothing, because the URL has no `g0.expr` (`render_test.go`; live)."
   - "[C-06.FR-21] The spec's `AlertmanagerWebhook` describes the payload of Grafana's webhook contact point beside Alertmanager's and documents the optional `orgId` as the mark of a Snapshot from Grafana; `make generate-check` passes with the regenerated server, clients and API reference."
-  - "[C-05.FR-11] The documentation page Connect Grafana describes connecting Grafana directly — the webhook contact point with its settings and a provisioning example, the notification policy, one Integration per Grafana cluster and organisation, and the limits of this section's Contracts — and through an external Alertmanager; the Alertmanager section of the site becomes Integrations, Snapshot semantics and the `MusterSnapshotTruncated` runbook name Grafana where they apply, `llms.txt` has the scenario Connect Grafana, and `make docs-check` passes."
+  - "[C-05.FR-11] The documentation page Connect Grafana describes connecting Grafana directly — the webhook contact point with its settings and a provisioning example, the notification policy, one Integration per Grafana cluster and organization, and the limits of this section's Contracts — and through an external Alertmanager; the Alertmanager section of the site becomes Integrations, Snapshot semantics and the `MusterSnapshotTruncated` runbook name Grafana where they apply, `llms.txt` has the scenario Connect Grafana, and `make docs-check` passes."
   - "[C-06.FR-4, C-06.FR-8, C-06.FR-21] Live, a single Grafana OSS 13.2.4 sends to `muster dev` through a webhook contact point with an Integration token: after a new group, an added alert, one resolved alert, all resolved and a paused rule, the Integration's firing Alerts (`listIntegrationAlerts`) equal the active alerts of Grafana's own Alertmanager each time, no Stored Snapshot failed, and the route learns a repeat interval; Grafana's truncated `status: resolved` body sent with and without `orgId` leaves 5 and 0 of 10 Alerts firing."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
@@ -81,7 +82,7 @@ issue: 304
   `MissingSeries`, F-109) in the Alerts view: the model takes annotations from firing listings only, and the reason
   stays visible in the Stored Snapshot. Proposed to the maintainer in the pull request (Notes).
 - `ha_single_node_evaluation`, retries of the webhook contact point, Grafana's silences and mute timings, several
-  organisations on one Integration, a custom payload, HMAC signing and the Heartbeat through Grafana: not verified
+  organizations on one Integration, a custom payload, HMAC signing and the Heartbeat through Grafana: not verified
   (facts, Pending); the documentation says so where it mentions them.
 - A generic inbound webhook for other senders: L2 (ADR-0002).
 - A fake Grafana server: the captured bodies stand for Grafana in tests, and a live check posts them to the ingest
@@ -116,10 +117,13 @@ issue: 304
 
   The rule holds for late Snapshots and replays too, which apply only the `resolved` rows. `resolveGroup` keeps skipping
   an Alert listed as resolved — its own row decides it, and now resolves it when the firings overlap — so only its
-  comment changes. `applyInternal` (Internal alerts) is unchanged. Alertmanager is unaffected: it merges overlapping
-  firings of one fingerprint into one alert with the earliest `startsAt` (F-053), and Prometheus and vmalert resolve an
-  alert before it fires again, so a resolve Alertmanager sends of an earlier firing, re-sent ones included (F-046),
-  ends before the next firing starts.
+  comment changes. `applyInternal` (Internal alerts) is unchanged. With one rule evaluator Alertmanager is unaffected:
+  it merges overlapping firings of one fingerprint into one alert with the earliest `startsAt` (F-053), and Prometheus
+  and vmalert resolve an alert before it fires again, so a resolve Alertmanager sends of an earlier firing, re-sent
+  ones included (F-046), ends before the next firing starts. With an HA pair of rule evaluators, Alertmanager replaces
+  rather than merges an alert whose incoming time range contains the stored one, so it can send a resolve with an older
+  `startsAt` whose `endsAt` is later than the next firing's `startsAt`; Muster then resolves the Alert, as it does when
+  it kept Alertmanager's merged `startsAt`, where before this change the Alert stayed firing for good.
 - **The truncated Snapshot from Grafana** (`process.go`, `run`, C-06.FR-21): a Snapshot with `status: resolved` resolves
   its whole Alertmanager group (`resolveGroup`) unless `Payload.Grafana` and `TruncatedAlerts > 0`; then only the Alerts
   it lists as resolved resolve, by their own rows, and the unlisted ones stay alive as C-06.FR-6 says. Truncation is
@@ -142,8 +146,8 @@ issue: 304
   without `orgId`.
 - **Fake Alertmanager** (`scenarios.go`): the F-046 scenario's resolve with the old `startsAt`, sent after the new
   firing, gets `EndsAt` at the time it first resolved (120 s), as Prometheus re-sends a resolve with its original
-  `endsAt`; the fake would otherwise stamp it with the time of the step, after the new firing's `startsAt`, which no
-  Alertmanager sends. Its expectations are unchanged.
+  `endsAt`; the fake would otherwise stamp it with the time of the step, after the new firing's `startsAt`, which
+  Alertmanager does not send with one rule evaluator. Its expectations are unchanged.
 - **Links** (`render_test.go`): a firing Alert whose `generatorURL` is
   `http://grafana.example.org/alerting/grafana/spike-cpu/view?orgId=1`, with the Lookup table `grafana` holding the
   Alert Group's cluster, gets the `source` link with that URL and no Explore link, and the evaluation counts no
@@ -158,7 +162,7 @@ issue: 304
   `make generate` and are not listed.
 - **Documentation** (C-05.FR-11, D383):
   - `docs/integrations/grafana.md` becomes **Connect Grafana**, with both ways. **Directly**: an Integration for each
-    Grafana cluster and organisation — an HA pair is one, and two organisations with the same policies give the same
+    Grafana cluster and organization — an HA pair is one, and two organizations with the same policies give the same
     `groupKey`s (F-106) — and its token; a webhook contact point to the Integration's ingest URL,
     `MUSTER_INGEST_URL` followed by `/api/v1/ingest`, method POST, the `Authorization` header with the scheme `Bearer`
     and the Integration token as its credentials, **Max alerts 0** (the default), "Disable resolved message" off and no
@@ -201,10 +205,11 @@ issue: 304
 3. **The resolve of an overlapping firing.** Change `apply` and the comment of `resolveGroup`; add the rows of the
    table to `TestAlertRules` and a test of the HA sequence. `TestRepeatedResolves` and the last part of
    `TestResolvedGroup` give a resolve the `endsAt` one hour after its `startsAt` (the helper `resolved`), after the
-   next firing's `startsAt` — a shape Alertmanager never sends, whose firings would have merged (F-053) — so they take
-   Alertmanager's real shape, `endsAt` the time of the resolve, before the next firing; fix the F-046 scenario of the
-   fake Alertmanager the same way. Check: `go test ./internal/ingest/ ./internal/fakes/fakealertmanager/`;
-   `make test-integration` (with `TestIntegrationFacts`) and the test of step 2 pass.
+   next firing's `startsAt` — a shape Alertmanager does not send with one rule evaluator, whose firings would have
+   merged (F-053) — so they take Alertmanager's real shape, `endsAt` the time of the resolve, before the next firing;
+   fix the F-046 scenario of the fake Alertmanager the same way. Check:
+   `go test ./internal/ingest/ ./internal/fakes/fakealertmanager/`; `make test-integration` (with
+   `TestIntegrationFacts`) and the test of step 2 pass.
 4. **The truncated Snapshot from Grafana.** Change `run`. Check: the unit test of C-06.AC-17 and the third case of
    `grafana_integration_test.go`.
 5. **Links.** Add the case to `render_test.go`. Check: `go test ./internal/links/`.
@@ -327,16 +332,21 @@ None.
   records as a Continuation, once per Alert, Quiet; later copies with the older `startsAt` are old copies. The live
   test kept the later one first. This story does not change the firing rows; the documentation of Connect Grafana
   names `ha_single_node_evaluation` as untested.
+- **A late resolve of a Grafana HA pair can end a later firing.** With a Grafana HA pair whose alert flaps, a late
+  resolve with the `startsAt` S1 and the `endsAt` E1 — in a replay, for example — resolves a later firing whose
+  `startsAt` falls between S1 and E1, because the two overlap. Alertmanager cannot produce that with one rule
+  evaluator, because it merges such firings.
 - **`grafana_state_reason`.** Proposed to the maintainer in the pull request: keep the annotations of a resolve on the
   Alert, so that the Alerts view and the Alert Group page show why Grafana resolved it (`Paused`, `RuleDeleted`,
   `MissingSeries`). It changes the processing model — annotations come from firing listings only — and is not part of
   this story.
 - **Facts.** F-070 to F-104 are reserved for the facts of the Slack test, so those of Grafana start at F-105.
 - **Changes to documents made with this contract**: C-06 gains scenarios 11 and 12 and C-06.AC-16 to AC-18, its
-  FR-4, FR-8 and FR-21 change; C-05's goal, scenario 6 and FR-11; L1 §1.1 Input and NFR-12; ADR-0002's Position and an
-  Amended line; the glossary's Snapshot and Truncated Snapshot; `facts.md` (the section Grafana and its Pending);
-  `architecture.md` (the system context and the processing flow); the Alerts table of S-020. They are proposed to the
-  maintainer in this pull request.
+  FR-4, FR-8 and FR-21 change, and FR-2, FR-6 and FR-7 cite the facts of Grafana; C-05's goal, scenario 6 and FR-11;
+  L1 §1.1 Input and NFR-12; ADR-0002's Position, its Snapshot semantics and an Amended line; the row
+  `integration.duplicate_window` of `defaults.md` cites F-111; the glossary's Snapshot and Truncated Snapshot;
+  `facts.md` (the section Grafana and its Pending); `architecture.md` (the system context and the processing flow); the
+  Alerts table of S-020. They are proposed to the maintainer in this pull request.
 - The live check uses a `repeat_interval` of 2 minutes so that two repeats come within minutes; the documentation
   recommends 5–15 minutes, as for Alertmanager.
 

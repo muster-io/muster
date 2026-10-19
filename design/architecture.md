@@ -24,7 +24,7 @@ Each Alertmanager cluster, usually an HA pair, is one Integration ([C-05]): an A
 Snapshots to Muster's ingestion endpoint, and a second receiver on a dedicated Alertmanager route sends an always-firing
 `Watchdog` alert as the Integration's Heartbeat ([C-07]). Muster needs no inbound access to Alertmanager. Grafana
 Alerting sends the same Snapshots from its built-in Alertmanager through a webhook contact point, one Integration per
-Grafana cluster and organisation ([ADR-0002], [C-05]).
+Grafana cluster and organization ([ADR-0002], [C-05]).
 
 Muster delivers Alert Groups to Mattermost through its REST API with a bot account, and Mattermost calls Muster back
 when someone presses a button ([ADR-0013], [C-13]). It delivers to Telegram through the Bot API — at
