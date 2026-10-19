@@ -175,10 +175,10 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
 
   | State | While | Mark (from 640 CSS pixels up) |
   |---|---|---|
-  | `connecting` | from the page load until the stream first opens | grey dot; "Connecting…" once `live.reconnecting_after` has passed |
-  | `live` | the stream is open | green dot and "Live" |
-  | `reconnecting` | the stream has been closed for `live.reconnecting_after`, and the browser or the shell tries again | amber dot and "Reconnecting…" |
-  | `offline` | the stream has been closed for `live.offline_after`, counted from the page load before it first opened | red dot and "Offline" |
+  | `connecting` | from the page load until the stream first opens | grey ring; "Connecting…" once `live.reconnecting_after` has passed |
+  | `live` | the stream is open | green filled dot and "Live" |
+  | `reconnecting` | the stream has been closed for `live.reconnecting_after`, and the browser or the shell tries again | amber half-filled dot and "Reconnecting…" |
+  | `offline` | the stream has been closed for `live.offline_after`, counted from the page load before it first opened | red ring with a slash and "Offline" |
 
   A drop shorter than `live.reconnecting_after`, such as a replica restarting, leaves the mark as it was. The mark's
   text is a status region (`role="status"`, announced politely) whose changes a screen reader reads out. Pressing the
@@ -186,10 +186,11 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   a button that reloads the page. Whenever the stream opens again after a loss, whether the browser reconnected it or
   the shell opened a new one (FR-25), every query is read again and the mark returns to `live`. Below 640 CSS pixels
   (the `sm` breakpoint) the mark shows only its dot in every state, its text in the status region and in what pressing
-  it shows, so that the navigation keeps its width; from 640 CSS pixels up the dot has its text beside it in every
-  state but `connecting` before `live.reconnecting_after` has passed. The page does not scroll horizontally from 360
-  CSS pixels up. The mark sends nothing to the server and is not recorded anywhere (NFR-7). When the session has
-  ended, the SPA goes to the sign-in page as FR-25 says.
+  it shows, so that the navigation keeps its width; each state's dot has its own shape, as in the table, so that no
+  state is told by colour alone. From 640 CSS pixels up the dot has its text beside it in every state but
+  `connecting` before `live.reconnecting_after` has passed. The page does not scroll horizontally from 360 CSS pixels
+  up. The mark sends nothing to the server and is not recorded anywhere (NFR-7). When the session has ended, the SPA
+  goes to the sign-in page as FR-25 says.
 
 ### Alert Group page
 

@@ -23,9 +23,9 @@ files_touched:
 acceptance:
   - "[C-09.FR-26] The state follows the live-updates stream: `connecting` from the page load until the first `open`, `live` on every `open`, `reconnecting` once the stream has been closed for `live.reconnecting_after` (5 s), `offline` once it has been closed for `live.offline_after` (30 s) — counted from the page load before the first `open` — while a close shorter than 5 s leaves the state as it was, and any later `open` returns to `live` (`live-status.test.ts`, with a stand-in EventSource and fake timers)."
   - "[C-09.FR-26] Whenever the stream opens again after a loss, every query is invalidated: when the browser reconnected the same EventSource, as before, and also when the shell opened a new one after the old one closed for good (`app-shell.test.tsx`)."
-  - "[C-09.FR-26] The mark is `data-testid=\"live-indicator\"` with `data-state` set to the state; its text — \"Connecting…\", \"Live\", \"Reconnecting…\", \"Offline\" («Подключение…», «Онлайн», «Переподключение…», «Нет связи») — sits in a `role=\"status\"` region, so each change is announced politely, names the button and titles the popover, so the state is never in the colour of the dot alone for assistive technology; below the `sm` breakpoint only the dot shows, in every state, on a button of at least 32 × 32 px named by the text; from `sm` up the text shows beside it in every state but `connecting` before `live.reconnecting_after`; pressing the mark opens a popover whose title is the text, which names the dialog, with the explanation of reference.md, which in `offline` names the time the stream was lost and has \"Reload page\" («Перезагрузить страницу»), which reloads it (`live-indicator.test.tsx`)."
+  - "[C-09.FR-26] The mark is `data-testid=\"live-indicator\"` with `data-state` set to the state; its text — \"Connecting…\", \"Live\", \"Reconnecting…\", \"Offline\" («Подключение…», «Онлайн», «Переподключение…», «Нет связи») — sits in a `role=\"status\"` region, so each change is announced politely, names the button and titles the popover, so the state is never in the colour of the dot alone for assistive technology; the dot is an 8 × 8 px picture hidden from assistive technology with its own shape in each state — a green filled dot in `live`, a grey ring in `connecting`, an amber half-filled dot in `reconnecting`, pulsing unless `prefers-reduced-motion`, and a red ring with a slash in `offline` (`data-shape` `filled`, `ring`, `half`, `slashed`) — so that no state is told by colour alone; below the `sm` breakpoint only the dot shows, in every state, on a button of at least 32 × 32 px named by the text; from `sm` up the text shows beside it in every state but `connecting` before `live.reconnecting_after`; pressing the mark opens a popover whose title is the text, which names the dialog, with the explanation of reference.md, which in `offline` names the time the stream was lost and has \"Reload page\" («Перезагрузить страницу»), which reloads it (`live-indicator.test.tsx`)."
   - "[C-09.AC-26] With the Alert Group list open, once the stream ends and its reconnects fail, the mark reads \"Reconnecting…\" and, with the page clock run 30 s forward, \"Offline\"; once the stream can be reached again it reads \"Live\" and the Firing tab count includes an Alert Group created through the fake Alertmanager meanwhile, without a reload; a loss that ends within 5 s leaves \"Live\" (`live-indicator.spec.ts`)."
-  - "[C-09.AC-26, C-09.FR-26] At 360 CSS pixels, in English and in Russian, with the stream lost the header of the Alert Group list shows only the dot of `reconnecting` and then of `offline`, and so does the header of an Alert Group page in `offline`, while the status region holds \"Reconnecting…\" and then \"Offline\" («Переподключение…», «Нет связи»); the main navigation keeps the width it had in `live`, with its first link whole inside it; the pages do not scroll horizontally; pressing the mark shows the state as the title of the popover and, in `offline`, \"Reload page\" («Перезагрузить страницу»); in `live` too only the green dot shows, its text read by screen readers; at 1280 px \"Live\" shows beside it (`live-indicator.spec.ts`)."
+  - "[C-09.AC-26, C-09.FR-26] At 360 CSS pixels, in English and in Russian, with the stream lost the header of the Alert Group list shows only the dot of `reconnecting` and then of `offline`, and so does the header of an Alert Group page in `offline`, while the status region holds \"Reconnecting…\" and then \"Offline\" («Переподключение…», «Нет связи»); the main navigation keeps the width it had in `live`, with its first link whole inside it; the pages do not scroll horizontally; pressing the mark shows the state as the title of the popover and, in `offline`, \"Reload page\" («Перезагрузить страницу»); in `live` too only the green dot shows, its text read by screen readers; the dot has the shape of its state while connecting, in `live`, in `reconnecting` and in `offline` (`data-shape`); at 1280 px \"Live\" shows beside it (`live-indicator.spec.ts`)."
   - "[C-09.FR-26] The mark makes no request of its own: the requests the spec records while the state changes are the live-updates stream and the reads of the page (`live-indicator.spec.ts`)."
   - "The documentation page Concepts → Alert Groups says what the mark shows and that the list and the page are read again when the connection is back; every new text exists in English and Russian; `make docs-check` passes."
 verify: "make ci e2e docs-check"
@@ -66,10 +66,12 @@ issue: 298
   EventSource after a close for good continues the same state, so a reopen does not start `connecting` again. The
   first `open` of a new EventSource after a loss invalidates every query, as the browser's reconnect already does, and
   so does the first `open` after the stream failed before it ever opened, which is a reconnect too (C-09.FR-25).
-- **Mark** (`components/live-indicator.tsx`), in the header before the user menu: a button with a dot — green `live`,
-  grey `connecting`, amber `reconnecting` (pulsing unless `prefers-reduced-motion`), red `offline` — and the state's
-  text. Below the `sm` breakpoint only the dot shows, in every state, so that the navigation keeps its width at 360
-  CSS pixels; the text is a screen-reader text there, which names the button, and the button is at least 32 × 32 px
+- **Mark** (`components/live-indicator.tsx`), in the header before the user menu: a button with a dot — a green filled
+  dot in `live`, a grey ring in `connecting`, an amber half-filled dot in `reconnecting` (pulsing unless
+  `prefers-reduced-motion`), a red ring with a slash in `offline`, each 8 × 8 px, an inline SVG hidden from assistive
+  technology with `data-shape` `filled`, `ring`, `half` or `slashed`, so that no state is told by colour alone — and the
+  state's text. Below the `sm` breakpoint only the dot shows, in every state, so that the navigation keeps its width at
+  360 CSS pixels; the text is a screen-reader text there, which names the button, and the button is at least 32 × 32 px
   to tap. From `sm` up the text shows beside the dot in `live`, `reconnecting` and `offline`, and in `connecting` once
   `live.reconnecting_after` has passed (before that a screen-reader text, as the table of C-09.FR-26 says, so that a
   page load does not flash "Connecting…"). The text sits in a `role="status"` region that holds the button, since the
@@ -119,10 +121,12 @@ Then in Playwright (`live-indicator.spec.ts`, at 1280 × 800 and 360 × 740, in 
    dot shows while the region holds «Переподключение…» and then «Нет связи» ("Reconnecting…", "Offline"); the
    navigation is as wide as in `live` (within `SUBPIXEL`), its first link whole inside it, `expectNoHorizontalScroll`
    passes, and pressing the mark shows the state as the title of the popover and, in `offline`, «Перезагрузить
-   страницу» ("Reload page"). The same holds on an Alert Group page in `offline`.
+   страницу» ("Reload page"). The same holds on an Alert Group page in `offline`. The dot's `data-shape` is `ring`
+   while connecting (the first stream held), `filled` in `live`, `half` in `reconnecting` and `slashed` in `offline`.
 8. The requests recorded through steps 4 to 6 are the live-updates stream and the reads of the page, none other.
 
-Screenshots of steps 4 and 7 in both languages go into the pull request.
+Screenshots of steps 4 and 7 in both languages go into the pull request, with the header at 360 px in each state
+(`live-indicator-shape-{connecting,live,reconnecting,offline}-360`).
 
 ## Open questions
 
@@ -143,6 +147,8 @@ None.
 - Added after all stories of L1 had merged, with the Snooze presets (D379).
 - Below `sm` the mark shows only its dot in every state: «Переподключение…» beside the user menu left the main
   navigation a few pixels wide at 360 px (decided during review of the pull request).
+- Each state has its own shape as well as its colour, so that the dot-only mark below `sm` does not rely on colour
+  (WCAG 1.4.1), decided during review of the pull request.
 
 ## Coverage
 

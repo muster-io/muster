@@ -10,10 +10,12 @@
 // Alert Group the fake Alertmanager created meanwhile gets its row, and the Firing count of the spec's Integration
 // grows by one. A loss of 4 s on the page clock leaves "Live". At 360 × 740, in English and in Russian, the mark shows
 // only its dot in every state, in the header of the list and of an Alert Group page, while the status region holds
-// "Reconnecting…" and then "Offline"; the main navigation keeps the width it had in live, the page does not scroll
-// horizontally, pressing the mark shows the state as the title of the popover, "Reload page" loads the page again, and
-// at 1280 px "Live" shows beside the dot. The requests of the page are the stream and its reads; while the mark changes,
-// the page reads nothing it had not read before, and nothing about the connection itself.
+// "Reconnecting…" and then "Offline"; the dot has the shape of each state, a ring while connecting, filled in live,
+// half-filled while reconnecting and slashed offline, so that no state is told by colour alone; the main navigation
+// keeps the width it had in live, the page does not scroll horizontally, pressing the mark shows the state as the title
+// of the popover, "Reload page" loads the page again, and at 1280 px "Live" shows beside the dot. The requests of the
+// page are the stream and its reads; while the mark changes, the page reads nothing it had not read before, and nothing
+// about the connection itself.
 
 import { type Locator, type Page, type Request, type Route, expect, test } from "@playwright/test";
 
@@ -131,6 +133,36 @@ function mark(page: Page) {
   return page.getByTestId("live-indicator");
 }
 
+/** The shape of the dot in each state, which tells the states apart without their colour. */
+const SHAPES = {
+  connecting: "ring",
+  live: "filled",
+  reconnecting: "half",
+  offline: "slashed",
+} as const;
+
+/** The mark is in the state, and its dot has the state's shape. */
+async function expectState(page: Page, state: keyof typeof SHAPES): Promise<void> {
+  await expect(mark(page)).toHaveAttribute("data-state", state);
+  await expect(mark(page).getByTestId("live-indicator-dot")).toHaveAttribute(
+    "data-shape",
+    SHAPES[state],
+  );
+}
+
+/**
+ * Saves a screenshot of the header of the shell alone for the pull request, where the dot can be seen, as shot() saves
+ * the page; the pulse of reconnecting is stopped, so that the dot is shown at its full colour.
+ */
+async function headerShot(page: Page, name: string): Promise<void> {
+  const dir = process.env.MUSTER_E2E_SCREENSHOTS;
+  if (dir !== undefined && dir !== "") {
+    await page
+      .getByRole("banner")
+      .screenshot({ path: `${dir}/${name}.png`, animations: "disabled" });
+  }
+}
+
 /** Whether the mark's text is on the screen, not only for screen readers, whose box is one pixel wide. */
 async function textShown(page: Page): Promise<boolean> {
   const box = await mark(page).getByTestId("live-indicator-text").boundingBox();
@@ -205,11 +237,11 @@ test("the mark follows the stream, and the list is read again once it is back", 
   await expect(page.getByRole("link", { name: FIRST_TITLE, exact: true })).toBeVisible();
   const firing = await count(page, "Firing");
   await lost.first.arrived.fired;
-  await expect(mark(page)).toHaveAttribute("data-state", "connecting");
+  await expectState(page, "connecting");
   await pauseClock(page);
   const fromLoss = requests.length;
   lost.first.released.fire();
-  await expect(mark(page)).toHaveAttribute("data-state", "live");
+  await expectState(page, "live");
   await expect(mark(page)).toHaveRole("status");
   await expect(mark(page)).toHaveText("Live");
   expect(await textShown(page)).toBe(true);
@@ -217,12 +249,12 @@ test("the mark follows the stream, and the list is read again once it is back", 
   await lost.second.arrived.fired;
   await expect(mark(page)).toHaveAttribute("data-state", "live");
   await page.clock.runFor(5_000);
-  await expect(mark(page)).toHaveAttribute("data-state", "reconnecting");
+  await expectState(page, "reconnecting");
   await expect(mark(page)).toHaveText("Reconnecting…");
   await expect(mark(page).getByTestId("live-indicator-dot")).toBeVisible();
   await shot(page, "live-indicator-reconnecting-en");
   await page.clock.runFor(25_000);
-  await expect(mark(page)).toHaveAttribute("data-state", "offline");
+  await expectState(page, "offline");
   await expect(mark(page)).toHaveText("Offline");
 
   // Pressed, the mark explains the state with the time of the loss and offers to reload the page. Offline lasts until
@@ -432,27 +464,42 @@ for (const language of ["en", "ru"] as const) {
     await page.clock.install();
     await signInIn(page, language);
 
-    // 7. The list in live: only the dot; the layout of the navigation the other states must keep.
+    // The header alone in each state, once, for the pull request: the shape of the dot, whatever the language.
+    const shapeShot = async (state: keyof typeof SHAPES) => {
+      if (language === "en") {
+        await headerShot(page, `live-indicator-shape-${state}-360`);
+      }
+    };
+
+    // 7. The list while connecting, the first stream held: only the ring.
     const lost = await routeStream(page, "abort");
     await page.goto("/alert-groups");
     await expect(page.getByRole("heading", { name: text.heading, level: 1 })).toBeVisible();
     const row = page.getByTestId("alert-group-row").filter({ hasText: FIRST_TITLE });
     await expect(row).toHaveCount(1);
     await lost.first.arrived.fired;
+    await expectState(page, "connecting");
+    await expect(mark(page).getByTestId("live-indicator-dot")).toBeVisible();
+    expect(await textShown(page)).toBe(false);
+    await shapeShot("connecting");
+
+    // In live: only the dot; the layout of the navigation the other states must keep.
     await pauseClock(page);
     lost.first.released.fire();
-    await expect(mark(page)).toHaveAttribute("data-state", "live");
+    await expectState(page, "live");
     await expectOnlyTheDot(page, text.live);
     const live = await navigationLayout(page, text.navigation);
+    await shapeShot("live");
     await lost.second.arrived.fired;
 
     // Reconnecting: still only the dot, the text in the status region and in the title of the popover.
     await page.clock.runFor(5_000);
-    await expect(mark(page)).toHaveAttribute("data-state", "reconnecting");
+    await expectState(page, "reconnecting");
     await expectOnlyTheDot(page, text.reconnecting);
     await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-reconnecting-${language}-360`);
+    await shapeShot("reconnecting");
     // The popover closes with an animation that waits for the page's frames, so the clock runs while it is open and
     // stops again before the rest of the 30 s; the state turns offline only once they have passed.
     await page.clock.resume();
@@ -468,11 +515,12 @@ for (const language of ["en", "ru"] as const) {
 
     // Offline: the same.
     await page.clock.runFor(25_000);
-    await expect(mark(page)).toHaveAttribute("data-state", "offline");
+    await expectState(page, "offline");
     await expectOnlyTheDot(page, text.offline);
     await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
     await shot(page, `live-indicator-offline-${language}-360-list`);
+    await shapeShot("offline");
 
     await page.clock.resume();
     const offline = await openPopover(page, text.offline);
@@ -486,7 +534,7 @@ for (const language of ["en", "ru"] as const) {
     // The Alert Group page, opened from the list: still offline, only the dot in its header.
     await row.getByRole("link").click();
     await expect(page.getByRole("heading", { name: FIRST_TITLE, level: 1 })).toBeVisible();
-    await expect(mark(page)).toHaveAttribute("data-state", "offline");
+    await expectState(page, "offline");
     await expectOnlyTheDot(page, text.offline);
     await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);
@@ -498,12 +546,13 @@ for (const language of ["en", "ru"] as const) {
     await page.getByRole("button", { name: text.reload }).click();
     await reloaded;
     await expect(page.getByRole("heading", { name: FIRST_TITLE, level: 1 })).toBeVisible();
-    await expect(mark(page)).toHaveAttribute("data-state", "connecting");
+    await expectState(page, "connecting");
 
     // Live again: only the dot, the region still holds the text for screen readers; from 640 px up the text shows.
     // The browser's next attempt reaches `muster dev` within 3 s, or the shell's new stream within 10 s.
     await lost.unroute();
     await expect(mark(page)).toHaveAttribute("data-state", "live", { timeout: 20_000 });
+    await expectState(page, "live");
     await expectOnlyTheDot(page, text.live);
     await expectNavigationAsInLive(page, text.navigation, live);
     await expectNoHorizontalScroll(page);

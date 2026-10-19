@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // The mark of the live updates in a real browser (C-09.FR-26): each state's dot, text and status region, where the text
-// shows (below the sm breakpoint only the dot, in every state, on a tap target of 32 px), the popover, a dialog named by
-// its title, the state's text, with the explanation of reference.md and, in offline, the time of the loss in the user's
-// time zone and "Reload page"; in English and in Russian; and the mark following the page's store.
+// shows (below the sm breakpoint only the dot, in every state, on a tap target of 32 px), the dot's own shape in each
+// state, so that no state is told by colour alone, the popover, a dialog named by its title, the state's text, with the
+// explanation of reference.md and, in offline, the time of the loss in the user's time zone and "Reload page"; in
+// English and in Russian; and the mark following the page's store.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -66,6 +67,22 @@ function screenReaderOnly(element: Element): boolean {
   return element.getBoundingClientRect().width <= 1;
 }
 
+/**
+ * Whether every shape of the dot lies inside its viewBox of 8 × 8, its stroke included, so that nothing of it is clipped.
+ */
+function insideViewBox(svg: Element): boolean {
+  return [...svg.querySelectorAll<SVGGeometryElement>("circle, path")].every((shape) => {
+    const box = shape.getBBox();
+    const half = Number(shape.getAttribute("stroke-width") ?? 0) / 2;
+    return (
+      box.x - half >= 0 &&
+      box.y - half >= 0 &&
+      box.x + box.width + half <= 8 &&
+      box.y + box.height + half <= 8
+    );
+  });
+}
+
 /** The popover shows the state's text as its title, which names the dialog: no aria-label of its own. */
 async function expectTitled(dialog: Locator, name: string): Promise<void> {
   const title = dialog.getByRole("heading", { name, exact: true });
@@ -94,21 +111,22 @@ async function viewport(width: number, height: number): Promise<void> {
 
 describe("the mark", () => {
   test.each([
-    // [state, overdue, text, dot classes, text shown from the sm breakpoint up]
-    ["connecting", false, "Connecting…", ["bg-muted-foreground"], false],
-    ["connecting", true, "Connecting…", ["bg-muted-foreground"], true],
-    ["live", false, "Live", ["bg-emerald-600", "dark:bg-emerald-400"], true],
+    // [state, overdue, text, shape of the dot, its colour classes, text shown from the sm breakpoint up]
+    ["connecting", false, "Connecting…", "ring", ["text-muted-foreground"], false],
+    ["connecting", true, "Connecting…", "ring", ["text-muted-foreground"], true],
+    ["live", false, "Live", "filled", ["text-emerald-600", "dark:text-emerald-400"], true],
     [
       "reconnecting",
       false,
       "Reconnecting…",
-      ["bg-warning", "animate-pulse", "motion-reduce:animate-none"],
+      "half",
+      ["text-warning", "animate-pulse", "motion-reduce:animate-none"],
       true,
     ],
-    ["offline", false, "Offline", ["bg-destructive"], true],
+    ["offline", false, "Offline", "slashed", ["text-destructive"], true],
   ] as const)(
     "%s (overdue %s): the text %s in a status region, below the sm breakpoint only the dot, from it up where the text shows",
-    async (state, overdue, text, dot, shownFromSm) => {
+    async (state, overdue, text, shape, colour, shownFromSm) => {
       await viewport(360, 740);
       const screen = await renderMark(snapshot(state, overdue));
       const region = screen.getByRole("status");
@@ -120,10 +138,17 @@ describe("the mark", () => {
       const button = region.getByRole("button", { name: text });
       await expect.element(button).toBeVisible();
       expect(region.element().textContent).toBe(text);
+      // The dot is a picture of 8 × 8 px hidden from assistive technology, with the state's shape and colour.
       const dotElement = screen.getByTestId("live-indicator-dot");
+      expect(dotElement.element()).toBeInstanceOf(SVGSVGElement);
       await expect.element(dotElement).toHaveAttribute("aria-hidden", "true");
-      await expect.element(dotElement).toHaveClass(...dot);
-      expect(dotElement.element().getBoundingClientRect().width).toBe(8);
+      await expect.element(dotElement).toHaveAttribute("focusable", "false");
+      await expect.element(dotElement).toHaveAttribute("viewBox", "0 0 8 8");
+      await expect.element(dotElement).toHaveAttribute("data-shape", shape);
+      await expect.element(dotElement).toHaveClass("size-2", "shrink-0", ...colour);
+      const dotBox = dotElement.element().getBoundingClientRect();
+      expect([dotBox.width, dotBox.height]).toEqual([8, 8]);
+      expect(insideViewBox(dotElement.element())).toBe(true);
       // Below sm only the dot shows, on a button of at least 32 × 32 px, whatever the state.
       const textElement = screen.getByTestId("live-indicator-text").element();
       expect(screenReaderOnly(textElement)).toBe(true);
@@ -240,6 +265,26 @@ describe("the mark", () => {
     await expect.element(page.getByText(RU_LOST_TEXT, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Перезагрузить страницу" }).click();
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  test("each state has its own shape, so that no state is told by the colour of the dot alone", async () => {
+    await viewport(360, 740);
+    const shapes = new Map<LiveState, string | null>();
+    for (const state of ["connecting", "live", "reconnecting", "offline"] as const) {
+      const screen = await renderMark(snapshot(state));
+      shapes.set(
+        state,
+        screen.getByTestId("live-indicator-dot").element().getAttribute("data-shape"),
+      );
+      await screen.unmount();
+    }
+    expect(Object.fromEntries(shapes)).toEqual({
+      connecting: "ring",
+      live: "filled",
+      reconnecting: "half",
+      offline: "slashed",
+    });
+    expect(new Set(shapes.values()).size).toBe(4);
   });
 
   test("follows the store of the live updates", async () => {
