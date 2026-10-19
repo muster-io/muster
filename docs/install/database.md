@@ -18,10 +18,12 @@ Fields
 :   `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`,
     `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`)
 
-When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
-`sslmode` into the connection and takes the password only from it, so `PGPORT`, `PGSSLMODE`, `PGPASSWORD` and
-`PGPASSFILE` change nothing. The database driver still reads the other `PG*` variables, such as `PGSSLROOTCERT`, for
-what the connection leaves out: leave them unset. Any secret can come from a `*_FILE` variable.
+When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every `PG*` variable,
+such as `PGHOST`, `PGSSLMODE`, `PGSSLROOTCERT`, `PGOPTIONS` and `PGPASSFILE`, and the password file `~/.pgpass`. Give
+any other libpq setting as a parameter of the URL instead, such as `sslrootcert`, `options` or `target_session_attrs`.
+Only libpq's default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
+`~/.postgresql/postgresql.crt` with `postgresql.key`; these are files, not variables, and the Muster image has none. Any
+secret can come from a `*_FILE` variable.
 
 Prefer the fields when the host, user and name are plain values and only the password is a secret: the Helm chart does
 exactly that, with `database.host`, `database.port`, `database.name`, `database.user` and `database.sslmode` as values
@@ -47,19 +49,9 @@ Muster applies its migrations at the first start: the compose example sets `MUST
 ## CloudNativePG
 
 [CloudNativePG](https://cloudnative-pg.io) runs PostgreSQL clusters on Kubernetes. A `Cluster` for Muster creates the
-database and the user from a Secret that you provide, so that the same password goes into the Secret of Muster:
+database and its owner:
 
 ```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: muster-db-credentials
-  namespace: muster
-type: kubernetes.io/basic-auth
-stringData:
-  username: muster
-  password: "<the database password>"
----
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -73,30 +65,40 @@ spec:
     initdb:
       database: muster
       owner: muster
-      secret:
-        name: muster-db-credentials
 ```
 
 CloudNativePG serves the primary at the Service `muster-db-rw` (and the replicas read-only at `muster-db-ro`) and enables
-TLS on its own. Point the chart at it:
+TLS on its own. It generates the password and keeps it in the Secret `muster-db-app`, with the keys `username`,
+`password`, `host`, `port`, `dbname` and `uri` among others. The chart reads the database from that Secret when you name
+it in `database.existingSecret`; the Secret `muster` of [Install with Helm](helm.md#create-the-secret) then holds only
+the master keys and the password of the first Admin:
 
 ```yaml
 existingSecret: muster
 database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+The `uri` key holds a URL such as `postgresql://muster:<password>@muster-db-rw.muster:5432/muster`. It names no
+`sslmode`, so Muster connects with its default, `prefer`, which uses the TLS of CloudNativePG but does not insist on
+it. To require TLS, give the connection as fields and take only the password from the Secret, which also keeps the
+password out of the pod's environment:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
   host: muster-db-rw.muster.svc
   name: muster
   user: muster
   sslmode: require
+  passwordKey: password
 ```
 
-The `muster` Secret holds the same password under `database-password`, as [Install with Helm](helm.md#create-the-secret)
-describes. The chart reads one Secret, so it cannot read the Secret `muster-db-app` that CloudNativePG generates when you
-give it no credentials; copy the `password` key of that Secret into your own when you prefer to let CloudNativePG
-generate it:
-
-```sh
-kubectl -n muster get secret muster-db-app -o jsonpath='{.data.password}' | base64 -d
-```
+When you give the `Cluster` a Secret of your own under `bootstrap.initdb.secret`, CloudNativePG generates no
+`muster-db-app`, and your Secret holds no `uri`: use the fields form above, with your Secret in `database.existingSecret`
+and `passwordKey: password`.
 
 Add an `spec.backup` section to the `Cluster` (see the CloudNativePG documentation) and test a restore, together with the
 master key, before you rely on it.
@@ -186,7 +188,8 @@ you: `muster doctor` reports each connection as encrypted or not, and a start wi
 warning. For anything but a single machine, set `require` at least, and `verify-full` where you can: the certificate then
 proves that the server is yours.
 
-`verify-ca` and `verify-full` check against the root certificates of the system, or against the file named by
-`sslrootcert` in `MUSTER_DATABASE_URL`, which must exist in the container. The fields form has no such setting. With
+`verify-ca` and `verify-full` check against the file named by `sslrootcert` in `MUSTER_DATABASE_URL`, which must exist
+in the container; without it, against `~/.postgresql/root.crt` when that file exists, and otherwise against the root
+certificates of the system. The fields form has no such setting. With
 `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`, the session connection takes the `sslmode` of the
 main connection; a `MUSTER_DATABASE_SESSION_URL` carries its own, `prefer` when it names none.
