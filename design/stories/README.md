@@ -129,8 +129,8 @@ current.
   the later one; the coverage table names both.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
-  check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation story, S-060. The
-  architecture lints of ADR-0016 exist from the first story that contains code.
+  check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
+  S-091. The architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
 
@@ -248,8 +248,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
-| Bridge | C-22, C-23, S-087 of C-13 and S-060 of C-21 | S-073 – S-081, S-083 – S-090, S-060 | 18 |
-| **L1** | 23 | | **90** |
+| Bridge | C-22, C-23, S-087 of C-13, and S-060 and S-091 of C-21 | S-073 – S-081, S-083 – S-090, S-060, S-091 | 19 |
+| **L1** | 23 | | **91** |
 
 ### Foundation
 
@@ -368,8 +368,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-085](S-085-example-bridge-on-the-go-library.md) | C-22 | The example bridge on the Go bridge library, with its chat page and image (BE) — in `muster-io/muster-bridge-go` | be | S-083 |
 | [S-086](S-086-end-to-end-test-against-the-released-example-bridge.md) | C-22 | End-to-end test against the example bridge's image, pinned by digest | infra | S-085 |
 | [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-086 |
-| [S-084](S-084-python-bridge-library.md) | C-22 | The Python bridge library `muster-bridge` with its CI and PyPI releases (BE) — in `muster-io/muster-bridge-python` | be | S-079 |
+| [S-084](S-084-python-bridge-library.md) | C-22 | The Python bridge library `muster-bridge` with its CI and PyPI releases (BE) — in `muster-io/muster-bridge-python` | be | S-078, S-083 |
 | [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079, S-084 |
+| [S-091](S-091-documentation-for-ai-agents-llms-txt-and-markdown-pages.md) | C-21 | Documentation for AI agents: llms.txt, the full text and a Markdown version of every page | docs | S-060 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -433,8 +434,8 @@ the Go library and S-085 the example bridge on it, both in `muster-io/muster-bri
 touched about 46 files; S-086 then runs Muster's end-to-end test against the example's image, pinned by digest —
 `edge` until the libraries are released with L1, then the release (D366) — which completes C-22.AC-22 and covers
 C-22.AC-23. S-079 follows with Write a bridge, which leads with the Go library; S-084, the Python library in
-`muster-io/muster-bridge-python`, comes after S-079 as the maintainer ordered, and S-060, which follows it, adds the
-Python library's section of Write a bridge.
+`muster-io/muster-bridge-python`, depends only on S-078, whose check its CI runs, and S-083, whose design it follows,
+and was built beside S-079 (D369); S-060, which follows both, adds the Python library's section of Write a bridge.
 
 S-087 to S-090 were added after S-083 merged, when the maintainer tried a Bridge on the test environment (D353, D354).
 S-087 adds the check of a Connection before saving it, for every Connection type, with a dry probe for Mattermost and
@@ -445,6 +446,10 @@ parts because together they touched about 80 files: S-088 the table, recording i
 and the API; S-089 the inbound requests at the callbacks and the kinds and runs of checks, the checks before saving of
 S-087 included; S-090 the pages. They follow S-083 and come before S-085 in the maintainer's queue; S-085 still depends
 only on S-083, since nothing of theirs is in the library's repository.
+
+S-091 was added when the maintainer decided that the site also serves documentation for AI agents — `llms.txt`, the
+text of the whole site in one file and a Markdown version of every page (D371). It belongs to C-21 and follows S-060,
+the last story that adds pages, so that its map covers the whole site.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
