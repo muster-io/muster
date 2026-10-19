@@ -1051,3 +1051,219 @@ func TestLiveBridgeLinks(t *testing.T) {
 		}
 	})
 }
+
+// The lock order of a token link against the deletion of its User: the deletion (users.Admin.Delete) locks the User
+// (LockUser) and then, through RemoveUserLinks, voids the User's pending link requests, while a token link reads its
+// request by the token's hash and locks the User before the request. Each test runs a real deletion transaction, held
+// after its lock of the User until the link waits for it, then removes the User's links in it and commits, while the
+// real link runs; neither may fail with a deadlock, and the link, which reads the request's state from its locked
+// row, is rejected as token_used. The deletion leaves the User's status alone, so that only the voided request can
+// reject the link.
+
+// TestLiveTelegramTokenLinkAgainstUserDeletionLockOrder: `/start <token>` while the token's User is deleted.
+func TestLiveTelegramTokenLinkAgainstUserDeletionLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupUserDeletion(t, s)
+		st, err := l.svc.StartTelegram(t.Context(), l.bob, "CNAAAAAAAAAAT1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, tok, _ := strings.Cut(st.DeepLink, "?start=")
+		var reply string
+		l.againstUserDeletion(t, func(ctx context.Context) error {
+			return l.svc.LinkTelegram(ctx, accountlinks.TelegramConnection{ID: l.conns["CNAAAAAAAAAAT1"],
+				PublicID: "CNAAAAAAAAAAT1"}, tok, accountlinks.TelegramAccount{ID: 7201},
+				func(_ context.Context, text string) error {
+					reply = text
+					return nil
+				})
+		})
+		if reply != "This link is invalid or expired. Start again from your Muster profile." {
+			t.Errorf("reply %q", reply)
+		}
+		l.rejectedAsUsed(t, "telegram")
+	})
+}
+
+// TestLiveBridgeTokenLinkAgainstUserDeletionLockOrder: an account_link event with a token while the token's User is
+// deleted.
+func TestLiveBridgeTokenLinkAgainstUserDeletionLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupUserDeletion(t, s)
+		st, err := l.svc.StartBridge(t.Context(), l.bob, "CNAAAAAAAAAAB1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var answer string
+		l.againstUserDeletion(t, func(ctx context.Context) error {
+			out, err := l.svc.LinkBridge(ctx, accountlinks.BridgeConnection{ID: l.conns["CNAAAAAAAAAAB1"],
+				PublicID: "CNAAAAAAAAAAB1"}, st.Token, accountlinks.BridgeAccount{ExternalID: "u-bob",
+				DisplayName: "Bob Brown"})
+			if err != nil {
+				return err
+			}
+			out.Log(ctx, nil)
+			answer = out.Answer
+			return nil
+		})
+		if answer != "This link is invalid or expired. Start again from your Muster profile." {
+			t.Errorf("answer %q", answer)
+		}
+		l.rejectedAsUsed(t, "bridge")
+	})
+}
+
+// userDeletionLive is the database of the lock-order tests of token links: a Telegram and a Bridge Connection, and
+// bob, whose deletion the tests race.
+type userDeletionLive struct {
+	d     *db.DB
+	org   int64
+	bobID int64
+	bob   accountlinks.Requester
+	svc   *accountlinks.Service
+	conns map[string]int64
+	log   *bytes.Buffer
+}
+
+func setupUserDeletion(t *testing.T, s dbtest.Server) *userDeletionLive {
+	t.Helper()
+	ctx := t.Context()
+	conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+	d, err := db.Open(ctx, conn, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	l := &userDeletionLive{d: d, conns: map[string]int64{}, log: &bytes.Buffer{}}
+	logger := logging.New(l.log, logging.LevelInfo)
+	if err := d.Migrate(ctx, logger); err != nil {
+		t.Fatal(err)
+	}
+	if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+		t.Fatal(err)
+	}
+	org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.org = org.ID
+	if _, err := d.Pool.Exec(ctx, `CREATE TABLE audit_log_p202610 PARTITION OF audit_log
+		FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ id, typ string }{{"CNAAAAAAAAAAT1", "telegram"}, {"CNAAAAAAAAAAB1", "bridge"}} {
+		var id int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			telegram_bot_api_base_url, telegram_update_mode, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, bot_username, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, $2, $3, $3,
+			CASE WHEN $3 = 'telegram' THEN 'https://api.telegram.org' END,
+			CASE WHEN $3 = 'telegram' THEN 'long_polling' END, CASE WHEN $3 = 'bridge' THEN 'https://br.example.org' END,
+			CASE WHEN $3 = 'bridge' THEN 'poll' END, '\x00', 'k1', $4, 'muster_dev_bot', 10, 1, $4, $4)
+			RETURNING id`, org.ID, c.id, c.typ, t0).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		l.conns[c.id] = id
+	}
+	const bobPID = "SRAAAAAAAAAAG1"
+	if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+		created_at, updated_at) VALUES ($1, $2, 'bob', 'Bob', 'responder', 'local', 'active', $3, $3) RETURNING id`,
+		org.ID, bobPID, t0).Scan(&l.bobID); err != nil {
+		t.Fatal(err)
+	}
+	l.bob = accountlinks.Requester{UserID: l.bobID, UserPublicID: bobPID, Actor: audit.User(l.bobID, bobPID),
+		Transport: audit.TransportUI, Address: netip.MustParseAddr("192.0.2.1")}
+	business := clock.NewManual(t0)
+	l.svc = accountlinks.New(accountlinks.Config{OrgID: org.ID, Store: accountlinks.NewStore(d.Pool),
+		Audit: audit.NewWriter(logger, business), Business: business, Log: logger})
+	return l
+}
+
+// againstUserDeletion deletes bob's links as users.Admin.Delete does — one transaction that locks bob (LockUser) and
+// then calls RemoveUserLinks — and holds that transaction after the lock while link runs, until link waits for a lock
+// the transaction holds or ends; then the deletion goes on and commits. Both must succeed.
+func (l *userDeletionLive) againstUserDeletion(t *testing.T, link func(ctx context.Context) error) {
+	t.Helper()
+	ctx := t.Context()
+	tx, err := l.d.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var held int32
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE org_id = $1 AND public_id = $2 FOR NO KEY UPDATE`, l.org,
+		l.bob.UserPublicID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- link(ctx) }()
+	var linkErr error
+	ended := false
+	for i := 0; ; i++ {
+		select {
+		case linkErr = <-done:
+			ended = true
+		default:
+		}
+		if ended {
+			t.Error("the link ended without waiting for the deletion")
+			break
+		}
+		var n int
+		if err := l.d.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND $1::int4 = ANY(pg_blocking_pids(pid))`, held).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			break
+		}
+		if i == 1000 {
+			t.Fatal("the link never waited for the deletion")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	after, err := l.svc.RemoveUserLinks(ctx, tx, l.bobID, audit.System, audit.TransportUI, netip.Addr{})
+	if err == nil {
+		err = tx.Commit(ctx)
+	} else {
+		_ = tx.Rollback(ctx)
+	}
+	if err != nil {
+		t.Errorf("the deletion: %v", err)
+	}
+	if after != nil {
+		after(ctx)
+	}
+	if !ended {
+		linkErr = <-done
+	}
+	if linkErr != nil {
+		t.Errorf("the link: %v", linkErr)
+	}
+}
+
+// rejectedAsUsed checks that the link through messenger linked nothing and was rejected as token_used for bob, with
+// his request voided by the deletion and not consumed.
+func (l *userDeletionLive) rejectedAsUsed(t *testing.T, messenger string) {
+	t.Helper()
+	count := func(q string, args ...any) int {
+		var n int
+		if err := l.d.Pool.QueryRow(t.Context(), q, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(`SELECT count(*) FROM audit_log WHERE action = 'account_link.link_rejected' AND
+		details->>'reason' = 'token_used' AND details->>'messenger' = $1 AND details->>'user' = $2`, messenger,
+		l.bob.UserPublicID) != 1 || count(`SELECT count(*) FROM audit_log WHERE action = 'account_link.link'`) != 0 ||
+		count(`SELECT count(*) FROM account_links`) != 0 || count(`SELECT count(*) FROM account_link_requests
+		WHERE user_id = $1 AND voided_at IS NOT NULL AND consumed_at IS NULL`, l.bobID) != 1 {
+		t.Errorf("the state after the race:\n%s", l.log)
+	}
+	if strings.Contains(l.log.String(), "deadlock") {
+		t.Errorf("the log has a deadlock:\n%s", l.log)
+	}
+}

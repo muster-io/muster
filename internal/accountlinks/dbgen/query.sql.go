@@ -295,13 +295,11 @@ func (q *Queries) GetAccountLinkOfUser(ctx context.Context, arg GetAccountLinkOf
 }
 
 const getBridgeTokenRequestByHash = `-- name: GetBridgeTokenRequestByHash :one
-SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
-       u.public_id AS user_public_id, c.public_id AS connection_public_id
+SELECT r.id, r.user_id, r.connection_id, u.public_id AS user_public_id, c.public_id AS connection_public_id
 FROM account_link_requests r
 JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = $1 AND r.messenger = 'bridge' AND r.method = 'token' AND r.secret_hash = $2
-FOR UPDATE OF r
 `
 
 type GetBridgeTokenRequestByHashParams struct {
@@ -313,15 +311,14 @@ type GetBridgeTokenRequestByHashRow struct {
 	ID                 int64
 	UserID             int64
 	ConnectionID       int64
-	ExpiresAt          time.Time
-	ConsumedAt         pgtype.Timestamptz
-	VoidedAt           pgtype.Timestamptz
 	UserPublicID       string
 	ConnectionPublicID string
 }
 
-// GetBridgeTokenRequestByHash locks the Bridge token request of a token, which an account_link event names by its hash
-// alone, with its User and the Connection it is bound to.
+// GetBridgeTokenRequestByHash reads the Bridge token request of a token, which an account_link event names by its hash
+// alone, with its User and the Connection it is bound to, neither of which changes. It takes no lock: the link locks
+// the User and then the request (LockLinkRequest), as the deletion of the User does, and reads the request's state from
+// that lock.
 func (q *Queries) GetBridgeTokenRequestByHash(ctx context.Context, arg GetBridgeTokenRequestByHashParams) (GetBridgeTokenRequestByHashRow, error) {
 	row := q.db.QueryRow(ctx, getBridgeTokenRequestByHash, arg.OrgID, arg.SecretHash)
 	var i GetBridgeTokenRequestByHashRow
@@ -329,9 +326,6 @@ func (q *Queries) GetBridgeTokenRequestByHash(ctx context.Context, arg GetBridge
 		&i.ID,
 		&i.UserID,
 		&i.ConnectionID,
-		&i.ExpiresAt,
-		&i.ConsumedAt,
-		&i.VoidedAt,
 		&i.UserPublicID,
 		&i.ConnectionPublicID,
 	)
@@ -426,13 +420,11 @@ func (q *Queries) GetLinkRequest(ctx context.Context, arg GetLinkRequestParams) 
 }
 
 const getTelegramRequestByHash = `-- name: GetTelegramRequestByHash :one
-SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
-       u.public_id AS user_public_id, c.public_id AS connection_public_id
+SELECT r.id, r.user_id, r.connection_id, u.public_id AS user_public_id, c.public_id AS connection_public_id
 FROM account_link_requests r
 JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = $1 AND r.messenger = 'telegram' AND r.secret_hash = $2
-FOR UPDATE OF r
 `
 
 type GetTelegramRequestByHashParams struct {
@@ -444,15 +436,13 @@ type GetTelegramRequestByHashRow struct {
 	ID                 int64
 	UserID             int64
 	ConnectionID       int64
-	ExpiresAt          time.Time
-	ConsumedAt         pgtype.Timestamptz
-	VoidedAt           pgtype.Timestamptz
 	UserPublicID       string
 	ConnectionPublicID string
 }
 
-// GetTelegramRequestByHash locks the Telegram link request of a token, which `/start` names by its hash alone, with
-// its User and the Connection it is bound to.
+// GetTelegramRequestByHash reads the Telegram link request of a token, which `/start` names by its hash alone, with
+// its User and the Connection it is bound to, neither of which changes. It takes no lock: the link locks the User and
+// then the request (LockLinkRequest), as the deletion of the User does, and reads the request's state from that lock.
 func (q *Queries) GetTelegramRequestByHash(ctx context.Context, arg GetTelegramRequestByHashParams) (GetTelegramRequestByHashRow, error) {
 	row := q.db.QueryRow(ctx, getTelegramRequestByHash, arg.OrgID, arg.SecretHash)
 	var i GetTelegramRequestByHashRow
@@ -460,9 +450,6 @@ func (q *Queries) GetTelegramRequestByHash(ctx context.Context, arg GetTelegramR
 		&i.ID,
 		&i.UserID,
 		&i.ConnectionID,
-		&i.ExpiresAt,
-		&i.ConsumedAt,
-		&i.VoidedAt,
 		&i.UserPublicID,
 		&i.ConnectionPublicID,
 	)
@@ -774,7 +761,7 @@ type LockLinkRequestRow struct {
 	VoidedAt   pgtype.Timestamptz
 }
 
-// LockLinkRequest locks a link request for checking its code.
+// LockLinkRequest locks a link request for checking its code or token, after its User (LockLinkUser).
 func (q *Queries) LockLinkRequest(ctx context.Context, arg LockLinkRequestParams) (LockLinkRequestRow, error) {
 	row := q.db.QueryRow(ctx, lockLinkRequest, arg.OrgID, arg.ID)
 	var i LockLinkRequestRow

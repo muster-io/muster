@@ -114,27 +114,26 @@ VALUES (@org_id, @public_id, @user_id, @messenger, @connection_id, @method, @sec
         @target_username, @target_display_name, @created_at::timestamptz, @expires_at::timestamptz)
 RETURNING id;
 
--- GetTelegramRequestByHash locks the Telegram link request of a token, which `/start` names by its hash alone, with
--- its User and the Connection it is bound to.
+-- GetTelegramRequestByHash reads the Telegram link request of a token, which `/start` names by its hash alone, with
+-- its User and the Connection it is bound to, neither of which changes. It takes no lock: the link locks the User and
+-- then the request (LockLinkRequest), as the deletion of the User does, and reads the request's state from that lock.
 -- name: GetTelegramRequestByHash :one
-SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
-       u.public_id AS user_public_id, c.public_id AS connection_public_id
+SELECT r.id, r.user_id, r.connection_id, u.public_id AS user_public_id, c.public_id AS connection_public_id
 FROM account_link_requests r
 JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
-WHERE r.org_id = @org_id AND r.messenger = 'telegram' AND r.secret_hash = @secret_hash
-FOR UPDATE OF r;
+WHERE r.org_id = @org_id AND r.messenger = 'telegram' AND r.secret_hash = @secret_hash;
 
--- GetBridgeTokenRequestByHash locks the Bridge token request of a token, which an account_link event names by its hash
--- alone, with its User and the Connection it is bound to.
+-- GetBridgeTokenRequestByHash reads the Bridge token request of a token, which an account_link event names by its hash
+-- alone, with its User and the Connection it is bound to, neither of which changes. It takes no lock: the link locks
+-- the User and then the request (LockLinkRequest), as the deletion of the User does, and reads the request's state from
+-- that lock.
 -- name: GetBridgeTokenRequestByHash :one
-SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
-       u.public_id AS user_public_id, c.public_id AS connection_public_id
+SELECT r.id, r.user_id, r.connection_id, u.public_id AS user_public_id, c.public_id AS connection_public_id
 FROM account_link_requests r
 JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
-WHERE r.org_id = @org_id AND r.messenger = 'bridge' AND r.method = 'token' AND r.secret_hash = @secret_hash
-FOR UPDATE OF r;
+WHERE r.org_id = @org_id AND r.messenger = 'bridge' AND r.method = 'token' AND r.secret_hash = @secret_hash;
 
 -- GetLinkRequest reads a link request by its public_id, with its Connection and whether that is deleted.
 -- name: GetLinkRequest :one
@@ -145,7 +144,7 @@ FROM account_link_requests r
 JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
 WHERE r.org_id = @org_id AND r.public_id = @public_id;
 
--- LockLinkRequest locks a link request for checking its code.
+-- LockLinkRequest locks a link request for checking its code or token, after its User (LockLinkUser).
 -- name: LockLinkRequest :one
 SELECT id, secret_hash, attempts, expires_at, consumed_at, voided_at
 FROM account_link_requests
