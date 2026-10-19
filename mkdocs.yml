@@ -78,10 +78,10 @@ nav:
   - Install:
       - install/helm.md
       - install/database.md
-  - Alertmanager:
+  - Integrations:
       - integrations/alertmanager.md
-      - integrations/heartbeat.md
       - integrations/grafana.md
+      - integrations/heartbeat.md
   - Messengers:
       - messengers/index.md
       - messengers/mattermost.md

@@ -3,8 +3,8 @@
 ## Meaning
 
 Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the `max_alerts`
-limit of its webhook receiver. Muster treats each Snapshot as the whole Alertmanager group, so a Truncated Snapshot
-hides Alerts from it.
+limit of its webhook receiver, or, for Grafana, the Max alerts limit of its webhook contact point. Muster treats each
+Snapshot as the whole Alertmanager group, so a Truncated Snapshot hides Alerts from it.
 
 It is an **Internal alert** only, severity `warning`, raised by Muster as an Alert of the built-in "Muster"
 Integration when the first Alertmanager group (`groupKey`) of the Integration arrives truncated. Its labels are
@@ -29,10 +29,13 @@ nothing for as long as it takes an Alert to go Stale.
 4. Open a recent Stored Snapshot of the Integration (`/integrations/<id>/snapshots/<id>`): a Truncated Snapshot has
    `truncatedAlerts` above 0.
 5. In the Alertmanager configuration, find the `webhook_configs` entry of the receiver that sends to Muster and its
-   `max_alerts`.
+   `max_alerts`. For Grafana, open the webhook contact point that sends to Muster and check its Max alerts (`maxAlerts`
+   in a provisioning file).
 
 ## Fix
 
 - Set `max_alerts: 0` on the Alertmanager receiver that sends to Muster, so that every Alert of the group is sent,
   and reload Alertmanager; see [Connect Alertmanager](../../integrations/alertmanager.md).
+- For Grafana, set Max alerts to 0, the default, on the webhook contact point that sends to Muster; see
+  [Connect Grafana](../../integrations/grafana.md#create-a-webhook-contact-point).
 - The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification.

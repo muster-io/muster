@@ -43,6 +43,13 @@
 4. [Snapshot semantics]({{page "concepts/snapshot-semantics.md"}}): how Muster reads what Alertmanager sends.
 5. Finished when, after Alertmanager is reloaded, the Integration page {{quote "docs/integrations/alertmanager.md" "shows the time of the last Snapshot"}} ([Connect Alertmanager]({{page "integrations/alertmanager.md#create-a-token-and-paste-the-snippet"}})) and the Heartbeat is live ([Heartbeat]({{page "integrations/heartbeat.md#turn-it-on"}})).
 
+### Connect Grafana
+
+1. [Connect Grafana]({{page "integrations/grafana.md"}}), both ways: directly, {{quote "docs/integrations/grafana.md" "from Grafana's built-in Alertmanager through a webhook contact point"}}, with one Integration per Grafana cluster and organization, its token, the contact point and the notification policy ([Connect Grafana directly]({{page "integrations/grafana.md#connect-grafana-directly"}})); or through an external Alertmanager, then [Connect Alertmanager]({{page "integrations/alertmanager.md"}}) ([Connect Grafana through an external Alertmanager]({{page "integrations/grafana.md#connect-grafana-through-an-external-alertmanager"}})).
+2. [Heartbeat]({{page "integrations/heartbeat.md"}}): its setup is for Alertmanager, so it serves Grafana through an external Alertmanager. Directly, the same idea in Grafana {{quote "docs/integrations/grafana.md" "has not been verified with Grafana"}}, and {{quote "docs/integrations/grafana.md" "Without a Heartbeat, Muster never resolves an Alert as Stale"}} ([Heartbeat]({{page "integrations/grafana.md#heartbeat"}})).
+3. [Snapshot semantics]({{page "concepts/snapshot-semantics.md"}}): how Muster reads what Grafana's built-in Alertmanager or an external one sends, and the [Limits]({{page "integrations/grafana.md#limits"}}) of Grafana's way.
+4. Finished when, after an alert fires in Grafana, the Integration page {{quote "docs/integrations/grafana.md" "shows the time of the last Snapshot"}} ([Connect Grafana]({{page "integrations/grafana.md#send-the-alerts-with-a-notification-policy"}})).
+
 ### Automate through the API
 
 1. [API]({{page "reference/api.md"}}): the conventions of the API and its tokens. {{quote "docs/reference/api.md" "Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token."}} [Sign-in]({{page "sign-in/index.md#ways-to-sign-in"}}) describes both.
