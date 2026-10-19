@@ -32,8 +32,13 @@ func testLook() look {
 }
 
 // rootMessage is a Root message as the renderer gives it, in a status, with an alert label that tries to mention the
-// channel and write HTML.
+// channel and write HTML, on a Route with three Snooze durations.
 func rootMessage(status string) messages.Message {
+	return rootMessageOf(status, 3)
+}
+
+// rootMessageOf is rootMessage on a Route with the given number of Snooze durations, at most three.
+func rootMessageOf(status string, durations int) messages.Message {
 	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
 		Heading:      &messages.Heading{Number: 1, Title: "DiskFull", URL: groupURL},
 		Environment:  "a · Started 2026-10-08 12:00 UTC",
@@ -46,10 +51,13 @@ func rootMessage(status string) messages.Message {
 			{Text: "Runbook", URL: "https://runbooks.example.org/disk"}},
 		Notices: []string{"Reopened 2 times"},
 		Footer:  "Acknowledged by Bob Smith", Footers: map[string]string{"mattermost:3": "Acknowledged by bob"}}
-	for _, b := range buttons.ForStatus(status, 3) {
+	for _, b := range buttons.ForStatus(status, durations) {
 		label := map[string]string{buttons.CommandAcknowledge: "Ack", buttons.CommandUnacknowledge: "Unack",
 			buttons.CommandResolve: "Resolve", buttons.CommandUnsnooze: "Unsnooze"}[b.Command]
 		if b.Command == buttons.CommandSnooze {
+			label = messages.PresetLabel("en", b.Argument, "09:00", "monday")
+		}
+		if b.Command == buttons.CommandSnooze && !buttons.IsPreset(b.Argument) {
 			label = fmt.Sprintf("Snooze %d h", []int{1, 4, 24}[b.Argument])
 		}
 		m.Buttons = append(m.Buttons, messages.Button{Command: b.Command, Argument: b.Argument, Label: label,
@@ -61,7 +69,8 @@ func rootMessage(status string) messages.Message {
 // TestRootPost is C-13.FR-3 and C-13.AC-13: the summary line as the message; one attachment coloured by status,
 // titled #N and the title linked to the Alert Group page, whose text holds the sections, the links under the Alerts
 // starting with "Open in Muster", the notices and the footer of the Destination's identity space as its last line;
-// the footer "Muster v<version>" with the mark; and the buttons with stable ids calling the Connection's callback.
+// the footer "Muster v<version>" with the mark; and the buttons with stable ids calling the Connection's callback, the
+// Snooze presets after the durations (C-10.FR-18, C-10.AC-23).
 func TestRootPost(t *testing.T) {
 	p := rootPost(rootMessage(messages.ColourFiring), testLook(), "")
 	if p.Message != "🔴 #1 DiskFull" || p.Props == nil || len(p.Props.Attachments) != 1 {
@@ -95,18 +104,32 @@ func TestRootPost(t *testing.T) {
 			t.Errorf("action %d = %+v", i, ac)
 		}
 	}
-	if !slices.Equal(ids, []string{"ack", "resolve", "snooze0", "snooze1", "snooze2"}) || a.Actions[2].Name != "Snooze 1 h" {
+	names := make([]string, len(a.Actions))
+	for i, ac := range a.Actions {
+		names[i] = ac.Name
+	}
+	if !slices.Equal(ids, []string{"ack", "resolve", "snooze0", "snooze1", "snooze2", "snoozetomorrow", "snoozeweek"}) ||
+		!slices.Equal(names, []string{"Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h",
+			"Until tomorrow 09:00", "Until Monday 09:00"}) {
 		t.Errorf("actions = %+v", a.Actions)
+	}
+	for _, ac := range a.Actions {
+		if !regexp.MustCompile(`^[a-z]+[0-9]*$`).MatchString(ac.ID) {
+			t.Errorf("the action id %q is not letters with an index", ac.ID)
+		}
 	}
 }
 
-// TestRootPostStatuses gives each status its colour, emoji and buttons; a resolved Root message has none.
+// TestRootPostStatuses gives each status its colour, emoji and buttons, the Snooze presets after the durations of an
+// acknowledged one and none on a snoozed one; a resolved Root message has none, and a Route without Snooze durations
+// offers neither Snooze nor the presets.
 func TestRootPostStatuses(t *testing.T) {
 	cases := []struct {
 		status, colour, emoji string
 		ids                   []string
 	}{
-		{messages.ColourAcknowledged, "#f57c00", "🟠", []string{"unack", "resolve", "snooze0", "snooze1", "snooze2"}},
+		{messages.ColourAcknowledged, "#f57c00", "🟠", []string{"unack", "resolve", "snooze0", "snooze1", "snooze2",
+			"snoozetomorrow", "snoozeweek"}},
 		{messages.ColourSnoozed, "#9e9e9e", "⚪", []string{"ack", "unsnooze", "resolve"}},
 		{messages.ColourResolved, "#388e3c", "🟢", []string{}},
 	}
@@ -119,6 +142,16 @@ func TestRootPostStatuses(t *testing.T) {
 		}
 		if p.Message != c.emoji+" #1 DiskFull" || a.Color != c.colour || !slices.Equal(ids, c.ids) {
 			t.Errorf("%s: %q %s %v", c.status, p.Message, a.Color, ids)
+		}
+	}
+	for status, want := range map[string][]string{messages.ColourFiring: {"ack", "resolve"},
+		messages.ColourAcknowledged: {"unack", "resolve"}} {
+		ids := []string{}
+		for _, ac := range rootPost(rootMessageOf(status, 0), testLook(), "").Props.Attachments[0].Actions {
+			ids = append(ids, ac.ID)
+		}
+		if !slices.Equal(ids, want) {
+			t.Errorf("%s without durations: %v", status, ids)
 		}
 	}
 	m := rootMessage(messages.ColourFiring)
@@ -350,8 +383,8 @@ func sentStyles(t *testing.T, p post) string {
 }
 
 // TestActionStyles is D329 with F-068: "ack" and "stillonit" are sent with the style primary and "resolve" with
-// success, while "unack", "unsnooze" and every "snooze<N>" have no style field, on a firing, an acknowledged and a
-// snoozed Root message and on a Reminder; a button of any other Command has no style either.
+// success, while "unack", "unsnooze", every "snooze<N>" and the Snooze presets have no style field, on a firing, an
+// acknowledged and a snoozed Root message and on a Reminder; a button of any other Command has no style either.
 func TestActionStyles(t *testing.T) {
 	reminder := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
 		Lines: []string{"Reminder: bob, are you still on it?"},
@@ -363,9 +396,9 @@ func TestActionStyles(t *testing.T) {
 		want string
 	}{
 		{"firing", rootPost(rootMessage(messages.ColourFiring), testLook(), ""),
-			"ack:primary resolve:success snooze0:- snooze1:- snooze2:-"},
+			"ack:primary resolve:success snooze0:- snooze1:- snooze2:- snoozetomorrow:- snoozeweek:-"},
 		{"acknowledged", rootPost(rootMessage(messages.ColourAcknowledged), testLook(), ""),
-			"unack:- resolve:success snooze0:- snooze1:- snooze2:-"},
+			"unack:- resolve:success snooze0:- snooze1:- snooze2:- snoozetomorrow:- snoozeweek:-"},
 		{"snoozed", rootPost(rootMessage(messages.ColourSnoozed), testLook(), ""),
 			"ack:primary unsnooze:- resolve:success"},
 		{"reminder", replyPost(reminder, testLook(), "@bob"), "stillonit:primary unack:-"},

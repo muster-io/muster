@@ -5,16 +5,17 @@
 -- re-render step — the samples of dry runs and previews, and the template error state of a Route.
 
 -- GetRenderGroup reads what a message of an Alert Group shows: the Alert Group, its Route with the Route's
--- templates, language, Snooze durations and template error, the Organization's time zone, and the names of its Owner,
--- of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the
--- dispatcher made is seen before it commits.
+-- templates, language, Snooze durations and template error, the Organization's time zone, start of the working day and
+-- first day of the week, which the labels of the Snooze presets name, and the names of its Owner, of who snoozed it
+-- and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
+-- before it commits.
 -- name: GetRenderGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level, g.urgent, g.group_key_labels,
        g.group_key_values, g.common_labels, g.common_annotations, g.firing_alert_count, g.reopen_count,
        g.resolved_by_kind, g.resolve_reason, g.snooze_until, g.snooze_no_end, g.unclaimed, g.created_at,
        r.id AS route_id, r.public_id AS route_public_id, r.name AS route_name, r.language,
        r.snooze_durations_seconds, r.template_root_message, r.template_line, r.template_error_template,
-       r.template_ack_timeout_notice, o.time_zone,
+       r.template_ack_timeout_notice, o.time_zone, o.workday_start, o.week_start,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
        coalesce(ru.name, rs.name, '')::text AS resolved_by_name
@@ -71,10 +72,10 @@ SELECT id, public_id, name, language, snooze_durations_seconds
 FROM routes
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
--- GetRenderSettings reads the Organization's time zone and the Default route's language and Snooze durations, for a
--- preview without a Route.
+-- GetRenderSettings reads the Organization's time zone, start of the working day and first day of the week, and the
+-- Default route's language and Snooze durations, for a preview without a Route.
 -- name: GetRenderSettings :one
-SELECT o.time_zone, r.name, r.language, r.snooze_durations_seconds
+SELECT o.time_zone, o.workday_start, o.week_start, r.name, r.language, r.snooze_durations_seconds
 FROM organizations o
 JOIN routes r ON r.org_id = @org_id AND r.is_default AND r.deleted_at IS NULL
 WHERE o.id = @org_id;

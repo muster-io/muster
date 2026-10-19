@@ -84,10 +84,13 @@ type PreviewResult struct {
 	Errors    []*templates.Error
 }
 
-// settings are what a preview takes from its Route, or from the Default route without one.
+// settings are what a preview takes from its Route, or from the Default route without one, and from the
+// Organization: its time zone, start of the working day and first day of the week.
 type settings struct {
-	route RouteRef
-	tz    string
+	route        RouteRef
+	tz           string
+	workdayStart string
+	weekStart    string
 }
 
 // Preview renders a template against its sample (previewTemplate), reading the main pool. An unknown Route, Stored
@@ -286,14 +289,14 @@ func (r *Renderer) CheckTemplate(ctx context.Context, routeID int64, kind, sourc
 	return nil
 }
 
-// settings reads the time zone and the Route of a preview: the Route publicID, or the Default route.
+// settings reads the Organization's settings and the Route of a preview: the Route publicID, or the Default route.
 func (r *Renderer) settings(ctx context.Context, q queries, publicID string) (settings, error) {
 	s, err := q.GetRenderSettings(ctx, r.orgID)
 	if err != nil {
 		return settings{}, fmt.Errorf("read the settings of a preview: %w", err)
 	}
-	set := settings{tz: s.TimeZone, route: RouteRef{Name: s.Name, Language: s.Language,
-		SnoozeDurations: s.SnoozeDurationsSeconds}}
+	set := settings{tz: s.TimeZone, workdayStart: s.WorkdayStart, weekStart: s.WeekStart,
+		route: RouteRef{Name: s.Name, Language: s.Language, SnoozeDurations: s.SnoozeDurationsSeconds}}
 	if publicID == "" {
 		return set, nil
 	}
@@ -391,8 +394,8 @@ func (r *Renderer) routeSamples(ctx context.Context, q queries, set settings) ([
 func (r *Renderer) sampleSource(d templates.Data, set settings) *Source {
 	src := &Source{Number: 1, Status: ColourResolved, SeverityLevel: "warning", KeyLabels: d.GroupLabels.Names(),
 		KeyValues: d.GroupLabels, CommonLabels: d.CommonLabels, CommonAnnotations: d.CommonAnnotations,
-		Summary: d.CommonAnnotations["summary"], Route: set.route, TimeZone: set.tz,
-		TotalAlerts: int64(len(d.Alerts)), StartedAt: r.business.Now().UTC()}
+		Summary: d.CommonAnnotations["summary"], Route: set.route, TimeZone: set.tz, WorkdayStart: set.workdayStart,
+		WeekStart: set.weekStart, TotalAlerts: int64(len(d.Alerts)), StartedAt: r.business.Now().UTC()}
 	if len(src.CommonLabels) == 0 && len(d.Alerts) > 0 {
 		src.CommonLabels = commonOf(d.Alerts)
 	}

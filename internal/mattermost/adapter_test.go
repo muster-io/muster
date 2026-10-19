@@ -148,7 +148,7 @@ func TestPublishUpdateReply(t *testing.T) {
 	integration, _ := first["integration"].(map[string]any)
 	if p.Message != "🔴 #1 DiskFull" || p.ChannelID != fakemattermost.ChannelAlerts || a["color"] != "#d32f2f" ||
 		a["title"] != "#1 DiskFull" || a["title_link"] != groupPage || a["footer"] != "Muster v1.2.3" ||
-		a["footer_icon"] != "http://localhost:8080/muster-mark-256.png" || len(actions) != 5 ||
+		a["footer_icon"] != "http://localhost:8080/muster-mark-256.png" || len(actions) != 7 ||
 		integration["url"] != "http://localhost:8081/api/v1/callbacks/mattermost/"+connectionPublicID ||
 		!strings.Contains(text, "[Open in Muster]("+groupPage+")") || !strings.HasSuffix(text, "Acknowledged by bob") {
 		t.Errorf("post = %+v\nattachment = %+v", p.Post, a)
@@ -204,7 +204,7 @@ func TestPublishUpdateReply(t *testing.T) {
 
 // TestStylesReachTheServer is D329 with F-068 against the fake server: the posted Root message, its edits to
 // acknowledged and snoozed, and a Reminder keep the style of each action as sent — primary on "ack" and "stillonit",
-// success on "resolve", and no style field on "unack", "unsnooze" and every "snooze<N>".
+// success on "resolve", and no style field on "unack", "unsnooze", every "snooze<N>" and the Snooze presets.
 func TestStylesReachTheServer(t *testing.T) {
 	e := newAdapter(t)
 	ctx := t.Context()
@@ -226,11 +226,13 @@ func TestStylesReachTheServer(t *testing.T) {
 	if out.Kind != delivery.OutcomeOK {
 		t.Fatalf("publish = %+v", out)
 	}
-	if got := styles(out.MessageID); got != "ack:primary resolve:success snooze0:- snooze1:- snooze2:-" {
+	if got := styles(out.MessageID); got != "ack:primary resolve:success snooze0:- snooze1:- snooze2:- "+
+		"snoozetomorrow:- snoozeweek:-" {
 		t.Errorf("firing: %s", got)
 	}
 	for _, c := range []struct{ status, want string }{
-		{messages.ColourAcknowledged, "unack:- resolve:success snooze0:- snooze1:- snooze2:-"},
+		{messages.ColourAcknowledged, "unack:- resolve:success snooze0:- snooze1:- snooze2:- snoozetomorrow:- " +
+			"snoozeweek:-"},
 		{messages.ColourSnoozed, "ack:primary unsnooze:- resolve:success"},
 	} {
 		if up := e.adapter.Update(ctx, call(1), out.MessageID, root(c.status)); up.Kind != delivery.OutcomeOK {

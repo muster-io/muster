@@ -4,6 +4,7 @@
 package mattermost
 
 import (
+	"cmp"
 	"regexp"
 	"slices"
 	"strconv"
@@ -37,7 +38,7 @@ var statusEmoji = map[string]string{
 }
 
 // actionIDs are the stable ids of the buttons by Command; Mattermost takes letters and digits only, and a Snooze
-// button is "snooze" with the index of its duration.
+// button is "snooze" with the index of its duration, or with the name of its Snooze preset (presetActionIDs).
 var actionIDs = map[string]string{
 	buttons.CommandAcknowledge:   "ack",
 	buttons.CommandUnacknowledge: "unack",
@@ -45,6 +46,13 @@ var actionIDs = map[string]string{
 	buttons.CommandUnsnooze:      "unsnooze",
 	buttons.CommandSnooze:        "snooze",
 	buttons.CommandStillOnIt:     "stillonit",
+}
+
+// presetActionIDs are the ends of the action ids of the Snooze preset buttons, by their argument (C-10.FR-18), in
+// letters only: "snoozetomorrow" and "snoozeweek".
+var presetActionIDs = map[int]string{
+	buttons.ArgumentTomorrow:  "tomorrow",
+	buttons.ArgumentWeekStart: "week",
 }
 
 // name is a Mattermost username or group name, which a Mention writes after `@`.
@@ -224,7 +232,7 @@ func actions(bs []messages.Button, callback string) []action {
 	for _, b := range bs {
 		id := actionIDs[b.Command]
 		if b.Command == buttons.CommandSnooze {
-			id += strconv.Itoa(b.Argument)
+			id += cmp.Or(presetActionIDs[b.Argument], strconv.Itoa(b.Argument))
 		}
 		out = append(out, action{ID: id, Name: b.Label, Type: "button", Style: actionStyles[b.Style()],
 			Integration: integration{URL: callback, Context: actionContext{Action: b.ActionID, KeyID: b.KeyID}}})

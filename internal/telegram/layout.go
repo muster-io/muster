@@ -267,25 +267,28 @@ var buttonStyles = map[buttons.Style]string{
 }
 
 // keyboard is the inline keyboard of the buttons (C-14.FR-15): Ack, Unack, Unsnooze and Resolve — or a Reminder's
-// Still on it and Unack — on one row, one Snooze button per Snooze duration on the next, each sending its compact
-// action id, at most buttons.MaxLen bytes, with the style of its hint. A button without a usable action id is left
-// out. The keyboard is never nil, so that an edit always carries it and an edit to a state without buttons removes
-// them on purpose (F-011).
+// Still on it and Unack — on one row, one Snooze button per Snooze duration on the next, and the Snooze presets on a
+// third (C-10.FR-18), each sending its compact action id, at most buttons.MaxLen bytes, with the style of its hint. A
+// button without a usable action id is left out. The keyboard is never nil, so that an edit always carries it and an
+// edit to a state without buttons removes them on purpose (F-011).
 func keyboard(bs []messages.Button) *inlineKeyboard {
-	var first, snooze []inlineButton
+	var first, snooze, presets []inlineButton
 	for _, b := range bs {
 		if b.ActionID == "" || len(b.ActionID) > buttons.MaxLen || !utf8.ValidString(b.Label) {
 			continue
 		}
 		ib := inlineButton{Text: b.Label, CallbackData: b.ActionID, Style: buttonStyles[b.Style()]}
-		if b.Command == buttons.CommandSnooze {
+		switch {
+		case b.Command == buttons.CommandSnooze && buttons.IsPreset(b.Argument):
+			presets = append(presets, ib)
+		case b.Command == buttons.CommandSnooze:
 			snooze = append(snooze, ib)
-		} else {
+		default:
 			first = append(first, ib)
 		}
 	}
 	k := &inlineKeyboard{InlineKeyboard: [][]inlineButton{}}
-	for _, row := range [][]inlineButton{first, snooze} {
+	for _, row := range [][]inlineButton{first, snooze, presets} {
 		if len(row) > 0 {
 			k.InlineKeyboard = append(k.InlineKeyboard, row)
 		}

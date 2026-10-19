@@ -111,7 +111,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolved_by_kind, g.resolve_reason, g.snooze_until, g.snooze_no_end, g.unclaimed, g.created_at,
        r.id AS route_id, r.public_id AS route_public_id, r.name AS route_name, r.language,
        r.snooze_durations_seconds, r.template_root_message, r.template_line, r.template_error_template,
-       r.template_ack_timeout_notice, o.time_zone,
+       r.template_ack_timeout_notice, o.time_zone, o.workday_start, o.week_start,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
        coalesce(ru.name, rs.name, '')::text AS resolved_by_name
@@ -162,6 +162,8 @@ type GetRenderGroupRow struct {
 	TemplateErrorTemplate    pgtype.Text
 	TemplateAckTimeoutNotice pgtype.Text
 	TimeZone                 string
+	WorkdayStart             string
+	WeekStart                string
 	OwnerName                string
 	SnoozedByName            string
 	ResolvedByName           string
@@ -172,9 +174,10 @@ type GetRenderGroupRow struct {
 // Messages (C-12): the reads a message is rendered from — through the caller's transaction at the dispatcher's
 // re-render step — the samples of dry runs and previews, and the template error state of a Route.
 // GetRenderGroup reads what a message of an Alert Group shows: the Alert Group, its Route with the Route's
-// templates, language, Snooze durations and template error, the Organization's time zone, and the names of its Owner,
-// of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the
-// dispatcher made is seen before it commits.
+// templates, language, Snooze durations and template error, the Organization's time zone, start of the working day and
+// first day of the week, which the labels of the Snooze presets name, and the names of its Owner, of who snoozed it
+// and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
+// before it commits.
 func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) (GetRenderGroupRow, error) {
 	row := q.db.QueryRow(ctx, getRenderGroup, arg.OrgID, arg.ID)
 	var i GetRenderGroupRow
@@ -209,6 +212,8 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.TemplateErrorTemplate,
 		&i.TemplateAckTimeoutNotice,
 		&i.TimeZone,
+		&i.WorkdayStart,
+		&i.WeekStart,
 		&i.OwnerName,
 		&i.SnoozedByName,
 		&i.ResolvedByName,
@@ -217,7 +222,7 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 }
 
 const getRenderSettings = `-- name: GetRenderSettings :one
-SELECT o.time_zone, r.name, r.language, r.snooze_durations_seconds
+SELECT o.time_zone, o.workday_start, o.week_start, r.name, r.language, r.snooze_durations_seconds
 FROM organizations o
 JOIN routes r ON r.org_id = $1 AND r.is_default AND r.deleted_at IS NULL
 WHERE o.id = $1
@@ -225,18 +230,22 @@ WHERE o.id = $1
 
 type GetRenderSettingsRow struct {
 	TimeZone               string
+	WorkdayStart           string
+	WeekStart              string
 	Name                   string
 	Language               string
 	SnoozeDurationsSeconds []int64
 }
 
-// GetRenderSettings reads the Organization's time zone and the Default route's language and Snooze durations, for a
-// preview without a Route.
+// GetRenderSettings reads the Organization's time zone, start of the working day and first day of the week, and the
+// Default route's language and Snooze durations, for a preview without a Route.
 func (q *Queries) GetRenderSettings(ctx context.Context, orgID int64) (GetRenderSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getRenderSettings, orgID)
 	var i GetRenderSettingsRow
 	err := row.Scan(
 		&i.TimeZone,
+		&i.WorkdayStart,
+		&i.WeekStart,
 		&i.Name,
 		&i.Language,
 		&i.SnoozeDurationsSeconds,

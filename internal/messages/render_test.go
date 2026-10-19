@@ -74,7 +74,8 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		SnoozeDurationsSeconds: s.Route.SnoozeDurations, TemplateRootMessage: text(s.Route.RootMessage),
 		TemplateLine: text(s.Route.Line), TemplateAckTimeoutNotice: text(s.Route.AckTimeoutNotice),
 		TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
-			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, OwnerName: s.Owner}
+			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, WorkdayStart: s.WorkdayStart, WeekStart: s.WeekStart,
+		OwnerName: s.Owner}
 	if s.SnoozeUntil != nil {
 		row.SnoozeUntil = pgtype.Timestamptz{Time: *s.SnoozeUntil, Valid: true}
 	}
@@ -136,8 +137,12 @@ func (f *fakeQueries) GetPreviewRoute(_ context.Context, arg dbgen.GetPreviewRou
 }
 
 func (f *fakeQueries) GetRenderSettings(context.Context, int64) (dbgen.GetRenderSettingsRow, error) {
-	return dbgen.GetRenderSettingsRow{TimeZone: "UTC", Name: "Default", Language: "en",
-		SnoozeDurationsSeconds: []int64{3600}}, f.err("GetRenderSettings")
+	row := dbgen.GetRenderSettingsRow{TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday", Name: "Default",
+		Language: "en", SnoozeDurationsSeconds: []int64{3600}}
+	if f.group != nil && f.group.WorkdayStart != "" {
+		row.WorkdayStart, row.WeekStart = f.group.WorkdayStart, f.group.WeekStart
+	}
+	return row, f.err("GetRenderSettings")
 }
 
 func (f *fakeQueries) ListRouteSnapshots(_ context.Context, arg dbgen.ListRouteSnapshotsParams) (
@@ -238,7 +243,7 @@ func TestRouteTemplates(t *testing.T) {
 	m := out.Message
 	if out.Failure != nil || m.Body == nil || m.Body.Text != "PodDown has 2 firing; owner @\u200bchannel web\\_ops" ||
 		m.Environment != "" || m.GroupLabels != nil || m.Alerts != nil || m.Footer != "Acknowledged by Alice" ||
-		len(m.Buttons) != 5 || len(m.Links) != 1 || m.Heading.Title != "PodDown" || len(out.Rendered) != 1 {
+		len(m.Buttons) != 7 || len(m.Links) != 1 || m.Heading.Title != "PodDown" || len(out.Rendered) != 1 {
 		t.Errorf("root template %+v", out)
 	}
 	src = source("firing", 3)
@@ -1047,11 +1052,11 @@ func TestDone(t *testing.T) {
 func TestButtonStyleNotStored(t *testing.T) {
 	out := newRenderer(t).Root(source("firing", 3), MarkupPlain)
 	m := out.Message
-	if out.Failure != nil || len(m.Buttons) != 5 {
+	if out.Failure != nil || len(m.Buttons) != 7 {
 		t.Fatalf("root %+v", out)
 	}
 	want := []buttons.Style{buttons.StylePrimary, buttons.StyleSuccess, buttons.StyleNeutral, buttons.StyleNeutral,
-		buttons.StyleNeutral}
+		buttons.StyleNeutral, buttons.StyleNeutral, buttons.StyleNeutral}
 	for i, b := range m.Buttons {
 		if b.Style() != want[i] || b.Style() != buttons.StyleOf(b.Command) {
 			t.Errorf("button %d %s = %s, want %s", i, b.Command, b.Style(), want[i])
@@ -1064,7 +1069,7 @@ func TestButtonStyleNotStored(t *testing.T) {
 	var stored struct {
 		Buttons []map[string]any `json:"buttons"`
 	}
-	if err := json.Unmarshal(raw, &stored); err != nil || len(stored.Buttons) != 5 ||
+	if err := json.Unmarshal(raw, &stored); err != nil || len(stored.Buttons) != 7 ||
 		strings.Contains(string(raw), `"style"`) {
 		t.Errorf("stored %s: %v", raw, err)
 	}
@@ -1097,7 +1102,8 @@ func TestLayoutCommonMark(t *testing.T) {
 		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
 		"🔁 Reopened ×2",
 		"Acknowledged by Alice",
-		"\\[Unack\\] \\[Resolve\\] \\[Snooze 1 h\\] \\[Snooze 4 h\\] \\[Snooze 24 h\\]",
+		"\\[Unack\\] \\[Resolve\\] \\[Snooze 1 h\\] \\[Snooze 4 h\\] \\[Snooze 24 h\\] \\[Until tomorrow 09:00\\] " +
+			"\\[Until Monday 09:00\\]",
 	}, "\n\n")
 	if got := Layout(out.Message, MarkupCommonMark); out.Failure != nil || got != want {
 		t.Errorf("layout\n%s\nwant\n%s", got, want)

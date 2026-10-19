@@ -244,8 +244,8 @@ func newPressEnv(t *testing.T) *pressEnv {
 	return e
 }
 
-// keyboard is the keyboard of a message about group: Ack, Resolve and Snooze 1 h, 4 h and 24 h, the last one a
-// duration the Route no longer has.
+// keyboard is the keyboard of a message about group: Ack, Resolve, Snooze 1 h, 4 h and 24 h, the last one a duration
+// the Route no longer has, and the Snooze presets.
 func (e *pressEnv) keyboard(t *testing.T, k buttons.Keys, s buttons.Subject, group string) *inlineKeyboard {
 	t.Helper()
 	sign := func(command string, arg int) string {
@@ -263,6 +263,8 @@ func (e *pressEnv) keyboard(t *testing.T, k buttons.Keys, s buttons.Subject, gro
 			{Text: "Snooze 24 h", CallbackData: sign(buttons.CommandSnooze, 2)}},
 		{{Text: "Unack", CallbackData: sign(buttons.CommandUnacknowledge, 0)},
 			{Text: "Unsnooze", CallbackData: sign(buttons.CommandUnsnooze, 0)}},
+		{{Text: "Until tomorrow 09:00", CallbackData: sign(buttons.CommandSnooze, buttons.ArgumentTomorrow)},
+			{Text: "Until Monday 09:00", CallbackData: sign(buttons.CommandSnooze, buttons.ArgumentWeekStart)}},
 	}}
 }
 
@@ -423,6 +425,50 @@ func TestPressSnoozesForThePressedDuration(t *testing.T) {
 	if n := len(e.commands.calls); n != 3 || e.commands.calls[1].command != "unacknowledge" ||
 		e.commands.calls[2].command != "unsnooze" {
 		t.Errorf("commands %+v", e.commands.calls)
+	}
+}
+
+// TestPressSnoozePresets covers C-10.FR-18 and C-10.AC-23: a press on "Until tomorrow" or "Until {day}" from a linked
+// account runs a Snooze with that Snooze preset and no time zone — the dispatcher takes the User's profile time zone,
+// else the Organization's — as its User with the Transport telegram, answered "Done: Snooze"; on a Root message whose
+// Route lost its Snooze durations after it was published, it runs nothing and is answered "This button could not be
+// verified; nothing was changed."; on a test message, "This is a test message; nothing was changed".
+func TestPressSnoozePresets(t *testing.T) {
+	e := newPressEnv(t)
+	for _, c := range []struct {
+		label  string
+		preset groups.SnoozePreset
+	}{{"Until tomorrow 09:00", groups.PresetTomorrow}, {"Until Monday 09:00", groups.PresetWeekStart}} {
+		if got := e.pressAs(t, bobTG, c.label); got != "Done: Snooze" {
+			t.Errorf("%s: answer %q", c.label, got)
+		}
+		r := e.commands.calls[len(e.commands.calls)-1]
+		if r.command != buttons.CommandSnooze || r.group != pressGroup || r.caller.Transport != audit.TransportTelegram ||
+			r.caller.Actor != audit.User(7, "SR0000000000B1") || r.end == nil || r.end.Preset != c.preset ||
+			r.end.TimeZone != nil || r.end.Until != nil || r.end.NoEnd {
+			t.Errorf("%s: ran %+v, the end %+v", c.label, r, r.end)
+		}
+		if l := e.last(t, "telegram_press"); l["command"] != buttons.CommandSnooze || l["outcome"] != "done" {
+			t.Errorf("%s: log %v", c.label, l)
+		}
+	}
+	e.bindings.bound[[3]int64{pressConn, faketelegram.ChannelID, e.post}] = delivery.Binding{Destination: pressDest,
+		ChannelID: "-1001000000001", Language: "en"}
+	for _, label := range []string{"Until tomorrow 09:00", "Until Monday 09:00"} {
+		if got := e.pressAs(t, bobTG, label); got != "This button could not be verified; nothing was changed." ||
+			e.last(t, "telegram_press")["outcome"] != "not_verified" {
+			t.Errorf("%s without durations: answer %q", label, got)
+		}
+	}
+	if len(e.commands.calls) != 2 {
+		t.Errorf("a preset without durations ran %+v", e.commands.calls[2:])
+	}
+	post := e.send(t, faketelegram.ChannelID, 0, e.keyboard(t, e.keys, buttons.SubjectTest, "DS0000000000T1"))
+	text := e.handle(t, e.press(t, fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":5001},"button":%q}`,
+		faketelegram.ChannelID, post, "Until Monday 09:00")))
+	if l := e.last(t, "telegram_press"); text != "This is a test message; nothing was changed" ||
+		len(e.commands.calls) != 2 || l["outcome"] != "test" || l["command"] != buttons.CommandSnooze {
+		t.Errorf("a preset of a test message: answer %q, %v", text, l)
 	}
 }
 
