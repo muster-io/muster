@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 )
 
 func TestParsePayload(t *testing.T) {
@@ -86,7 +88,7 @@ func readCaptured(t *testing.T, name string) []capturedBody {
 
 // TestParsePayloadGrafana is C-06.FR-8 and C-06.FR-21: every body Grafana 13.2.4 sent on the development stand parses
 // as a Snapshot from Grafana without notification_reason, each alert with the fingerprint of the body, Grafana's other
-// fields accepted and not read; a body of Alertmanager, and one whose orgId is null, is not from Grafana.
+// fields accepted and not read; a body of the fake Alertmanager, and one whose orgId is null, is not from Grafana.
 func TestParsePayloadGrafana(t *testing.T) {
 	for name, n := range map[string]int{"ha-main.jsonl": 84, "trunc.jsonl": 6} {
 		bodies := readCaptured(t, name)
@@ -124,11 +126,21 @@ func TestParsePayloadGrafana(t *testing.T) {
 		Fingerprint(p.Alerts[0].Labels) == p.Alerts[0].Fingerprint {
 		t.Errorf("SpikeMem: %+v, %v", p.Alerts, err)
 	}
+	am := fakealertmanager.New().Webhook(1, time.Date(2026, 10, 19, 7, 27, 0, 0, time.UTC))
+	var head struct {
+		Version string          `json:"version"`
+		OrgID   json.RawMessage `json:"orgId"`
+	}
+	if err := json.Unmarshal(am, &head); err != nil || head.Version != "4" || head.OrgID != nil {
+		t.Fatalf("the fake Alertmanager's body: version %q, orgId %s, %v", head.Version, head.OrgID, err)
+	}
+	if p, err := ParsePayload(am); err != nil || p.Grafana || len(p.Alerts) != 1 {
+		t.Errorf("the fake Alertmanager's body: grafana %v, %d alerts, %v", p.Grafana, len(p.Alerts), err)
+	}
 	for _, tt := range []struct {
 		name, body string
 		grafana    bool
 	}{
-		{"Alertmanager", `{"version":"4","groupKey":"g","status":"firing","alerts":[]}`, false},
 		{"orgId null", `{"version":"1","groupKey":"g","status":"firing","orgId":null,"alerts":[]}`, false},
 		{"orgId a number", `{"version":"1","groupKey":"g","status":"firing","orgId":1,"alerts":[]}`, true},
 		{"orgId a string", `{"groupKey":"g","status":"firing","orgId":"1","alerts":[]}`, true},
