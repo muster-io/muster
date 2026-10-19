@@ -250,16 +250,22 @@ func (s *Service) LinkBridge(ctx context.Context, conn BridgeConnection, token s
 	}}, nil
 }
 
-// linkBridge is the transaction of LinkBridge; out says how it ended.
+// linkBridge is the transaction of LinkBridge; out says how it ended. It reads the request by the token's hash without
+// a lock and then locks the User before the request, as the deletion of a User locks the User before it voids the
+// User's pending requests, so that a link and the deletion of its User do not deadlock; the request's state comes from
+// its locked row, and a request pruned in between is an unknown token.
 func (s *Service) linkBridge(ctx context.Context, q Queries, a account, conn BridgeConnection, token string,
 	out *bridgeOutcome) error {
 	system := audit.System
 	invalid := func(lang string) string { return messages.T(lang, "accountLink.invalid", nil) }
+	unknown := func() error {
+		out.reason, out.answer = ReasonTokenUnknown, invalid(messages.LanguageEnglish)
+		return s.reject(ctx, q, system, audit.TransportBridge, noAddress, a, out.reason, "")
+	}
 	r, err := q.GetBridgeTokenRequestByHash(ctx, dbgen.GetBridgeTokenRequestByHashParams{OrgID: s.cfg.OrgID,
 		SecretHash: hash(token)})
 	if errors.Is(err, pgx.ErrNoRows) {
-		out.reason, out.answer = ReasonTokenUnknown, invalid(messages.LanguageEnglish)
-		return s.reject(ctx, q, system, audit.TransportBridge, noAddress, a, out.reason, "")
+		return unknown()
 	}
 	if err != nil {
 		return fmt.Errorf("read the link request: %w", err)
@@ -268,10 +274,17 @@ func (s *Service) linkBridge(ctx context.Context, q Queries, a account, conn Bri
 	if err != nil {
 		return fmt.Errorf("lock the user %s: %w", r.UserPublicID, err)
 	}
+	row, err := q.LockLinkRequest(ctx, dbgen.LockLinkRequestParams{OrgID: s.cfg.OrgID, ID: r.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unknown()
+	}
+	if err != nil {
+		return fmt.Errorf("lock the link request: %w", err)
+	}
 	lang := language(u.Language)
 	linked := messages.T(lang, "accountLink.linkedBridge", messages.Args{"name": u.Name, "login": u.Login})
 	switch {
-	case r.ConsumedAt.Valid && r.ConnectionID == conn.ID && u.Status != statusDeleted:
+	case row.ConsumedAt.Valid && r.ConnectionID == conn.ID && u.Status != statusDeleted:
 		mine, err := q.GetUserLinkInSpace(ctx, dbgen.GetUserLinkInSpaceParams{OrgID: s.cfg.OrgID, UserID: u.ID,
 			IdentitySpace: a.space})
 		switch {
@@ -282,9 +295,9 @@ func (s *Service) linkBridge(ctx context.Context, q Queries, a account, conn Bri
 			return fmt.Errorf("read the user's account link: %w", err)
 		}
 		out.reason = ReasonTokenUsed
-	case r.ConsumedAt.Valid || r.VoidedAt.Valid || u.Status == statusDeleted:
+	case row.ConsumedAt.Valid || row.VoidedAt.Valid || u.Status == statusDeleted:
 		out.reason = ReasonTokenUsed
-	case !r.ExpiresAt.After(s.now()):
+	case !row.ExpiresAt.After(s.now()):
 		out.reason = ReasonTokenExpired
 	case r.ConnectionID != conn.ID:
 		out.reason = ReasonWrongConnection

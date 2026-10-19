@@ -2920,7 +2920,6 @@ func (s *probeLinkStore) GetTelegramRequestByHash(_ context.Context, a alinkdb.G
 	for _, r := range s.reqs {
 		if r.messenger == "telegram" && bytes.Equal(r.row.SecretHash, a.SecretHash) {
 			return alinkdb.GetTelegramRequestByHashRow{ID: r.row.ID, UserID: 1, ConnectionID: r.conn,
-				ExpiresAt: r.row.ExpiresAt, ConsumedAt: r.row.ConsumedAt, VoidedAt: r.row.VoidedAt,
 				UserPublicID: "SRAAAAAAAAAAA1", ConnectionPublicID: "CNAAAAAAAAAAA1"}, nil
 		}
 	}
@@ -2950,7 +2949,6 @@ func (s *probeLinkStore) GetBridgeTokenRequestByHash(_ context.Context, a alinkd
 		if r.messenger == "bridge" && r.method.String == accountlinks.MethodToken &&
 			bytes.Equal(r.row.SecretHash, a.SecretHash) {
 			return alinkdb.GetBridgeTokenRequestByHashRow{ID: r.row.ID, UserID: 1, ConnectionID: r.conn,
-				ExpiresAt: r.row.ExpiresAt, ConsumedAt: r.row.ConsumedAt, VoidedAt: r.row.VoidedAt,
 				UserPublicID: "SRAAAAAAAAAAA1", ConnectionPublicID: s.bridge.PublicID}, nil
 		}
 	}
