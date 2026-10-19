@@ -980,7 +980,10 @@ without a notification. Edits are always Quiet. Do not make an edit ring anyone.
 **Buttons.** Each button has a `label` (up to 64 characters), a `style` hint (`primary`, `danger`, `neutral` or
 `success`), and `data`. The data is opaque and signed by Muster; return it unchanged with the press. Map a style that
 your messenger lacks to the closest one, or show a plain button. Muster sends at most `max_per_message` buttons, and
-drops Snooze durations first.
+drops Snooze buttons first: the preset of the first day of the week ("Until Monday 09:00"), then the preset of the next
+morning ("Until tomorrow 09:00"), then the durations from the longest. A firing Root message on an On-call Route has
+seven buttons, Ack, Resolve, three durations and the two presets, so a bridge that declares `max_per_message: 5` gets
+Ack, Resolve and the three durations.
 
 **Length and safe truncation.** Muster keeps the `body` within `limits.max_body_length` code points of the CommonMark it
 sends. Choose that limit so that a body of that length fits your messenger after your rendering. When the rendered
