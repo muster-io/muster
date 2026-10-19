@@ -4,7 +4,7 @@
 - Date: 2026-10-19
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
-its documentation: how Telegram, Mattermost, Alertmanager and Grafana actually behave. Each fact has a stable id
+its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
 `F-NNN`, never reused, followed by the fact itself, the date it was checked, the method and the version of the external
 system where it is known, and the requirements that rely on it. When a later check contradicts a fact, the entry is
 corrected with the new date and the requirements that cite it are revisited. Facts still to be checked are listed under
@@ -557,6 +557,295 @@ listed it again, with its old `startsAt`, at 08:22:48. Grafana has no setting li
 configuration, `alertmanager_config_poll_interval` (60 s). — _2026-10-19 · live test on the development stand ·
 Grafana OSS 13.2.4_ · Used in C-05.FR-11.
 
+## Slack
+
+Unless an entry says otherwise, the facts were checked on 2026-10-19 on a test stand in Slack's cloud: a free
+workspace, an app installed in it with the bot scopes `chat:write`, `channels:read`, `groups:read`, `im:write`,
+`users:read` and `users:read.email`, an app-level token with `connections:write`, interactivity and Socket Mode on, two
+channels the bot is a member of and two it is not, and one person, the workspace's owner. The Web API was called with
+`curl` at `https://slack.com/api/` with a JSON body and `Authorization: Bearer`; Socket Mode with a small Go client on
+`github.com/coder/websocket` v1.8.15, directly and through a local HTTP proxy; messages were looked at in the web
+client in a browser, at a window about 1,250 px wide, without pressing anything. No person pressed a button during the
+test: what Slack sends for a press is taken from its documentation and a local simulation, and the entries that rely on
+it say so. Every message of the test was deleted afterwards.
+
+### Tokens, errors and scopes
+
+**F-070. Errors are `200` with `ok: false`.** A wrong token is answered `{"ok":false,"error":"invalid_auth"}`, a request
+without a token `not_authed`, a token of the wrong kind `not_allowed_token_type` (an app-level token on
+`chat.postMessage`, a bot token on `apps.connections.open`), all with HTTP `200`. A missing scope is `missing_scope`
+with the fields `needed` and `provided`: `conversations.history` needs
+`channels:history,groups:history,mpim:history,im:history`, `conversations.join` `channels:join`, `conversations.list`
+with `types=im` `im:read`. An answer is classified by its `error` field, never by its status; the only error status is
+the `429` of F-099. — _2026-10-19 · calls with wrong, missing and other tokens on the stand_ · Used in C-24.FR-2,
+C-24.FR-8.
+
+**F-071. Every answer names the token's scopes.** The header `x-oauth-scopes`, on every call `auth.test` included,
+lists the scopes of the token — here `chat:write,im:write,channels:read,groups:read,users:read,users:read.email` — and
+`x-accepted-oauth-scopes` those the method accepts: `users:read` for `users.list`, `users:read.email` for
+`users.lookupByEmail`, `channels:read,groups:read,mpim:read,im:read,read` for `conversations.info`, `chat:write` for
+`chat.update`, `channels:write,groups:write,mpim:write,im:write,post` for `conversations.open`. One `auth.test` tells
+which required scopes a token lacks. — _2026-10-19 · headers of each call on the stand_ · Used in C-24.FR-2.
+
+**F-072. `auth.test` with a bot token and with an app-level token.** With the bot token it answers `ok`, `team`,
+`team_id`, `user_id` (the bot user), `bot_id` and the workspace's `url`. With the app-level token it answers `ok` and
+`app_id`, without `team_id` or `bot_id`. The bot's `app_id` is in `bots.info` (`bot.app_id`, scope `users:read`) and in
+`users.info` (`profile.api_app_id`), so a check can tell whether both tokens belong to one app. A wrong app-level token
+on `apps.connections.open` answers `invalid_auth`. — _2026-10-19 · both tokens of the stand's app_ · Used in
+C-24.FR-2.
+
+**F-073. Without `chat:write.customize` a custom name is ignored.** `chat.postMessage` with `username` answered `ok`,
+and the message came from the bot under its own name, without `message.username`. The bot's name is the display name
+set in the app's settings. — _2026-10-19 · a message with `username` on the stand_ · Used in C-24.FR-16.
+
+### Sending, Block Kit and limits
+
+**F-074. Block Kit and the styles of buttons.** A message of `header`, `section` (mrkdwn), `context` and `actions`
+blocks was accepted. A button takes `style` `primary` or `danger` only; `success`, `default` or an empty string refuse
+the whole message with `invalid_blocks` and `errors: ["must be a valid enum value
+[json-pointer:/blocks/0/elements/0/style]"]`. A button without `style` is plain. The web client draws `primary` as a
+filled green button, `danger` as a filled red one and a plain button white with a border (the documentation describes
+`primary` as a green outline). A button with `url` and no `value` is a link button. The documentation: "`primary`
+should only be used for one button within a set", and `danger` is for destructive actions. — _2026-10-19 · messages
+and a screenshot of the web client;
+[button element](https://docs.slack.dev/reference/block-kit/block-elements/button-element)_ · Used in C-24.FR-5.
+
+**F-075. A colour bar needs an attachment, and blocks and buttons work inside it.** `attachments: [{color, fallback,
+blocks: [section, context, actions]}]` is drawn with a coloured bar on the left, the buttons inside the attachment shown
+and styled. `color` takes a hex value; `good` is stored as `2eb886`. The legacy fields of an attachment (`title`,
+`title_link`, `text`, `footer`, `footer_icon`, `ts`, `callback_id` and legacy `actions`) were accepted too. The
+documentation calls attachments "legacy secondary message attachments" whose legacy fields "may be subject to
+reductions in visibility or functionality", and recommends `blocks` inside them. — _2026-10-19 · messages and a
+screenshot of the web client;
+[legacy attachments](https://docs.slack.dev/legacy/legacy-messaging/legacy-secondary-message-attachments)_ · Used in
+C-24.FR-4.
+
+**F-076. Block limits count the code points of the string as sent.** Exact bounds, where N passes and N+1 is refused
+with `invalid_blocks` and a `json-pointer`: a `section` text 3,000 ("must be less than 3001 characters"), a `header`
+(plain text) 150, a button's text 75, a button's `value` 2,000, an `action_id` 255, 50 blocks in a message ("no more
+than 50 items allowed"), 25 elements in an `actions` block and 10 in a `context` block, and in a `static_select` an
+option's text 75 and its `value` 150. Code points are counted: 3,000 "я" and 3,000 "🔥" pass, 3,001 do not, and a family
+emoji of five code points counts five. The raw string is counted: `&amp;` is five characters and `<https://e.org|x>`
+counts all its markup. An `action_id` is unique within its block (a second one in the block is refused with
+"`action_id` "same" already exists") and may repeat in other blocks; a `block_id` is unique in the message; without an
+`action_id` Slack makes up a random one. — _2026-10-19 · bounds probed one by one on the stand_ · Used in C-24.FR-4,
+C-24.FR-5.
+
+**F-077. A long `text` is split into several messages, and only the last one's `ts` is returned.** `chat.postMessage`
+with a `text` of 12,000 characters and no blocks made three separate messages of 4,000; 40,000 "я" made ten. The answer
+held the `ts` and `message` of the last piece only; the others had earlier `ts`, about 20 ms apart, and
+`chat.delete` of the returned `ts` deleted only that piece. 4,000 and 4,001 characters made one message. Beyond
+40,000 the text is cut to 40,000 with `warning: "message_truncated"`. Next to blocks, `text` is only the notification's
+fallback: blocks with a `text` of 8,000 made one message. — _2026-10-19 · messages on the stand, the pieces seen in the
+web client_ · Used in C-24.FR-4.
+
+**F-078. `chat.update` refuses a `text` longer than 4,000 bytes, even with blocks.** A `text` of 4,000 ASCII characters
+passes and 4,001 are refused with `msg_too_long`; 2,000 "я" (4,000 bytes of UTF-8) pass and 2,001 do not; 3,999 ASCII
+characters and one "я" (4,001 bytes) do not. The stored form is counted: `&` is stored as `&amp;` (1,000 "&" were
+refused), `<` as `&lt;` (900 passed, 1,001 did not), an emoji as its shortcode (1,000 "🔥", stored as `:fire:`, were
+refused). A fallback `text` of 8,000 next to blocks is refused the same way. Blocks are not limited like this: 20
+sections of 3,000 characters passed both in a send and in an edit. — _2026-10-19 · edits on the stand_ · Used in
+C-24.FR-4.
+
+**F-079. Emoji in `text` are stored as shortcodes.** A `text` sent as "🔥 …" came back in `message.text` as
+":fire: …", "✅" as ":white_check_mark:". — _2026-10-19 · answers of `chat.postMessage` on the stand_ · Used in
+C-24.FR-4.
+
+**F-080. An attachment's text is cut to 8,000 characters silently.** `attachments[0].text` of 9,000 characters was
+stored as 8,000 and "…", without a warning, in a send and in an edit; the client shows its start and "Show more". —
+_2026-10-19 · the stand_ · Used in C-24.FR-4.
+
+**F-081. The `markdown` block.** A block `{"type":"markdown","text":…}` with standard Markdown, tables included, is
+turned by the server into `rich_text` (and `table`) blocks; 12,000 characters passed as one message and 12,001 were
+refused with `msg_too_long`. It is accepted inside an attachment too. — _2026-10-19 · the stand_ · Used in C-24.FR-4.
+
+**F-082. The web client folds buttons beyond five in a row.** An `actions` block of seven buttons was shown as the
+first five and "+ 2 more", one of 25 as five and "+ 20 more". A button with a label of 75 characters was cut to about
+38 with "…" (the documentation: it "may truncate with ~30 characters"). A `static_select` and an `overflow` menu next
+to buttons were drawn in the row. — _2026-10-19 · screenshots of the web client, a window about 1,250 px wide; the
+mobile clients were not looked at_ · Used in C-24.FR-5.
+
+**F-083. `unfurl_links: false` and `unfurl_media: false` are accepted,** and no message of the test unfurled a link. —
+_2026-10-19 · the stand_ · Used in C-24.FR-4.
+
+### Edits and deletions
+
+**F-084. A bot edits its own messages.** `chat.update` with `text` and `blocks` answered `ok` with
+`message.edited = {user: <the bot>, ts}`. The same edit again answered `ok` too: there is no "not modified" answer. The
+oldest message of the test, about 35 minutes old, was edited. The documented error `edit_window_closed` ("The message
+cannot be edited due to the team message edit settings") was not seen; whether the workspace's edit window applies to
+bots was not checked, for lack of an older message. — _2026-10-19 · the stand;
+[chat.update](https://docs.slack.dev/reference/methods/chat.update)_ · Used in C-24.FR-6, C-24.FR-8.
+
+**F-085. What `chat.update` keeps.** With `text` and no `blocks`, the earlier blocks are replaced by `rich_text` made
+from the text; without `attachments` the earlier attachments are kept, with `attachments: []` they are removed; with
+`blocks: []` the blocks are removed. The documentation: "If you don't include `blocks`, the message's previous `blocks`
+will only be retained if the `text` argument is not provided… If you don't include `attachments`, the message's previous
+`attachments` will be retained". — _2026-10-19 · edits on the stand; chat.update_ · Used in C-24.FR-4.
+
+**F-086. `block_mismatch`.** A message sent only of `rich_text` blocks cannot be edited into blocks without
+`rich_text`: the edit is refused with `block_mismatch` ("Rich-text blocks cannot be replaced with non-rich-text
+blocks"). A mixed message (`section` and `rich_text`) can be edited into `[section]`, a `section` into `rich_text`, and
+a plain `text` message, which the server stores as `rich_text`, into a `section`. — _2026-10-19 · edits on the stand_
+· Used in C-24.FR-4, C-24.FR-8.
+
+**F-087. A deleted or foreign message.** `chat.update` and `chat.delete` of a deleted or unknown `ts`, or of a `ts` of
+another channel, answer `message_not_found`; of an unknown channel `channel_not_found`; of someone else's message — a
+system message, Slackbot's or a person's — `cant_update_message` and `cant_delete_message`. A second `chat.delete`
+answers `message_not_found`. — _2026-10-19 · the stand_ · Used in C-24.FR-8.
+
+**F-088. `chat.getPermalink` needs no scope and is no test of a deletion.** Its `x-accepted-oauth-scopes` is empty; it
+answers `ok` and `permalink` for an existing `ts` (for a Thread reply, with `?thread_ts=…&cid=…`), and
+`message_not_found` for a deleted or unknown one and for a channel the bot is not in; an unknown channel is
+`channel_not_found`. A deleted root that has replies, the tombstone of F-090, answers `ok`. — _2026-10-19 · the stand_
+· Used in C-24.FR-8.
+
+### Threads
+
+**F-089. A reply in a Thread.** `thread_ts` set to the root's `ts` gives `message.thread_ts` of the root and
+`parent_user_id` of its author; a `thread_ts` that names a reply is normalized to its root. `reply_broadcast: true`
+gives `subtype: thread_broadcast`, an answer with `root` (`reply_count`, `latest_reply`, `reply_users`), and "replied to
+a thread: …" in the channel. Buttons on a Thread reply are sent as on any message. — _2026-10-19 · the stand_ · Used
+in C-24.FR-6.
+
+**F-090. A deleted root with replies stays as a tombstone, and its Thread goes on.** After a root with a reply was
+deleted, the channel showed "This message was deleted." and "2 replies"; the next `chat.postMessage` with its
+`thread_ts` answered `ok`, with the same `thread_ts` and `parent_user_id: "USLACKBOT"`; `chat.update` of the root
+answered `message_not_found`, and `chat.getPermalink` of it `ok`. — _2026-10-19 · the stand, a screenshot_ · Used in
+C-24.FR-8.
+
+**F-091. A reply to a deleted root without replies goes to the channel, silently.** `chat.postMessage` with the
+`thread_ts` of a deleted message that had no replies — or of an unknown one — answered `ok`, without
+`message.thread_ts`, and the message appeared in the channel as an ordinary one. Mattermost (F-058) and Telegram (F-008)
+refuse such a reply; Slack does not. — _2026-10-19 · the stand, a screenshot_ · Used in C-24.FR-8.
+
+### Answers and presses
+
+**F-092. `chat.postEphemeral`.** It needs `chat:write` (rate limit tier 4) and answers `{"ok":true,"message_ts":"…"}`,
+in a channel, with `thread_ts` and with blocks alike. In a channel the client shows it at once in the channel view as
+"Only visible to you". When the bot is not in the channel it answers `not_in_channel`, and when the person is unknown
+or not in the channel `user_not_in_channel`. An ephemeral message cannot be deleted. The documentation: delivery is not
+guaranteed — the person must be active and in the channel — and in a Thread it is "only shown if there is already an
+active thread". No permission is needed beyond the scope, unlike Mattermost's `create_post_ephemeral` (F-063). —
+_2026-10-19 · the stand, a screenshot;
+[chat.postEphemeral](https://docs.slack.dev/reference/methods/chat.postEphemeral)_ · Used in C-24.FR-11.
+
+**F-093. What a press sends, and how fast it must be confirmed (from the documentation).** In HTTP mode Slack posts to
+the app's Interactivity Request URL an `application/x-www-form-urlencoded` body whose field `payload` is JSON with
+`type: block_actions`, `user.id`, `team.id`, `api_app_id`, `container` (`type` `message` or `message_attachment`,
+`message_ts`, `channel_id`, `is_ephemeral`), `channel`, `message`, `trigger_id`, `response_url`
+(`https://hooks.slack.com/actions/…`) and `actions[]` (`action_id`, `block_id`, `value`, `type`, `action_ts`; a select
+has `selected_option.value`). The answer must be HTTP `200` **within 3 seconds**, or the person sees an error.
+`response_url` takes up to five answers within 30 minutes, ephemeral by default (`response_type: ephemeral`);
+`replace_original: true` edits the original message and `delete_original` deletes it, and it "will bypass any channel
+posting permissions". In Socket Mode the same payload comes in an envelope `{"envelope_id", "type": "interactive",
+"payload", "accepts_response_payload"}`, confirmed with `{"envelope_id": …}` on the same socket, also within 3 seconds.
+No press was seen live. — _documentation:
+[handling user interaction](https://docs.slack.dev/interactivity/handling-user-interaction),
+[block_actions payload](https://docs.slack.dev/reference/interaction-payloads/block_actions-payload),
+[Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode); a local simulation of the handler_ · Used in
+C-24.FR-9, C-24.FR-10, C-24.FR-11.
+
+**F-094. A bot cannot press its own button.** The Web API has no method that presses a button — nothing like
+Mattermost's `POST /api/v4/posts/{id}/actions/{action_id}` (F-054) — and no interaction reaches an app without a person.
+A test message cannot prove by itself that presses reach Muster. — _2026-10-19 · the method reference, and no
+`interactive` envelope on the socket during the whole test_ · Used in C-24.FR-2, C-24.FR-13.
+
+### Users and direct messages
+
+**F-095. Finding a person.** `users.lookupByEmail` (scope `users:read.email`) ignores the case of the address (an
+address with capitals found the same `U…`); an unknown address answers `users_not_found`. `users.info` answers
+`user_not_found` for an unknown id, and has `tz` (an IANA zone name), `deleted`, `is_bot` and `profile.email`, and
+`locale` (`en-US`) with `include_locale=true`. `users.list` (tier 2) returns `USLACKBOT` and bots (`is_bot: true`) too,
+with `profile.email` when the token has `users:read.email`. There is no search by name: only `users.list` page by page,
+comparing `name` and `profile.display_name`. — _2026-10-19 · the stand_ · Used in C-24.FR-12.
+
+**F-096. The bot's direct messages.** `conversations.open {users: U…}` (scope `im:write`) answers
+`{"ok":true,"no_op":true,"already_open":true,"channel":{"id":"D…"}}`; for the bot itself `cannot_dm_bot`, for an
+unknown user `user_not_found`. `chat.postMessage` to the `D…` channel is delivered, and so is `chat.postMessage` with
+`channel` set to the `U…` id, into the same direct chat, without `conversations.open`. The messages show in the app's
+Messages tab; with the tab read-only, the input says "Sending messages to this app has been turned off", so the person
+cannot answer. `chat.delete` works in the direct chat; `conversations.info` of it needs `im:read`. — _2026-10-19 · two
+direct messages to the stand's owner, deleted afterwards, and a screenshot_ · Used in C-24.FR-3, C-24.FR-12.
+
+**F-097. Mentions and escaping.** `<@U…>` in `text` and in a `section` becomes a Mention, shown highlighted (stored as
+a `rich_text` element `{"type":"user","user_id":…}`). `&lt;!channel&gt;` and `&lt;b&gt;` are shown literally, as
+"<!channel> <b>x</b>", and `&amp;` as "&". mrkdwn emphasis (`*`, `_`, `~`, `` ` ``) has no escape: `*not bold?*` was
+bold. The `text` elements of a `rich_text` block are literal: "*not bold* _x_ ~y~ `z` <!channel> <@U…> <https://e.org|t>
+&" was kept and shown as it was, without Mentions or links. A bare `@channel`, `<!channel>` and `<!here>` were not sent,
+so as not to notify the workspace. — _2026-10-19 · the stand;
+[formatting](https://docs.slack.dev/messaging/formatting-message-text)_ · Used in C-24.FR-6, C-24.FR-7.
+
+### Channels
+
+**F-098. Checking a channel.** `conversations.info` (scopes `channels:read` and `groups:read`) answers
+`channel.{id, name, is_member, is_archived, is_private, is_channel}`; a channel without the bot answers `ok` with
+`is_member: false`; an unknown id, of a `D…` direct chat or a `C…` channel, `channel_not_found`. Sending to a channel
+without the bot answers `not_in_channel` (and so does `chat.postEphemeral`); to an unknown channel, or to a channel
+named `#…`, `channel_not_found`; without any text `no_text`. `conversations.list` with `limit=2` returned a cursor in
+`next_cursor`, and with `types=public_channel,private_channel&exclude_archived=false` all five channels. An archived
+channel, a bot removed from a channel and a private channel were not tried: the stand has no `channels:manage`, and a
+bot is removed only by a person. — _2026-10-19 · the stand_ · Used in C-24.FR-3.
+
+### Rate limits
+
+**F-099. `429` is a real HTTP status, with JSON and `Retry-After`.** `users.list` (tier 2), 100 requests 50 at a time:
+90 × `200` and 10 × `429` with `Retry-After: 30` and the body `{"ok":false,"error":"ratelimited"}` as
+`application/json`. `chat.update` of one message: 60 and 150 requests at once all passed; then 400 within 3 s, 100 at a
+time, gave 120 × `200` and 280 × `429` with `Retry-After: 10`, and about 10 s later an edit and a send to another
+channel passed. `chat.delete` without pauses, about 100 a minute, got 3 `ratelimited` out of about 115.
+`chat.postMessage` to one channel, 40 in a row (about two a second for 22 s) and 30 at once, got no `429`. The
+documentation: limits are per method, per app and per workspace (`Retry-After` asks to wait "before attempting to call
+`conversations.info` with any token awarded to your app from this workspace"); `chat.postMessage` allows "one message
+per second per channel" with short bursts and a workspace-wide limit, and "if you attempt bursts, there is no guarantee
+that messages will be stored or displayed"; `chat.update`, `chat.delete` and `apps.connections.open` are tier 3 (50 or
+more a minute), `chat.postEphemeral` tier 4, `users.list` and `conversations.list` tier 2. — _2026-10-19 · the stand;
+[rate limits](https://docs.slack.dev/apis/web-api/rate-limits)_ · Used in C-24.FR-3, C-24.FR-8.
+
+### Socket Mode
+
+**F-100. Opening a Socket Mode connection.** `apps.connections.open` with the app-level token answers
+`{"ok":true,"url":"wss://wss-primary.slack.com/link/?ticket=…&app_id=…"}`; the URL carries a single-use `ticket`, a
+secret. The WebSocket answers `101`, and its first frame is
+`{"type":"hello","num_connections":1,"debug_info":{"host":"applink-2","build_number":28,"approximate_connection_time":18060},"connection_info":{"app_id":…}}`,
+about five hours before a planned refresh. A second connection with the same URL got `101` but no `hello` within 3 s:
+every connection needs a new `apps.connections.open`. — _2026-10-19 · the Go client on the stand_ · Used in C-24.FR-1,
+C-24.FR-9.
+
+**F-101. The planned refresh.** With `&debug_reconnects=true`, `approximate_connection_time` was 360; the frame
+`{"type":"disconnect","reason":"warning"}` came after about 303 to 310 s and
+`{"type":"disconnect","reason":"refresh_requested"}` after about 370 s, about 60 s after the warning (the documentation
+promises the warning "about 10 seconds before"). `link_disabled`, sent when Socket Mode is turned off in the app's
+settings, is known from the documentation only. — _2026-10-19 · two runs on the stand; Socket Mode documentation_ ·
+Used in C-24.FR-9.
+
+**F-102. Up to ten connections, and an event goes to any of them.** Of twelve connections opened at once,
+`hello.num_connections` grew from 1 to 10; the eleventh and twelfth got `101` and at once
+`{"type":"disconnect","reason":"too_many_websockets"}` without `hello`. `num_connections` counts every connection of the
+app, a parallel test's included (it showed 2 with one connection of the client's own). The documentation: "up to 10
+open WebSocket connections", "each payload may be sent to any of the connections… don't assume any particular pattern",
+and with Socket Mode on, events and presses go only to the sockets, never over HTTP. — _2026-10-19 · the stand;
+Socket Mode documentation_ · Used in C-24.FR-2, C-24.FR-9.
+
+**F-103. Socket Mode through an HTTP proxy.** A Go `http.Transport` with `Proxy` set and `coder/websocket`'s `Dial`
+with that client took both `apps.connections.open` and the WebSocket through a local CONNECT proxy — its log showed
+`CONNECT slack.com:443`, then `CONNECT wss-primary.slack.com:443` — and `hello` arrived. A proxy that answers CONNECT
+with `403` already breaks `apps.connections.open`. — _2026-10-19 · the stand_ · Used in C-24.FR-9.
+
+### HTTP mode
+
+**F-104. Slack's request signature.** `X-Slack-Signature` is `v0=` and the hex HMAC-SHA256, keyed with the app's Slack
+signing secret, of `"v0:" + X-Slack-Request-Timestamp + ":" + the raw body`. A Go implementation reproduced the
+documentation's example, `v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503` for the secret
+`8f742231b10e8888abcd99yyyzzz85a5`, the timestamp `1531420618` and its example body. The window is five minutes, and the
+raw body is signed before the form is parsed. The stand's Slack signing secret is 32 hex characters. In a local
+simulation a correct request was answered `200`, a changed body `401` and a timestamp older than 301 s `401`. The Events
+API's `url_verification` and its retries (three, at once, after 1 and after 5 minutes, with `x-slack-retry-num` and
+`x-slack-retry-reason`) are documented but not used. No request from Slack itself was received: the stand had no Request
+URL. — _2026-10-19 · the documentation's example vector in Go; [verifying
+requests](https://docs.slack.dev/authentication/verifying-requests-from-slack), [Events
+API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
+
 ## Pending
 
 - **Telegram and Mattermost, several bots** (S-069). Two admin bots of one channel and its discussion group: whether
@@ -583,3 +872,16 @@ Grafana OSS 13.2.4_ · Used in C-05.FR-11.
   of Alertmanager (F-045, F-047); a crash, and whether the notification log survives it; `for` above 0 and
   `keep_firing_for`; `DatasourceError`; several organizations (F-106); a custom payload and HMAC signing; an
   always-firing rule sent to the Heartbeat URL through a webhook contact point.
+- **Slack.** A person's press in both event modes — the real `block_actions` payload and envelope of F-093,
+  `response_url`, what the person sees when a press is not confirmed within 3 seconds, and whether Slack ever sends an
+  unconfirmed `interactive` envelope or an interaction it could not deliver over HTTP again; which notifications a
+  Mention added by an edit, a Thread reply and an ephemeral answer in a Thread make, and push on phones; whether
+  `<!channel>` and `<!here>` from a bot notify as documented; whether the workspace's edit window applies to the bot's
+  messages hours or days old (`edit_window_closed`, F-084); what `chat.update`, `chat.postMessage` and
+  `conversations.info` answer after the bot is removed from a channel, and in an archived or a private channel (F-098);
+  whether a zero-width space after `*`, `_`, `~` or `` ` `` keeps mrkdwn from pairing them into emphasis (C-24.FR-7);
+  what `apps.connections.open` answers with Socket Mode off, and `link_disabled` (F-101); how long `num_connections`
+  keeps counting a socket that went away without a close, such as a crashed Leader's (F-102); Socket Mode through a
+  SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot token; and the mobile clients — the colour bar,
+  buttons beyond five in a row and `static_select` (F-075, F-082). To check on the test stand with a person, by the
+  Slack stories.

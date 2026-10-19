@@ -170,6 +170,13 @@ Other lifecycle values:
 | `bridge.retry_after_max` | 15 min: a `rate_limited` answer asking for a longer wait, or a `429` without `Retry-After`, counts as Transient, so a long pause ends in Broken instead of an unseen stall | built in | C-22 | decided |
 | `bridge.edit_window_margin` | 60 s: a Root message is treated as past the bridge's edit window this long before `edit_max_age_seconds` | built in | C-22 | decided |
 | `bridge.text_commands` | `ack`, `unack`, `resolve`, `snooze <duration>`, `unsnooze`, `still on it`, and in Russian `взял`, `отпускаю`, `решено`, `отложить <duration>`, `вернуть`, `ещё работаю` (also with `е`); `<duration>` is also a Snooze preset: `tomorrow` (`завтра`) or the name of the first day of the week (`monday` … `sunday`, `понедельник` … `воскресенье`); every word works whatever the Route's language | built in | C-22 | decided |
+| `connection.slack.limiter` | 50 requests/min, every Web API call of the Connection together — the documented minimum of the rate-limit tier of `chat.update` and `chat.delete` ([F-099](../../facts.md#rate-limits)); Slack's `429` answers stay the truth | Connection | C-24 | P-60 |
+| `destination.slack.limiter` | 30 requests/min, sends and edits together — half of Slack's "one message per second per channel" ([F-099](../../facts.md#rate-limits)) | Destination | C-24 | P-61 |
+| `connection.slack.event_mode` | `socket`: the Leader holds a Socket Mode connection, which needs no address of Muster that Slack can reach; `http` when Slack can reach `MUSTER_INGEST_URL`, which loses no press during a change of the Leader | Connection | C-24 | decided |
+| `slack.hello_timeout` | 10 s: a Socket Mode connection whose `hello` has not come by then is closed, and the next one starts with a new `apps.connections.open` ([F-100](../../facts.md#socket-mode)) | built in | C-24 | decided |
+| `slack.socket_backoff` | from 1 s, doubling with jitter, up to 5 min after a Socket Mode connection failed or was refused (`too_many_websockets`, `link_disabled`); a `hello` resets it | built in | C-24 | decided |
+| `slack.request_tolerance` | 5 min between a press's `X-Slack-Request-Timestamp` and Muster's real clock, as Slack recommends ([F-104](../../facts.md#http-mode)) | built in | C-24 | decided |
+| `slack.parallel_presses` | 2 Slack presses handled at the same time per replica, over all its Slack Connections and both event modes, like `bridge.parallel_events`; the others wait, already confirmed | built in | C-24 | decided |
 
 ## Request log
 
@@ -189,6 +196,8 @@ Other lifecycle values:
 | `account_link.bridge_token_ttl` | single use, 10 min, like `account_link.telegram_token_ttl` | built in | C-22 | decided |
 | `account_link.bridge_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts, like `account_link.mattermost_code` | built in | C-22 | decided |
 | `account_link.bridge_code_requests` | 5 per hour per requesting User; 3 per hour per target account, like `account_link.mattermost_code_requests` | built in | C-22 | decided |
+| `account_link.slack_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts, like `account_link.mattermost_code` | built in | C-24 | decided |
+| `account_link.slack_code_requests` | 5 per hour per requesting User; 3 per hour per target account, like `account_link.mattermost_code_requests` | built in | C-24 | decided |
 | `account_link.request_prune_after` | 24 h after a link request's `expires_at`, consumed and voided requests included, so that the hour `account_link.mattermost_code_requests` counts is kept and a late `/start` still answers that the link expired; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-18 | decided |
 
 ## Organization

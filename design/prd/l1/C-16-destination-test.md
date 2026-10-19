@@ -36,7 +36,9 @@
   the result says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the
   Mattermost server, the most common cause, which only the Mattermost server log names (C-13.FR-7, C-13.FR-13,
   [F-022](../../facts.md#button-presses-and-answers)). Muster recognises its own press by the test message's action id
-  and the bot's `user_id`, and answers it with no private message.
+  and the bot's `user_id`, and answers it with no private message. A Slack bot cannot press its own button
+  ([F-094](../../facts.md#answers-and-presses)), so the test of a Slack Destination checks delivery only and says so,
+  and a press by a person on its test message shows that presses reach Muster (C-24.FR-13).
 - **C-16.FR-4** "Preview" renders the Root message (or webhook request) for a chosen Alert Group or the example without
   sending it.
 - **C-16.FR-5** Sending a test message is recorded in the Audit log.

@@ -12,6 +12,9 @@
   run twice, because it only deletes records past the bounds
 - Amended: 2026-10-19 — the Decision, Health and Consequences name Bridge polling beside Telegram polling, and every
   task of the closed list, the retention deletes included: the earlier amendments had added tasks to the Context only
+- Amended: 2026-10-19 — holding the Socket Mode connections of Slack Connections (`slack_socket_mode`) is a Leader task
+  (journal D385); it is safe to run twice, because Slack gives each press to one of an app's connections, so an overlap
+  only shares them; the presses made while no Leader holds a connection are lost, which the HTTP event mode avoids
 
 ## Context
 
@@ -22,6 +25,10 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 - Telegram `getUpdates` long polling — Telegram answers `409 Conflict` when two clients poll the same bot token;
 - polling the events of Bridge Connections in the poll mode (ADR-0017), so that one cursor per Connection is kept in
   one place;
+- holding the Socket Mode connection of each Slack Connection in the `socket` event mode: Slack allows an app up to ten
+  connections and gives each press to any one of them, so one holder per Connection keeps the count of connections
+  meaningful — a `hello` that counts more than the holder's own shows that another installation shares the app — and
+  receives presses the way Telegram updates and Bridge events are received;
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
 - creating and dropping partitions; deleting what the retention periods remove outside partitions — resolved Alerts of
   the Alerts view, Alert Groups past their retention, Thread replies and outgoing webhook events; and pruning
@@ -51,12 +58,12 @@ claimed like any other row, with `SKIP LOCKED` and a lease, so a timer fires on 
 replica delays nothing beyond its lease.
 
 **One Leader** holds a **session advisory lock with a constant key** on a dedicated connection and runs only the tasks
-listed in the Context: Telegram polling, Bridge polling, the Heartbeat lost and Stale checks, partition maintenance,
-the retention deletes, the pruning of short-lived rows, of the records of gone replicas and of the Request log,
-database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key
-rotation (later also polling Alertmanager in the `pull` Connection mode). This list is closed: new singleton work is
-added to it by a reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica
-leads.
+listed in the Context: Telegram polling, Bridge polling, Slack's Socket Mode connections, the Heartbeat lost and Stale
+checks, partition maintenance, the retention deletes, the pruning of short-lived rows, of the records of gone replicas
+and of the Request log, database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the
+re-render after a key rotation (later also polling Alertmanager in the `pull` Connection mode). This list is closed: new
+singleton work is added to it by a reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops
+when no replica leads.
 
 **A bounded lease on leadership.** The Leader proves it still holds the lock by pinging over the lock's own session at a
 fixed interval. The lock session sets `idle_session_timeout` (which is why PostgreSQL 14 is the oldest supported
@@ -66,7 +73,8 @@ shorter than that bound, stops all singleton work at once and closes the lock co
 again later. So the old Leader normally stops before PostgreSQL can hand the lock to another replica. A process frozen
 for longer than the bound can still overlap with its successor for a moment, so every singleton task must be safe to run
 twice: Telegram rejects a second poller with `409 Conflict`, which the poller answers by backing off — it never counts
-against the Connection or marks anything Broken; a Bridge event polled twice is handled once by its id; partition
+against the Connection or marks anything Broken; a Bridge event polled twice is handled once by its id; two Slack
+connections of one Connection share its presses, each press reaching one of them; partition
 changes, Stale resolutions and deletes past a bound are idempotent, Internal alerts are deduplicated by fingerprint, and
 an extra outgoing heartbeat is harmless. Defaults: a ping every 5 seconds, a fencing deadline of 15 seconds and a
 server-side bound of 30 seconds, so a handover after a node loss takes well under a minute.
@@ -86,18 +94,20 @@ with a PodDisruptionBudget are an option. A nightly end-to-end test runs two rep
 without anyone having to run HA in production.
 
 **Health.** Liveness performs no checks; readiness checks only the database. Unreachable messengers or Alertmanagers
-raise alerts; they do not take replicas out of load balancing. The `muster_leader` metric shows which replica leads.
-The chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram and Bridge polling,
-the Heartbeat lost and Stale checks, partition maintenance, retention and pruning, the database gauges, the outgoing
-heartbeat, the OIDC secret expiry check and the re-render after a key rotation have stopped, while ingestion, delivery
-and timers keep working.
+raise alerts; they do not take replicas out of load balancing. The `muster_leader` metric shows which replica leads. The
+chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram and Bridge polling,
+Slack's Socket Mode connections, the Heartbeat lost and Stale checks, partition maintenance, retention and pruning, the
+database gauges, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key rotation have
+stopped, while ingestion, delivery and timers keep working.
 
 ## Consequences
 
 - HTTP and all workers, timers included, scale horizontally; only the few singleton tasks do not, which is fine at the
   volumes of the first release.
 - A Leader change pauses Telegram and Bridge polling, the periodic checks and the outgoing heartbeat for at most the
-  handover bound; no ack timeout or Reminder waits for it.
+  handover bound; no ack timeout or Reminder waits for it. Telegram and bridges keep what arrives meanwhile; Slack does
+  not, so the presses made in Socket Mode until the next Leader connects are lost and their people see Slack's error. A
+  Slack Connection that cannot lose a press uses the HTTP event mode, which any replica serves.
 - The Leader's own database connection becomes a liveness signal: a Leader that cannot reach PostgreSQL stops leading
   within seconds, even if its process keeps running.
 - Installations whose main connection goes through PgBouncer in transaction mode must provide a second, session-capable
@@ -117,6 +127,10 @@ and timers keep working.
   and to Alertmanager.
 - **One advisory lock per role, spreading roles across replicas.** Balances load, but "who does what" becomes harder to
   observe and debug, and first-release volumes do not need it.
+- **Every replica holds a Slack Socket Mode connection.** No press would be lost during a Leader change, but each
+  replica's connections, two of them during Slack's planned refresh, count against the app's ten, a second
+  installation could no longer be told from Muster's own replicas, and presses would arrive in a way unlike Telegram's
+  and Bridges'; the HTTP event mode serves installations that cannot lose a press.
 - **Kubernetes Lease objects.** Muster must also run outside Kubernetes.
 - **Locks in Redis.** Would add the component ADR-0006 avoids.
 - **Requiring a direct database connection for everything.** Many PostgreSQL deployments put PgBouncer in front; a
