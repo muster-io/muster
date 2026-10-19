@@ -1,3 +1,1 @@
-# Changelog
-
-release-please maintains this file from the conventional-commit messages of merged pull requests.
+<!-- Maintained by release-please from the conventional commits of merged pull requests. Do not edit by hand. -->

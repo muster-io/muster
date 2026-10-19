@@ -58,8 +58,11 @@ dockers_v2:
     dockerfile: Dockerfile
     images:
       - ghcr.io/muster-io/muster
+    # latest follows the newest release only: a prerelease (and the snapshot, whose version has a prerelease part)
+    # renders the empty tag, which goreleaser drops.
     tags:
       - "v{{ .Version }}"
+      - '{{ if not .Prerelease }}latest{{ end }}'
     platforms:
       - linux/amd64
       - linux/arm64
@@ -99,6 +102,8 @@ release:
   draft: true
   use_existing_draft: true
   mode: keep-existing
+  # A re-run on the same tag replaces the artifacts an earlier run uploaded into the draft.
+  replace_existing_artifacts: true
   prerelease: auto
 
 snapshot:

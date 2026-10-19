@@ -18,6 +18,10 @@
         {
           "type": "generic",
           "path": "docs/quick-start.md"
+        },
+        {
+          "type": "generic",
+          "path": "api/openapi.yaml"
         }
       ]
     }
