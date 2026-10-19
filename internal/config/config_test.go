@@ -497,6 +497,8 @@ func TestSecureContext(t *testing.T) {
 		{"http://localhost:8080", true},
 		{"http://LOCALHOST:8080", true},
 		{"http://muster.localhost:8080", true},
+		{"http://localhost.:8080", true},
+		{"http://muster.localhost.:8080", true},
 		{"http://127.0.0.1:8080", true},
 		{"http://127.0.0.5", true},
 		{"http://[::1]:8080", true},

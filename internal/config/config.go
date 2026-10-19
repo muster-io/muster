@@ -306,12 +306,13 @@ func Load(environ []string) (Config, error) {
 }
 
 // SecureContext reports whether browsers treat the pages of u as a secure context, where they keep the Secure session
-// cookie: https, or http on a loopback host — localhost, a name under .localhost, 127.0.0.0/8 or ::1.
+// cookie: https, or http on a loopback host — localhost, a name under .localhost, either with a trailing dot,
+// 127.0.0.0/8 or ::1.
 func SecureContext(u *url.URL) bool {
 	if u.Scheme == "https" {
 		return true
 	}
-	host := strings.ToLower(u.Hostname())
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}

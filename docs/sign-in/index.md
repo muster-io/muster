@@ -65,7 +65,8 @@ There are two ways out:
   port 8080, set `MUSTER_PUBLIC_URL` to its `https://` address and restart Muster.
 - **An SSH tunnel to localhost**, to try Muster on another machine without a certificate. On your own machine, run
   `ssh -L 8080:localhost:8080 <host>`, keep it open and browse to `http://localhost:8080`, with `MUSTER_PUBLIC_URL`
-  set to `http://localhost:8080`.
+  set to `http://localhost:8080`. Safari may drop the cookie on `localhost` too: if sign-in still returns to the
+  sign-in page there, use HTTPS or another browser.
 
 ## Link your messenger accounts
 
