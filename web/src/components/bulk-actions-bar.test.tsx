@@ -2,8 +2,9 @@
 // Copyright The Muster Authors
 
 // The bulk bar in a real browser, against a stubbed API: each Command only with its Permission, more than
-// alert_group.bulk_max selected disables them all with the reason, and a bulk Acknowledge sends the selection and
-// lists each Alert Group's outcome, an Owner's name for a skipped one.
+// alert_group.bulk_max selected disables them all with the reason, a bulk Acknowledge sends the selection and lists
+// each Alert Group's outcome, an Owner's name for a skipped one, and a bulk Snooze sends a Snooze preset with the
+// user's time zone.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -21,10 +22,42 @@ import { BulkActionsBar } from "./bulk-actions-bar";
 
 let sent: unknown[] = [];
 
+const ZONE = "Europe/Berlin";
+
+function json(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 beforeEach(async () => {
   sent = [];
   await i18n.changeLanguage("en");
-  vi.spyOn(window, "fetch").mockImplementation((_input, init) => {
+  vi.spyOn(window, "fetch").mockImplementation((input, init) => {
+    const url = new URL(
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      window.location.origin,
+    );
+    // The Snooze dialog reads the Organization's settings and the ends of the Snooze presets.
+    if (url.pathname === "/api/v1/organization") {
+      return Promise.resolve(
+        json({ time_zone: "UTC", workday_start: "09:00", week_start: "monday" }),
+      );
+    }
+    if (url.pathname === "/api/v1/snooze-presets") {
+      return Promise.resolve(
+        json({
+          time_zone: ZONE,
+          workday_start: "09:00",
+          week_start: "monday",
+          items: [
+            { preset: "tomorrow", until: "2026-10-20T07:00:00Z" },
+            { preset: "week_start", until: "2026-10-26T08:00:00Z" },
+          ],
+        }),
+      );
+    }
     // The bar reads a skipped Alert Group again for its Owner; only the command is a request with a body.
     if (typeof init?.body === "string") {
       sent.push(JSON.parse(init.body));
@@ -58,8 +91,8 @@ async function renderBar(ids: string[], permissions: Permission[]) {
   const read: SessionRead = {
     session: {
       state: "active",
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the bar reads only the Permissions
-      user: { id: "US0000000000ME" } as Session["user"],
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the bar reads only the Permissions and the time zone
+      user: { id: "US0000000000ME", time_zone: ZONE } as Session["user"],
       csrf_token: "csrf",
       expires_at: "2026-10-08T09:00:00Z",
       idle_expires_at: "2026-10-08T09:00:00Z",
@@ -131,6 +164,29 @@ describe("BulkActionsBar", () => {
     ).toEqual(["#1: done", "#2: skipped: owned by Alice"]);
     expect(sent).toEqual([
       { command: "acknowledge", alert_group_ids: ["AG0000000000A1", "AG0000000000A2"] },
+    ]);
+    expect(done).toHaveBeenCalledWith(["AG0000000000A1", "AG0000000000A2"]);
+  });
+
+  test("a bulk Snooze sends the chosen Snooze preset with the user's time zone", async () => {
+    const { done } = await renderBar(["AG0000000000A1", "AG0000000000A2"], ALL);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Snooze 2 Alert Groups" });
+    await expect
+      .element(dialog.getByTestId("snooze-preset-end-week_start"))
+      .toHaveTextContent("Ends Oct 26, 2026, 09:00");
+    await dialog.getByTestId("snooze-choice-week_start").click();
+    await expect
+      .element(dialog.getByRole("radio", { name: "Until Monday 09:00", exact: true }))
+      .toBeChecked();
+    await dialog.getByRole("button", { name: "Snooze", exact: true }).click();
+    await expect.element(page.getByRole("dialog", { name: "Result: Snooze" })).toBeVisible();
+    expect(sent).toEqual([
+      {
+        command: "snooze",
+        alert_group_ids: ["AG0000000000A1", "AG0000000000A2"],
+        snooze: { preset: "week_start", time_zone: ZONE },
+      },
     ]);
     expect(done).toHaveBeenCalledWith(["AG0000000000A1", "AG0000000000A2"]);
   });

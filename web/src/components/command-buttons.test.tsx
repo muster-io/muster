@@ -93,6 +93,16 @@ beforeEach(async () => {
         body: { id: "RT0000000000OP", policy: { snooze_durations_seconds: [3600, 14400, 86400] } },
       });
     }
+    // The Snooze dialog labels its presets from the Organization's settings; their ends cannot be read here.
+    if (url.pathname === "/api/v1/organization") {
+      return json({
+        status: 200,
+        body: { time_zone: "UTC", workday_start: "09:00", week_start: "monday" },
+      });
+    }
+    if (url.pathname === "/api/v1/snooze-presets") {
+      return json({ status: 503, body: { code: "unavailable" } });
+    }
     requests.push({
       method,
       path: url.pathname,
@@ -460,8 +470,16 @@ describe("CommandButtons", () => {
     await renderWith(<CommandButtons group={g} />);
     await page.getByRole("button", { name: "Snooze" }).click();
     const dialog = page.getByRole("dialog", { name: "Snooze #412" });
-    for (const name of ["1 h", "4 h", "24 h", "Until", "No end"]) {
-      await expect.element(dialog.getByRole("radio", { name })).toBeInTheDocument();
+    for (const name of [
+      "1 h",
+      "4 h",
+      "24 h",
+      "Until tomorrow 09:00",
+      "Until Monday 09:00",
+      "Until",
+      "No end",
+    ]) {
+      await expect.element(dialog.getByRole("radio", { name, exact: true })).toBeInTheDocument();
     }
     await dialog.getByText("4 h", { exact: true }).click();
     const before = Date.now();

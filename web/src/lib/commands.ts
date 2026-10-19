@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Commands on Alert Groups from the UI (C-10.FR-1, FR-2, FR-14, FR-16; C-17.FR-10): which buttons an Alert Group
-// offers, taken only from its allowed_commands; the refusal messages by their Problem code; running a Command and
-// putting the CommandResult into the page and the list; the texts of bulk results; and the limits the dialogs check.
+// Commands on Alert Groups from the UI (C-10.FR-1, FR-2, FR-14, FR-16, FR-18; C-17.FR-10): which buttons an Alert
+// Group offers, taken only from its allowed_commands; the labels of the Snooze presets; the refusal messages by their
+// Problem code; running a Command and putting the CommandResult into the page and the list; the texts of bulk results;
+// and the limits the dialogs check.
 
 import {
   type InfiniteData,
@@ -36,7 +37,9 @@ import type {
   BulkCommandItem,
   CommandName,
   CommandResult,
+  SnoozePreset,
   SnoozeRequest,
+  Weekday,
 } from "../api/gen/model";
 import { isApiError, problemText } from "./api";
 import { formatDuration } from "./time";
@@ -92,6 +95,41 @@ export function snoozeDurationLabel(t: TFunction, seconds: number): string {
     return t("duration.days", { value: seconds / day });
   }
   return formatDuration(t, seconds);
+}
+
+/** The day of the week in a preset's label: in Russian in the genitive, «До понедельника 09:00». */
+function presetDay(t: TFunction, day: Weekday): string {
+  switch (day) {
+    case "monday":
+      return t("commands.snooze.presetDay.monday");
+    case "tuesday":
+      return t("commands.snooze.presetDay.tuesday");
+    case "wednesday":
+      return t("commands.snooze.presetDay.wednesday");
+    case "thursday":
+      return t("commands.snooze.presetDay.thursday");
+    case "friday":
+      return t("commands.snooze.presetDay.friday");
+    case "saturday":
+      return t("commands.snooze.presetDay.saturday");
+    default:
+      return t("commands.snooze.presetDay.sunday");
+  }
+}
+
+/**
+ * A Snooze preset as a choice (C-10.FR-17): "Until tomorrow 09:00" or "Until Monday 09:00", from the Organization's
+ * start of the working day (HH:MM) and first day of the week.
+ */
+export function snoozePresetLabel(
+  t: TFunction,
+  preset: SnoozePreset,
+  workdayStart: string,
+  weekStart: Weekday,
+): string {
+  return preset === "tomorrow"
+    ? t("commands.snooze.presetTomorrow", { time: workdayStart })
+    : t("commands.snooze.presetWeekStart", { day: presetDay(t, weekStart), time: workdayStart });
 }
 
 /** The Problem code of a refused Command, or undefined for any other failure. */

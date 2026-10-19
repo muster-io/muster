@@ -9,7 +9,9 @@ covers: [C-10.FR-18, C-10.AC-24, C-20.FR-9]
 files_touched:
   - web/src/components/snooze-dialog.tsx
   - web/src/components/snooze-dialog.test.tsx
+  - web/src/components/bulk-actions-bar.tsx
   - web/src/components/bulk-actions-bar.test.tsx
+  - web/src/components/command-buttons.test.tsx
   - web/src/lib/commands.ts
   - web/src/routes/admin.organization.general.tsx
   - web/src/routes/profile.tsx
@@ -17,6 +19,7 @@ files_touched:
   - web/src/locales/ru.json
   - web/e2e/snooze-presets.spec.ts
   - web/e2e/organization-settings.spec.ts
+  - web/e2e/bulk-commands.spec.ts
   - docs/concepts/statuses-and-commands.md
 acceptance:
   - "[C-10.FR-18, C-10.AC-24] The Snooze dialog of an Alert Group offers, after the Route's durations and before \"Until\" and \"No end\", \"Until tomorrow 09:00\" and \"Until Monday 09:00\" — the Organization's `workday_start` and `week_start` — each with \"Ends {date and time}\" in the user's time zone, as `listSnoozePresets` answers it for that zone; choosing one sends `{\"preset\", \"time_zone\"}` with the user's time zone, and the page header then shows the Snooze end (`snooze-dialog.test.tsx`, `snooze-presets.spec.ts`)."

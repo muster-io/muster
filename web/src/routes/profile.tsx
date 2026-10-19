@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The profile (C-03.FR-12): name, language and time zone, the sign-in method with "Link OIDC" (C-03.FR-29), the
-// password of an account that has one, the sessions, TOTP, the Personal access tokens (C-04) and the messenger accounts
-// linked to the user, with linking and unlinking (C-18).
+// The profile (C-03.FR-12): name, language and time zone, with the hint on the time zone of the Snooze presets pressed in
+// messengers (C-10.FR-18), the sign-in method with "Link OIDC" (C-03.FR-29), the password of an account that has one,
+// the sessions, TOTP, the Personal access tokens (C-04) and the messenger accounts linked to the user, with linking and
+// unlinking (C-18).
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +23,7 @@ import {
   useStartOidcLink,
   useUpdateMe,
 } from "../api/gen/endpoints/profile/profile";
+import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
 import { useGetSignInOptions } from "../api/gen/endpoints/sessions/sessions";
 import type { Me, MeUpdate, User } from "../api/gen/model";
 import { UpdateMeBody } from "../api/gen/zod/profile/profile.zod";
@@ -204,6 +206,8 @@ function PreferencesCard({ user }: { user: User }) {
     update.mutate({ data: { name: user.name, ...change } });
   };
   const browserZone = browserTimeZone();
+  const organization = useGetOrganization();
+  const zoneHint = organization.data?.time_zone;
   return (
     <Card>
       <CardHeader>
@@ -244,6 +248,7 @@ function PreferencesCard({ user }: { user: User }) {
             className="w-full max-w-sm"
             value={user.time_zone ?? ""}
             aria-busy={update.isPending}
+            aria-describedby={zoneHint === undefined ? undefined : "profile-time-zone-hint"}
             onChange={(e) => save({ time_zone: e.target.value === "" ? null : e.target.value })}
           >
             <NativeSelectOption value="">
@@ -255,6 +260,11 @@ function PreferencesCard({ user }: { user: User }) {
               </NativeSelectOption>
             ))}
           </NativeSelect>
+          {zoneHint !== undefined && (
+            <p id="profile-time-zone-hint" className="text-sm text-muted-foreground">
+              {t("profile.preferences.presetTimeZoneHint", { zone: zoneHint })}
+            </p>
+          )}
         </div>
         {update.isError && (
           <Alert variant="destructive">
