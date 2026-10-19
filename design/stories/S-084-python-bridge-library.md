@@ -5,7 +5,7 @@ capability: C-22
 kind: be
 layer: L1
 repository: muster-io/muster-bridge-python
-depends_on: [S-079]
+depends_on: [S-078, S-083]
 covers: [C-22.FR-25, C-22.AC-25]
 files_touched:
   - LICENSE
@@ -47,16 +47,16 @@ files_touched:
   - tests/test_mentions.py
   - tests/test_spec.py
 acceptance:
-  - "[C-22.FR-25] The repository `muster-io/muster-bridge-python` has the default branch `master`, whose first commit adds only the MIT `LICENSE` (\"Copyright The Muster Authors\"); `pyproject.toml` names the distribution `muster-bridge` with the licence expression `MIT`, `requires-python = \">=3.11\"` and the runtime dependencies Starlette, httpx and pydantic 2 only; every Python file, workflow and Makefile carries `SPDX-License-Identifier: MIT` and the copyright line, which `make lint` checks; CONTRIBUTING.md takes contributions under MIT without a CLA; `make licenses` fails on a runtime dependency whose licence is not on its list."
-  - "[C-22.FR-25] `muster_bridge.BridgeApp(config, messenger)` is an ASGI application on Starlette that uvicorn serves and that mounts under a path of a Starlette or FastAPI application; a bridge implements the `Messenger` protocol with `async` methods — post, edit, reply in a Thread, check a channel, answer — and, for the features it declares, `UserFinder`, `DirectMessenger` and `Deleter`; a configuration whose features need a protocol the messenger lacks, or whose `info` would not match `api/bridge.yaml`, raises `ConfigError` naming the reason (`test_config.py`, `test_app.py`)."
-  - "[C-22.FR-25] The application serves every operation of `api/bridge.yaml` under `/v1/`, answers `401` to a missing or wrong token and calls the messenger with the bot of the token; before calling the messenger it refuses as `invalid` a request that does not match the models generated from the specification, a request body over the library's cap of 1 MiB, a `body` longer than `max_body_length` code points, buttons sent without `buttons`, more buttons than `max_per_message` and data longer than `data_max_bytes`; every request and answer of `test_spec.py`, one per operation and per problem, validates against the copy of `api/bridge.yaml` with openapi-core."
+  - "[C-22.FR-25] The repository `muster-io/muster-bridge-python` has the default branch `master`, whose first commit, `chore: add the licence`, adds the MIT `LICENSE` (\"Copyright The Muster Authors\") and a README stub and nothing else; `pyproject.toml` names the distribution `muster-bridge` with the licence expression `MIT`, `requires-python = \">=3.11\"` and the runtime dependencies Starlette, httpx and pydantic 2 only; every Python file, workflow and Makefile carries `SPDX-License-Identifier: MIT` and the copyright line, which `make lint` checks; CONTRIBUTING.md takes contributions under MIT without a CLA; `make licenses` fails on a runtime dependency whose licence is not on its list."
+  - "[C-22.FR-25] `muster_bridge.BridgeApp(config, messenger)` is an ASGI application on Starlette that uvicorn serves and that mounts under a path of a host application, whose lifespan it joins as `FastAPI(lifespan=bridge.lifespan)` — the test mounts it with Starlette's `Mount`, which FastAPI's mount is, because FastAPI is not a dependency; a bridge implements the `Messenger` protocol with `async` methods — post, edit, reply in a Thread, check a channel, answer — and, for the features it declares, `UserFinder`, `DirectMessenger` and `Deleter`; a configuration whose features need a protocol the messenger lacks, or whose `info` would not match `api/bridge.yaml`, raises `ConfigError` naming the reason (`test_config.py`, `test_app.py`)."
+  - "[C-22.FR-25] The application serves every operation of `api/bridge.yaml` under `/v1/`, answers `401` to a missing or wrong token and calls the messenger with the bot of the token; before calling the messenger it refuses as `invalid` a request that does not match the models generated from the specification, a request body over the library's cap of 1 MiB, a `body` longer than `max_body_length` code points, buttons sent without `buttons` and more buttons than `max_per_message`; data longer than `data_max_bytes` is refused by the validating function, tested on it as in S-083, because the specification caps button data at 64 bytes and `data_max_bytes` at no less, so no request over HTTP reaches it; every request and answer of `test_spec.py`, one per operation and per problem, validates against the copy of `api/bridge.yaml` with openapi-core."
   - "[C-22.FR-25] A repeated `Idempotency-Key` under the same token answers the first result with `replayed` true without calling the messenger again, whatever the repeated body; under another token it is a new request; a key whose first request is still running is `transient`; a failed request stores nothing; keys live 24 hours (`test_store.py`, `test_app.py`)."
-  - "[C-22.FR-25] A `BridgeError` of each class — `Transient`, `RateLimited` with the wait and the scope, `Gone` with `edit_window_closed`, `Forbidden`, `Invalid` — becomes its problem with the bridge's `detail`, a class the operation does not declare is mapped as in S-083, and any other exception becomes `transient` with a generic `detail` that carries none of its text, logged through `logging` without the token (`test_problems.py`, `test_spec.py`)."
+  - "[C-22.FR-25] A `BridgeError` of each class — `Transient`, `RateLimited` with its required wait and the scope, `Gone` with `edit_window_closed`, `Forbidden`, `Invalid` — becomes its problem with the bridge's `detail`, a class the operation does not declare is mapped as in S-083, and any other exception becomes `transient` with a generic `detail` that carries none of its text, logged through `logging` without the token (`test_problems.py`, `test_spec.py`)."
   - "[C-22.FR-25] Reported presses, Thread messages, deleted messages and direct messages become events of their bot, a direct message that carries an Account link token becoming `account_link` and any other being ignored; an event reported twice with the same messenger id is queued once; `pollEvents` answers at once or within `wait` without blocking the event loop, keeps events at least 24 hours and refuses an unknown cursor as `invalid`; `answerEvent` reaches the messenger with its event and is `gone` for an id the library did not issue (`test_events.py`)."
-  - "[C-22.FR-25] With a push target set for a bot, its events are posted with httpx to the callback one at a time and in order, signed as Standard Webhooks specifies, retried with back-off under the same `webhook-id` for at least an hour, dropped on `400` and kept on `401`; the pushers run as tasks of the running event loop, stop on `aclose()`, and `lifespan` stops them for a host application (`test_push.py`)."
+  - "[C-22.FR-25] With a push target set for a bot, its events are posted with httpx to the callback one at a time and in order, signed as Standard Webhooks specifies, retried with back-off under the same `webhook-id` for at least an hour, dropped on `400` and kept on `401`; the pushers run as tasks of the running event loop — started by a bot's first event, by `set_push` in the running loop or on entering `lifespan` — stop on `aclose()`, and `lifespan` stops them for a host application (`test_push.py`)."
   - "[C-22.FR-25, C-22.AC-25] `make spec-check` compares `api/bridge.yaml` with the one on Muster's `master` and fails naming the difference — a copy with one byte changed fails it — and `make generate-check` fails when `src/muster_bridge/models.py` is not what datamodel-code-generator makes of the copy; the CI jobs `spec` and `generate` run them on every pull request, on every push to `master` and daily."
   - "[C-22.AC-25] `make conformance` builds the wheel, installs it with `pip install` into a fresh virtual environment beside uvicorn, runs `examples/memory_bridge.py` from it with `python -I`, and runs `muster bridge check` from `ghcr.io/muster-io/muster:edge` against it three times, each exiting 0: with every feature and `--no-interactive`, every step passes but press and push, which are skipped; with `BRIDGE_FEATURES=thread_messages`, buttons, user_lookup, direct_message and delete are skipped too; interactively, with the example pushing to the check's listener, a script presses the button named by the `WAIT press` line through the example's `/demo/press`, and press, push and answer pass. The CI job `conformance` runs it on every pull request, on every push to `master` and daily."
-  - "[C-22.FR-25] CI runs `lint` (ruff, the format check, mypy in strict mode, the header check), `test` (pytest with a coverage gate of 90 % on every Python release from 3.11 to the newest stable one), `generate`, `spec`, `licenses`, `build` and `conformance`, joined in the check `ci`; release-please keeps a release pull request with `0.x` versions, and a release builds the sdist and the wheel and publishes them to PyPI by trusted publishing from the environment `pypi`, with attestations and no stored token; Renovate, CodeQL and OpenSSF Scorecard run as in Muster's repository; every Action is pinned by commit SHA."
+  - "[C-22.FR-25] CI runs `lint` (ruff, the format check, mypy in strict mode, the header check), `test` (pytest with a coverage gate of 90 % on CPython 3.11, 3.12, 3.13, 3.14 and 3.15, the newest stable release), `generate`, `spec`, `licenses`, `build` and `conformance`, joined in the check `ci`; release-please keeps a release pull request with `0.x` versions that also updates the project's version in `uv.lock`, and a release builds the sdist and the wheel and publishes them to PyPI by trusted publishing from the environment `pypi`, with attestations and no stored token; Renovate, CodeQL and OpenSSF Scorecard run as in Muster's repository; every Action is pinned by commit SHA."
   - "[C-22.FR-25] The first release pull request stays open until L1 is complete, when the maintainer releases the libraries (D366): after the maintainer's PyPI setup, merging it publishes `muster-bridge` 0.1.0, and `pip install muster-bridge==0.1.0` in a fresh virtual environment imports `muster_bridge` with `__version__` `0.1.0` (Notes)."
 verify: "make ci conformance"
 operator_attention: true
@@ -69,8 +69,8 @@ issue: 257
 
 **IN**
 
-- The repository `muster-io/muster-bridge-python`, from its first commit: the MIT licence, the distribution
-  `muster-bridge` with the module `muster_bridge`, the contributor files and the agent guide.
+- The repository `muster-io/muster-bridge-python`, from its first commit: the MIT licence and a README stub, the
+  distribution `muster-bridge` with the module `muster_bridge`, the contributor files and the agent guide.
 - The library: the protocol's part of a bridge (C-22.FR-25), asynchronous, as an ASGI application on Starlette, with
   pydantic v2 models generated from its copy of `api/bridge.yaml` and httpx for pushes, for Python 3.11 or newer.
 - An in-memory example that the README's quick start shows and the CI runs from the built wheel.
@@ -86,8 +86,10 @@ issue: 257
 ## Contracts
 
 - **Repository** (D343): as S-083's — public, default branch `master`, squash merges only, no wiki; the first commit,
-  `chore: add the MIT licence`, adds only `LICENSE` and is pushed to `master` to create the branch; everything else
-  goes through this story's pull request. Every Python file, workflow and Makefile starts with
+  `chore: add the licence`, adds `LICENSE` and a README stub of a few lines and nothing else, and is pushed to `master`
+  to create the branch; everything else goes through this story's pull request, from the branch `feat-bridge-library`,
+  whose body says `Part of muster-io/muster#<issue>` — a pull request there does not close the issue here, so it is
+  closed by hand once the pull request merges. Every Python file, workflow and Makefile starts with
   `SPDX-License-Identifier: MIT` and `Copyright The Muster Authors`; `make lint` fails naming a file without them
   (generated files, `uv.lock` and `api/bridge.yaml` excepted). CONTRIBUTING.md, SECURITY.md, AGENTS.md and the pull
   request template say what S-083's do, for this repository.
@@ -96,8 +98,8 @@ issue: 257
   Starlette, httpx and pydantic 2, with lower bounds and no upper ones; the development dependencies — pytest, the
   anyio pytest plugin, coverage, ruff, mypy, datamodel-code-generator, openapi-core, uvicorn and pip-licenses — in a
   dependency group, locked by uv in `uv.lock`. `.python-version` names the Python of development and CI's single-version
-  jobs. Each dependency is stated in the pull request with its licence, latest release and maintenance status, as
-  Muster's ADR-0001 asks. `make licenses` (pip-licenses over an environment with the runtime dependencies only) allows
+  jobs, `3.15`. Each dependency is stated in the pull request with its licence, latest release and maintenance status,
+  as Muster's ADR-0001 asks. `make licenses` (pip-licenses over an environment with the runtime dependencies only) allows
   MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, PSF-2.0 and MPL-2.0, which the TLS certificates of httpx come
   under unmodified.
 - **Types** (`api/bridge.yaml`): the copy of Muster's `api/bridge.yaml`, byte for byte; datamodel-code-generator writes
@@ -114,10 +116,11 @@ issue: 257
     `ConfigError` names what is wrong, with the checks of S-083's `New`.
   - `BridgeApp(config, messenger)`, the ASGI application, with `press`, `thread_message`, `message_deleted` and
     `direct_message` (coroutines that queue an event and return at once), `set_push(bot, target)`, `aclose()` and
-    `lifespan`, an async context manager for a host application's lifespan — Starlette runs no lifespan of a mounted
-    application, so the README's FastAPI example passes it on.
-  - `BridgeError` and its classes `Transient`, `RateLimited` (with the wait and the scope), `Gone` (with
-    `edit_window_closed` as a flag), `Forbidden` and `Invalid`, each with a `detail` for the Admin.
+    `lifespan`, the lifespan function a host passes as its own — `FastAPI(lifespan=bridge.lifespan)` — which, called
+    with the host application, returns an async context manager; Starlette runs no lifespan of a mounted application,
+    so a host that mounts the bridge passes it on, or enters it from a lifespan of its own, as the README shows.
+  - `BridgeError` and its classes `Transient`, `RateLimited` (with its wait, which it requires, and the scope), `Gone`
+    (with `edit_window_closed` as a flag), `Forbidden` and `Invalid`, each with a `detail` for the Admin.
   - `Store`, a protocol of `async` methods for idempotency results and events, and `MemoryStore`.
   - `replace_mentions(body, mentions, render)`.
 
@@ -132,8 +135,9 @@ issue: 257
   requests block nothing; `account_link` only for a direct message whose whole text, trimmed and after an optional
   `/start `, is 43 characters of base64url; `answerEvent` `gone` for an unknown id; pushes signed with `hmac` and
   `hashlib`, sent with one `httpx.AsyncClient` per bridge, in order, with exponential back-off up to five minutes, for
-  at least an hour, the event staying queued for polling afterwards. The pushers are tasks started on the first event of
-  a bot with a push target, in the running loop.
+  at least an hour, the event staying queued for polling afterwards. The pushers are tasks of the running loop, started
+  for a bot with a push target on its first event, by `set_push` in the running loop, or on entering `lifespan`, so that
+  events queued before a target was set are pushed too, as in S-083.
 - **Example** (`examples/memory_bridge.py`): S-083's minimal example in Python — channels from `--channels` (default
   `alerts,ops`; any other id is `forbidden`), people from `--users` (default `alice:Alice Smith,bob:Bob Brown`, found by
   login), messages written to the log, the token from `--token-file`, `--listen` (default `127.0.0.1:18095`), every
@@ -146,24 +150,27 @@ issue: 257
   that it imports the installed package and not `src/`, and runs S-083's three `muster bridge check` runs — two with
   `--no-interactive`, one interactive through `/demo/press` — from `$(MUSTER_IMAGE)`, by default
   `ghcr.io/muster-io/muster:edge`, with a token file of mode 0644. `ci.yml` runs on pull requests, pushes to `master`,
-  daily and by hand, with the jobs `lint`, `test` (every Python release from 3.11 to the newest stable one), `generate`,
+  daily and by hand, with the jobs `lint`, `test` (CPython 3.11, 3.12, 3.13, 3.14 and 3.15), `generate`,
   `spec`, `licenses`, `build` and `conformance`, and the job `ci` that passes only when all of them did. Tools are
   pinned in `uv.lock` and the workflows, and uv itself in the workflows, all updated by Renovate.
 - **Releases** (`release-please.yml`, `release-please-config.json`, `.release-please-manifest.json`): release-please
   with the release type `python`, `bump-minor-pre-major`, `include-component-in-tag: false` and the manifest at `0.0.0`,
-  run with the GitHub App's token; it updates the version in `pyproject.toml` and `__init__.py`. When it creates a
+  run with the GitHub App's token; it updates the version in `pyproject.toml` and `__init__.py`, and through
+  `extra-files` the project's own version in `uv.lock`, without which the release pull request fails the
+  `uv lock --check` of `make lint`. When it creates a
   release, a job builds the sdist and the wheel, and a second job in the GitHub environment `pypi`, with
   `id-token: write` and nothing else, publishes them with `pypa/gh-action-pypi-publish` by trusted publishing, with
   attestations.
-  Versions stay `0.x` until Muster's first release, then `1.0.0` for protocol version 1 (ADR-0017).
+  Versions stay `0.x` until Muster's first release, then `1.0.0` for protocol version 1 (ADR-0017). The first release
+  pull request stays open until L1 is complete (D366).
 - **Renovate, CodeQL, Scorecard** (`.github/renovate.json5`, `codeql.yml`, `scorecard.yml`): as in S-083, with
   Renovate's managers for `pyproject.toml`, `uv.lock`, `.python-version` and the workflows, and CodeQL for Python and
   Actions.
 
 ## Steps
 
-1. Push the licence commit to create `master`; branch `s-084-python-bridge-library` from it. Check: `git ls-remote`
-   shows `master` with one commit.
+1. Push the licence commit, with `LICENSE` and the README stub, to create `master`; branch `feat-bridge-library` from
+   it. Check: `git ls-remote` shows `master` with one commit.
 2. Add `pyproject.toml`, the Makefile, the copy of `api/bridge.yaml` and the generated models. Check:
    `make generate-check`, `make spec-check`.
 3. Write the configuration, the application, the problems, the store and the idempotency with their tests. Check:
@@ -172,7 +179,8 @@ issue: 257
 5. Write the example, the README with the quick start and the FastAPI example, then `test_spec.py`. Check: `make ci`,
    `make conformance`.
 6. Add the workflows, Renovate, release-please and the contributor files. Check: the pull request's checks, all green.
-7. Hand over to the maintainer for PyPI (Notes); after the first release, the last check of Verification.
+7. Hand over to the maintainer for PyPI (Notes); after the first release, which waits until L1 is complete (D366), the
+   last check of Verification.
 
 ## Verification
 
@@ -202,7 +210,7 @@ cp /tmp/spec.yaml api/bridge.yaml
 make conformance                                 # passes
 ```
 
-After the maintainer's PyPI setup and the merge of the first release pull request:
+After the maintainer's PyPI setup and the merge of the first release pull request, once L1 is complete (D366):
 
 ```sh
 python3 -m venv /tmp/pypi && /tmp/pypi/bin/pip install -q muster-bridge==0.1.0
@@ -231,8 +239,22 @@ None.
 - The repository was created empty by the maintainer (D343); nothing is pushed to it before this story.
 - The library follows S-083's design so that a bridge author can move between the two, and is written for Python, not
   translated: `async` methods, `typing.Protocol`, exceptions for problems. Muster's code is AGPL and is never copied.
-- Starlette runs the lifespan of the top-level application only; the pushers therefore start lazily, and `lifespan`
-  lets a host application stop them on shutdown.
+- Starlette runs the lifespan of the top-level application only; the pushers therefore also start on a bot's first
+  event and on `set_push` in the running loop, not only on entering `lifespan`, and `lifespan` lets a host application
+  stop them on shutdown.
+- As merged (muster-io/muster-bridge-python#1, merge `5cf5696`), as S-083 was: the first commit is `chore: add the
+  licence` with `LICENSE` and a README stub, the branch was `feat-bridge-library`, and this file was corrected after the
+  merge to match the code. It depends on S-078, whose `muster bridge check` its CI runs, and on S-083, whose design it
+  follows, not on S-079: it was built beside S-079 (D369).
+- The package exports more names than the Contracts list: `ReportedEvent` and `EventType` for reported events,
+  `idempotency_key`, the store's `KeyState`, `KeyClaim`, `StoredAnswer`, `StoredEvent` and `UnknownCursorError`, the
+  errors `ClosedError`, `UnknownBotError`, `NotOfferedError` and `InvalidEventError`, and the generated models it
+  re-exports — `MessageInput`, `MessageContent`, `MessagePosted`, `MessageEdited`, `ThreadReplyInput`,
+  `ThreadReplyPosted`, `DirectMessageInput`, `DirectMessageSent`, `Button`, `ButtonStyle`, `Capabilities` and its
+  `Capabilities*` members, `Limits`, `Link`, `Mention`, `Person`, `Status`, `MessageKind`, `InfoEventDelivery`,
+  `InfoUserLookup` and `AnswerShownShownAs`. `RateLimited` requires its wait, `retry_after`, because Muster waits
+  exactly that long. A `BridgeApp` runs on one event loop at a time — loops take turns, never run at once — and has
+  one lifespan: its end is `aclose()`, so a host that starts again makes a new `BridgeApp`.
 
 ## Coverage
 
