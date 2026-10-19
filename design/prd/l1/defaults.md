@@ -43,6 +43,7 @@ table in the same pull request.
 | `process.shutdown_grace` | 20 s (the chart's termination grace period is 30 s) | built in | C-02 | decided |
 | `live.check_interval` | 5 s: each replica checks that the sessions of its live-updates streams are still usable, closing the others, and evaluates the Organization-wide notices, sending a hint when they changed | built in | C-02, C-03 | decided |
 | `live.keepalive_interval` / `live.retry` | 25 s / 3 s: a stream without hints sends a comment every 25 s; the stream asks the browser to reconnect 3 s after it closes | built in | C-03, C-09 | decided |
+| `live.reconnecting_after` / `live.offline_after` | 5 s / 30 s without an open live-updates stream, counted in the browser from the moment the stream closed, or from the page load until it first opens: the mark in the header turns to "Reconnecting…" (or "Connecting…"), then to "Offline" (C-09.FR-26) | built in | C-09 | P-59 |
 | `live.max_streams` / `live.max_streams_per_session` | 1000 per replica / 10 per session (one per open tab); a stream beyond them gets `429`, and a stream that falls 32 hints behind is closed, so that its client reconnects and reads everything again | built in | C-03, C-09 | decided |
 | Helm `replicas` | 1 | Helm chart | C-01 | decided |
 
@@ -168,7 +169,7 @@ Other lifecycle values:
 | `bridge.event_max_age` | 1 h after the event's `occurred_at`, by the real clock: an older press or Text command is dropped, unanswered, and logged | built in | C-22 | decided |
 | `bridge.retry_after_max` | 15 min: a `rate_limited` answer asking for a longer wait, or a `429` without `Retry-After`, counts as Transient, so a long pause ends in Broken instead of an unseen stall | built in | C-22 | decided |
 | `bridge.edit_window_margin` | 60 s: a Root message is treated as past the bridge's edit window this long before `edit_max_age_seconds` | built in | C-22 | decided |
-| `bridge.text_commands` | `ack`, `unack`, `resolve`, `snooze <duration>`, `unsnooze`, `still on it`, and in Russian `взял`, `отпускаю`, `решено`, `отложить <duration>`, `вернуть`, `ещё работаю` (also with `е`); every word works whatever the Route's language | built in | C-22 | decided |
+| `bridge.text_commands` | `ack`, `unack`, `resolve`, `snooze <duration>`, `unsnooze`, `still on it`, and in Russian `взял`, `отпускаю`, `решено`, `отложить <duration>`, `вернуть`, `ещё работаю` (also with `е`); `<duration>` is also a Snooze preset: `tomorrow` (`завтра`) or the name of the first day of the week (`monday` … `sunday`, `понедельник` … `воскресенье`); every word works whatever the Route's language | built in | C-22 | decided |
 
 ## Request log
 
@@ -196,6 +197,8 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `organization.name` | `Muster` | Organization | C-02, C-20 | decided |
 | `organization.time_zone` | UTC (for messages) | Organization | C-02, C-20 | decided |
+| `organization.workday_start` | 09:00, the start of the working day, at which the Snooze presets end (C-10.FR-17); `HH:MM` on the 24-hour clock | Organization | C-10, C-20 | P-58 |
+| `organization.week_start` | Monday, the first day of the week, on which "Until Monday 09:00" ends (C-10.FR-17); any day of the week | Organization | C-10, C-20 | P-58 |
 | `organization.severity_label` | `severity` | Organization | C-02, C-20 | decided |
 | `organization.severity_mapping` | `critical` → critical; `warning` → warning; `info` and `none` → info; any other value → warning, shown as received; label missing → info | Organization | C-08, C-20 | decided |
 | `organization.severity_styles` | the emoji and colour of each Severity level: critical 🟥 `#d32f2f`, warning 🟧 `#f57c00`, info 🟦 `#1976d2` (squares, so that they never look like the status colours of messages) | Organization | C-02, C-20 | decided |

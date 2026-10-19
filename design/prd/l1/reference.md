@@ -54,22 +54,27 @@ where its bridge declares `quiet_messages`, and otherwise as an ordinary message
 
 | Root message status | Buttons |
 |---|---|
-| firing | Ack · Resolve · Snooze (the Route's durations, `route.snooze_durations`) |
-| acknowledged | Unack · Resolve · Snooze |
+| firing | Ack · Resolve · Snooze (the Route's durations, `route.snooze_durations`, then the Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00", C-10.FR-18) |
+| acknowledged | Unack · Resolve · Snooze (the durations, then the presets) |
 | snoozed | Ack · Unsnooze · Resolve |
 | resolved | none; a link "Open in Muster" |
 
 Other messages: a Reminder carries "Still on it" and "Unack"; a Storm summary and ack timeout notices carry only links;
 a test message carries the buttons of its status, answered with "This is a test message; nothing was changed". The UI
 and the API offer every command allowed by the status, including Unresolve, which messengers never offer. Snooze
-durations appear as separate buttons or a menu, as the messenger allows. Mattermost and Telegram show Ack and "Still
-on it" as primary buttons and Resolve as a success button, and the other buttons plain, without a style
-([F-066](../../facts.md#telegram), [F-068](../../facts.md#mattermost)). In Mattermost every link, "Open in Muster"
-included, is a link in the post, never a button (C-13.FR-3). A Bridge shows these buttons only when its bridge declares
-`buttons`, with the style hints Ack and "Still on it" `primary`, Resolve `success` and the rest `neutral`; without
-buttons, a Root message that is not resolved names the Text commands of its status in a line "Reply in the Thread: …"
-("Reply in the Thread, mentioning the bot: …" when the bridge forwards only those) when the bridge forwards Thread
-messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
+durations appear as separate buttons or a menu, as the messenger allows. The Snooze presets follow them only on a Route
+that has Snooze durations; their labels name the Organization's start of the working day and first day of the week in
+the Route's language — "Until tomorrow {start}" and "Until {day} {start}", «До завтра {start}» and «До {day} {start}»
+with the day in the genitive («До понедельника 09:00») — and a Telegram keyboard puts them on a row of their own, under
+the row of the durations. Mattermost and Telegram show Ack and "Still on it" as primary buttons and Resolve as a success
+button, and the other buttons plain, without a style ([F-066](../../facts.md#telegram),
+[F-068](../../facts.md#mattermost)). In Mattermost every link, "Open in Muster" included, is a link in the post, never a
+button (C-13.FR-3). A Bridge shows these buttons only when its bridge declares `buttons`, with the style hints Ack and
+"Still on it" `primary`, Resolve `success` and the rest `neutral`, and drops Snooze buttons beyond the bridge's
+`max_per_message` — the presets first, then the durations from the longest; without buttons, a Root message that is not
+resolved names the Text commands of its status in a line "Reply in the Thread: …" ("Reply in the Thread, mentioning the
+bot: …" when the bridge forwards only those) when the bridge forwards Thread messages, and otherwise offers only the
+link to Muster (C-22.FR-5, C-22.FR-14).
 
 ## Banners, warnings and notices
 
@@ -91,6 +96,9 @@ messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 | Root message and Alert Group page | resolved by a person with Alerts still firing | "⚠ N alerts still firing in Alertmanager" | C-09, C-12 |
 | Root message and Alert Group page | Reopen count > 0 | "🔁 Reopened ×N" | C-09, C-12 |
 | Snooze dialog | no end chosen | "This Alert Group stays snoozed until someone unsnoozes it." | C-10 |
+| Snooze dialog, messenger buttons | the Snooze presets (C-10.FR-18) | "Until tomorrow {start}" · "Until {day} {start}"; in the dialog each with "Ends {date and time}" | C-10 |
+| Profile, time zone | always (hint) | "Snooze presets pressed in messengers end in this time zone. While it follows the browser, they use the Organization's time zone, {zone}." | C-10 |
+| Header, every page | the state of the live updates (C-09.FR-26) | "Connecting…" · "Live" · "Reconnecting…" · "Offline"; pressed: "Live updates are on: lists and pages change as soon as something happens." · "Connecting to live updates. What you see may be out of date." · "No live updates since {time}. What you see may be out of date; it is read again as soon as the connection is back." with "Reload page" | C-09 |
 | Destination and its Routes | Broken | "Broken since HH:MM: {reason}. Muster tries again every {interval}." — the reason is the error, or "unavailable after repeated failures: {last error}" | C-11, C-13 |
 | Alert Group page, delivery state | as applicable | "Not delivered: {error}" · "Waiting: {Destination} is Broken" · "Deleted in the messenger" · "Thread not attached to the Root message" · "Possible duplicate" · "Not posted: resolved during a Storm or while the Destination was Broken" · "No longer updated here" | C-11, C-13 |
 | Root message | delivered late | "Delivered late: started HH:MM, resolved HH:MM while this Destination was unavailable." | C-11, C-12 |
@@ -106,7 +114,7 @@ messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 | Bridge Connection check | the token is refused · the protocol version is unknown · the answer does not match the protocol · the event delivery mode is not offered | "The bridge refused the token." · "The bridge speaks protocol version {version}; this Muster speaks 1." · "The bridge's answer does not match the protocol: {detail}" · "The bridge does not offer {mode} event delivery." | C-22 |
 | Thread reply | a Bridge Root message was republished past the edit window | "This message is no longer updated. The current one: {link}" | C-22 |
 | Alert Group page, delivery state | a Bridge Root message is past its edit window | "Past the edit window: updated on the next change of status" | C-22 |
-| Bridge answer to a person | a Text command ran · a Snooze duration is not one of the Route's | "Done: {command} #N" · "Snooze for one of: {durations}" | C-22 |
+| Bridge answer to a person | a Text command ran · a Snooze duration is not one of the Route's | "Done: {command} #N" · "Snooze for one of: {durations}", the Route's durations and the words of the Snooze presets | C-22 |
 | Bridge answer to a person | a Snooze Text command on an Alert Group whose Route has no Snooze durations | "This Alert Group's Route has no Snooze durations; nothing was changed." | C-22 |
 | Bridge answer to a person | a press or Text command from an account without an Account link | "Your account is not linked to Muster. Link it in your profile: {link}" | C-22 |
 | Bridge answer to a person | a press whose button data fails verification or belongs to another message | "This button could not be verified; nothing was changed." | C-22 |
@@ -136,7 +144,7 @@ with the C-03 sign-in story (P-42).
 | `alerts:read` | Read Alerts of Alert Groups and the Alerts view of Integrations | ✓ | ✓ | ✓ |
 | `alert-groups:acknowledge` | Acknowledge, Unacknowledge, Takeover and answer Reminders ("Still on it") | ✓ | ✓ | — |
 | `alert-groups:resolve` | Resolve and Unresolve | ✓ | ✓ | — |
-| `alert-groups:snooze` | Snooze and Unsnooze | ✓ | ✓ | — |
+| `alert-groups:snooze` | Snooze and Unsnooze, and read the ends of the Snooze presets | ✓ | ✓ | — |
 | `alert-groups:note` | Add Notes | ✓ | ✓ | — |
 | `integrations:read`, `routes:read`, `connections:read`, `destinations:read`, `link-rules:read`, `lookup-tables:read` | Read them, secret values masked (see below); `routes:read` also covers Route profiles, suggestions and dismissing one; picking a Connection to link an account through does not need `connections:read` (see below) | ✓ | ✓ | ✓ |
 | `integrations:write`, `routes:write`, `connections:write`, `destinations:write`, `link-rules:write`, `lookup-tables:write` | Create, edit and delete them; `connections:write` also lists a Connection's channels, which calls out with the bot token | ✓ | — | — |

@@ -130,7 +130,8 @@ current.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
   check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
-  S-091. The architecture lints of ADR-0016 exist from the first story that contains code.
+  S-091, and last the pre-release stories S-092 to S-095. The architecture lints of ADR-0016 exist from the first story
+  that contains code.
 
 ## 4. Shared contracts
 
@@ -249,7 +250,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
 | Bridge | C-22, C-23, S-087 of C-13, and S-060 and S-091 of C-21 | S-073 – S-081, S-083 – S-090, S-060, S-091 | 19 |
-| **L1** | 23 | | **91** |
+| Pre-release | S-092 – S-094 of C-10, S-095 of C-09 | S-092 – S-095 | 4 |
+| **L1** | 23 | | **95** |
 
 ### Foundation
 
@@ -372,6 +374,15 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079, S-084 |
 | [S-091](S-091-documentation-for-ai-agents-llms-txt-and-markdown-pages.md) | C-21 | Documentation for AI agents: llms.txt, the full text and a Markdown version of every page | docs | S-060 |
 
+### Pre-release
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-092](S-092-snooze-presets-in-the-command-layer-and-the-api.md) | C-10 | Snooze presets in the command layer and the API, with the start of the working day and of the week (BE) | be | S-063, S-055 |
+| [S-093](S-093-snooze-presets-on-messenger-buttons-and-in-text-commands.md) | C-10 | Snooze presets on the buttons of Mattermost, Telegram and Bridges, and in Text commands (BE) | be | S-092, S-075, S-082 |
+| [S-094](S-094-snooze-presets-in-the-snooze-dialog-and-the-working-week-settings.md) | C-10 | Snooze presets in the Snooze dialog and the bulk Snooze, and the working day and week on the General page (FE) | fe | S-092, S-033, S-056 |
+| [S-095](S-095-live-updates-mark-in-the-header.md) | C-09 | The mark of the live updates in the header — connecting, live, reconnecting and offline (FE) | fe | S-030, S-072 |
+
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
 rules exist. S-061 was split from S-039 after the review of the contracts: S-039 keeps Connections, Destinations, the
@@ -450,6 +461,15 @@ only on S-083, since nothing of theirs is in the library's repository.
 S-091 was added when the maintainer decided that the site also serves documentation for AI agents — `llms.txt`, the
 text of the whole site in one file and a Markdown version of every page (D371). It belongs to C-21 and follows S-060,
 the last story that adds pages, so that its map covers the whole site.
+
+S-092 to S-095 were added after every other story of L1 had merged, when the maintainer took two features into L1
+before its release (D379): Snooze presets — "Until tomorrow 09:00" and "Until Monday 09:00", from the Organization's
+start of the working day and first day of the week, in the person's time zone (C-10.FR-17, FR-18, C-20.FR-9) — and a
+mark in the header that says whether the live updates are connected (C-09.FR-26). The presets are three stories,
+because together they touched about 60 files: S-092 the rule, the settings and the API; S-093 the buttons of
+Mattermost, Telegram and Bridges and the Text commands, on the messengers of the earlier phases; S-094 the Snooze
+dialog, the bulk Snooze and the General page. S-095, the mark, is one frontend story with no change to the server.
+They come last, in that order; S-093 and S-094 each need only S-092, and S-095 needs none of them.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

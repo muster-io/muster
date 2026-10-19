@@ -169,6 +169,25 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   user's session expires or ends, the server closes the stream, and the reconnect gets `401`, which makes the browser
   stop and sends the SPA to the sign-in page. The stream itself arrives earlier, with C-03 (C-03.FR-18), carrying the
   hints for the notices and the Organization; this capability adds the others.
+- **C-09.FR-26** The header of the application shell shows, on every page — the Alert Group list and page included —
+  a mark with the state of the live-updates stream of FR-25, so that a person on a phone at night knows whether the
+  list in front of them is live:
+
+  | State | While | Mark |
+  |---|---|---|
+  | `connecting` | from the page load until the stream first opens | grey dot; "Connecting…" once `live.reconnecting_after` has passed |
+  | `live` | the stream is open | green dot and "Live" |
+  | `reconnecting` | the stream has been closed for `live.reconnecting_after`, and the browser or the shell tries again | amber dot and "Reconnecting…" |
+  | `offline` | the stream has been closed for `live.offline_after`, counted from the page load before it first opened | red dot and "Offline" |
+
+  A drop shorter than `live.reconnecting_after`, such as a replica restarting, leaves the mark as it was. The mark's
+  text is a status region (`role="status"`, announced politely) whose changes a screen reader reads out. Pressing the
+  mark shows what its state means — "What you see may be out of date" in every state but `live` — and, in `offline`,
+  a button that reloads the page. Whenever the stream opens again after a loss, whether the browser reconnected it or
+  the shell opened a new one (FR-25), every query is read again and the mark returns to `live`. From 360 CSS pixels up
+  the mark keeps its dot, and its text in every state but `live`, without horizontal scrolling of the page. The mark
+  sends nothing to the server and is not recorded anywhere (NFR-7). When the session has ended, the SPA goes to the
+  sign-in page as FR-25 says.
 
 ### Alert Group page
 
@@ -210,8 +229,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
 
 Alert Group list (tabs, filters, time range, search, columns with chosen labels, live updates, shareable URL); Alert
 Group page (header, notices, Alerts, labels and annotations, Timeline with loudness and Mentions, previous Alert Groups
-with the same key); both at phone width; statistics page per Route or Integration; the count in the Integration delete
-dialog; the move dialog when deleting a Route with open Alert Groups.
+with the same key); both at phone width; the mark of the live updates in the header (FR-26); statistics page per Route
+or Integration; the count in the Integration delete dialog; the move dialog when deleting a Route with open Alert
+Groups.
 
 ## API surface
 
@@ -276,6 +296,12 @@ Checked with the fake Alertmanager, through the API and the UI.
   connection attempt gets `401`.
 - **C-09.AC-25** Filtering by `namespace="payments"` matches an Alert Group whose Alerts all carry that value, and not
   one in which only some of its Alerts do; after its details are removed, the same filter still finds the first one.
+- **C-09.AC-26** With the Alert Group list open in a real browser, when the live-updates stream ends and the browser
+  cannot reach it again, the mark turns to "Reconnecting…" after `live.reconnecting_after` and to "Offline" after
+  `live.offline_after`, each change in its status region; once the stream can be reached again, the mark turns back to
+  "Live" and the tab counts include an Alert Group created meanwhile, without a reload. A drop shorter than
+  `live.reconnecting_after` leaves "Live". 360 CSS pixels wide and in Russian, «Нет связи» shows in the header of the
+  list and of an Alert Group page without horizontal scrolling of the page.
 
 ## Related ADRs
 
@@ -291,3 +317,4 @@ C-08 — Routes, Group keys and Severity levels.
   API, counts, related Alert Groups, statistics, live hints; may be split into "lifecycle" and "list, past Alert Groups
   and statistics".
 - **FE** — Alert Group list, Alert Group page, both at phone width, statistics page, the dialog additions.
+- Added later: **FE** — the mark of the live updates in the header (FR-26).
