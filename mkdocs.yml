@@ -107,6 +107,13 @@ nav:
       - concepts/statuses-and-commands.md
       - concepts/broken-destinations.md
   - Operations:
+      - operations/backup-and-restore.md
+      - operations/upgrades.md
+      - operations/key-rotation.md
+      - operations/high-availability.md
+      - operations/monitoring.md
+      - operations/outgoing-heartbeat.md
+      - operations/cli.md
       - operations/request-log.md
       - Runbooks:
           - operations/runbooks/index.md
