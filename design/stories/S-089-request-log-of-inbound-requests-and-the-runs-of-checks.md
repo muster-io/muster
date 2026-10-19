@@ -83,7 +83,7 @@ issue: 267
   read — or beside `connection` or `destination`, where it narrows that owner's records; the runs of an outgoing
   webhook's tests and probes are read beside its `destination`. `ConnectionCheckResult`, `DestinationCheckResult` and
   `DestinationTestResult` gain `request_log_run` (the run of their requests), always set but optional in the schema,
-  so that the SPA's test fixtures stay valid until S-090 reads it.
+  so that the SPA's test fixtures stay valid until S-090 reads it; now that S-090 reads it, the schema requires it.
 - **Inbound recording** (`internal/requestlog/inbound.go`): `requestlog.Inbound(recorder, real clock, operation,
   next)` wraps a callback handler: it keeps the request's headers and its body as the handler reads it, with its full
   size; it holds Muster's answer — status, headers, body — back while the handler writes it; it measures the handler's

@@ -86,6 +86,11 @@ const AUDITED: Record<string, readonly string[]> = {
   connection: [
     "/name",
     "/server_url",
+    "/bot_api_base_url",
+    "/update_mode",
+    "/base_url",
+    "/event_delivery",
+    "/push_secret",
     "/bot_token",
     "/limiter/limit",
     "/limiter/per_seconds",
@@ -138,13 +143,28 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "link_rule", "/url_template")).toBe("Шаблон URL");
   });
 
-  test("names the server URL, the bot token and the limiter of a Connection", async () => {
+  test("names the server URL, the token and the limiter of a Connection", async () => {
     expect(fieldLabel(i18n.t, "connection", "/server_url")).toBe("Server URL");
-    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Bot token");
+    // The diff does not say the Connection's type: the token is named for a bot and a bridge alike.
+    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Token");
     expect(fieldLabel(i18n.t, "connection", "/limiter/limit")).toBe("Rate limit: requests");
     await i18n.changeLanguage("ru");
     expect(fieldLabel(i18n.t, "connection", "/server_url")).toBe("URL сервера");
-    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Токен бота");
+    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Токен");
+  });
+
+  test("names the fields of a Bridge and a Telegram Connection as their forms do", async () => {
+    expect(fieldLabel(i18n.t, "connection", "/base_url")).toBe("Base URL");
+    expect(fieldLabel(i18n.t, "connection", "/event_delivery")).toBe("Event delivery");
+    expect(fieldLabel(i18n.t, "connection", "/push_secret")).toBe("Push secret");
+    expect(fieldLabel(i18n.t, "connection", "/bot_api_base_url")).toBe("Bot API base URL");
+    expect(fieldLabel(i18n.t, "connection", "/update_mode")).toBe("Update mode");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "connection", "/base_url")).toBe("Базовый URL");
+    expect(fieldLabel(i18n.t, "connection", "/event_delivery")).toBe("Доставка событий");
+    expect(fieldLabel(i18n.t, "connection", "/push_secret")).toBe("Секрет push-отправки");
+    expect(fieldLabel(i18n.t, "connection", "/bot_api_base_url")).toBe("Базовый URL Bot API");
+    expect(fieldLabel(i18n.t, "connection", "/update_mode")).toBe("Режим получения обновлений");
   });
 
   test("names the Destinations and the delivery fields of a Route", async () => {
@@ -199,8 +219,57 @@ describe("AuditDiff", () => {
     const diff = screen.getByTestId("audit-diff");
     await expect.element(diff).toBeVisible();
     const text = diff.element().textContent;
-    expect(text).toContain("Bot token:changed");
+    expect(text).toContain("Token:changed");
     expect(text).toContain("Server URL:http://old.example.org");
     expect(text).not.toContain("mm-dev-token");
   });
+
+  test.each([
+    {
+      language: "en",
+      lines: [
+        "Base URL:http://127.0.0.1:18094→changed tohttp://127.0.0.1:18094/prefix",
+        "Event delivery:poll→changed topush",
+        "Token:changed",
+        "Push secret:changed",
+      ],
+    },
+    {
+      language: "ru",
+      lines: [
+        "Базовый URL:http://127.0.0.1:18094→изменено наhttp://127.0.0.1:18094/prefix",
+        "Доставка событий:poll→изменено наpush",
+        "Токен:изменено",
+        "Секрет push-отправки:изменено",
+      ],
+    },
+  ])(
+    "names the changed fields of a Bridge Connection in $language",
+    async ({ language, lines }) => {
+      await i18n.changeLanguage(language);
+      const screen = await render(
+        <I18nextProvider i18n={i18n}>
+          <AuditDiff
+            resourceType="connection"
+            diff={[
+              {
+                pointer: "/base_url",
+                before: "http://127.0.0.1:18094",
+                after: "http://127.0.0.1:18094/prefix",
+              },
+              { pointer: "/event_delivery", before: "poll", after: "push" },
+              { pointer: "/bot_token", secret_changed: true },
+              { pointer: "/push_secret", secret_changed: true },
+            ]}
+          />
+        </I18nextProvider>,
+      );
+      await expect.element(screen.getByTestId("audit-diff")).toBeVisible();
+      const rows = Array.from(
+        screen.getByTestId("audit-diff").element().children,
+        (row) => row.textContent ?? "",
+      );
+      expect(rows).toEqual(lines);
+    },
+  );
 });

@@ -160,9 +160,9 @@ A database connection is set both as a URL and as fields: the URL is used and th
 
 ### `delivery_attempt`
 
-INFO · fields: `destination`, `group`, `kind`, `outcome`, `attempt`, `duration_ms`, `retry_after_ms` · C-11
+INFO · fields: `destination`, `group`, `kind`, `outcome`, `code`, `reason`, `attempt`, `duration_ms`, `retry_after_ms` · C-11
 
-The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, empty for a Storm summary, kind what it sent (publication, update, thread_reply, storm_summary for any call of a Storm summary, or final_edit for the last edit of a Root message in a Destination it left), outcome delivered or the error class of the answer, attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a RetryAfter asked for, 0 otherwise.
+The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, empty for a Storm summary, kind what it sent (publication, update, thread_reply, storm_summary for any call of a Storm summary, final_edit for the last edit of a Root message in a Destination it left, or webhook_event for an event of an outgoing webhook in the events mode), outcome delivered or the error class of the answer, code the HTTP status of an answer that was not delivered, or the error_code a Telegram answer reports, 0 when it was delivered or the outcome carries no status, reason the masked error the messenger answered or the call failed with, empty when it was delivered, attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a RetryAfter asked for, 0 otherwise.
 
 ### `delivery_not_delivered`
 

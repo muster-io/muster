@@ -26,5 +26,5 @@ export interface DestinationCheckResult {
   checks: DestinationCheckItem[];
   health: DestinationHealth;
   /** The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them. */
-  request_log_run?: PublicId;
+  request_log_run: PublicId;
 }

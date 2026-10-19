@@ -12,7 +12,6 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
-	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The steps of the connection check of a Telegram Connection (C-14.FR-11).
@@ -26,11 +25,8 @@ const (
 const (
 	MessageNotBotAPI      = "This is not a Bot API."
 	MessageWrongPrefix    = "Wrong path prefix: the server answered 404."
-	MessageProxyRefused   = "The proxy refused the connection (407)"
+	MessageProxyRefused   = delivery.MessageProxyRefused
 	MessageTokenInvalid   = "The bot token is not valid." //nolint:gosec // G101: a message, not a credential
-	messageDNS            = "DNS lookup failed: %s"
-	messageTLS            = "TLS handshake failed: %s"
-	messageTimeout        = "No answer within %d s"
 	messageOtherStatus    = "The server answered %d instead of 401 with JSON."
 	messageWebhookSet     = "A webhook is set at %s."
 	messageWebhookUnknown = "A webhook is set."
@@ -144,7 +140,11 @@ func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock c
 		return Check{}, err
 	}
 	dry := Step{Name: StepDryProbe, Latency: latency, Via: target.Via()}
-	dry.OK, dry.Message, dry.Code = probeVerdict(r, target.settings.BaseURL)
+	address := target.settings.BaseURL
+	if dry.Via == ViaProxy {
+		address = ""
+	}
+	dry.OK, dry.Message, dry.Code = probeVerdict(r, address)
 	out.Steps = append(out.Steps, dry)
 	if probe != nil || !dry.OK {
 		skipRest(StepGetMe, StepGetWebhookInfo)
@@ -205,27 +205,16 @@ func timed(ctx context.Context, run Runner, realClock clock.Clock, f func(ctx co
 	return latency, err
 }
 
-// probeVerdict says whether the answer to the dry probe is a Bot API's — 401 with a JSON body — and otherwise names
-// what answered, with its code: the name, the TLS handshake, the time, the proxy, a 404 of a wrong path prefix, an
-// answer that is not JSON, or another status.
+// probeVerdict says whether the answer to the dry probe of the base URL base, empty through a proxy, is a Bot API's —
+// 401 with a JSON body — and otherwise names what answered, with its code: without an answer the text of
+// delivery.FailureMessage — the name, the TLS handshake, the time, the proxy — or the error's own, which names the
+// proxy whose name did not resolve; a 404 of a wrong path prefix, an answer that is not JSON, or another status.
 func probeVerdict(r Result, base string) (bool, string, string) {
 	if r.Status == 0 {
-		code := r.FailureCode()
-		switch r.Network {
-		case outbound.NetworkDNS:
-			host := base
-			if u, err := url.Parse(base); err == nil {
-				host = u.Hostname()
-			}
-			return false, fmt.Sprintf(messageDNS, host), code
-		case outbound.NetworkTLS:
-			return false, fmt.Sprintf(messageTLS, r.Detail), code
-		case outbound.NetworkTimeout:
-			return false, fmt.Sprintf(messageTimeout, int(CallTimeout/time.Second)), code
-		case outbound.NetworkProxyAuth:
-			return false, MessageProxyRefused, code
+		if message, ok := delivery.FailureMessage(r.Network, base, r.Detail, CallTimeout); ok {
+			return false, message, r.FailureCode()
 		}
-		return false, string(r.Outcome.Error), code
+		return false, string(r.Outcome.Error), r.FailureCode()
 	}
 	switch {
 	case r.Status == http.StatusProxyAuthRequired:

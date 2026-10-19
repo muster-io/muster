@@ -409,6 +409,7 @@
       "status": "Status",
       "stormThreshold": "Storm threshold (new Alert Groups per minute)",
       "threadBatchingWindowSeconds": "Thread batching window (seconds)",
+      "token": "Token",
       "totpRequired": "TOTP required",
       "urgentRiseRemovesAck": "Rise to Urgent removes the acknowledgement"
     },
@@ -728,7 +729,7 @@
       "serverUrlHint": "The address of the Mattermost server, such as https://mattermost.example.org.",
       "telegram": "Telegram"
     },
-    "hint": "How Muster reaches messengers: a bot account on a Mattermost server, or a Telegram bot.",
+    "hint": "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, or a bridge to a messenger that Muster has no native support for.",
     "list": {
       "empty": "No Connections yet."
     },
@@ -1451,7 +1452,7 @@
     "tooLong": "A Note has at most {{max}} characters."
   },
   "notices": {
-    "noReplicaLeading": "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
+    "noReplicaLeading": "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused.",
     "recoveringAfterDowntime": "Muster is recovering after downtime. Data may be incomplete until {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster is recovering after downtime. Data may be incomplete for a while."
   },

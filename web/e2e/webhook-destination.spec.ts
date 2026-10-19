@@ -6,7 +6,8 @@
 // no Connection and no "Check". In "Template", "Create" posts to the fake chat with an extraction rule and "Update" puts
 // to the message by its extracted id; a broken body of "Update" is refused at its field with its line and column, and
 // once fixed the Destination is created and its Signing secret shown once, with "Copy". A reader of Russian sees the
-// form at phone width. "Delete" says what happens in template and in events mode, and the Destination leaves the list.
+// form at phone width. "Delete" says what happens in template and in events mode, and the Destination leaves the list;
+// its page reads it no more once the deletion starts.
 // No page scrolls sideways at 360 px; no Content Security Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
@@ -19,6 +20,7 @@ import {
   signIn,
   signInAdmin,
   watchCsp,
+  watchDeletion,
 } from "./support";
 
 test.describe.configure({ mode: "serial" });
@@ -254,8 +256,15 @@ test("deleting says what happens in template and events mode", async ({ page }) 
     "Muster stops sending here, and the Destination leaves every Route. Queued events will not be sent. The Signing secret and the Secrets are deleted now. This cannot be undone.",
   );
   await shot(page, "webhook-destination-delete");
+  const deletion = await watchDeletion(page, `/api/v1/destinations/${destinationId}`, {
+    type: "destination",
+    id: destinationId,
+  });
   await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page).toHaveURL(/\/destinations$/);
   await expect(page.getByRole("link", { name: NAME, exact: true })).toHaveCount(0);
+  // Its page read the Destination no more once the deletion started, not even on the live hint of the deletion.
+  expect(deletion.reads).toEqual([]);
+  expect(deletion.errors).toEqual([]);
   expect(csp).toEqual([]);
 });

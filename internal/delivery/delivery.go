@@ -132,15 +132,15 @@ const (
 
 // Outcome is what an adapter call ended with. An ok Publication or Thread reply names its message; a RetryAfter the
 // exact delay and its scope; a failure carries the provider's error text, masked of secrets and untrusted. Status is
-// the HTTP status of the answer of an outgoing webhook or a bridge, 0 without one. An outgoing webhook in the template
-// mode also reports the values the extraction rules of its "create" or "open thread" found (Values), by rule name, and
-// the rules that found nothing (Missing); that "open thread" ran (ThreadOpened), whatever the reply after it came to;
-// that its request templates rendered (Rendered), which ends the Destination's template error; and the request it
-// ended with (Request: create, update, open_thread, reply_in_thread or events) (C-15.FR-3, FR-4, FR-7). A bridge's
-// Publication or Thread reply also reports the Thread its answer named (ThreadRef, the `thread_ref` stored for the next
-// reply), whether the answer was the first result of the call's idempotency key (Replayed), and, when the call failed,
-// whether the request may have reached the messenger without its answer — a timeout, or a connection lost after the
-// request was sent (Unanswered) (C-22.FR-6).
+// the HTTP status of the answer, or the error_code a Telegram answer reports, 0 when the outcome carries no status. An
+// outgoing webhook in the template mode also reports the values the extraction rules of its "create" or "open thread"
+// found (Values), by rule name, and the rules that found nothing (Missing); that "open thread" ran (ThreadOpened),
+// whatever the reply after it came to; that its request templates rendered (Rendered), which ends the Destination's
+// template error; and the request it ended with (Request: create, update, open_thread, reply_in_thread or events)
+// (C-15.FR-3, FR-4, FR-7). A bridge's Publication or Thread reply also reports the Thread its answer named (ThreadRef,
+// the `thread_ref` stored for the next reply), whether the answer was the first result of the call's idempotency key
+// (Replayed), and, when the call failed, whether the request may have reached the messenger without its answer — a
+// timeout, or a connection lost after the request was sent (Unanswered) (C-22.FR-6).
 type Outcome struct {
 	Kind         OutcomeKind
 	MessageID    string

@@ -238,7 +238,7 @@ export function destinationErrorText(t: TFunction, pointer: string, problem: Fie
     }
     // The check's text in the reader's language; the server's English message follows as its detail.
     const reason = checkCodeText(t, problem.checkCode);
-    const detail = checkDetail(t, problem.checkCode, problem.detail);
+    const detail = checkDetail(problem.checkCode, problem.detail);
     return detail === null ? reason : t("checks.reasonWithDetail", { reason, detail });
   }
   if (problem.code === "name_taken") {

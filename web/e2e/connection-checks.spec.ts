@@ -190,7 +190,7 @@ test("checks drafts of new Connections of every type and saves nothing", async (
     await expect(summary(page)).toHaveText("The check passed.");
     await expect(steps(page)).toHaveText([
       /^Bridge info: ok · \d+ ms · direct$/,
-      /^Event delivery: ok · \d+ ms · direct$/,
+      "Event delivery: ok · direct",
     ]);
     await shot(page, "connection-checks-new-bridge");
     await expect(page.getByText(BRIDGE_SECOND_TOKEN)).toHaveCount(0);

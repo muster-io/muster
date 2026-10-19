@@ -42,15 +42,6 @@ var (
 // codeOneOfRequired is the code of a request that gives neither or several of the fields of which it takes one.
 const codeOneOfRequired = "one_of_required"
 
-// requestLogRunOf is the request_log_run of a check or test result whose requests share the check run run, none
-// without one.
-func requestLogRunOf(run string) *string {
-	if run == "" {
-		return nil
-	}
-	return &run
-}
-
 // ListRequestLog is listRequestLog (C-23.FR-5): the records of exactly one Connection or Destination, or of a check run
 // alone, newest first, by cursor, filtered by direction, status class, operation, Alert Group and check run. Naming
 // the owner needs its Permission — connections:read for a Connection, destinations:read for a Destination — before

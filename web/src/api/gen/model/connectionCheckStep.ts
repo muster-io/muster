@@ -25,11 +25,14 @@ export interface ConnectionCheckStep {
   name: ConnectionCheckStepName;
   ok: boolean;
   skipped?: boolean;
-  /** @nullable */
+  /**
+     * How long the step's request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.
+     * @nullable
+     */
   latency_ms?: number | null;
   via?: ConnectionPath;
   /**
-     * What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.
+     * What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code's text.
      * @nullable
      */
   message?: string | null;

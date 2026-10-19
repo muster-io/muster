@@ -975,20 +975,36 @@ function isInUse(err: unknown): boolean {
   return isApiError(err) && err.status === 409 && err.code === "in_use";
 }
 
-/** "Delete" with its dialog; a Connection that Destinations use is refused and the dialog says by how many. */
-export function ConnectionDeleteDialog({ connection }: { connection: Connection }) {
+/**
+ * "Delete" with its dialog; a Connection that Destinations use is refused and the dialog says by how many. The page
+ * stops reading the Connection through onDeletingChange from the moment the deletion starts, as a read once it is
+ * deleted, such as the one the live hint of the deletion starts, would answer 404; a refused deletion lets it read
+ * again.
+ */
+export function ConnectionDeleteDialog({
+  connection,
+  onDeletingChange,
+}: {
+  connection: Connection;
+  onDeletingChange?: (deleting: boolean) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteConnection(connection.id, { headers: { "If-Match": connection.etag } }),
+    onMutate: async () => {
+      onDeletingChange?.(true);
+      await queryClient.cancelQueries({ queryKey: getGetConnectionQueryKey(connection.id) });
+    },
     onSuccess: async () => {
       await navigate({ to: "/connections" });
       queryClient.removeQueries({ queryKey: getGetConnectionQueryKey(connection.id) });
       void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
     },
     onError: (err) => {
+      onDeletingChange?.(false);
       // The number of Destinations or the version may have changed: read the Connection again.
       if (isInUse(err) || isStale(err)) {
         void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey(connection.id) });

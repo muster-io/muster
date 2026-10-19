@@ -915,6 +915,10 @@ type Step struct {
 	Code    string
 }
 
+// Called reports whether the step made a call, so that its Latency is that call's: not when it was skipped, nor for
+// StepEventDelivery, which only reads the info that the step info read.
+func (s Step) Called() bool { return !s.Skipped && s.Name != StepEventDelivery }
+
 // CheckResult is the result of a Connection check: its steps and the bot's username once the token works; for a
 // Telegram Connection, once getWebhookInfo answered, whether a webhook is set and how many updates wait; for a Bridge,
 // marked by Bridge, the info that its step info read, as the bridge sent it, nil when that step failed.

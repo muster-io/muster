@@ -25,7 +25,7 @@ export interface DestinationCheckItem {
   name: DestinationCheckItemName;
   ok: boolean;
   /**
-     * Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.
+     * Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail where it says more than the code's text.
      * @nullable
      */
   message?: string | null;

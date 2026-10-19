@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"testing"
@@ -390,8 +391,9 @@ func TestDryProbe(t *testing.T) {
 }
 
 // TestDryProbeWithoutAnswer covers C-22.FR-2: a dry probe without an answer has the code of delivery.FailureCode — a
-// refused connection, an unknown name, an address the outbound address policy refuses — and a proxy that refuses the
-// credentials, SOCKS5 or HTTP, is proxy_refused; nothing reaches the bridge.
+// refused connection, an unknown name, a failed TLS handshake, no answer in time, an address the outbound address
+// policy refuses — and a proxy that refuses the credentials, SOCKS5 or HTTP, is proxy_refused; an unknown name, the
+// time and the proxy have the text of delivery.FailureMessage. Nothing reaches the bridge.
 func TestDryProbeWithoutAnswer(t *testing.T) {
 	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -417,16 +419,27 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 		t.Cleanup(func() { _ = p.Close() })
 		proxies[kind] = p.Addr()
 	}
+	tlsServer := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(tlsServer.Close)
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(release) })
 	for _, tc := range []struct {
 		name    string
 		n       Network
 		base    string
 		proxy   *outbound.Proxy
+		within  time.Duration
 		code    string
 		message string
 	}{
 		{name: "refused", n: network(t, nil), base: refused, code: delivery.CodeConnectFailed},
-		{name: "dns", n: dns, base: "http://bridge.invalid", code: delivery.CodeDNSFailed},
+		{name: "dns", n: dns, base: "http://bridge.invalid", code: delivery.CodeDNSFailed,
+			message: "DNS lookup failed: bridge.invalid"},
+		{name: "tls", n: network(t, nil), base: tlsServer.URL, code: delivery.CodeTLSFailed},
+		{name: "timeout", n: network(t, nil), base: slow.URL, within: 100 * time.Millisecond,
+			code: delivery.CodeTimeout, message: "No answer within 10 s"},
 		{name: "blocked", n: blocked, base: b.srv.URL, code: delivery.CodeBlocked},
 		{name: "socks5 refused the credentials", n: network(t, nil), base: b.srv.URL, proxy: &outbound.Proxy{
 			Type: outbound.ProxySOCKS5, Address: proxies[fakeproxy.SOCKS5], Username: "u", Password: "wrong"},
@@ -436,8 +449,14 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 			code: delivery.CodeProxyRefused, message: MessageProxyRefused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			if tc.within > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.within)
+				defer cancel()
+			}
 			c := newClient(t, tc.n, Settings{BaseURL: tc.base, Proxy: tc.proxy})
-			p, err := RunDryProbe(t.Context(), c, direct, clock.NewManual(time.Time{}))
+			p, err := RunDryProbe(ctx, c, direct, clock.NewManual(time.Time{}))
 			if err != nil || p.OK || p.Code != tc.code || p.Message == "" ||
 				(tc.message != "" && p.Message != tc.message) || strings.Contains(p.Message, "wrong") {
 				t.Errorf("probe = %+v, %v", p, err)
@@ -453,9 +472,37 @@ func TestDryProbeWithoutAnswer(t *testing.T) {
 	if got := b.seen(); len(got) != 0 {
 		t.Errorf("requests %+v", got)
 	}
-	if p := probeVerdict(outbound.Result{}, Result{Classification: Classification{Class: ClassTransient}}, ""); p.OK ||
-		p.Message != checkFailed || p.Code != delivery.CodeRequestFailed {
+	if p := probeVerdict(outbound.Result{}, Result{Classification: Classification{Class: ClassTransient}}, "",
+		"http://bridge.example"); p.OK || p.Message != checkFailed || p.Code != delivery.CodeRequestFailed {
 		t.Errorf("a failure without text = %+v", p)
+	}
+}
+
+// TestDryProbeProxyDNS covers C-22.FR-2: through a proxy whose name does not resolve, HTTP or SOCKS5, the dry probe is
+// dns_failed with the error's own text, which names the proxy as the name that did not resolve and never the bridge,
+// whose name Muster leaves to the proxy. Nothing reaches the bridge.
+func TestDryProbeProxyDNS(t *testing.T) {
+	b := startStandIn(t, answerJSON(http.StatusUnauthorized, problemJSON, `{"title":"Unauthorized"}`))
+	n := network(t, nil)
+	n.Resolver = failingResolver{}
+	host, _, err := net.SplitHostPort(b.srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []outbound.ProxyType{outbound.ProxyHTTP, outbound.ProxySOCKS5} {
+		t.Run(string(kind), func(t *testing.T) {
+			c := newClient(t, n, Settings{BaseURL: b.srv.URL, Proxy: &outbound.Proxy{Type: kind,
+				Address: "proxy.invalid:3128"}})
+			p, err := RunDryProbe(t.Context(), c, direct, clock.NewManual(time.Time{}))
+			if err != nil || p.OK || p.Code != delivery.CodeDNSFailed ||
+				!strings.Contains(p.Message, "lookup proxy.invalid") ||
+				strings.Contains(p.Message, "DNS lookup failed: "+host) {
+				t.Errorf("probe = %+v, %v", p, err)
+			}
+		})
+	}
+	if got := b.seen(); len(got) != 0 {
+		t.Errorf("requests %+v", got)
 	}
 }
 

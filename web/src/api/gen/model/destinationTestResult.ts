@@ -27,5 +27,5 @@ export interface DestinationTestResult {
   /** Health after the test; a successful test of a Broken Destination makes it healthy. */
   health: DestinationHealth;
   /** The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them. */
-  request_log_run?: PublicId;
+  request_log_run: PublicId;
 }

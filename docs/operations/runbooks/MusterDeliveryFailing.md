@@ -37,10 +37,12 @@ from 2 s up to 5 min) and marks the Destination Broken only when the Transient b
    `sum by (outcome) (increase(muster_delivery_attempts_total{job="muster",destination="<id>"}[15m]))`. `transient`
    and `unknown` point at the network or the messenger; `retry_after` at rate limits; `fatal` and `markup_rejected` at
    the configuration or the message; `template_error` at a template, see [MusterTemplateError](MusterTemplateError.md).
-4. Read the log lines `delivery_attempt` for the Destination (`destination` is its id): `outcome`, `attempt`,
-   `duration_ms` and `retry_after_ms`. `outbound_blocked` means that the outbound address policy refused the address
-   or the proxy (`rule` names why); `delivery_work_failed` that the worker itself could not attempt, for example
-   because the database connection was lost.
+4. Read the log lines `delivery_attempt` for the Destination (`destination` is its id): `outcome`, `code` (the HTTP
+   status of the answer or the `error_code` of a Telegram answer, 0 when the outcome carries no status), `reason` (the
+   masked error the messenger answered or the call failed with), `attempt`, `duration_ms` and `retry_after_ms`.
+   `outbound_blocked` means that the outbound address policy refused the address or the proxy (`rule` names why);
+   `delivery_work_failed` that the worker itself could not attempt, for example because the database connection was
+   lost.
 5. Compare with all outbound calls of the delivery client class:
    `sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))`. Failures across
    every Destination point at the network, a proxy or DNS rather than one messenger.

@@ -319,7 +319,9 @@ function DestinationView({ destinationId }: { destinationId: string }) {
   const canWrite = useCan("destinations:write");
   const canTest = useCan("destinations:test");
   const [dirty, setDirty] = useState(false);
-  const query = useGetDestination(destinationId);
+  // A Destination being deleted is read no more: the read would answer 404.
+  const [deleting, setDeleting] = useState(false);
+  const query = useGetDestination(destinationId, { query: { enabled: !deleting } });
   const destination = query.data;
   const connections = useConnectionsById();
   const connection =
@@ -356,7 +358,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && destination !== undefined && (
-            <DestinationDeleteDialog destination={destination} />
+            <DestinationDeleteDialog destination={destination} onDeletingChange={setDeleting} />
           )}
         </div>
       </div>

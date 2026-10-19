@@ -433,6 +433,7 @@ const PASSED: ConnectionCheckResult = {
   ],
   warnings: [],
   bot_name: "muster_dev_bot",
+  request_log_run: "CR0000000000R1",
   webhook_set: false,
   pending_updates: 0,
 };
@@ -696,7 +697,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
       .toHaveTextContent("Проверка берёт значения из формы и ничего не сохраняет.");
   });
 
-  test("translates a failed dry probe into Russian, with the server's English message as the detail", async () => {
+  test("translates a failed dry probe into Russian, without the English message that only repeats it", async () => {
     await i18n.changeLanguage("ru");
     await runCheck(
       json(200, {
@@ -721,11 +722,9 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(() => stepTexts()[0])
       .toBe(
-        "Пробный запрос без токена: ошибка 2 мс · напрямуюНеверный префикс пути: сервер ответил 404.Подробности: Wrong path prefix: the server answered 404.",
+        "Пробный запрос без токена: ошибка 2 мс · напрямуюНеверный префикс пути: сервер ответил 404.",
       );
-    expect(page.getByTestId("connection-check-step-detail").element().className).toContain(
-      "text-muted-foreground",
-    );
+    expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
   });
 
   test("writes the pending updates with Russian plurals", async () => {

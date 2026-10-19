@@ -2242,7 +2242,7 @@ export const CheckDestinationResponse = zod.object({
   "checks": zod.array(zod.object({
   "name": zod.enum(['token', 'bot_in_channel', 'channel_exists', 'discussion_group', 'bot_rights_channel', 'bot_rights_group', 'channel']).describe('One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge\'s `checkChannel` — whether the bot can post, edit and reply in the channel.'),
   "ok": zod.boolean(),
-  "message": zod.string().nullish().describe('Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.'),
+  "message": zod.string().nullish().describe('Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail where it says more than the code\'s text.'),
   "code": zod.union([zod.literal('token_invalid'),zod.literal('bot_not_in_channel'),zod.literal('channel_in_other_team'),zod.literal('channel_archived'),zod.literal('channel_not_found'),zod.literal('not_a_channel'),zod.literal('comments_disabled'),zod.literal('changed_since_saved'),zod.literal('bot_not_channel_admin'),zod.literal('bot_may_not_post'),zod.literal('bot_may_not_edit'),zod.literal('bot_not_group_admin'),zod.literal('channel_forbidden'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal(null)]).nullish().describe('Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination\'s team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge\'s `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.')
 })),
   "health": zod.object({
@@ -2250,7 +2250,7 @@ export const CheckDestinationResponse = zod.object({
   "since": zod.iso.datetime({"offset":true}).nullish(),
   "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
 }),
-  "request_log_run": zod.string().regex(checkDestinationResponseRequestLogRunRegExp).optional().describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
+  "request_log_run": zod.string().regex(checkDestinationResponseRequestLogRunRegExp).describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
 })
 
 /**
@@ -2300,7 +2300,7 @@ export const TestDestinationResponse = zod.object({
   "since": zod.iso.datetime({"offset":true}).nullish(),
   "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
 }).describe('Health after the test; a successful test of a Broken Destination makes it healthy.'),
-  "request_log_run": zod.string().regex(testDestinationResponseRequestLogRunRegExp).optional().describe('The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
+  "request_log_run": zod.string().regex(testDestinationResponseRequestLogRunRegExp).describe('The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.')
 })
 
 /**

@@ -138,9 +138,10 @@ type Probe struct {
 
 // RunDryProbe makes the dry probe of c through run (C-22.FR-2): `GET <base>/v1/info` without the token, timed on the
 // real clock, on a client that may have none. It passes on a 401 answer with a problem and otherwise names what
-// answered. A rate_limited answer is handed to run as Transient: a request without a token says nothing of the bot's
-// budget, so it never holds the Connection's limiter, least of all when an unsaved base URL answered it. Its error is
-// the runner's own.
+// answered, a bridge it could not reach as delivery.FailureMessage does, without the bridge's name through a proxy,
+// whose own name is the one that did not resolve. A rate_limited answer is handed to run as Transient: a request
+// without a token says nothing of the bot's budget, so it never holds the Connection's limiter, least of all when an
+// unsaved base URL answered it. Its error is the runner's own.
 func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (Probe, error) {
 	var res outbound.Result
 	var r Result
@@ -161,22 +162,31 @@ func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clo
 	if err != nil {
 		mediaType = ""
 	}
-	p := probeVerdict(res, r, c.settings.mask(mediaType))
+	address := c.settings.BaseURL
+	if c.Via() == ViaProxy {
+		address = ""
+	}
+	p := probeVerdict(res, r, c.settings.mask(mediaType), address)
 	p.Latency = latency
 	return p, nil
 }
 
-// probeVerdict says whether the answer to the dry probe is a bridge's, in the order of C-22.FR-2: no answer has the
-// code of delivery.FailureCode, a proxy that refused the credentials — which resultOf turns into a call without an
-// answer when the Connection has a proxy — proxy_refused, 404 wrong_path_prefix, an answer that is not a problem
-// not_bridge with its status and media type, 401 with a problem passes, and another status with a problem
-// unexpected_status.
-func probeVerdict(res outbound.Result, r Result, mediaType string) Probe {
+// probeVerdict says whether the answer to the dry probe of the bridge at base, empty through a proxy, is a bridge's, in
+// the order of C-22.FR-2: no answer has the code of delivery.FailureCode, with the text of delivery.FailureMessage —
+// the name, the time, a proxy that refused the credentials, which resultOf turns into a call without an answer when
+// the Connection has a proxy — or the error's own; then 407 proxy_refused, 404 wrong_path_prefix, an answer that is
+// not a problem not_bridge with its status and media type, 401 with a problem passes, and another status with a
+// problem unexpected_status.
+func probeVerdict(res outbound.Result, r Result, mediaType, base string) Probe {
 	switch {
-	case r.Status == 0 && r.Network == outbound.NetworkProxyAuth, r.Status == http.StatusProxyAuthRequired:
-		return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
 	case r.Status == 0:
-		return Probe{Message: cmp.Or(string(r.Error), checkFailed), Code: delivery.FailureCode(r.Blocked, r.Network)}
+		code := delivery.FailureCode(r.Blocked, r.Network)
+		if message, ok := delivery.FailureMessage(r.Network, base, "", callTimeout); ok {
+			return Probe{Message: message, Code: code}
+		}
+		return Probe{Message: cmp.Or(string(r.Error), checkFailed), Code: code}
+	case r.Status == http.StatusProxyAuthRequired:
+		return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
 	case r.Status == http.StatusNotFound:
 		return Probe{Message: MessageWrongPrefix, Code: CodeWrongPrefix}
 	case problemOf(res) == nil:

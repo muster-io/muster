@@ -473,8 +473,14 @@ function step(
   return { name, ok: true, via: "direct", ...extra };
 }
 
-async function runCheck(result: ConnectionCheckResult, button = "Check connection") {
-  const fetch = vi.spyOn(window, "fetch").mockResolvedValue(json(200, result));
+/** Answers the check with the result, which names its run as every result does. */
+async function runCheck(
+  result: Omit<ConnectionCheckResult, "request_log_run">,
+  button = "Check connection",
+) {
+  const fetch = vi
+    .spyOn(window, "fetch")
+    .mockResolvedValue(json(200, { ...result, request_log_run: "CR0000000000R1" }));
   await render(providers(<ConnectionCheck connectionId="CN0000000000BR" type="bridge" />));
   await page.getByRole("button", { name: button }).click();
   return fetch;
@@ -518,7 +524,8 @@ describe("ConnectionCheck of a Bridge Connection", () => {
   test("names the Bridge steps, with their latency and path, and the hint of the check", async () => {
     const fetch = await runCheck({
       ok: true,
-      steps: [step("info", { latency_ms: 3 }), step("event_delivery")],
+      // Event delivery makes no call of its own, so it has no latency, and none shows.
+      steps: [step("info", { latency_ms: 3 }), step("event_delivery", { latency_ms: null })],
       warnings: [],
       info: INFO,
     });

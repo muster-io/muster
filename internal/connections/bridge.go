@@ -200,11 +200,12 @@ func (s *Service) cachedBridgeClient(id, version int64, build func() (*bridge.Cl
 	return c, nil
 }
 
-// forgetBridgeClient drops the cached Bridge client of the deleted Connection id.
+// forgetBridgeClient drops the cached Bridge client and the info kept in memory of the deleted Connection id.
 func (s *Service) forgetBridgeClient(id int64) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.bridgeClients, id)
+	s.mu.Unlock()
+	s.info.Forget(id)
 }
 
 // BridgeTarget is where the Bridge Destination destinationID posts, for the Bridge delivery (bridge.Targets): its

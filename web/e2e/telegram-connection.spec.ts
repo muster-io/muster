@@ -107,10 +107,10 @@ test("creates a Telegram Connection and checks it step by step, an unsaved path 
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // The list names both messengers.
+  // The list names every type of Connection.
   await nav(page, "Connections").click();
   await expect(page.getByText("How Muster reaches messengers:", { exact: false })).toHaveText(
-    "How Muster reaches messengers: a bot account on a Mattermost server, or a Telegram bot.",
+    "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, or a bridge to a messenger that Muster has no native support for.",
   );
   const demo = page
     .getByRole("row")
@@ -268,7 +268,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByRole("heading", { name: "Подключения", level: 1 })).toBeVisible();
   await expect(
     page.getByText(
-      "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost или бот Telegram.",
+      "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost, бот Telegram или мост к мессенджеру, который Muster не поддерживает напрямую.",
     ),
   ).toBeVisible();
   await page.getByRole("link", { name: "tg", exact: true }).click();
@@ -278,7 +278,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByRole("textbox", { name: "Базовый URL Bot API" }).fill(`${FTG}/other/`);
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(steps(page)).toHaveText([
-    /^Пробный запрос без токена: ошибка \d+ мс · напрямуюНеверный префикс пути: сервер ответил 404\.Подробности: Wrong path prefix: the server answered 404\.$/,
+    /^Пробный запрос без токена: ошибка \d+ мс · напрямуюНеверный префикс пути: сервер ответил 404\.$/,
     "getMe: Пропущено: предыдущий шаг не прошёл",
     "getWebhookInfo: Пропущено: предыдущий шаг не прошёл",
   ]);

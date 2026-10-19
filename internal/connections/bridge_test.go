@@ -1021,6 +1021,41 @@ func TestBridgeInfoForDelivery(t *testing.T) {
 	}
 }
 
+// TestBridgeInfoForgottenOnDelete: deleting a Bridge Connection drops the info that the InfoCache keeps of it in
+// memory, so that a read through a Conn taken before the deletion finds no copy, since the store keeps none for a
+// deleted Connection, and reads getInfo again instead of serving the deleted Connection's info.
+func TestBridgeInfoForgottenOnDelete(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	c := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.brTargets[21] = memBRTarget{connection: c.ID, channel: fakebridge.ChannelAlerts}
+	infoReads := func() int {
+		n := 0
+		for _, r := range f.Requests() {
+			if r.Path == "/v1/info" {
+				n++
+			}
+		}
+		return n
+	}
+	tg, err := e.svc.BridgeTarget(ctx, 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, r := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); !r.OK() || infoReads() != 1 {
+			t.Fatalf("info before the deletion = %+v, %d reads", r, infoReads())
+		}
+	}
+	if err := e.svc.Delete(ctx, by, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, r := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); !r.OK() || infoReads() != 2 {
+		t.Errorf("info after the deletion = %+v, %d reads; the copy in memory outlived the Connection", r, infoReads())
+	}
+}
+
 // TestBridgePushConnection is the Connection of a pushed Bridge event (C-22.FR-11): a Bridge Connection in either
 // mode, by its public_id in any case, with its mode, and in push mode a client whose settings hold the push secret,
 // kept while the Connection is unchanged; a Connection in poll mode has no client, and its secrets are not opened, so
