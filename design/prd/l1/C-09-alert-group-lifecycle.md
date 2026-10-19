@@ -173,7 +173,7 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   a mark with the state of the live-updates stream of FR-25, so that a person on a phone at night knows whether the
   list in front of them is live:
 
-  | State | While | Mark |
+  | State | While | Mark (from 640 CSS pixels up) |
   |---|---|---|
   | `connecting` | from the page load until the stream first opens | grey dot; "Connecting…" once `live.reconnecting_after` has passed |
   | `live` | the stream is open | green dot and "Live" |
@@ -303,9 +303,9 @@ Checked with the fake Alertmanager, through the API and the UI.
   `live.offline_after`, each change in its status region; once the stream can be reached again, the mark turns back to
   "Live" and the tab counts include an Alert Group created meanwhile, without a reload. A drop shorter than
   `live.reconnecting_after` leaves "Live". 360 CSS pixels wide, in English and in Russian, with the stream lost the
-  header of the list and of an Alert Group page shows the dot of `reconnecting` and then of `offline`, the status region
-  holds «Переподключение…» and then «Нет связи», and the main navigation keeps its width, without horizontal scrolling
-  of the page.
+  header of the list shows only the dot of `reconnecting` and then of `offline`, and that of an Alert Group page only
+  the dot of `offline`, while the status region holds "Reconnecting…" and then "Offline" («Переподключение…», «Нет
+  связи»); the main navigation keeps its width, without horizontal scrolling of the page.
 
 ## Related ADRs
 

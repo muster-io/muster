@@ -2,12 +2,12 @@
 // Copyright The Muster Authors
 
 // The mark of the live updates in the header (C-09.FR-26): a dot and the text of the state in a status region, so that
-// a screen reader reads each change out, and the dot is never the only cue. Below the sm breakpoint only the dot shows,
-// in every state, so that the navigation keeps its width; the text stays in the region for screen readers and is the
-// title of the popover, which pressing the mark opens: it says what the state means and, in offline, offers to reload
-// the page. The status region holds the button rather than sitting in it, because the content of a button is
-// presentational; the popover itself is portalled out of the region, a dialog named by its title and described by its
-// explanation. The mark sends nothing to the server and records nothing (NFR-7).
+// a screen reader reads each change out and the state is never in the dot's colour alone for it. Below the sm
+// breakpoint only the dot shows, in every state, so that the navigation keeps its width; the text stays in the region
+// for screen readers and is the title of the popover, which pressing the mark opens: it says what the state means and,
+// in offline, offers to reload the page. The status region holds the button rather than sitting in it, because the
+// content of a button is presentational; the popover itself is portalled out of the region, a dialog named by its title
+// and described by its explanation. The mark sends nothing to the server and records nothing (NFR-7).
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
