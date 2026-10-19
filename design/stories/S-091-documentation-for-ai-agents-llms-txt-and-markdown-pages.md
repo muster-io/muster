@@ -115,7 +115,8 @@ issue: 287
   3. `## Scenarios`, one `###` heading each, with the pages to read in order and the commands that finish it:
      - **Write a bridge in Go**: Write a bridge (its Go library and example bridge), Messengers → Bridge, Reference →
        Bridge protocol and `api/bridge.yaml`; `go get github.com/muster-io/muster-bridge-go` and the library's
-       repository, whose README and `AGENTS.md` guide the work; finished when `muster bridge check` passes.
+       repository, whose README guides the work and whose `AGENTS.md` guides an agent that changes the library;
+       finished when `muster bridge check` passes.
      - **Write a bridge in Python**: Write a bridge (its Python section, S-060), the same protocol pages; the repository
        `muster-io/muster-bridge-python`, with its `AGENTS.md`, and the install line as Write a bridge gives it, taken
        with `quote` — `pip install muster-bridge` once the libraries are released with L1, and an install from a clone
@@ -125,18 +126,21 @@ issue: 287
        semantics.
      - **Automate through the API**: Reference → API with its conventions and tokens, `api/openapi.yaml` (also served by
        every Muster at `/api/v1/openapi.yaml`), Concepts → statuses and commands, Operations → CLI.
-  4. `## Document map`, written by `map`: one `###` heading per top-level section of the navigation, a nested section a
-     level lower, and per page `- [<title>](<Markdown URL>): <description>` in the order of the navigation. A top-level
-     page outside any section keeps its place in that order: before the first section — Home and Quick start — directly
-     under `## Document map`; after a section, under a `###` heading of its own title, so that it is not read as part of
-     the section before it. The title is the page's title in the navigation when it has one, otherwise its first `#`
-     heading; the description is the first sentence of the first paragraph after it, skipping headings, comments,
-     admonitions and fenced blocks, and is left out when the page has no such paragraph.
+  4. `## Document map`, a heading of the template, and under it what `map` writes: one `###` heading per top-level
+     section of the navigation, a nested section a level lower, and per page
+     `- [<title>](<Markdown URL>): <description>` in the order of the navigation. A top-level page outside any section
+     keeps its place in that order: before the first section — Home and Quick start — directly under `## Document map`;
+     after a section, under a `###` heading of its own title, so that it is not read as part of the section before it.
+     The title is the page's title in the navigation when it has one, otherwise its first `#` heading; the description
+     is the first sentence of the first paragraph after it, skipping headings, comments, admonitions and fenced blocks,
+     and is left out when the page has no such paragraph. Title and description have their links reduced to their text
+     and their images left out, so that the map links only to the Markdown versions.
   5. `## Optional`: `llms-full.txt` with its size.
 - **Checks** (`llmsgen`, C-21.AC-4): it exits non-zero, naming the file and what is wrong, when a template function
   fails as above, when the template does not call `map` exactly once, when a page of the navigation does not exist or
   has no title, when a link of `llms.txt` or `llms-full.txt` under the version's base URL does not resolve to a file
-  under `site/`, when a link of `llms.txt` leaves the site other than to a repository under
+  under `site/`, when a link of `llms.txt` — a link, not a URL in a code span or fenced code, such as the
+  `https://api.telegram.org` that a description quotes — leaves the site other than to a repository under
   `https://github.com/muster-io/`, when `llms.txt` is larger than 32 KiB, and when `llms-full.txt` is 1 MiB (1,048,576
   bytes) or larger. It prints the sizes of `llms.txt` and `llms-full.txt` and the token estimate of the latter. Because
   `make docs-check` runs `make docs`, it fails the same way in CI.

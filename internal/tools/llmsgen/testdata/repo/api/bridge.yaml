@@ -1,0 +1,18 @@
+openapi: 3.1.2
+info:
+  title: Fixture Bridge protocol
+  version: 1.0.0
+  description: |-
+    **Presses** are confirmed to the messenger by the bridge itself, within the messenger's deadline and at most 3
+    seconds after the press.
+paths: {}
+components:
+  schemas:
+    ErrorClass:
+      type: string
+      enum:
+      - transient
+      - rate_limited
+      - gone
+      - forbidden
+      - invalid

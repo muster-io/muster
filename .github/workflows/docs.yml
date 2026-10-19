@@ -84,7 +84,8 @@ jobs:
           python-version: "3.14.8"
           cache: pip
           cache-dependency-path: docs/requirements.txt
-      - run: make docs
+      # The links of llms.txt and llms-full.txt point into the version being published.
+      - run: make docs DOCS_VERSION="$VERSION"
       # A fresh shallow clone of gh-pages for each attempt, or a new orphan branch on the first publish; a push that
       # loses a race with another run is retried on top of it.
       - name: publish to gh-pages

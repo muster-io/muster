@@ -6,6 +6,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +20,12 @@ import (
 // writeSite writes a built site with an index page, a metrics page and the file marker.
 func writeSite(t *testing.T, marker string) string {
 	t.Helper()
+	return writeSiteWith(t, marker, nil)
+}
+
+// writeSiteWith writes the site of writeSite with the extra files.
+func writeSiteWith(t *testing.T, marker string, extra map[string]string) string {
+	t.Helper()
 	site := t.TempDir()
 	files := map[string]string{
 		"index.html":                       "<html>home</html>",
@@ -26,6 +35,7 @@ func writeSite(t *testing.T, marker string) string {
 		"brand/muster-mark-on-dark.svg":    "<svg/>",
 		"reference/environment/index.html": "<html>MUSTER_SECRET_KEYS</html>",
 	}
+	maps.Copy(files, extra)
 	for name, content := range files {
 		path := filepath.Join(site, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -143,6 +153,89 @@ func TestPublishSequence(t *testing.T) {
 	}
 	if got := redirect(t, target); got != "0.5/" {
 		t.Errorf("the root redirects to %q", got)
+	}
+}
+
+// llmsSite writes the site of writeSite with an llms.txt that names the marker.
+func llmsSite(t *testing.T, marker string) string {
+	t.Helper()
+	return writeSiteWith(t, marker, map[string]string{llmsFile: "# Muster " + marker + "\n"})
+}
+
+// rootLLMS returns the root llms.txt, or "" when the root has none.
+func rootLLMS(t *testing.T, target string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(target, llmsFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestRootLLMSFollowsTheRedirect(t *testing.T) {
+	target := t.TempDir()
+	mustPublish(t, llmsSite(t, "latest"), target, "latest")
+	if got := rootLLMS(t, target); got != "# Muster latest\n" {
+		t.Errorf("the root llms.txt is %q, want that of latest/", got)
+	}
+	mustPublish(t, llmsSite(t, "0.4"), target, "0.4")
+	if got := rootLLMS(t, target); got != "# Muster 0.4\n" {
+		t.Errorf("the root llms.txt is %q, want that of 0.4/", got)
+	}
+	mustPublish(t, llmsSite(t, "latest again"), target, "latest")
+	if got := rootLLMS(t, target); got != "# Muster 0.4\n" {
+		t.Errorf("the root llms.txt is %q, want that of 0.4/, where the root still redirects", got)
+	}
+	if got := redirect(t, target); got != "0.4/" {
+		t.Errorf("the root redirects to %q", got)
+	}
+}
+
+func TestRootLLMSRemovedWhenTheVersionHasNone(t *testing.T) {
+	target := t.TempDir()
+	mustPublish(t, llmsSite(t, "latest"), target, "latest")
+	if rootLLMS(t, target) == "" {
+		t.Fatal("the root has no llms.txt after publishing latest with one")
+	}
+	mustPublish(t, writeSite(t, "a"), target, "0.4")
+	if got := rootLLMS(t, target); got != "" {
+		t.Errorf("the root keeps the llms.txt of latest/ while it redirects to 0.4/, which has none: %q", got)
+	}
+
+	stale := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stale, llmsFile), []byte("# Muster earlier\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, writeSite(t, "a"), stale, "latest")
+	if got := rootLLMS(t, stale); got != "" {
+		t.Errorf("a root llms.txt of an earlier publication is left: %q", got)
+	}
+}
+
+// TestRootLLMSNeverFollowsALink publishes over a root llms.txt that is a symbolic link to another file of the target,
+// which stays as it was.
+func TestRootLLMSNeverFollowsALink(t *testing.T) {
+	target := t.TempDir()
+	keep := filepath.Join(target, "keep.txt")
+	if err := os.WriteFile(keep, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("keep.txt", filepath.Join(target, llmsFile)); err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, llmsSite(t, "latest"), target, "latest")
+	if data, err := os.ReadFile(keep); err != nil || string(data) != "keep\n" {
+		t.Errorf("the file the link pointed at is %q, %v; want it unchanged", data, err)
+	}
+	info, err := os.Lstat(filepath.Join(target, llmsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() || rootLLMS(t, target) != "# Muster latest\n" {
+		t.Errorf("the root llms.txt is %v with %q, want a file with that of latest/", info.Mode(), rootLLMS(t, target))
 	}
 }
 

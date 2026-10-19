@@ -58,3 +58,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Runbooks](operations/runbooks/index.md): what each alert about Muster means and how to fix it.
 - [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values, the API
   and the Bridge protocol.
+
+## AI agents
+
+AI agents and coding assistants start at [llms.txt](llms.txt): the map of this documentation for agents, with a
+Markdown version of every page and the full text in one file.

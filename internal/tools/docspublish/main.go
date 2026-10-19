@@ -4,6 +4,8 @@
 // Command docspublish copies a built documentation site into a checkout of the gh-pages branch (C-21.FR-1, C-21.AC-1):
 // it replaces <target>/<version>/, keeps versions.json in the format of mike, which the version selector of the site
 // reads, and points the root index.html at the newest published minor, or at latest/ while no release is published.
+// It copies the llms.txt of that version into the root, so that <site>/llms.txt answers with links into the version the
+// root redirects to, and removes the root copy when that version has none (C-21.FR-8).
 // It refuses a minor older than the newest published one, so the build of an older minor stays as it was published;
 // a minor that is not published yet may always be published first.
 package main
@@ -26,6 +28,7 @@ import (
 const (
 	latest       = "latest"
 	versionsFile = "versions.json"
+	llmsFile     = "llms.txt"
 )
 
 var minorRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -142,12 +145,49 @@ func publish(site, target, version string, stdout io.Writer) error {
 	if err := os.WriteFile(filepath.Join(target, "index.html"), []byte(redirectPage(redirect)), 0o600); err != nil {
 		return err
 	}
+	rootLLMS, err := copyRootLLMS(target, redirect)
+	if err != nil {
+		return err
+	}
 	// GitHub Pages serves the files as they are, without Jekyll, which would drop the directories that start with _.
 	if err := os.WriteFile(filepath.Join(target, ".nojekyll"), nil, 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "published %s into %s; the root redirects to %s\n", version, dir, redirect)
+	llms := "which has no " + llmsFile
+	if rootLLMS {
+		llms = "and serves its " + llmsFile
+	}
+	fmt.Fprintf(stdout, "published %s into %s; the root redirects to %s %s\n", version, dir, redirect, llms)
 	return nil
+}
+
+// copyRootLLMS copies the llms.txt of the version that the root redirects to into the root, or leaves the root without
+// one when that version has none, so that it never points into another version; it reports whether the root has one.
+// The root copy is removed first, so that a symbolic link in its place is never written through.
+func copyRootLLMS(target, redirect string) (bool, error) {
+	root, err := os.OpenRoot(target)
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	if err := root.Remove(llmsFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	src := filepath.Join(redirect, llmsFile)
+	info, err := root.Lstat(src)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, err
+	case !info.Mode().IsRegular():
+		return false, nil
+	}
+	data, err := root.ReadFile(src)
+	if err != nil {
+		return false, err
+	}
+	return true, root.WriteFile(llmsFile, data, 0o600)
 }
 
 // replaceDir copies site into a temporary directory beside dir and then puts it in the place of dir, so that a failed

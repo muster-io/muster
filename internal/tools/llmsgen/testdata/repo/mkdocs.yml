@@ -1,0 +1,27 @@
+# A small site for the tests of llmsgen. The python tag below is one llmsgen must read past.
+site_name: Fixture
+site_url: https://muster-io.github.io/muster/
+docs_dir: docs
+site_dir: site
+
+exclude_docs: |
+  llms.txt.tmpl
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - guide.md
+  - Section:
+      - section/index.md
+      - Titled: section/titled.md
+      - Nested:
+          - section/nested/deep.md
+  - After: after.md
+  - Reference:
+      - reference/api.md

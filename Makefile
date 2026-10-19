@@ -99,6 +99,8 @@ DOCS_DEPS := $(DOCS_VENV)/.installed
 ZENSICAL := $(DOCS_VENV)/bin/zensical
 API_REFERENCE := docs/reference/api/spec/index.html
 BRIDGE_REFERENCE := docs/reference/bridge/spec/index.html
+# The version whose URLs the links of llms.txt and llms-full.txt name: latest, or the minor the docs workflow publishes.
+DOCS_VERSION ?= latest
 
 # The third-party scripts of the site, served from the site itself so that a page loads nothing from another host but
 # GitHub (NFR-7): Mermaid, which the theme otherwise loads from unpkg.com on a page with a diagram, and Redoc, which the
@@ -497,9 +499,11 @@ docs-vendor:
 # echoed, so that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other
 # files and not the navigation, so after the build the rendered references are checked, then that every page the nav
 # of mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the
-# nav, and last that no page loads a script or a stylesheet from another host and every page with a diagram loads
-# Mermaid from the site.
-docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references and build the site strictly into site/
+# nav, and that no page loads a script or a stylesheet from another host and every page with a diagram loads Mermaid
+# from the site. Last, llmsgen writes llms.txt from docs/llms.txt.tmpl, llms-full.txt, the Markdown version of every
+# page and the copied specifications into site/, with links into DOCS_VERSION, and checks them; it fails naming the file
+# when the template names a page, an anchor, a phrase, a setting or an enum that its source no longer has.
+docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references, build the site strictly into site/ and write its llms.txt for DOCS_VERSION
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \
 		$(GO) run ./internal/tools/runbookcheck -manifest "$$tmp/chart.yaml"
@@ -524,12 +528,13 @@ docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the
 	for f in $$(grep -rlF --include='*.html' 'class="mermaid"' site); do \
 		grep -qF 'assets/vendor/mermaid/mermaid.min.js' "$$f" || { echo "$$f has a diagram but loads no Mermaid of the site"; exit 1; }; \
 	done
+	$(GO) run ./internal/tools/llmsgen -version $(DOCS_VERSION)
 
-docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes
+docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes; llms.txt and the Markdown versions only make docs writes
 	$(ZENSICAL) serve --config-file mkdocs.yml
 
 # generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page.
-docs-check: ## Fail on stale generated files, check the runbook pages, then build the site strictly (broken links and anchors fail)
+docs-check: ## Fail on stale generated files, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
 	$(MAKE) --no-print-directory generate-check
 	$(MAKE) --no-print-directory docs
 

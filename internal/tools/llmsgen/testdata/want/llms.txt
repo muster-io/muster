@@ -1,0 +1,37 @@
+# Fixture
+
+> Fixture is a small site for llmsgen. This file covers version latest.
+
+## Rules
+
+- Sources of truth: https://muster-io.github.io/muster/latest/api/bridge.yaml and https://muster-io.github.io/muster/latest/api/openapi.yaml.
+- Error classes: `transient`, `rate_limited`, `gone`, `forbidden`, `invalid`.
+- Presses: at most 3 seconds.
+- Waits: 15 min; edit windows: 60 s; plain: 5 | 6.
+- Read [the deep part](https://muster-io.github.io/muster/latest/section/nested/deep.md#deep-part) and https://github.com/muster-io/muster-bridge-go.
+
+## Document map
+
+- [Home](https://muster-io.github.io/muster/latest/index.md): Fixture is a small site for llmsgen.
+- [Guide](https://muster-io.github.io/muster/latest/guide.md): Run `make docs. now` to build (RFC 6238) the site, with **bold**.
+
+### Section
+
+- [Section index](https://muster-io.github.io/muster/latest/section/index.md): The section collects pages!
+- [Titled](https://muster-io.github.io/muster/latest/section/titled.md): A page whose title comes from the nav?
+
+#### Nested
+
+- [Deep](https://muster-io.github.io/muster/latest/section/nested/deep.md)
+
+### After
+
+- [After](https://muster-io.github.io/muster/latest/after.md): After the section, a page without a heading spans two lines.
+
+### Reference
+
+- [API](https://muster-io.github.io/muster/latest/reference/api.md): The API reference is rendered from `api/openapi.yaml`.
+
+## Optional
+
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): 2924 bytes, about 731 tokens.
