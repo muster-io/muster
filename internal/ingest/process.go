@@ -137,8 +137,9 @@ func newEngine(in snapshotIn, g *group, r *route, rows []*alert, presences []*pr
 }
 
 // run applies the Snapshot: its window, truncation and repeat learning, every Alert it lists, the resolve of its
-// whole Alertmanager group, and absence. A late Snapshot applies only its explicit resolves. A synthetic Snapshot of
-// an Internal alert applies only its Alert: it is never evidence of absence and feeds no repeat learning.
+// whole Alertmanager group (resolvesGroup), and absence. A late Snapshot applies only its explicit resolves. A
+// synthetic Snapshot of an Internal alert applies only its Alert: it is never evidence of absence and feeds no repeat
+// learning.
 func (e *engine) run() {
 	e.wasTruncated = e.group.Truncated
 	if e.in.Internal {
@@ -162,12 +163,21 @@ func (e *engine) run() {
 	if e.late {
 		return
 	}
-	if e.in.Payload.Status == StatusResolved {
+	if e.resolvesGroup() {
 		e.resolveGroup()
 	}
 	if !e.early {
 		e.absence()
 	}
+}
+
+// resolvesGroup reports whether the Snapshot resolves its whole Alertmanager group (C-06.FR-21): one with status
+// resolved does, unless it is a truncated one from Grafana, which computes status from the alerts it lists and sends
+// status resolved while the alerts it left out still fire (F-110); only the Alerts it lists as resolved resolve then,
+// by their own rows, and the unlisted ones stay alive as for any truncated Snapshot (C-06.FR-6).
+func (e *engine) resolvesGroup() bool {
+	p := e.in.Payload
+	return p.Status == StatusResolved && (!p.Grafana || p.TruncatedAlerts == 0)
 }
 
 // apply is the table of the per-Alert rules (C-06.FR-2, FR-4, FR-11, FR-12).

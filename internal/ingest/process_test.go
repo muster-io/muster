@@ -421,6 +421,55 @@ func TestResolvedGroup(t *testing.T) {
 	}
 }
 
+// TestTruncatedResolvedFromGrafana is C-06.FR-21 and C-06.AC-17: with 10 Alerts firing in one groupKey, a truncated
+// Snapshot from Grafana with status resolved that lists 5 of them as resolved resolves those 5 and leaves the other 5
+// firing, the groupKey truncated; the same Snapshot from Alertmanager, and an untruncated one from Grafana, resolve all
+// 10.
+func TestTruncatedResolvedFromGrafana(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		grafana   bool
+		truncated int64
+		left      int
+	}{
+		{"truncated, from Grafana", true, 5, 5},
+		{"truncated, from Alertmanager", false, 5, 0},
+		{"untruncated, from Grafana", true, 0, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newSim()
+			var all, five []PayloadAlert
+			for i := range 10 {
+				fp := string(rune('A' + i))
+				all = append(all, firing(fp, t0))
+				if i < 5 {
+					five = append(five, resolvedAt(fp, t0, t0.Add(time.Minute)))
+				}
+			}
+			first := snap("", all...)
+			first.Grafana = tt.grafana
+			s.send(t0, first)
+			p := snap("", five...)
+			p.Status, p.Grafana, p.TruncatedAlerts = StatusResolved, tt.grafana, tt.truncated
+			e := s.send(t0.Add(2*time.Minute), p)
+			left := 0
+			for i, a := range all {
+				got := s.alert(t, a.Fingerprint)
+				switch {
+				case got.Status == StatusFiring && i >= 5:
+					left++
+				case got.Status != StatusResolved || got.Reason != ResolveResolved:
+					t.Errorf("%s: %s/%s", a.Fingerprint, got.Status, got.Reason)
+				}
+			}
+			if left != tt.left || e.stats.Resolved != 10-tt.left || e.stats.Dropped != 0 ||
+				s.groups[gk].Truncated != (tt.truncated > 0) {
+				t.Errorf("%d firing, %+v, truncated %v", left, e.stats, s.groups[gk].Truncated)
+			}
+		})
+	}
+}
+
 // TestRepeatedResolves is C-06.AC-14 and F-046: a resolve arriving again, alone and inside firing Snapshots of its
 // groupKey, changes nothing and is not counted; a resolve with the old startsAt leaves a new firing firing.
 func TestRepeatedResolves(t *testing.T) {
