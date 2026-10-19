@@ -431,6 +431,7 @@
       "status": "Статус",
       "stormThreshold": "Порог шторма (новых групп алертов в минуту)",
       "threadBatchingWindowSeconds": "Окно объединения в треде (секунды)",
+      "token": "Токен",
       "totpRequired": "Обязательный TOTP",
       "urgentRiseRemovesAck": "Переход в срочные снимает подтверждение"
     },
@@ -764,7 +765,7 @@
       "serverUrlHint": "Адрес сервера Mattermost, например https://mattermost.example.org.",
       "telegram": "Telegram"
     },
-    "hint": "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost или бот Telegram.",
+    "hint": "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost, бот Telegram или мост к мессенджеру, который Muster не поддерживает напрямую.",
     "list": {
       "empty": "Подключений пока нет."
     },
@@ -1503,7 +1504,7 @@
     "tooLong": "В заметке не больше {{max}} символов."
   },
   "notices": {
-    "noReplicaLeading": "Нет ведущей реплики: опрос Telegram, проверки Heartbeat и Stale приостановлены.",
+    "noReplicaLeading": "Нет ведущей реплики: опрос Telegram и мостов, проверки Heartbeat и Stale приостановлены.",
     "recoveringAfterDowntime": "Muster восстанавливается после простоя. Данные могут быть неполными до {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster восстанавливается после простоя. Какое-то время данные могут быть неполными."
   },

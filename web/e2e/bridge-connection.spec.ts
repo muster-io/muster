@@ -8,7 +8,8 @@
 // translated text and the bridge's message as its detail. The Connections list names the messenger and the host. An
 // Admin reading Russian sees «Мост» and the steps at phone width. No page scrolls sideways at 360 px, a new or saved
 // Connection, in polling and in push mode with the push secret and the callback address, in English and Russian; no
-// Content Security Policy violation. The spec creates and deletes its own "br" and puts the fake's configuration back.
+// Content Security Policy violation. The spec creates its own "br", deletes it from its page, which reads it no more
+// once the deletion starts, and puts the fake's configuration back.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -24,6 +25,7 @@ import {
   signIn,
   signInAdmin,
   watchCsp,
+  watchDeletion,
 } from "./support";
 
 test.describe.configure({ mode: "serial" });
@@ -99,7 +101,8 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   await expect(page.getByTestId("connection-check-summary")).toHaveText("The check passed.");
   await expect(steps(page)).toHaveText([
     /^Bridge info: ok · \d+ ms · direct$/,
-    /^Event delivery: ok · \d+ ms · direct$/,
+    // Event delivery makes no call of its own and shows no latency.
+    "Event delivery: ok · direct",
   ]);
   const info = page.getByTestId("bridge-info");
   await expect(info.getByTestId("bridge-info-bridge")).toHaveText(
@@ -212,6 +215,29 @@ test("an Admin reading Russian sees the Bridge and its check at phone width", as
   }
 });
 
+test("deletes the Bridge Connection from its page", async ({ page }) => {
+  expect(connectionId).not.toBe("");
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await page.goto(`/connections/${connectionId}`);
+  await expect(page.getByRole("heading", { name: "br", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  const deletion = await watchDeletion(page, `/api/v1/connections/${connectionId}`, {
+    type: "connection",
+    id: connectionId,
+  });
+  await page
+    .getByRole("dialog", { name: "Delete Connection br?" })
+    .getByRole("button", { name: "Delete", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/connections$/);
+  await expect(page.getByRole("link", { name: "br", exact: true })).toHaveCount(0);
+  // Its page read the Connection no more once the deletion started, not even on the live hint of the deletion.
+  expect(deletion.reads).toEqual([]);
+  expect(deletion.errors).toEqual([]);
+  expect(csp).toEqual([]);
+});
+
 async function russianAdmin(browser: Browser): Promise<void> {
   const context = await browser.newContext({ viewport: { width: 360, height: 740 } });
   const page = await context.newPage();
@@ -244,7 +270,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByTestId("connection-check-summary")).toHaveText("Проверка прошла.");
   await expect(steps(page)).toHaveText([
     /^Сведения о мосте: успешно · \d+ мс · напрямую$/,
-    /^Доставка событий: успешно · \d+ мс · напрямую$/,
+    "Доставка событий: успешно · напрямую",
   ]);
   await expect(page.getByTestId("bridge-info-protocol")).toHaveText("Версия протокола 1");
   await expect(page.getByTestId("bridge-info-messenger")).toHaveText("Мессенджер: Fake chat");

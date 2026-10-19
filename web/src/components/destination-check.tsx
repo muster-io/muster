@@ -166,7 +166,7 @@ export function DestinationCheck({ destination, dirty }: DestinationCheckProps) 
           )}
           {check.isSuccess && <Result result={check.data} />}
         </div>
-        {check.isSuccess && check.data.request_log_run !== undefined && (
+        {check.isSuccess && (
           <div>
             <RequestLogButton
               scope={{ destination: destination.id, run: check.data.request_log_run }}

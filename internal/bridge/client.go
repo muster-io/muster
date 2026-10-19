@@ -67,9 +67,9 @@ const maxRetryAfter = 365 * 24 * time.Hour
 // Transient.
 const DefaultRetryAfterMax = 15 * time.Minute
 
-// MessageProxyRefused is the message of a request that the Connection's proxy refused with 407 (D338), as Telegram's
+// MessageProxyRefused is the message of a request that the Connection's proxy refused with 407 (D338), as every
 // check says it.
-const MessageProxyRefused = "The proxy refused the connection (407)"
+const MessageProxyRefused = delivery.MessageProxyRefused
 
 // maxID is the longest message_id and thread_ref of the protocol, in characters.
 const maxID = 512

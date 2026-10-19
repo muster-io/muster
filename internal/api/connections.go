@@ -262,7 +262,8 @@ func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 }
 
 // checkResultOf is the API form of the result of a Connection check, of a saved Connection or of a draft: the steps,
-// skipped ones without latency, the bot's name, a Telegram bot's webhook and pending updates, and a Bridge's info.
+// without latency those that made no call (connections.Step.Called), the bot's name, a Telegram bot's webhook and
+// pending updates, a Bridge's info, and the check run of its requests.
 func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	out := gen.ConnectionCheckResult{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
 		Warnings: make([]gen.ConnectionCheckResultWarnings, 0, len(res.Warnings))}
@@ -274,10 +275,10 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 		skipped := st.Skipped
 		step := gen.ConnectionCheckStep{Name: gen.ConnectionCheckStepName(st.Name), Ok: st.OK, Via: &via,
 			Skipped: &skipped}
-		if st.Skipped {
-			step.LatencyMs.SetNull()
-		} else {
+		if st.Called() {
 			step.LatencyMs.Set(int(st.Latency / time.Millisecond))
+		} else {
+			step.LatencyMs.SetNull()
 		}
 		if st.Message != "" {
 			step.Message.Set(st.Message)
@@ -309,7 +310,7 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	if res.Bridge {
 		out.Info = bridgeInfoOf(res.Info)
 	}
-	out.RequestLogRun = requestLogRunOf(res.Run)
+	out.RequestLogRun = res.Run
 	return out
 }
 

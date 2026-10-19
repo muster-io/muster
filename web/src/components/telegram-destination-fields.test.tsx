@@ -112,7 +112,8 @@ function checkFailed(...details: string[]): ApiError {
   );
 }
 
-function mockReads(check?: DestinationCheckResult) {
+/** Answers the reads of the form and, when given, the check with its result, which names its run as every result does. */
+function mockReads(check?: Omit<DestinationCheckResult, "request_log_run">) {
   return vi.spyOn(window, "fetch").mockImplementation((input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith("/api/v1/connections")) {
@@ -122,7 +123,7 @@ function mockReads(check?: DestinationCheckResult) {
       return Promise.resolve(json(200, { items: [], next_cursor: null }));
     }
     if (check !== undefined && url.endsWith("/checks")) {
-      return Promise.resolve(json(200, check));
+      return Promise.resolve(json(200, { ...check, request_log_run: "CR0000000000R1" }));
     }
     return Promise.resolve(json(404, { title: "not mocked" }));
   });

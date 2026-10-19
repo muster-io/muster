@@ -1097,6 +1097,27 @@ func TestDeleteWithoutAbandon(t *testing.T) {
 	}
 }
 
+// TestStepCalled: a step that ran made a call, whose latency it has, unless it was skipped or is event_delivery, which
+// only reads the info that the step info read.
+func TestStepCalled(t *testing.T) {
+	for _, tc := range []struct {
+		step connections.Step
+		want bool
+	}{
+		{connections.Step{Name: connections.StepToken, OK: true}, true},
+		{connections.Step{Name: mattermost.StepDryProbe}, true},
+		{connections.Step{Name: connections.StepInfo, OK: true}, true},
+		{connections.Step{Name: connections.StepToken, Skipped: true}, false},
+		{connections.Step{Name: connections.StepEventDelivery, OK: true}, false},
+		{connections.Step{Name: connections.StepEventDelivery, Code: "event_delivery_not_offered"}, false},
+		{connections.Step{Name: connections.StepEventDelivery, Skipped: true}, false},
+	} {
+		if got := tc.step.Called(); got != tc.want {
+			t.Errorf("%+v.Called() = %v, want %v", tc.step, got, tc.want)
+		}
+	}
+}
+
 // TestCheck is C-13.FR-2: the Connection check on the interactive path, limited by the Connection, returns the bot's
 // name and records the bot, with the warning press_answers_in_thread while the bot's roles do not grant
 // create_post_ephemeral (D284) and without it once they do; a revoked token fails with "The bot token is not

@@ -183,7 +183,7 @@ const (
 	StepDryProbe = "dry_probe"
 
 	MessageWrongPrefix   = "Wrong path prefix: the server answered 404."
-	MessageProxyRefused  = "The proxy refused the connection (407)"
+	MessageProxyRefused  = delivery.MessageProxyRefused
 	messageNotMattermost = "The address answered %d with %s, not as a Mattermost server."
 	messageStatusNotOK   = "The address answered 200 with JSON whose status is not OK."
 	messageOtherStatus   = "The server answered %d instead of 200 with JSON whose status is OK."
@@ -209,7 +209,8 @@ type Probe struct {
 
 // RunDryProbe makes the dry probe of c through run (C-13.FR-2): `GET <server>/api/v4/system/ping` without the token,
 // timed on the real clock, on a client that may have none. It passes on a 200 JSON answer whose status is OK and
-// otherwise names what answered. Its error is the runner's own.
+// otherwise names what answered, a server it could not reach as delivery.FailureMessage does, without the server's
+// name through a proxy, whose own name is the one that did not resolve. Its error is the runner's own.
 func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (Probe, error) {
 	var r Result
 	var mediaType string
@@ -222,19 +223,25 @@ func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clo
 	}); err != nil {
 		return Probe{}, err
 	}
-	p := probeVerdict(r, mediaType)
+	address := c.settings.ServerURL
+	if c.Via() == ViaProxy {
+		address = ""
+	}
+	p := probeVerdict(r, mediaType, address)
 	p.Latency = latency
 	return p, nil
 }
 
-// probeVerdict says whether the answer to the dry probe is a Mattermost server's, in the order of C-13.FR-2: no answer
-// has the code of Result.FailureCode, a proxy that refused the credentials proxy_refused, 404 wrong_path_prefix, an
-// answer that is not a JSON object not_mattermost with its status and media type, a 200 whose status is OK passes and
-// any other 200 is not_mattermost, and another status with JSON unexpected_status.
-func probeVerdict(r Result, mediaType string) Probe {
+// probeVerdict says whether the answer to the dry probe of the server serverURL, empty through a proxy, is a Mattermost
+// server's, in the order of C-13.FR-2: no answer has the code of Result.FailureCode, with the text of
+// delivery.FailureMessage — the name, the time, the proxy that refused the credentials — or the error's own; then 407
+// proxy_refused, 404 wrong_path_prefix, an answer that is not a JSON object not_mattermost with its status and media
+// type, a 200 whose status is OK passes and any other 200 is not_mattermost, and another status with JSON
+// unexpected_status.
+func probeVerdict(r Result, mediaType, serverURL string) Probe {
 	if r.Status == 0 {
-		if r.Network == outbound.NetworkProxyAuth {
-			return Probe{Message: MessageProxyRefused, Code: delivery.CodeProxyRefused}
+		if message, ok := delivery.FailureMessage(r.Network, serverURL, "", callTimeout); ok {
+			return Probe{Message: message, Code: r.FailureCode()}
 		}
 		return Probe{Message: string(r.Outcome.Error), Code: r.FailureCode()}
 	}

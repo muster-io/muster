@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -144,7 +145,9 @@ func (f *fakeDestinations) Check(_ context.Context, id string) (destinations.Che
 	if !slices.ContainsFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id }) {
 		return destinations.CheckResult{}, destinations.ErrNotFound
 	}
-	return f.check, f.checkErr
+	res := f.check
+	res.Run = cmp.Or(res.Run, checkRun)
+	return res, f.checkErr
 }
 
 func (f *fakeDestinations) Test(_ context.Context, r destinations.Requester, id string, src destinations.Source) (
@@ -153,7 +156,9 @@ func (f *fakeDestinations) Test(_ context.Context, r destinations.Requester, id 
 	if !slices.ContainsFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id }) {
 		return destinations.TestResult{}, destinations.ErrNotFound
 	}
-	return f.test, f.testErr
+	res := f.test
+	res.Run = cmp.Or(res.Run, checkRun)
+	return res, f.testErr
 }
 
 func (f *fakeDestinations) Preview(_ context.Context, id string, src destinations.Source) ([]delivery.PreviewItem,

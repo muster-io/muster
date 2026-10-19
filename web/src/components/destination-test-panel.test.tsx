@@ -40,6 +40,8 @@ import { defaultMentions } from "./mention-settings";
 import { EXAMPLE, type PickedSource, TestSourcePicker } from "./test-source-picker";
 
 const ID = "DS0000000000WH";
+/** The run of every test and check result; each result names one. */
+const RUN = "CR0000000000R1";
 const PRESS_ERROR =
   "The button press did not reach Muster. Add the host of http://localhost:8081 to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.";
 
@@ -140,6 +142,7 @@ describe("TestResult", () => {
         step("create", "fatal", { error: "Mattermost answered 403: <b>no</b>" }),
       ],
       health: { state: "healthy" },
+      request_log_run: RUN,
     };
     const { ui } = providers(<TestResult result={result} />);
     await render(ui);
@@ -170,6 +173,7 @@ describe("TestResult", () => {
     const reached: DestinationTestResult = {
       steps: [step("message", "none"), step("press", "none")],
       health: { state: "healthy" },
+      request_log_run: RUN,
     };
     const { ui } = providers(<TestResult result={reached} />);
     const screen = await render(ui);
@@ -185,6 +189,7 @@ describe("TestResult", () => {
               step("press", "unknown", { error: PRESS_ERROR, error_code: "press_not_reached" }),
             ],
             health: { state: "healthy" },
+            request_log_run: RUN,
           }}
         />,
       ).ui,
@@ -208,6 +213,7 @@ describe("TestResult", () => {
               }),
             ],
             health: { state: "healthy" },
+            request_log_run: RUN,
           }}
         />,
       ).ui,
@@ -224,6 +230,7 @@ describe("TestResult", () => {
           result={{
             steps: [step("message", "none"), step("press", "unknown", { error: "boom" })],
             health: { state: "healthy" },
+            request_log_run: RUN,
           }}
         />,
       ).ui,
@@ -238,6 +245,7 @@ describe("TestResult", () => {
           result={{
             steps: [step("message", "none"), step("press", "fatal", { error: "" })],
             health: { state: "healthy" },
+            request_log_run: RUN,
           }}
         />,
       ).ui,
@@ -250,6 +258,7 @@ describe("TestResult", () => {
           result={{
             steps: [step("message", "none"), step("press", "limited")],
             health: { state: "healthy" },
+            request_log_run: RUN,
           }}
         />,
       ).ui,
@@ -267,6 +276,7 @@ describe("TestResult", () => {
         step("press", "unknown", { error: PRESS_ERROR, error_code: "press_not_reached" }),
       ],
       health: { state: "broken", since: "2026-10-09T09:30:00Z", reason: "Refused" },
+      request_log_run: RUN,
     };
     const { ui } = providers(<TestResult result={press} />);
     const screen = await render(ui);
@@ -276,8 +286,11 @@ describe("TestResult", () => {
         "The test message was posted, but the Destination stays Broken: a test ends the Broken state only when every step succeeds, the button press included.",
       );
     await screen.rerender(
-      providers(<TestResult result={{ steps: [step("message", "fatal")], health: press.health }} />)
-        .ui,
+      providers(
+        <TestResult
+          result={{ steps: [step("message", "fatal")], health: press.health, request_log_run: RUN }}
+        />,
+      ).ui,
     );
     await expect
       .element(page.getByTestId("test-still-broken"))
@@ -306,6 +319,7 @@ describe("TestResult", () => {
         }),
       ],
       health: { state: "healthy" },
+      request_log_run: RUN,
     };
     const { ui } = providers(<TestResult result={result} />);
     await render(ui);
@@ -346,6 +360,7 @@ describe("TestResult", () => {
             step("press", "unknown", { error: "bot", error_code: "bot_unknown" }),
           ],
           health: { state: "healthy" },
+          request_log_run: RUN,
         }}
       />,
     );
@@ -590,8 +605,6 @@ describe("DestinationTestPanel", () => {
   });
 });
 
-const RUN = "CR0000000000R1";
-
 /** Answers the test or the check with the result and the Request log with one record of the run. */
 function serveRun(result: unknown, record: Record<string, unknown>): Record<string, string>[] {
   const queries: Record<string, string>[] = [];
@@ -657,15 +670,6 @@ describe("the requests of a test or a check", () => {
     await expect.element(list.getByTestId("request-status")).toHaveTextContent("500");
     await expect.element(list.getByTestId("request-check")).toHaveTextContent("Test message");
     expect(queries).toEqual([{ destination: ID, run: RUN }]);
-  });
-
-  test("offers no requests for a result without a run", async () => {
-    serveRun({ steps: [step("create", "none")], health: { state: "healthy" } }, {});
-    const { ui } = providers(<Panel />);
-    await render(ui);
-    await page.getByRole("button", { name: "Send test message" }).click();
-    await expect.element(page.getByTestId("test-summary")).toHaveTextContent("Test passed");
-    expect(page.getByRole("button", { name: "Requests of this check" }).elements()).toHaveLength(0);
   });
 
   test("opens the requests of a Destination check's run, and in Russian", async () => {

@@ -353,9 +353,9 @@ func TestListRequestLogByRun(t *testing.T) {
 }
 
 // TestCheckResultsNameTheirRun is C-23.FR-5: checkConnection, checkConnectionDraft, checkDestination and
-// testDestination answer the check run of their requests as request_log_run, and leave it out without one.
+// testDestination answer the check run of their requests as request_log_run.
 func TestCheckResultsNameTheirRun(t *testing.T) {
-	const run = "CRAAAAAAAAAAA1"
+	const run = "CRAAAAAAAAAAA2"
 	x, fc := newConnectionsAPI(t)
 	fc.check = connections.CheckResult{OK: true, Run: run}
 	for _, path := range []string{"/api/v1/connections/" + connectionID + "/checks", "/api/v1/connections/checks"} {
@@ -366,14 +366,9 @@ func TestCheckResultsNameTheirRun(t *testing.T) {
 		a := x.as(t, connectionsWriter, http.MethodPost, path, body)
 		var res gen.ConnectionCheckResult
 		decodeInto(t, a, &res)
-		if a.status != http.StatusOK || res.RequestLogRun == nil || *res.RequestLogRun != run {
+		if a.status != http.StatusOK || res.RequestLogRun != run {
 			t.Errorf("%s = %d %s", path, a.status, a.body)
 		}
-	}
-	fc.check = connections.CheckResult{OK: true}
-	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/"+connectionID+"/checks", ""); a.status !=
-		http.StatusOK || strings.Contains(string(a.body), "request_log_run") {
-		t.Errorf("without a run = %d %s", a.status, a.body)
 	}
 
 	y, fd, _ := newDestinationsAPI(t)
@@ -385,7 +380,7 @@ func TestCheckResultsNameTheirRun(t *testing.T) {
 	a := y.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/"+mattermostID+"/checks", "")
 	var checked gen.DestinationCheckResult
 	decodeInto(t, a, &checked)
-	if a.status != http.StatusOK || checked.RequestLogRun == nil || *checked.RequestLogRun != run {
+	if a.status != http.StatusOK || checked.RequestLogRun != run {
 		t.Errorf("checkDestination = %d %s", a.status, a.body)
 	}
 	fd.test = destinations.TestResult{Health: destinations.Health{State: "healthy"}, Run: run}
@@ -393,7 +388,7 @@ func TestCheckResultsNameTheirRun(t *testing.T) {
 		`{"source":{"kind":"example"}}`)
 	var tested gen.DestinationTestResult
 	decodeInto(t, a, &tested)
-	if a.status != http.StatusOK || tested.RequestLogRun == nil || *tested.RequestLogRun != run {
+	if a.status != http.StatusOK || tested.RequestLogRun != run {
 		t.Errorf("testDestination = %d %s", a.status, a.body)
 	}
 }

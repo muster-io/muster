@@ -12351,6 +12351,8 @@ components:
           type:
           - integer
           - 'null'
+          description: 'How long the step''s request took; null for a step that made no request: one that was skipped,
+            and `event_delivery`, which only reads the info that the step `info` read.'
         via:
           $ref: '#/components/schemas/ConnectionPath'
         message:
@@ -12359,7 +12361,7 @@ components:
           - 'null'
           description: What answered when the step failed, or what a step that passed found, in English; untrusted text
             where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate
-            `code` and show this text as its detail.
+            `code` and show this text as its detail where it says more than the code's text.
         code:
           $ref: '#/components/schemas/NullableConnectionCheckCode'
     NullableConnectionCheckCode:
@@ -12409,6 +12411,7 @@ components:
       - ok
       - steps
       - warnings
+      - request_log_run
       properties:
         ok:
           type: boolean
@@ -13158,6 +13161,7 @@ components:
       required:
       - steps
       - health
+      - request_log_run
       properties:
         steps:
           type: array
@@ -13247,7 +13251,7 @@ components:
           - string
           - 'null'
           description: Why the check failed, in English; untrusted text where it comes from the messenger. Clients
-            translate `code` and show this text as its detail.
+            translate `code` and show this text as its detail where it says more than the code's text.
         code:
           $ref: '#/components/schemas/NullableDestinationCheckCode'
     NullableDestinationCheckCode:
@@ -13295,6 +13299,7 @@ components:
       - ok
       - checks
       - health
+      - request_log_run
       properties:
         ok:
           type: boolean

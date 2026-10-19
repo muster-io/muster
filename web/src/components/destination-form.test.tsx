@@ -10,17 +10,23 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  Outlet,
   RouterProvider,
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import {
+  getGetDestinationQueryKey,
+  useGetDestination,
+} from "../api/gen/endpoints/destinations/destinations";
 import type {
   BridgeDestination,
   DestinationCheckResult,
@@ -378,13 +384,17 @@ describe("the refusals of a save", () => {
       detail: "The bot is not a member of this channel.",
       checkCode: "bot_not_in_channel" as const,
     };
-    // In English the message says what the code says, so no detail repeats it.
+    // The message says what the code says, so no detail repeats it, in English or in Russian.
     expect(destinationErrorText(i18n.t, "/channel_id", notMember)).toBe(
       "The bot is not a member of this channel.",
     );
     await i18n.changeLanguage("ru");
     expect(destinationErrorText(i18n.t, "/channel_id", notMember)).toBe(
-      "Бот не состоит в этом канале. Подробности: The bot is not a member of this channel.",
+      "Бот не состоит в этом канале.",
+    );
+    expect(destinationErrorText(i18n.t, "/channel_id", found["/channel_id"]!)).toBe(
+      "Бот не администратор группы обсуждения. Сделайте бота администратором там, с правом публиковать сообщения. " +
+        "Подробности: The bot is not an admin of the discussion group Ops Chat. Make the bot an admin there.",
     );
   });
 
@@ -545,6 +555,7 @@ const PASSED: DestinationCheckResult = {
     { name: "bot_in_channel", ok: true },
   ],
   health: { state: "healthy" },
+  request_log_run: "CR0000000000R1",
 };
 
 async function runCheck(response: Response) {
@@ -597,7 +608,7 @@ describe("Check", () => {
       .toHaveTextContent("Bot in the channel: failed The bot is not a member of this channel.");
   });
 
-  test("translates a failing check by its code into Russian, the English message below as its detail", async () => {
+  test("translates a failing check by its code into Russian, without the English message that only repeats it", async () => {
     await i18n.changeLanguage("ru");
     const fetch = vi.spyOn(window, "fetch").mockResolvedValue(
       json(200, {
@@ -631,8 +642,9 @@ describe("Check", () => {
       .element(page.getByTestId("destination-check-item-reason"))
       .toHaveTextContent("ошибка Бот не состоит в этом канале.");
     await expect
-      .element(page.getByTestId("destination-check-item-detail"))
-      .toHaveTextContent("Подробности: The bot is not a member of this channel.");
+      .element(page.getByTestId("destination-check-item").nth(1))
+      .toHaveTextContent("Бот в канале: ошибка Бот не состоит в этом канале.");
+    await expect.element(page.getByTestId("destination-check-item-detail")).not.toBeInTheDocument();
     await expect
       .element(page.getByTestId("destination-check-item").nth(0))
       .toHaveTextContent("Токен: успешно");
@@ -745,5 +757,77 @@ describe("Delete", () => {
       .toBeVisible();
     const init = fetch.mock.calls[0]?.[1];
     expect(new Headers(init?.headers).get("If-Match")).toBe('"3"');
+  });
+
+  test("reads the deleted Destination no more, even when its live hint comes before the answer", async () => {
+    let answerDeletion: (() => void) | undefined;
+    const requests: string[] = [];
+    vi.spyOn(window, "fetch").mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const method = (init?.method ?? "GET").toUpperCase();
+      requests.push(`${method} ${url}`);
+      if (method === "DELETE") {
+        return new Promise<Response>((resolve) => {
+          answerDeletion = () => resolve(new Response(null, { status: 204 }));
+        });
+      }
+      return Promise.resolve(json(200, DESTINATION));
+    });
+    // The page of a Destination as the route builds it: it reads the Destination unless the dialog says it is being
+    // deleted.
+    function DestinationPage() {
+      const [deleting, setDeleting] = useState(false);
+      const query = useGetDestination(DESTINATION.id, { query: { enabled: !deleting } });
+      return query.data === undefined ? null : (
+        <DestinationDeleteDialog destination={query.data} onDeletingChange={setDeleting} />
+      );
+    }
+    const rootRoute = createRootRoute({ component: () => <Outlet /> });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([
+        createRoute({
+          getParentRoute: () => rootRoute,
+          path: "/destinations/$destinationId",
+          component: DestinationPage,
+        }),
+        createRoute({
+          getParentRoute: () => rootRoute,
+          path: "/destinations",
+          component: () => <p>Destinations</p>,
+        }),
+      ]),
+      history: createMemoryHistory({ initialEntries: [`/destinations/${DESTINATION.id}`] }),
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    // The live hint of the Destination, which the server sends once the deletion is committed.
+    const hint = () =>
+      queryClient.invalidateQueries({ queryKey: getGetDestinationQueryKey(DESTINATION.id) });
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </I18nextProvider>,
+    );
+    await page.getByRole("button", { name: "Delete" }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete Destination alerts?" });
+    await expect.element(dialog).toBeVisible();
+    const confirm = dialog.getByRole("button", { name: "Delete" }).element();
+    if (confirm instanceof HTMLElement) {
+      confirm.focus();
+    }
+    await userEvent.keyboard("{Enter}");
+    await expect.poll(() => requests.at(-1)).toBe(`DELETE /api/v1/destinations/${DESTINATION.id}`);
+    const sent = requests.length;
+    await hint();
+    answerDeletion?.();
+    await expect.poll(() => router.state.location.pathname).toBe("/destinations");
+    await expect.element(page.getByText("Destinations", { exact: true })).toBeVisible();
+    await hint();
+    // The deleted Destination, which would answer 404, is not read again.
+    expect(requests.slice(sent)).toEqual([]);
+    expect(queryClient.getQueryData(getGetDestinationQueryKey(DESTINATION.id))).toBeUndefined();
   });
 });

@@ -12,17 +12,23 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  Outlet,
   RouterProvider,
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import {
+  getGetConnectionQueryKey,
+  useGetConnection,
+} from "../api/gen/endpoints/connections/connections";
 import type {
   BridgeConnection,
   ConnectionCheckResult,
@@ -674,6 +680,7 @@ const PASSED: ConnectionCheckResult = {
   steps: [{ name: "token", ok: true, latency_ms: 12, via: "direct", message: null }],
   warnings: ["press_answers_in_thread"],
   bot_name: "muster-dev-bot",
+  request_log_run: "CR0000000000R1",
 };
 
 const TOKEN_REFUSED: ConnectionCheckResult = {
@@ -690,6 +697,7 @@ const TOKEN_REFUSED: ConnectionCheckResult = {
   ],
   warnings: [],
   bot_name: null,
+  request_log_run: "CR0000000000R1",
 };
 
 async function runCheck(response: Response, button = "Check connection") {
@@ -763,15 +771,16 @@ describe("ConnectionCheck", () => {
     await expect.element(page.getByTestId("connection-check-step-detail")).not.toBeInTheDocument();
   });
 
-  test("translates a failing step by its code, with the server's English message as the detail", async () => {
+  test("translates a failing step by its code, without the English message that only repeats it", async () => {
     await i18n.changeLanguage("ru");
     await runCheck(json(200, TOKEN_REFUSED), "Проверить подключение");
     await expect
       .element(page.getByTestId("connection-check-step-reason"))
       .toHaveTextContent("Токен бота недействителен.");
     await expect
-      .element(page.getByTestId("connection-check-step-detail"))
-      .toHaveTextContent("Подробности: The bot token is not valid.");
+      .element(page.getByTestId("connection-check-step"))
+      .toHaveTextContent("Токен: ошибка 8 мс · напрямуюТокен бота недействителен.");
+    await expect.element(page.getByTestId("connection-check-step-detail")).not.toBeInTheDocument();
   });
 
   test("names a request that got no answer by its code, the server's text as the detail", async () => {
@@ -831,6 +840,78 @@ describe("ConnectionCheck", () => {
     );
   });
 });
+
+/**
+ * Renders the page of a Connection as the route builds it, which reads the Connection unless the dialog says it is
+ * being deleted, and confirms "Delete". Returns the requests sent, the QueryClient and the router, the live hint of the
+ * Connection, which a test plays, and the answer to the deletion, which the test gives.
+ */
+async function renderPage(deletion: () => Response) {
+  let answerDeletion: (() => void) | undefined;
+  const requests: string[] = [];
+  vi.spyOn(window, "fetch").mockImplementation((input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const method = (init?.method ?? "GET").toUpperCase();
+    requests.push(`${method} ${url}`);
+    if (method === "DELETE") {
+      return new Promise<Response>((resolve) => {
+        answerDeletion = () => resolve(deletion());
+      });
+    }
+    return Promise.resolve(json(200, CONNECTION));
+  });
+  function ConnectionPage() {
+    const [deleting, setDeleting] = useState(false);
+    const query = useGetConnection(CONNECTION.id, { query: { enabled: !deleting } });
+    return query.data === undefined ? null : (
+      <ConnectionDeleteDialog connection={query.data} onDeletingChange={setDeleting} />
+    );
+  }
+  const rootRoute = createRootRoute({ component: () => <Outlet /> });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/connections/$connectionId",
+        component: ConnectionPage,
+      }),
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/connections",
+        component: () => <p>Connections</p>,
+      }),
+    ]),
+    history: createMemoryHistory({ initialEntries: [`/connections/${CONNECTION.id}`] }),
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  await render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </I18nextProvider>,
+  );
+  await page.getByRole("button", { name: "Delete" }).click();
+  const dialog = page.getByRole("dialog", { name: "Delete Connection mm?" });
+  await expect.element(dialog).toBeVisible();
+  const confirm = dialog.getByRole("button", { name: "Delete" }).element();
+  if (confirm instanceof HTMLElement) {
+    confirm.focus();
+  }
+  await userEvent.keyboard("{Enter}");
+  await expect.poll(() => requests.at(-1)).toBe(`DELETE /api/v1/connections/${CONNECTION.id}`);
+  return {
+    requests,
+    queryClient,
+    router,
+    answer: () => answerDeletion?.(),
+    /** The live hint of the Connection, which the server sends once the deletion is committed. */
+    hint: () =>
+      queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey(CONNECTION.id) }),
+  };
+}
 
 describe("deleting a Connection", () => {
   test("names the Destinations that use it, in their plural forms", async () => {
@@ -892,5 +973,39 @@ describe("deleting a Connection", () => {
     expect(init?.method).toBe("DELETE");
     expect(new Headers(init?.headers).get("If-Match")).toBe('"1"');
     await expect.element(dialog.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  test("reads the deleted Connection no more, even when its live hint comes before the answer", async () => {
+    const { requests, queryClient, router, answer, hint } = await renderPage(
+      () => new Response(null, { status: 204 }),
+    );
+    const sent = requests.length;
+    await hint();
+    answer();
+    await expect.poll(() => router.state.location.pathname).toBe("/connections");
+    await expect.element(page.getByText("Connections", { exact: true })).toBeVisible();
+    await hint();
+    // The deleted Connection, which would answer 404, is not read again.
+    expect(requests.slice(sent)).toEqual([]);
+    expect(queryClient.getQueryData(getGetConnectionQueryKey(CONNECTION.id))).toBeUndefined();
+  });
+
+  test("reads the Connection again after a refused deletion", async () => {
+    const { requests, answer } = await renderPage(() =>
+      json(409, {
+        type: "https://muster-io.github.io/muster/problems/conflict",
+        title: "Conflict",
+        status: 409,
+        code: "in_use",
+      }),
+    );
+    const sent = requests.length;
+    answer();
+    await expect
+      .element(page.getByTestId("connection-delete-error"))
+      .toHaveTextContent("This Connection is used by 1 Destination. Delete it first.");
+    await expect
+      .poll(() => requests.slice(sent))
+      .toEqual([`GET /api/v1/connections/${CONNECTION.id}`]);
   });
 });

@@ -406,7 +406,7 @@ describe("banners", () => {
     await expect
       .element(
         screen.getByText(
-          "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
+          "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused.",
         ),
       )
       .toBeVisible();
