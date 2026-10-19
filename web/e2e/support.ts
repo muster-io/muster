@@ -408,6 +408,13 @@ export async function freshCode(page: Page, secret: string, offset = 0): Promise
   return totpCode(secret, Date.now() + offset * 30_000);
 }
 
+/**
+ * How far a measured box may pass a limit and still be within it. Boxes are fractional, and the browser's layout units
+ * can put an edge that sits on a limit a tiny fraction of a pixel past it, such as a dialog 360.0000038 pixels wide.
+ * Whole numbers, such as scrollWidth and clientWidth, need no tolerance.
+ */
+export const SUBPIXEL = 0.5;
+
 /** The page scrolls vertically only: nothing is wider than the viewport. */
 export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   const widths = await page.evaluate(() => ({

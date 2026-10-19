@@ -18,6 +18,7 @@ import { type Browser, expect, test, type Page } from "@playwright/test";
 import {
   APP,
   Api,
+  SUBPIXEL,
   adminApi,
   advance,
   deleteRoute,
@@ -300,7 +301,7 @@ function entry(page: Page, text: string) {
 async function expectInside(page: Page, testId: string): Promise<void> {
   const box = await page.getByTestId(testId).boundingBox();
   expect(box, testId).not.toBeNull();
-  expect((box?.x ?? 0) + (box?.width ?? 0), testId).toBeLessThanOrEqual(PHONE.width);
+  expect((box?.x ?? 0) + (box?.width ?? 0), testId).toBeLessThanOrEqual(PHONE.width + SUBPIXEL);
 }
 
 test.beforeAll(async () => {
