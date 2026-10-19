@@ -319,9 +319,9 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 # validates every rendering with kubeconform. The default values render no rule and no dashboard; chartcheck checks the
 # rules and the dashboard of the all-options rendering, and of the chart packaged with a release appVersion, against
 # reference.md and the metric catalogue. The CloudNativePG values read the database URL, or the password, from the
-# Secret muster-db-app and the master keys from existingSecret. Rendering without existingSecret must fail with the
-# master keys message, and a GrafanaDashboard without its ConfigMap with its own. Every step runs even when an earlier
-# one fails.
+# Secret muster-db-app, the password through a volume of its own in both containers, and the master keys from
+# existingSecret. Rendering without existingSecret must fail with the master keys message, and a GrafanaDashboard
+# without its ConfigMap with its own. Every step runs even when an earlier one fails.
 helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules and dashboard; check the existingSecret error
 	@tmp=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT; \
@@ -350,6 +350,8 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 		grep -A3 -x ' *- name: MUSTER_DATABASE_URL' "$$tmp/cnpg-url.yaml" | grep -qx ' *name: muster-db-app' && \
 		grep -qx ' *value: /etc/muster/database/password' "$$tmp/cnpg-fields.yaml" && \
 		grep -A2 -x ' *- name: database' "$$tmp/cnpg-fields.yaml" | grep -qx ' *secretName: muster-db-app' && \
+		test "$$(grep -cx ' *mountPath: /etc/muster/database' "$$tmp/cnpg-fields.yaml")" -eq 2 && \
+		test "$$(grep -cx ' *- key: "password"' "$$tmp/cnpg-fields.yaml")" -eq 1 && \
 		grep -qx ' *secretName: muster' "$$tmp/cnpg-url.yaml" && \
 		grep -qx ' *secretName: muster' "$$tmp/cnpg-fields.yaml" || \
 		{ echo "the CloudNativePG values do not read the database from muster-db-app and the master keys from muster"; \

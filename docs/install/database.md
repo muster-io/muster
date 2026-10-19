@@ -95,7 +95,8 @@ database:
 ```
 
 When you give the `Cluster` a Secret of your own under `bootstrap.initdb.secret`, CloudNativePG generates no
-`muster-db-app`: name your Secret in `database.existingSecret` instead, with `passwordKey: password`.
+`muster-db-app`, and your Secret holds no `uri`: use the fields form above, with your Secret in `database.existingSecret`
+and `passwordKey: password`.
 
 Add an `spec.backup` section to the `Cluster` (see the CloudNativePG documentation) and test a restore, together with the
 master key, before you rely on it.
