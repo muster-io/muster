@@ -696,8 +696,8 @@ var BridgeTextCommand = newEvent("bridge_text_command", LevelInfo, "C-22",
 		"and was handled once its id was recorded: connection is the public_id of the Connection, external_id the "+
 		"messenger account that wrote it, group the public_id of the Alert Group of the message whose Thread it is "+
 		"in, command the Command; outcome done or unchanged for a Command that ran, answered \"Done: {command} #N\"; "+
-		"refused, forbidden, not_linked, disabled or unknown_duration — a Snooze duration that is not one of the "+
-		"Route's — for a Text command that changed nothing; unknown_message for one in the Thread of a message "+
+		"refused, forbidden, not_linked, disabled or unknown_duration — a Snooze duration or preset the Route does not "+
+		"offer — for a Text command that changed nothing; unknown_message for one in the Thread of a message "+
 		"Muster did not post through the Connection, which is not answered; dropped for one older than "+
 		"bridge.event_max_age, which is not answered; failed when the Command failed. error, when present, says "+
 		"why the Command failed or why its answer was not made, masked of the token. Any other text in a Thread is "+

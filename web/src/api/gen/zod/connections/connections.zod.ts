@@ -168,7 +168,7 @@ export const ListConnectionsResponse = zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
@@ -426,7 +426,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
@@ -575,7 +575,7 @@ export const CheckConnectionDraftResponse = zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(checkConnectionDraftResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(checkConnectionDraftResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(checkConnectionDraftResponseInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
@@ -749,7 +749,7 @@ export const GetConnectionResponse = zod.union([zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
@@ -1016,7 +1016,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
@@ -1148,7 +1148,7 @@ export const CheckConnectionResponse = zod.object({
 }),
   "capabilities": zod.object({
   "buttons": zod.object({
-  "max_per_message": zod.int().min(checkConnectionResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_message": zod.int().min(checkConnectionResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many, dropping Snooze buttons first: the Snooze presets, then the durations from the longest.'),
   "max_per_row": zod.int().min(1),
   "data_max_bytes": zod.int().min(checkConnectionResponseInfoOneCapabilitiesButtonsDataMaxBytesMin),
   "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
