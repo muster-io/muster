@@ -656,15 +656,16 @@ func rootOfRow(row dbgen.GetLeasedDeliveryRow) Root {
 	return Root{MessageID: row.MessageID.String, ThreadAnchorID: row.ThreadAnchorID.String}
 }
 
-// attempted counts an attempt and writes its delivery_attempt line; a Storm summary, number 0, names no Alert Group.
+// attempted counts an attempt and writes its delivery_attempt line, with the status and the masked error of an answer
+// that was not delivered; a Storm summary, number 0, names no Alert Group.
 func (w *Worker) attempted(ctx context.Context, d Destination, number int64, kind string, out Outcome, n int64,
 	took time.Duration) {
 	if o := metricOutcome(out.Kind); o != "" {
 		metrics.DeliveryAttempts.With(d.PublicID, kind, o).Inc()
 	}
-	outcome := string(out.Kind)
+	outcome, code, reason := string(out.Kind), out.Status, string(out.Error)
 	if out.Kind == OutcomeOK {
-		outcome = "delivered"
+		outcome, code, reason = "delivered", 0, ""
 	}
 	var retry int64
 	if out.Kind == OutcomeRetryAfter {
@@ -674,6 +675,7 @@ func (w *Worker) attempted(ctx context.Context, d Destination, number int64, kin
 	if number > 0 {
 		group = "#" + strconv.FormatInt(number, 10)
 	}
-	w.Log.Log(ctx, logging.DeliveryAttempt, logging.F("destination", d.PublicID), logging.F("group", group), logging.F("kind", kind), logging.F("outcome", outcome),
+	w.Log.Log(ctx, logging.DeliveryAttempt, logging.F("destination", d.PublicID), logging.F("group", group),
+		logging.F("kind", kind), logging.F("outcome", outcome), logging.F("code", code), logging.F("reason", reason),
 		logging.F("attempt", n), logging.F("duration_ms", took.Milliseconds()), logging.F("retry_after_ms", retry))
 }

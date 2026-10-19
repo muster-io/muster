@@ -119,7 +119,7 @@ type fakeStore struct {
 	// counted are the request counts and the locks of code targets, in order, each marked whether it ran in a
 	// transaction.
 	counted []string
-	// locks are the rows LockLinkUser and LockLinkRequest locked, in order.
+	// locks are the rows LockLinkUser, LockLinkRequest and VoidPendingMattermostRequests locked, in order.
 	locks      []string
 	fail       map[string]error
 	next       int64
@@ -492,6 +492,7 @@ func (s *fakeStore) VoidPendingMattermostRequests(_ context.Context, a dbgen.Voi
 	if err := s.err("VoidPendingMattermostRequests"); err != nil {
 		return 0, err
 	}
+	s.locks = append(s.locks, "requests")
 	var n int64
 	for i := range s.reqs {
 		r := &s.reqs[i]

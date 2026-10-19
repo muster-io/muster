@@ -165,6 +165,57 @@ func TestTransientBackoffAndReset(t *testing.T) {
 	}
 }
 
+// attemptLine is a delivery_attempt line.
+type attemptLine struct {
+	Event   string `json:"event"`
+	Kind    string `json:"kind"`
+	Outcome string `json:"outcome"`
+	Code    int    `json:"code"`
+	Reason  string `json:"reason"`
+}
+
+// attemptLines are the delivery_attempt lines of log, in order.
+func attemptLines(t *testing.T, log string) []attemptLine {
+	t.Helper()
+	var out []attemptLine
+	for line := range strings.Lines(log) {
+		var l attemptLine
+		if err := json.Unmarshal([]byte(line), &l); err == nil && l.Event == "delivery_attempt" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestAttemptLogCause is C-11.FR-17: the delivery_attempt line of a call that was not delivered carries, beside its
+// error class in outcome, the HTTP status of the answer as code, 0 without an answer, and its masked error as reason;
+// a delivered call has neither.
+func TestAttemptLogCause(t *testing.T) {
+	e, d := pending(t)
+	e.rec.Script(deliverytest.MethodPublish,
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeTransient, Status: 502,
+			Error: "Telegram answered 502: Bad Gateway"}})
+	e.round(t)
+	e.business.Set(d.next)
+	e.rec.Script(deliverytest.MethodPublish,
+		deliverytest.Failure(delivery.OutcomeTransient, "network: timeout after 10s"))
+	e.round(t)
+	e.business.Set(d.next)
+	e.round(t)
+	want := []attemptLine{
+		{Event: "delivery_attempt", Kind: "publication", Outcome: "transient", Code: 502,
+			Reason: "Telegram answered 502: Bad Gateway"},
+		{Event: "delivery_attempt", Kind: "publication", Outcome: "transient", Reason: "network: timeout after 10s"},
+		{Event: "delivery_attempt", Kind: "publication", Outcome: "delivered"},
+	}
+	if got := attemptLines(t, e.log.String()); !slices.Equal(got, want) || d.state != "delivered" {
+		t.Errorf("delivery_attempt lines %+v, want %+v; log %s", got, want, e.log)
+	}
+	if !strings.Contains(e.log.String(), `"outcome":"delivered","code":0,"reason":"","attempt":`) {
+		t.Errorf("a delivered line without code 0 and an empty reason: %s", e.log)
+	}
+}
+
 // TestTransientBackoffEqualJitter is delivery.transient_backoff: the step doubles from its first step, 2 s, up to its
 // longest wait, 5 min; each wait lies between half the step and the step (equal jitter) and is never shorter than the
 // first step, whatever the jitter.
@@ -292,13 +343,14 @@ func TestMarkupRejected(t *testing.T) {
 	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
 		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet})
 	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeMarkupRejected, "bad"),
-		deliverytest.Failure(delivery.OutcomeMarkupRejected, ""))
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeMarkupRejected, Status: 400}})
 	e.round(t)
 	if d.state != "not_delivered" || *d.lastError != "the messenger rejected the text without markup" ||
 		!slices.Equal(e.eventKinds(), []string{"publication", "markup_rejected", "not_delivered", "markup_rejected"}) {
 		t.Errorf("rejected twice %+v, %v", d, e.eventKinds())
 	}
-	if !strings.Contains(e.log.String(), `"kind":"update"`) {
+	if !strings.Contains(e.log.String(), `"kind":"update","outcome":"unknown","code":400,`+
+		`"reason":"the messenger rejected the text without markup"`) {
 		t.Errorf("log %s", e.log)
 	}
 }
