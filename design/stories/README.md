@@ -10,7 +10,7 @@ CLI commands — which files it touches, how its acceptance is checked and what 
 code: the implementation writes the code in the repository against compiler and test feedback, and the contract is what
 the review checks the code against.
 
-Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-23`. Every functional requirement
+Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24`. Every functional requirement
 (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the
 [coverage table](coverage.md) shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the
 reasons behind technical choices are in the [ADRs](../adr/README.md).
@@ -87,13 +87,13 @@ and ADR-0009 (the SPA in `web/`); the foundation stories create it.
 |---|---|
 | `cmd/muster/` | The single binary: the server and its CLI subcommands. |
 | `cmd/muster-archlint/` | The architecture lints, built only with the `lint` build tag. |
-| `internal/<domain>/` | One package per domain: `users`, `auth`, `totp`, `oidc`, `tokens`, `audit`, `organization`, `integrations`, `ingest`, `heartbeat`, `matchers`, `routing`, `groups`, `timers`, `delivery`, `destinations`, `connections`, `mattermost`, `telegram`, `bridge`, `webhooks`, `messages`, `templates`, `links`, `mentions`, `buttons`, `accountlinks`, `internalalerts`, `outgoingheartbeat`, `systemstatus`. |
+| `internal/<domain>/` | One package per domain: `users`, `auth`, `totp`, `oidc`, `tokens`, `audit`, `organization`, `integrations`, `ingest`, `heartbeat`, `matchers`, `routing`, `groups`, `timers`, `delivery`, `destinations`, `connections`, `mattermost`, `telegram`, `slack`, `bridge`, `webhooks`, `messages`, `templates`, `links`, `mentions`, `buttons`, `accountlinks`, `internalalerts`, `outgoingheartbeat`, `systemstatus`. |
 | `internal/<domain>/query.sql` | The domain's hand-written SQL queries, read by `sqlc`. |
 | `internal/api/` | Hand-written API handlers, one file per OpenAPI tag, and the API middleware; each handler calls its domain package. |
 | `internal/{logging,metrics,outbound,proxyconf,db,keyring,publicid,leader,partitions,server,live,runtime,config,clock,cli,buildinfo,doctor,devmode}/` | Shared infrastructure: the domain logger and log event registry, the metric registry, the outbound HTTP package and the proxy settings, database access, the Keyring, `public_id`, the Leader and partition maintenance, the listeners, the live-update hub, process wiring, bootstrap settings, the clock, the CLI, build information, `muster doctor` and the development mode. |
 | `internal/archlint/` | The rules and fixtures of the architecture lints that `cmd/muster-archlint` runs. |
 | `internal/db/migrations/` | Migrations in golang-migrate format, embedded in the binary; the schema `sqlc` reads. |
-| `internal/fakes/<name>/` | Fake servers of external systems (Alertmanager, Mattermost, Telegram, a bridge, OIDC, proxies) for tests and `muster dev`. |
+| `internal/fakes/<name>/` | Fake servers of external systems (Alertmanager, Mattermost, Telegram, Slack, a bridge, OIDC, proxies) for tests and `muster dev`. |
 | `internal/tools/` | Generators run by `make generate`; never part of the binary. |
 | `api/` | `openapi.yaml`, its generator configuration and the package that embeds the spec for `/api/v1/openapi.yaml`; `bridge.yaml`, the Bridge protocol (MIT, ADR-0017). |
 | `web/` | The SPA: `src/routes/` (file-based routes), `src/components/`, `src/locales/`, `e2e/` (Playwright). |
@@ -130,8 +130,8 @@ current.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
   check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
-  S-091, and last the pre-release stories S-092 to S-096. The architecture lints of ADR-0016 exist from the first story
-  that contains code.
+  S-091, then the pre-release stories S-092 to S-096, and last the Slack stories S-097 to S-105. The architecture lints
+  of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
 
@@ -251,7 +251,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
 | Bridge | C-22, C-23, S-087 of C-13, and S-060 and S-091 of C-21 | S-073 – S-081, S-083 – S-090, S-060, S-091 | 19 |
 | Pre-release | S-092 – S-094 of C-10, S-095 of C-09, S-096 of C-06 | S-092 – S-096 | 5 |
-| **L1** | 23 | | **96** |
+| Slack | C-24 | S-097 – S-105 | 9 |
+| **L1** | 24 | | **105** |
 
 ### Foundation
 
@@ -384,6 +385,20 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-095](S-095-live-updates-mark-in-the-header.md) | C-09 | The mark of the live updates in the header — connecting, live, reconnecting and offline (FE) | fe | S-030, S-072 |
 | [S-096](S-096-grafana-direct-intake.md) | C-06 | Snapshots directly from Grafana Alerting's webhook contact point (BE) | be | S-020, S-028, S-060, S-091 |
 
+### Slack
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-097](S-097-slack-connections-web-api-client-check-and-fake-slack-server.md) | C-24 | Slack Connections, the Web API client with its error classes, the Connection check and the fake Slack server (BE) | be | S-087, S-089, S-071 |
+| [S-098](S-098-slack-destinations-channel-check-channel-list-doctor-and-mention-settings.md) | C-24 | Slack Destinations, the channel check, the channel list, `muster doctor` and the Mention settings of Slack (BE) | be | S-097 |
+| [S-099](S-099-slack-delivery-messages-in-blocks-buttons-edits-threads-deleted-messages-and-tests.md) | C-24 | Slack delivery: messages in blocks, mrkdwn, buttons and the Snooze menu, edits, Thread replies, deleted Root messages, error classes and test messages (BE) | be | S-098, S-093 |
+| [S-100](S-100-slack-presses-over-http-signed-callback-answers-and-reminder-buttons.md) | C-24 | Slack presses over HTTP: the signed callback, presses and their attribution, answers to people and Reminder buttons (BE) | be | S-099 |
+| [S-101](S-101-slack-socket-mode-held-by-the-leader-envelopes-refresh-and-shared-app-warning.md) | C-24 | Slack Socket Mode held by the Leader: the WebSocket through the outbound package, confirmed envelopes, refresh and back-off, and the warning about a shared app (BE) | be | S-100 |
+| [S-102](S-102-slack-account-links-by-code-by-direct-message-and-mentions-of-linked-people.md) | C-24 | Slack Account links by a code sent by direct message, and Mentions of linked people (BE) | be | S-101 |
+| [S-105](S-105-check-a-slack-connection-before-saving-it.md) | C-24 | Check a Slack Connection before saving it, with the dry probe without a token (BE) | be | S-101 |
+| [S-103](S-103-slack-connection-and-destination-pages-check-before-saving-and-profile-links.md) | C-24 | Slack Connection and Destination pages, the check before saving, and Slack in the profile (FE) | fe | S-102, S-105, S-070 |
+| [S-104](S-104-connect-slack-documentation-with-the-app-manifests.md) | C-24 | Connect Slack on the documentation site, with the app manifests, and Slack on the Messengers page | docs | S-103 |
+
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
 rules exist. S-061 was split from S-039 after the review of the contracts: S-039 keeps Connections, Destinations, the
@@ -479,6 +494,20 @@ after a live test of Grafana OSS 13.2.4 showed that its built-in Alertmanager ke
 pair sends with an older `startsAt`, and the `status` of a truncated Snapshot, which Grafana computes from the alerts it
 lists (F-105 to F-112). It belongs to C-06, whose rules it changes, and is one backend story with the page Connect
 Grafana. It comes after S-095 and needs none of S-092 to S-095.
+
+S-097 to S-105 were added when the maintainer took native Slack into L1 before its release (D381, D382, D385), after a
+test on a Slack workspace established the facts F-070 to F-104: a Slack Connection is the bot of one Slack app in one
+workspace, receives presses over Socket Mode — a connection that only the Leader holds — or over HTTP at the ingest
+listener, and links accounts by a code sent by direct message. They form C-24 and come last, as a phase of their own,
+because they build on every messenger story before them: the check before saving of S-087, the Request log of S-088
+and S-089, key rotation, Reminder buttons and the Snooze presets of S-093. Their order follows the Bridge's: the
+Connection, the client and the fake server (S-097); Destinations and their check (S-098); delivery, with test
+messages and the Broken probe (S-099); presses over HTTP, with the answers, the Transport and the schema for Slack's
+Account links (S-100); Socket Mode on the Leader (S-101); Account links and Mentions (S-102); the check before saving
+of a Slack Connection (S-105), split from the pages by the review of these contracts so that the frontend story stays
+one; the pages (S-103); and the page "Connect Slack" (S-104). S-105 keeps its place before S-103 although its ID is
+larger. S-097 touches 43 files, at the edge of the size signal, because the type, the client and the fake server are
+each needed for the live check of the others.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

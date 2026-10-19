@@ -37,15 +37,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   attempts); code requests are limited by `account_link.mattermost_code_requests`, per requesting User and per target
   account. After the code is entered, the bot confirms "Linked to Muster user {name}".
 - **C-18.FR-4** A messenger account is linked to exactly one User. A User has at most one account per identity space —
-  one Telegram account in all, one account per Mattermost Connection; a new link replaces the previous one.
+  one Telegram account in all, one account per Mattermost Connection, per Bridge Connection (C-22.FR-15) and per Slack
+  Connection (C-24.FR-12); a new link replaces the previous one.
 - **C-18.FR-5** Linking an account already linked to another User is refused; nothing moves silently.
 - **C-18.FR-6** Users unlink their own accounts in the profile; Admins see and remove any User's links but cannot create
   a link for someone else. Nothing can be unlinked from chat.
 - **C-18.FR-7** Linking needs no re-authentication or TOTP beyond the signed-in session.
 - **C-18.FR-8** Presses from linked accounts run the command as the linked User with the Transport of the messenger.
   Presses from unlinked accounts change nothing and are answered privately with a link to the profile that carries no
-  secret (C-13.FR-4, C-14.FR-5); presses by Viewers get "You are not permitted to do this"; presses by disabled Users get
-  "Your Muster account is disabled". Deleting a User removes their links.
+  secret (C-13.FR-4, C-14.FR-5, C-22.FR-12, C-24.FR-10); presses by Viewers get "You are not permitted to do this";
+  presses by disabled Users get "Your Muster account is disabled". Deleting a User removes their links.
 - **C-18.FR-9** The Audit log records `link`, `unlink` (by whom, from where) and `link_rejected` (conflict, expired
   token, wrong code) with the User, the messenger, the external id and username, and the Connection.
 - **C-18.FR-10** The profile lists links with the messenger, Connection, username and last use. It picks the

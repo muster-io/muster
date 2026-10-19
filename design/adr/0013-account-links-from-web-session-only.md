@@ -7,6 +7,8 @@
 - Amended: 2026-10-14 — Bridge Connections ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
   link by a token that the person sends to the bot, as Telegram does, or by a code sent by direct message to the
   account found by its handle, as Mattermost does; their Identity space is one Bridge Connection
+- Amended: 2026-10-19 — Slack Connections (journal D382) link by a code that the bot sends by direct message to the
+  account found by its email or name, as Mattermost does; their Identity space is one Slack Connection
 
 ## Context
 
@@ -53,7 +55,7 @@ the owner of the messenger account — never the other way round.
 4. Linking asks for no extra re-authentication or TOTP; the session is already signed in, and TOTP is checked at
    sign-in.
 5. Identity spaces: Telegram links are global, so one Telegram account works through any Muster bot; Mattermost links
-   belong to one Connection, and so do Bridge links (ADR-0017).
+   belong to one Connection, and so do Bridge links (ADR-0017) and Slack links.
 6. Presses by a disabled User are refused; deleting a User removes their links. Deactivation inside Mattermost is not
    tracked in the first release.
 7. The Audit log records `link`, `unlink` (by whom, from where) and `link_rejected` (conflict, expired token, wrong

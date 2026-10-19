@@ -48,7 +48,9 @@ channel's discussion group, and the automatic copy of a Root message rings them 
 (C-14.FR-9). In Mattermost a Thread reply notifies the Thread's followers by their own settings, so Quiet means "without
 a Mention" (C-13.FR-8); a Mention also makes the person a follower of the Thread
 ([F-027](../../facts.md#threads-and-direct-messages)). A Bridge posts a Quiet new message without a notification
-where its bridge declares `quiet_messages`, and otherwise as an ordinary message without Mentions (C-22.FR-6).
+where its bridge declares `quiet_messages`, and otherwise as an ordinary message without Mentions (C-22.FR-6). Slack
+cannot send a message without a notification: whom a new message notifies follows each member's settings for the
+channel and the Thread, so Quiet means "without a Mention" there too (C-24.FR-6).
 
 ## Buttons and links by status
 
@@ -68,20 +70,23 @@ the Route's language — "Until tomorrow {start}" and "Until {day} {start}", «�
 with the day in the genitive («До понедельника 09:00») — and a Telegram keyboard puts them on a row of their own, under
 the row of the durations. Mattermost and Telegram show Ack and "Still on it" as primary buttons and Resolve as a success
 button, and the other buttons plain, without a style ([F-066](../../facts.md#telegram),
-[F-068](../../facts.md#mattermost)). In Mattermost every link, "Open in Muster" included, is a link in the post, never a
-button (C-13.FR-3). A Bridge shows these buttons only when its bridge declares `buttons`, with the style hints Ack and
-"Still on it" `primary`, Resolve `success` and the rest `neutral`, and drops Snooze buttons beyond the bridge's
-`max_per_message` — the presets first, then the durations from the longest; without buttons, a Root message that is not
-resolved names the Text commands of its status in a line "Reply in the Thread: …" ("Reply in the Thread, mentioning the
-bot: …" when the bridge forwards only those) when the bridge forwards Thread messages, and otherwise offers only the
-link to Muster (C-22.FR-5, C-22.FR-14).
+[F-068](../../facts.md#mattermost)). Slack has only the styles `primary` and `danger` and asks for one `primary` per set
+([F-074](../../facts.md#sending-block-kit-and-limits)): Ack is `primary` on a firing and on a snoozed Root message,
+Resolve on an acknowledged one and "Still on it" on a Reminder, every other button is plain, and the Snooze durations
+and presets are the options of one menu "Snooze…" (C-24.FR-5). In Mattermost and Slack every link, "Open in Muster"
+included, is a link in the text, never a button (C-13.FR-3, C-24.FR-4). A Bridge shows these buttons only when its
+bridge declares `buttons`, with the style hints Ack and "Still on it" `primary`, Resolve `success` and the rest
+`neutral`, and drops Snooze buttons beyond the bridge's `max_per_message` — the presets first, then the durations from
+the longest; without buttons, a Root message that is not resolved names the Text commands of its status in a line "Reply
+in the Thread: …" ("Reply in the Thread, mentioning the bot: …" when the bridge forwards only those) when the bridge
+forwards Thread messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 
 ## Banners, warnings and notices
 
 | Where | Shown while | Text (English) | Capability |
 |---|---|---|---|
 | UI, every page | recovering after downtime | "Muster is recovering after downtime. Data may be incomplete until HH:MM." | C-02, C-03 |
-| UI, Admins | no replica is leading | "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused." | C-02, C-03 |
+| UI, Admins | no replica is leading | "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode, Heartbeat and Stale checks are paused." | C-02, C-03, C-24 |
 | OIDC settings | mapping empty or no groups claim | "Nobody will be able to sign in through OIDC." | C-03 |
 | OIDC settings | the client secret expires within `oidc.secret_expiry_lead` | "The client secret expires on {date}. Issue a new one in the identity provider and enter it here." | C-03 |
 | OIDC settings | Role sync would lower the last active Admin | "{user} stays Admin: they are the last active Admin, and the identity provider maps them to {role}. Make another user Admin first." | C-03 |
@@ -112,13 +117,21 @@ link to Muster (C-22.FR-5, C-22.FR-14).
 | Telegram Destination check | the channel has no linked discussion group | "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group." | C-14 |
 | Bridge Connection | push mode (hint) | "The bridge posts events to {callback address}, signed with the push secret. Configure the same address and secret in the bridge." | C-22 |
 | Bridge Connection check | the token is refused · the protocol version is unknown · the answer does not match the protocol · the event delivery mode is not offered | "The bridge refused the token." · "The bridge speaks protocol version {version}; this Muster speaks 1." · "The bridge's answer does not match the protocol: {detail}" · "The bridge does not offer {mode} event delivery." | C-22 |
+| Slack Connection | Socket Mode (hint) | "The Leader holds the Socket Mode connection, so Slack needs no address of Muster. Presses made while the Leader changes are lost; use HTTP if that matters." | C-24 |
+| Slack Connection | HTTP mode (hint) | "Slack sends button presses to {callback address}. Enter it as the Interactivity Request URL of the Slack app, and the app's Slack signing secret here. A press on a test message checks both." | C-24 |
+| Slack Connection and its check | the last `hello` of Socket Mode counted another connection of the app | "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Muster installation." | C-24 |
+| Slack Connection check | the bot token is refused · it is not a bot token · scopes are missing · the tokens belong to two apps | "Slack refused the token." · "This is not a bot token." · "The bot token lacks the scopes {scopes}." · "The app-level token belongs to another Slack app than the bot token." | C-24 |
+| Slack Destination check | the bot is not a member of the channel | "Invite the bot to the channel: /invite @{bot}" | C-24 |
+| Destination test of a Slack Destination | always | "Slack does not let a bot press its own button, so this test does not check presses. Press a button on the test message: once the press reaches Muster, it answers that nothing was changed." | C-24 |
+| Answer to a press in Slack | a press from an account without an Account link | "Your Slack account is not linked to Muster. Link it in your profile: {link}" | C-24 |
+| Profile, link Slack | no account has the email or name · several accounts have the name | "No Slack account with this email or name was found." · "Several Slack accounts have this name. Enter the email instead." | C-24 |
 | Thread reply | a Bridge Root message was republished past the edit window | "This message is no longer updated. The current one: {link}" | C-22 |
 | Alert Group page, delivery state | a Bridge Root message is past its edit window | "Past the edit window: updated on the next change of status" | C-22 |
 | Bridge answer to a person | a Text command ran · a Snooze duration is not one of the Route's | "Done: {command} #N" · "Snooze for one of: {durations}", the Route's durations and the words of the Snooze presets | C-22 |
 | Bridge answer to a person | a Snooze Text command on an Alert Group whose Route has no Snooze durations | "This Alert Group's Route has no Snooze durations; nothing was changed." | C-22 |
 | Bridge answer to a person | a press or Text command from an account without an Account link | "Your account is not linked to Muster. Link it in your profile: {link}" | C-22 |
-| Bridge answer to a person | a press whose button data fails verification or belongs to another message | "This button could not be verified; nothing was changed." | C-22 |
-| Answer to a press in Mattermost or Telegram, Bridge answer to a person | a press, or a Text command through a Bridge, could not run: its Command failed, or, in Mattermost and Telegram, Muster could not read the Account link or, in Telegram, the pressed message | "Muster could not run this command; nothing was changed." | C-13, C-14, C-22 |
+| Bridge answer to a person, answer to a press in Slack | a press whose button data fails verification or belongs to another message | "This button could not be verified; nothing was changed." | C-22, C-24 |
+| Answer to a press in Mattermost, Telegram or Slack, Bridge answer to a person | a press, or a Text command through a Bridge, could not run: its Command failed, or, in Mattermost, Telegram and Slack, Muster could not read the Account link or, in Telegram, the pressed message | "Muster could not run this command; nothing was changed." | C-13, C-14, C-22, C-24 |
 | Profile, link through a Bridge | the bridge refuses the direct message with the code · no account has the handle | "The bot cannot send you a direct message. Send it the token instead." · "No account with this {kind} was found." | C-22 |
 | Bridge answer to a person | an Account link token was linked · was unknown, used, expired or of another Connection | "Linked to Muster user {name} ({login})" · "This link is invalid or expired. Start again from your Muster profile." | C-22 |
 | Telegram Destination check | the bot is not an admin of the discussion group | "The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post messages." | C-14 |
@@ -256,7 +269,7 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | Rule | Severity | Default expression | For | Meaning |
 |---|---|---|---|---|
 | `MusterDown` | critical | `up{job="muster"} == 0` | 2m | the scrape target is down |
-| `MusterNoLeader` | critical | `max(muster_leader{job="muster"}) == 0` | 2m | no replica leads: Telegram and Bridge polling, Heartbeat lost and Stale checks, partitions and the outgoing heartbeat have stopped; ingestion, delivery and timers keep working |
+| `MusterNoLeader` | critical | `max(muster_leader{job="muster"}) == 0` | 2m | no replica leads: Telegram and Bridge polling, Slack's Socket Mode, Heartbeat lost and Stale checks, partitions and the outgoing heartbeat have stopped; ingestion, delivery and timers keep working |
 | `MusterDeliveryFailing` | critical | `max by (destination) (muster_delivery_queue{job="muster"}) > 0 unless on (destination) sum by (destination) (increase(muster_delivery_attempts_total{job="muster",outcome="delivered"}[10m])) > 0` | 5m | a Destination has queued deliveries and no successful delivery for 10 minutes |
 | `MusterDestinationBroken` | critical | `max by (destination) (muster_destination_broken{job="muster"}) == 1` | 5m | a Destination is Broken |
 | `MusterHeartbeatLost` | critical | `max by (integration) (muster_heartbeat_lost{job="muster"}) == 1` | 1m | an Integration is Heartbeat lost; the backup for the Internal alert |

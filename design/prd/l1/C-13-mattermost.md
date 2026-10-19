@@ -130,17 +130,19 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   read that setting through the bot; instead, the test message of a Mattermost Destination presses its own button
   through the bot and reports whether the press reached Muster, naming the setting when it did not (C-16.FR-3, F-022,
   F-054).
-- **C-13.FR-14** Check before saving, for every Connection type — Mattermost, Telegram and Bridge — so that their forms
-  behave alike: the create form, and the edit form while it holds unsaved changes, has "Check connection", which checks
-  the form's draft without saving it — the type, the address, the token typed in the form, the proxy and, for a
-  Bridge, the event delivery mode — with the steps and step codes of the check of a saved Connection (FR-2,
-  C-14.FR-11, C-22.FR-2), through the interactive path. It stores nothing — no Connection, no bot name, no `info` — and
-  writes no Audit log entry, because it changes no configuration. Which token goes where:
+- **C-13.FR-14** Check before saving, for every Connection type — Mattermost, Telegram, Bridge and Slack — so that their
+  forms behave alike: the create form, and the edit form while it holds unsaved changes, has "Check connection", which
+  checks the form's draft without saving it — the type, the address, the token typed in the form, the proxy and, for a
+  Bridge, the event delivery mode, and for Slack the event mode and the app-level token — with the steps and step codes
+  of the check of a saved Connection (FR-2, C-14.FR-11, C-22.FR-2, C-24.FR-2), through the interactive path. It stores
+  nothing — no Connection, no bot name, no `info` — and writes no Audit log entry, because it changes no configuration.
+  Which token goes where:
   1. A token **typed in the same request** may be sent to the address typed in the same request: a new Connection, or
      a Connection whose token is being replaced.
   2. A **stored** token is sent only to the saved address of its Connection, through its saved proxy. With a changed
      but unsaved address or proxy and no token typed, the check makes only the dry probe of its type, without any
-     token: FR-2 for Mattermost, C-14.FR-11 for Telegram, C-22.FR-2 for a Bridge.
+     token: FR-2 for Mattermost, C-14.FR-11 for Telegram, C-22.FR-2 for a Bridge, C-24.FR-2 for Slack, whose address is
+     fixed and only the proxy can change.
   3. A stored proxy password is used only with the proxy type and address it was saved with; a draft that changes them
      uses the password typed with it, or none.
 

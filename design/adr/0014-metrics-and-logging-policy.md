@@ -7,6 +7,8 @@
   processing
 - Amended: 2026-10-19 — `bridge` joins the values of the `transport` label and Bridge polling the Leader's tasks that
   `MusterNoLeader` names, as the metric catalogue and ADR-0007 have had them since Bridge Connections (ADR-0017)
+- Amended: 2026-10-19 — `slack` joins the values of the `transport` label, and Slack's Socket Mode connections the
+  Leader's tasks that `MusterNoLeader` names (ADR-0007)
 
 ## Context
 
@@ -37,9 +39,9 @@ code turns into noise nobody reads.
 - A future hosted mode that serves several Organizations turns the entity labels off with a switch.
 - All other labels take values from closed sets defined in code (`outcome`, `reason`, `command`, `transport`, `kind`,
   …); the catalogue in the product requirements lists each set, and adding a value is a reviewed change like adding a
-  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram`, `bridge` — or
-  `system` for every transition Muster starts itself: on a timer, or because of ingestion, such as a Reopen, a resolve
-  by the system or a rise to Urgent.
+  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack` —
+  or `system` for every transition Muster starts itself: on a timer, or because of ingestion, such as a Reopen, a
+  resolve by the system or a rise to Urgent.
 
 **Histograms.** Metrics use the VictoriaMetrics/metrics library with **Prometheus-compatible `le` histograms only**,
 with buckets chosen for each kind of latency (ingestion, delivery, messenger APIs, template rendering). An architecture
@@ -72,14 +74,14 @@ them, so sums are not multiplied by the number of replicas.
 The reference page of all metrics is generated from the registry in code, and CI checks that it is current.
 
 **Chart rules and dashboard.** The chart ships alert rules, rendered only when the Prometheus or VictoriaMetrics CRDs
-are present. Critical: `MusterDown`, `MusterNoLeader` (the Leader's tasks — Telegram and Bridge polling, the Heartbeat
-lost and Stale checks, partition maintenance, the outgoing heartbeat — have stopped), `MusterDeliveryFailing`,
-`MusterDestinationBroken`, `MusterHeartbeatLost`. Warning: `MusterDeliverySlow`, `MusterDeliveryQueueGrowing`,
-`MusterIngestBacklog`, `MusterIngestRejected` (an oversized ingestion request, or more unauthorized ones than a
-threshold, so that a single scanner request does not fire it), `MusterTemplateError`, `MusterClockSkew`,
-`MusterLoginFailures`. Every rule has a `description` and a `runbook_url` into the versioned documentation; thresholds
-are chart values; the documentation tells users to send critical rules through an Alertmanager route that bypasses
-Muster. One "Muster" dashboard with Overview, Ingestion, Delivery and Platform rows ships as a
+are present. Critical: `MusterDown`, `MusterNoLeader` (the Leader's tasks — Telegram and Bridge polling, Slack's Socket
+Mode connections, the Heartbeat lost and Stale checks, partition maintenance, the outgoing heartbeat — have stopped),
+`MusterDeliveryFailing`, `MusterDestinationBroken`, `MusterHeartbeatLost`. Warning: `MusterDeliverySlow`,
+`MusterDeliveryQueueGrowing`, `MusterIngestBacklog`, `MusterIngestRejected` (an oversized ingestion request, or more
+unauthorized ones than a threshold, so that a single scanner request does not fire it), `MusterTemplateError`,
+`MusterClockSkew`, `MusterLoginFailures`. Every rule has a `description` and a `runbook_url` into the versioned
+documentation; thresholds are chart values; the documentation tells users to send critical rules through an Alertmanager
+route that bypasses Muster. One "Muster" dashboard with Overview, Ingestion, Delivery and Platform rows ships as a
 ConfigMap for the Grafana sidecar and as a `GrafanaDashboard` resource, each behind its own flag.
 
 **Internal alerts.** Problems Muster can still report through its own pipeline are raised as Internal alerts of the

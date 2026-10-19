@@ -8,6 +8,11 @@
   to the saved address through the saved proxy, a token typed in the same request may go to the address typed with it,
   and every Connection type has a dry probe without the token; the outbound package records each request it sends
   for a Connection or an outgoing webhook in the Request log, masked like its logs (journal D354)
+- Amended: 2026-10-19 — Slack Connections (journal D381, D385): the outbound package also opens WebSocket connections —
+  Slack's Socket Mode — in the background class, under the address policy and through the Connection's proxy, by
+  CONNECT or SOCKS5; Slack's addresses are fixed, so its tokens go only to `https://slack.com/api/`, its socket only
+  to a `wss` address under `slack.com` and an answer to a press only to a `response_url` on `hooks.slack.com`; the
+  one-time `ticket` in the address of a socket is a secret in a URL
 
 ## Context
 
@@ -50,7 +55,7 @@ target so that an admin can correct the configured URL.
 |---|---|---|
 | Delivery — messenger send and edit, outgoing webhook requests, the Broken probe with the Destination check it runs when no delivery waits | the Desired state, not a person | one attempt per call; the result is classified as `RetryAfter`, `Transient`, `Fatal` or unknown, and the delivery row schedules the next attempt within its attempt and time budgets (ADR-0005); a failed probe is retried by the next one |
 | Interactive — callback answers, ephemeral replies, account-link messages, test messages, connection and Destination checks started from the UI, the OIDC code exchange | a person | one attempt within a time budget of a few seconds; messenger calls take their limiter tokens ahead of deliveries and never queue (ADR-0005); a failure is shown to that person |
-| Background — Telegram `getUpdates`, OIDC discovery and key sets | a loop | exponential backoff with jitter and a cap between attempts; polling keeps going, and a `409 Conflict` from a second poller only makes it back off (ADR-0007); a key-set refresh keeps the last good keys |
+| Background — Telegram `getUpdates`, Bridge polling, Slack's Socket Mode connection, OIDC discovery and key sets | a loop | exponential backoff with jitter and a cap between attempts; polling keeps going, and a `409 Conflict` from a second poller only makes it back off (ADR-0007); a key-set refresh keeps the last good keys |
 | Heartbeat — Muster's outgoing heartbeat (ADR-0014) | an external dead man's switch | one attempt per tick with a short timeout; a failure is counted and logged, and the next tick is the retry |
 | Later — LLM providers, MCP servers, Alertmanager polling | an investigation or a poller | budgets set when those features are designed, under the same rules |
 
@@ -81,16 +86,16 @@ targets behind a proxy (see below); a denied entry always wins. A future hosted 
 connection goes only to an address that passed, so a DNS answer that changes between check and connection cannot bypass
 it. A blocked request fails without retry, as a configuration error that names the rule that blocked it.
 
-**Proxies per client.** Each client that may need one — each Mattermost and Telegram Connection, each outgoing webhook
-Destination, the OIDC provider, Muster's outgoing heartbeat, and later each LLM provider and MCP server — has its own
-proxy setting in the UI: use a proxy or not; its type (HTTP, HTTPS or SOCKS5); its address; and, when the proxy needs
-authentication, a username and a password, stored encrypted and write-only in the API (ADR-0011). There is no
-environment-wide proxy: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are ignored. The UI's connection check takes the same
-path as real traffic, proxy included. Through a proxy, the proxy resolves the target's name; Muster resolves it too and
-applies the SSRF policy to every address it gets, or to the address itself if the target is an IP address. Where only
-the proxy can resolve names, as in some closed networks, Muster checks the name instead: a name matching a denied entry
-is blocked, in strict mode only a name matching an allowed entry passes, and a request that passes is logged as sent
-without an address check. The proxy's own address is always checked by the same policy, like any other target, so a
+**Proxies per client.** Each client that may need one — each Mattermost, Telegram, Slack and Bridge Connection, each
+outgoing webhook Destination, the OIDC provider, Muster's outgoing heartbeat, and later each LLM provider and MCP server
+— has its own proxy setting in the UI: use a proxy or not; its type (HTTP, HTTPS or SOCKS5); its address; and, when the
+proxy needs authentication, a username and a password, stored encrypted and write-only in the API (ADR-0011). There is
+no environment-wide proxy: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are ignored. The UI's connection check takes the
+same path as real traffic, proxy included. Through a proxy, the proxy resolves the target's name; Muster resolves it too
+and applies the SSRF policy to every address it gets, or to the address itself if the target is an IP address. Where
+only the proxy can resolve names, as in some closed networks, Muster checks the name instead: a name matching a denied
+entry is blocked, in strict mode only a name matching an allowed entry passes, and a request that passes is logged as
+sent without an address check. The proxy's own address is always checked by the same policy, like any other target, so a
 proxy setting cannot reach a metadata, link-local or denied address, and a proxy on loopback needs an allowed network.
 
 **Base addresses and secrets in URLs.** A Telegram Connection has a Bot API base URL, `https://api.telegram.org` by
@@ -108,6 +113,21 @@ proxy over a self-hosted server. The outbound package redacts secrets that trave
 from every error it returns, including the URL inside Go's `url.Error`, and logs only the scheme and host of a base URL,
 whose path may be a secret prefix; the architecture lint that pushes known secrets through the code (ADR-0016) covers
 these errors.
+
+**WebSocket connections.** A WebSocket connection is outbound traffic like a request, so the same package opens it:
+its dialer applies the outbound address policy after name resolution, the client's proxy carries it — an HTTP or HTTPS
+proxy by CONNECT, also for a plain `ws` target such as a fake server, or a SOCKS5 proxy — the handshake has the
+client's connect timeout and user agent and follows no redirect, and it is counted in `muster_client_requests_total`
+like a request. The WebSocket library gets only the package's HTTP client; reading and writing the open connection,
+with deadlines of its own, are the caller's. Slack's Socket Mode is the first such connection: the Leader holds it in
+the background class (ADR-0007).
+
+**Slack's fixed addresses.** A Slack Connection has no address field: Slack's Web API is always
+`https://slack.com/api/`, so its bot token and app-level token go only there, through the Connection's saved proxy,
+and its check before saving needs a dry probe — `auth.test` without a token — only when the proxy changed. The address
+of a Socket Mode connection, which `apps.connections.open` answers, is accepted only as a `wss` address under
+`slack.com`, and carries a one-time `ticket` that is redacted like a token in a URL; an answer to a press goes to its
+`response_url` only on `https://hooks.slack.com/`. `muster dev` alone points these addresses at its fake Slack server.
 
 **Request log.** The outbound package also records each request it sends for a Connection or an outgoing webhook
 Destination, with its answer, in the Request log (C-23): the caller names the operation and what the request concerns,
