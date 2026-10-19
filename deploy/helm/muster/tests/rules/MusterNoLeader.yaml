@@ -27,9 +27,10 @@ tests:
             exp_annotations:
               summary: No Muster replica is the Leader
               description: >-
-                No replica holds the Leader lock: Telegram polling, the Heartbeat and Stale checks, partition
-                maintenance and the outgoing heartbeat have stopped, while ingestion, delivery and timers keep working.
-                First check the replicas on the System status page and the database connection of each replica.
+                No replica holds the Leader lock: Telegram and Bridge polling, the Heartbeat and Stale checks,
+                partition maintenance and the outgoing heartbeat have stopped, while ingestion, delivery and timers keep
+                working. First check the replicas on the System status page and the database connection of each
+                replica.
               runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader/
   - name: one target leads, or a Leader returns within 2 minutes
     interval: 1m

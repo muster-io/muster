@@ -113,7 +113,7 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 | `mentions` | Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`, `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet event. |
 | `sequence` | The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps, and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer". |
 | `occurred_at` | When the event was recorded. |
-| `actor` | Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name` used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `cli`), or `system` with the `reason`, for example `timer`. |
+| `actor` | Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name` used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`, for example `timer`. |
 | `alert_group` | The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`, `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster. |
 | `alerts` | One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason. |
 
