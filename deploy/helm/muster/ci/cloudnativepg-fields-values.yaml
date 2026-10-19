@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# The database as fields with sslmode require, and only the password from the app Secret that CloudNativePG generates
+# for the Cluster muster-db; the master keys and the bootstrap Admin password stay in existingSecret.
+existingSecret: muster
+
+database:
+  existingSecret: muster-db-app
+  host: muster-db-rw.muster.svc
+  name: muster
+  user: muster
+  sslmode: require
+  passwordKey: password
+
+publicURL: https://muster.example.org
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password

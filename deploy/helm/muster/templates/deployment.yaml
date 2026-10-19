@@ -4,7 +4,11 @@ Copyright The Muster Authors
 */ -}}
 {{- $secret := include "muster.existingSecret" . }}
 {{- $secretKeys := list .Values.masterKeysKey }}
-{{- if and (not .Values.database.urlKey) .Values.database.passwordKey }}
+{{- /* With database.existingSecret, the password comes from a volume of its own, so its key never meets a key of
+existingSecret. */ -}}
+{{- $databasePassword := and (not .Values.database.urlKey) .Values.database.passwordKey }}
+{{- $databaseVolume := and $databasePassword .Values.database.existingSecret }}
+{{- if and $databasePassword (not $databaseVolume) }}
 {{- $secretKeys = append $secretKeys .Values.database.passwordKey }}
 {{- end }}
 {{- if .Values.bootstrapAdmin.passwordKey }}
@@ -22,7 +26,7 @@ Copyright The Muster Authors
 - name: MUSTER_DATABASE_URL
   valueFrom:
     secretKeyRef:
-      name: {{ include "muster.existingSecret" . }}
+      name: {{ include "muster.databaseSecret" . }}
       key: {{ .Values.database.urlKey | quote }}
 {{- else }}
 {{- if .Values.database.host }}
@@ -47,7 +51,11 @@ Copyright The Muster Authors
 {{- end }}
 {{- if .Values.database.passwordKey }}
 - name: MUSTER_DATABASE_PASSWORD_FILE
+  {{- if .Values.database.existingSecret }}
+  value: /etc/muster/database/{{ .Values.database.passwordKey }}
+  {{- else }}
   value: /etc/muster/secrets/{{ .Values.database.passwordKey }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- if .Values.database.sessionHost }}
@@ -133,6 +141,11 @@ spec:
             - name: secrets
               mountPath: /etc/muster/secrets
               readOnly: true
+            {{- if $databaseVolume }}
+            - name: database
+              mountPath: /etc/muster/database
+              readOnly: true
+            {{- end }}
       # The preStop sleep of 5 s and process.shutdown_grace of 20 s fit in the 30 s before the pod is killed.
       terminationGracePeriodSeconds: 30
       containers:
@@ -190,6 +203,11 @@ spec:
             - name: secrets
               mountPath: /etc/muster/secrets
               readOnly: true
+            {{- if $databaseVolume }}
+            - name: database
+              mountPath: /etc/muster/database
+              readOnly: true
+            {{- end }}
       volumes:
         - name: secrets
           secret:
@@ -200,6 +218,15 @@ spec:
               - key: {{ . | quote }}
                 path: {{ . | quote }}
               {{- end }}
+        {{- if $databaseVolume }}
+        - name: database
+          secret:
+            secretName: {{ .Values.database.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.database.passwordKey | quote }}
+                path: {{ .Values.database.passwordKey | quote }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

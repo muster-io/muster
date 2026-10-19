@@ -21,6 +21,7 @@ database:
   name: muster
   user: muster
   sslmode: ""
+  existingSecret: ""
   passwordKey: database-password
   urlKey: ""
   sessionHost: ""

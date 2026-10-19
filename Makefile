@@ -82,6 +82,7 @@ MUTATION_DIR := $(BIN)/mutation
 # ServiceMonitor, PrometheusRule, VMRule and GrafanaDashboard schemas come from a pinned commit of the CRDs catalog.
 # It also packages the chart with a release appVersion, as release.yml does with the tag, to check its runbook_urls.
 CHART := deploy/helm/muster
+HELM_CHECK_VALUES := $(sort $(wildcard $(CHART)/ci/*-values.yaml))
 HELM_CHECK_KUBE_VERSION := 1.33.0
 HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret and set existingSecret
 HELM_CHECK_DASHBOARD_ERROR := dashboard.grafanaDashboard.enabled needs dashboard.configMap.enabled
@@ -314,16 +315,18 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 	cat $$summary; \
 	exit $$failed
 
-# Lints and renders the chart with the default values plus an existingSecret and with the all-options values, and
-# validates both renderings with kubeconform. The default values render no rule and no dashboard; chartcheck checks the
+# Lints and renders the chart with the default values plus an existingSecret and with each values file of ci/, and
+# validates every rendering with kubeconform. The default values render no rule and no dashboard; chartcheck checks the
 # rules and the dashboard of the all-options rendering, and of the chart packaged with a release appVersion, against
-# reference.md and the metric catalogue. Rendering without existingSecret must fail with the master keys message, and a
-# GrafanaDashboard without its ConfigMap with its own. Every step runs even when an earlier one fails.
+# reference.md and the metric catalogue. The CloudNativePG values read the database URL, or the password, from the
+# Secret muster-db-app and the master keys from existingSecret. Rendering without existingSecret must fail with the
+# master keys message, and a GrafanaDashboard without its ConfigMap with its own. Every step runs even when an earlier
+# one fails.
 helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules and dashboard; check the existingSecret error
 	@tmp=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	failed=0; \
-	for values in "--set existingSecret=muster" "-f $(CHART)/ci/all-options-values.yaml"; do \
+	for values in "--set existingSecret=muster" $(foreach f,$(HELM_CHECK_VALUES),"-f $(f)"); do \
 		echo "helm lint, helm template and kubeconform with $$values"; \
 		$(HELM) lint --strict --kube-version $(HELM_CHECK_KUBE_VERSION) $$values $(CHART) || \
 			{ echo "helm lint failed with $$values"; failed=1; }; \
@@ -340,6 +343,19 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 		fi; \
 	else \
 		echo "helm template failed with the default values"; failed=1; \
+	fi; \
+	echo "the database Secret of the CloudNativePG values"; \
+	if $(HELM) template muster $(CHART) -f $(CHART)/ci/cloudnativepg-values.yaml >"$$tmp/cnpg-url.yaml" && \
+		$(HELM) template muster $(CHART) -f $(CHART)/ci/cloudnativepg-fields-values.yaml >"$$tmp/cnpg-fields.yaml"; then \
+		grep -A3 -x ' *- name: MUSTER_DATABASE_URL' "$$tmp/cnpg-url.yaml" | grep -qx ' *name: muster-db-app' && \
+		grep -qx ' *value: /etc/muster/database/password' "$$tmp/cnpg-fields.yaml" && \
+		grep -A2 -x ' *- name: database' "$$tmp/cnpg-fields.yaml" | grep -qx ' *secretName: muster-db-app' && \
+		grep -qx ' *secretName: muster' "$$tmp/cnpg-url.yaml" && \
+		grep -qx ' *secretName: muster' "$$tmp/cnpg-fields.yaml" || \
+		{ echo "the CloudNativePG values do not read the database from muster-db-app and the master keys from muster"; \
+			failed=1; }; \
+	else \
+		echo "helm template failed with the CloudNativePG values"; failed=1; \
 	fi; \
 	echo "chartcheck with the all-options values"; \
 	if $(HELM) template muster $(CHART) --kube-version $(HELM_CHECK_KUBE_VERSION) \
