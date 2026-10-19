@@ -472,8 +472,9 @@ func (f *fakeDB) GetBridgeReminderBinding(_ context.Context, arg dbgen.GetBridge
 // TestBridgePressBinding is the binding of C-22.FR-12: a press on a message of a Bridge Connection is bound to the
 // delivery of an Alert Group to a Bridge Destination of the Connection whose current Root message it is, or whose older
 // Root message a republication past the edit window replaced, or to a sent Reminder there, with the Alert Group, the
-// Route's language and Snooze durations and the Organization's first day of the week; another Connection, another type, a deleted Destination, a Thread reply that is not a
-// sent Reminder, a Storm summary or an unknown message is not bound, and a failed read is an error.
+// Route's language and Snooze durations and the Organization's first day of the week; another Connection, another
+// type, a deleted Destination, a Thread reply that is not a sent Reminder, a Storm summary or an unknown message is not
+// bound, and a failed read is an error.
 func TestBridgePressBinding(t *testing.T) {
 	e, _ := bridged(t)
 	e.db.dests[destMM].name = "alerts"

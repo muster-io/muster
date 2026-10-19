@@ -799,13 +799,19 @@ func TestReminderPress(t *testing.T) {
 
 // TestReminderPressBinding covers C-14.FR-4 on Reminders: a press must come from the Reminder's chat and message, and a
 // Reminder carries only "Still on it" and Unack; the data of another Alert Group's Reminder, a Reminder's data on the
-// channel post or on another message, a Root message's data on a Reminder and another Command of a Reminder are
-// answered "This button could not be verified; nothing was changed." and run nothing.
+// channel post or on another message, a Root message's data on a Reminder and another Command of a Reminder, a Snooze
+// preset included though the Route has Snooze durations, are answered "This button could not be verified; nothing was
+// changed." and run nothing.
 func TestReminderPressBinding(t *testing.T) {
 	e := newPressEnv(t)
 	r := e.reminder(t, e.keys, pressGroup, "en")
 	rb := e.reminder(t, e.keys, pressGroupB, "en")
 	stillOnIt, resolve := e.replySigned(t, buttons.CommandStillOnIt), e.replySigned(t, buttons.CommandResolve)
+	preset, _, err := buttons.Sign(e.keys, buttons.Action{Subject: buttons.SubjectReply, PublicID: pressGroup,
+		Command: buttons.CommandSnooze, Argument: buttons.ArgumentTomorrow})
+	if err != nil {
+		t.Fatal(err)
+	}
 	const copied = `{"chat":%d,"message_id":%d,"data_from":%d,"from":{"id":%d},"button":"Still on it"}`
 	const data = `{"chat":%d,"message_id":%d,"from":{"id":%d},"button":"x","data":%q}`
 	for name, body := range map[string]string{
@@ -814,6 +820,7 @@ func TestReminderPressBinding(t *testing.T) {
 		"the channel post":               fmt.Sprintf(data, faketelegram.ChannelID, e.post, bobTG, stillOnIt),
 		"a root message's data":          fmt.Sprintf(data, faketelegram.GroupID, r, bobTG, e.signed(t, pressGroup)),
 		"another command":                fmt.Sprintf(data, faketelegram.GroupID, r, bobTG, resolve),
+		"a snooze preset":                fmt.Sprintf(data, faketelegram.GroupID, r, bobTG, preset),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := e.handle(t, e.press(t, body)); got != textNotVerified || len(e.commands.calls) != 0 ||

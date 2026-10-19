@@ -874,6 +874,11 @@ func TestReplyPressBinding(t *testing.T) {
 		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
 			buttons.CommandAcknowledge), fakemattermost.BobUserID, alerts, postA, textNotVerified)
 		e.expectLine(t, groupA, buttons.CommandAcknowledge, "not_verified")
+		// Nor is a Snooze preset on a Reminder, though its Route has Snooze durations.
+		id, kid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandSnooze, buttons.ArgumentTomorrow)
+		e.expectAnsweredIn(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+			replyA, id, kid)), fakemattermost.BobUserID, alerts, postA, textNotVerified)
+		e.expectLine(t, groupA, buttons.CommandSnooze, "not_verified")
 		if len(e.commands.calls) != 0 {
 			t.Fatalf("an unbound press ran %+v", e.commands.calls)
 		}

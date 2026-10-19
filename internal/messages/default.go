@@ -51,10 +51,13 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 	}
 	keyID := ""
 	for _, b := range buttons.ForStatus(src.Status, len(src.Route.SnoozeDurations)) {
-		btn := Button{Command: b.Command, Argument: b.Argument, Label: buttonLabel(lang, b, src.Route.SnoozeDurations)}
+		var label string
 		if b.Command == buttons.CommandSnooze && buttons.IsPreset(b.Argument) {
-			btn.Label = PresetLabel(lang, b.Argument, src.WorkdayStart, src.WeekStart)
+			label = PresetLabel(lang, b.Argument, src.WorkdayStart, src.WeekStart)
+		} else {
+			label = buttonLabel(lang, b, src.Route.SnoozeDurations)
 		}
+		btn := Button{Command: b.Command, Argument: b.Argument, Label: label}
 		if sign && r.keys != nil {
 			id, kid, err := buttons.Sign(r.keys, buttons.Action{Subject: buttons.SubjectRoot, PublicID: src.PublicID,
 				Command: b.Command, Argument: b.Argument})
