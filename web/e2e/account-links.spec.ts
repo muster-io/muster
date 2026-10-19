@@ -550,6 +550,21 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
       })
       .not.toBe("");
     bridgeGroupId = group.id;
+    // The fake lists the Root message as soon as it is posted, but Muster stores its id only once the post is answered:
+    // a press before that names a message Muster does not know, which it ignores, and the Alert Group stays firing. So
+    // Bob presses once the delivery to "br-links" is delivered.
+    await expect
+      .poll(
+        async () =>
+          (
+            await api.call<{ items: { destination: { id: string }; state: string }[] }>(
+              "GET",
+              `/api/v1/alert-groups/${group.id}/deliveries`,
+            )
+          ).items.find((d) => d.destination.id === created.destination.id)?.state,
+        { timeout: 30_000 },
+      )
+      .toBe("delivered");
     let root: BridgeMessage | undefined;
     await expect
       .poll(
