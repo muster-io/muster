@@ -28,7 +28,7 @@ acceptance:
   - "The documentation page Concepts → Alert Groups says what the mark shows and that the list and the page are read again when the connection is back; every new text exists in English and Russian; `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 298
 ---
 
 # S-095. The mark of the live updates in the header — connecting, live, reconnecting and offline (FE)

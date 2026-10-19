@@ -46,7 +46,7 @@ acceptance:
   - "The documentation pages Concepts → Statuses and commands (the buttons and the Text commands), Messengers → Bridge and Write a bridge (the order in which Snooze buttons are dropped) describe the presets, and `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 296
 ---
 
 # S-093. Snooze presets on the buttons of Mattermost, Telegram and Bridges, and in Text commands (BE)

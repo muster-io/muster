@@ -28,7 +28,7 @@ acceptance:
   - "Every new text exists in English and Russian; the documentation page Concepts → Statuses and commands says how the web UI shows the presets and their ends, and `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 297
 ---
 
 # S-094. Snooze presets in the Snooze dialog and the bulk Snooze, and the working day and week on the General page (FE)

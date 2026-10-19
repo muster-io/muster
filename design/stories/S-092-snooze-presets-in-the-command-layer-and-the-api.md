@@ -43,7 +43,7 @@ acceptance:
   - "The documentation page Concepts → Statuses and commands describes the Snooze presets — the rule with its examples, the time zone they use, the two Organization settings and the API's `preset` and `snooze-presets` — and `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 295
 ---
 
 # S-092. Snooze presets in the command layer and the API, with the start of the working day and of the week (BE)
