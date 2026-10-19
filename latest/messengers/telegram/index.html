@@ -1999,8 +1999,8 @@ few minutes while nothing waits for the Destination, and ends the Broken state o
 <p>Muster receives the bot's updates — button presses and the messages of the discussion group — in one of two <strong>update
 modes</strong>, set on the Connection:</p>
 <ul>
-<li><strong>Long polling</strong>, the default. The replica that leads asks Telegram for updates with <code>getUpdates</code>. Muster needs no
-  public address: it only calls out to Telegram. Only one process may poll a bot: when a second one starts — another
+<li><strong>Long polling</strong>, the default. The Leader asks Telegram for updates with <code>getUpdates</code>. Muster needs no public address:
+  it only calls out to Telegram. Only one process may poll a bot: when a second one starts — another
   Muster installation with the same token, or a test script — Telegram ends one of the polls with <code>409 Conflict</code>, and
   the two then take turns. Muster backs off and logs <code>telegram_poll_conflict</code>; the Destination does not become Broken.
   Give each installation its own bot.</li>

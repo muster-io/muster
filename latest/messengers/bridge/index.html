@@ -1977,8 +1977,8 @@ under <strong>Connections</strong> and <strong>Destinations</strong>.</p>
 <p>Choose how the bridge reports <strong>events</strong> — the presses of buttons and the messages people write in a Thread — with the
 <strong>event delivery</strong> mode:</p>
 <ul>
-<li><strong><code>poll</code></strong> when the bridge cannot reach Muster. The replica that leads asks the bridge for new events, so the bridge
-  needs no address of Muster.</li>
+<li><strong><code>poll</code></strong> when the bridge cannot reach Muster. The Leader asks the bridge for new events, so the bridge needs no
+  address of Muster.</li>
 <li><strong><code>push</code></strong> when the bridge can reach <code>MUSTER_INGEST_URL</code>. The bridge posts each event to the Connection's callback
   address, <code>https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…</code>, which the Connection shows in
   <code>callback_url</code>, signed with a <strong>push secret</strong> that you configure on both sides. The push secret has the Standard
