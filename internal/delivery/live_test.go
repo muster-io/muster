@@ -2750,7 +2750,11 @@ func (l *live) fallbackTemplate(t *testing.T) {
 	l.round(t, l.a)
 	gid := l.group(t, "FbOne")
 	pubs := only(l.rec.Calls(), deliverytest.MethodPublish)
-	if len(pubs) != 1 || head(pubs[0].Message) == "" || len(pubs[0].Message.Buttons) != 5 ||
+	presetsLast := func(bs []messages.Button) bool {
+		return len(bs) == 7 && bs[5].Command == buttons.CommandSnooze && bs[5].Argument == buttons.ArgumentTomorrow &&
+			bs[6].Command == buttons.CommandSnooze && bs[6].Argument == buttons.ArgumentWeekStart
+	}
+	if len(pubs) != 1 || head(pubs[0].Message) == "" || !presetsLast(pubs[0].Message.Buttons) ||
 		!strings.Contains(pubs[0].Message.Text(), "The message template of this Route failed") ||
 		!strings.Contains(pubs[0].Message.Text(), "disk=FbOne/a") || pubs[0].Message.Body != nil {
 		t.Fatalf("fallback publication %+v", pubs)
