@@ -2577,27 +2577,18 @@
 <h1 id="backup-and-restore">Backup and restore<a class="headerlink" href="#backup-and-restore" title="Permanent link">&para;</a></h1>
 <p>Muster keeps all its state in PostgreSQL, and encrypts its secrets with the <a href="../key-rotation/">master keys</a> from the
 environment. Neither the Helm chart nor the compose example backs up anything, so you back up two things, <strong>separately</strong>:</p>
-<table>
-<thead>
-<tr>
-<th>What</th>
-<th>Holds</th>
-<th>Without it</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>the database</td>
-<td>Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted</td>
-<td>everything is gone</td>
-</tr>
-<tr>
-<td>the master keys (<code>MUSTER_SECRET_KEYS</code>)</td>
-<td>the keys that decrypt the Secrets and sign the buttons in messages</td>
-<td>Muster refuses to start on the database, and its encrypted Secrets cannot be read</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>The database</dt>
+<dd>
+<p>Holds Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted.</p>
+<p>Without it, everything is gone.</p>
+</dd>
+<dt>The master keys (<code>MUSTER_SECRET_KEYS</code>)</dt>
+<dd>
+<p>Hold the keys that decrypt the Secrets and sign the buttons in messages.</p>
+<p>Without them, Muster refuses to start on the database, and its encrypted Secrets cannot be read.</p>
+</dd>
+</dl>
 <h2 id="why-they-are-kept-apart">Why they are kept apart<a class="headerlink" href="#why-they-are-kept-apart" title="Permanent link">&para;</a></h2>
 <p>A database backup alone reveals no bot token, OIDC client secret or proxy password, because Muster encrypts them before
 they reach the database. A backup together with the master keys reveals all of them. Store the two in different places

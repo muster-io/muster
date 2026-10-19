@@ -2478,151 +2478,173 @@ address, Secrets and proxy.</p>
 <p>To start, create the Connection, check it, create a Destination for a channel, and add the Destination to a Route. A Route
 decides which Alert Groups reach which Destinations; see <a href="../concepts/routes-and-group-keys/">Routes and Group keys</a>.</p>
 <h2 id="what-each-destination-type-can-do">What each Destination type can do<a class="headerlink" href="#what-each-destination-type-can-do" title="Permanent link">&para;</a></h2>
-<p>Every cell is true for this release. A cell that depends on the bridge says "if the bridge declares it": a Bridge offers
-only what its <code>info</code> announces, and Muster adapts to the rest. <a href="write-a-bridge/">Write a bridge</a> lists the features.</p>
-<table>
-<thead>
-<tr>
-<th></th>
-<th>Mattermost</th>
-<th>Telegram</th>
-<th>Bridge</th>
-<th>Outgoing webhook, events mode</th>
-<th>Outgoing webhook, template mode</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Needs a Connection</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes</td>
-<td>no</td>
-<td>no</td>
-</tr>
-<tr>
-<td>One message per Alert Group, kept up to date</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes</td>
-<td>no: one request per event</td>
-<td>yes, through your requests</td>
-</tr>
-<tr>
-<td>Edits of the Root message</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes, until the bridge's edit window</td>
-<td>no</td>
-<td>yes, through the <code>update</code> request</td>
-</tr>
-<tr>
-<td>Buttons</td>
-<td>yes</td>
-<td>yes</td>
-<td>if the bridge declares <code>buttons</code></td>
-<td>no</td>
-<td>no</td>
-</tr>
-<tr>
-<td>Without buttons</td>
-<td>the web UI and the API</td>
-<td>the web UI and the API</td>
-<td><a href="../concepts/statuses-and-commands/#text-commands">Text commands</a> in the Thread if the bridge declares <code>thread_messages</code>; otherwise the web UI and the API</td>
-<td>the web UI and the API</td>
-<td>the web UI and the API</td>
-</tr>
-<tr>
-<td>Thread</td>
-<td>replies under the Root message</td>
-<td>the comments of the Root message, in the channel's discussion group</td>
-<td>replies under the Root message</td>
-<td>no: each event is separate</td>
-<td>optional <code>reply_in_thread</code>, with an optional <code>open_thread</code></td>
-</tr>
-<tr>
-<td>Loud</td>
-<td>a new post with Mentions</td>
-<td>a new message</td>
-<td>a new message that the bridge posts with <code>notify</code></td>
-<td><code>notify</code> is true</td>
-<td><code>.Notify</code> is true</td>
-</tr>
-<tr>
-<td>Quiet</td>
-<td>an edit, or a post without a Mention</td>
-<td>an edit, or a message sent with <code>disable_notification</code></td>
-<td>an edit, or a message without a notification if the bridge declares <code>quiet_messages</code></td>
-<td><code>notify</code> is false</td>
-<td><code>.Notify</code> is false</td>
-</tr>
-<tr>
-<td>Mentions</td>
-<td>nobody, <code>@channel</code> <code>@all</code> <code>@here</code>, users, Mattermost groups</td>
-<td>nobody, users</td>
-<td>nobody, users</td>
-<td>nobody, everyone, users, groups, as data</td>
-<td>the same, as data</td>
-</tr>
-<tr>
-<td>Account links</td>
-<td>yes: a code the bot sends by direct message</td>
-<td>yes: a link that opens the bot</td>
-<td>yes: a token sent to the bot, and a code if the bridge can find people and send direct messages</td>
-<td>not needed: no one presses anything</td>
-<td>not needed</td>
-</tr>
-<tr>
-<td>Rate limits</td>
-<td>Connection 5 requests/s; Destination the same by default</td>
-<td>Connection 15 messages/s; Destination 10 requests/min, sends and edits together</td>
-<td>Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares</td>
-<td>Destination 5 requests/s</td>
-<td>Destination 5 requests/s</td>
-</tr>
-<tr>
-<td>Edit window</td>
-<td>none by default; the server setting <code>PostEditTimeLimit</code> is unlimited, so keep it</td>
-<td>none for the bot's own messages</td>
-<td>the bridge declares it, or none; Muster publishes a new Root message past it</td>
-<td>not applicable</td>
-<td>the chat's own; Muster does not know it</td>
-</tr>
-<tr>
-<td>Storms</td>
-<td>one Storm summary per Route</td>
-<td>one Storm summary per Route</td>
-<td>one Storm summary per Route</td>
-<td>every event is sent, no summary</td>
-<td>one Storm summary</td>
-</tr>
-<tr>
-<td>Proxy</td>
-<td>on the Connection</td>
-<td>on the Connection</td>
-<td>on the Connection</td>
-<td>on the Destination</td>
-<td>on the Destination</td>
-</tr>
-<tr>
-<td>Destination check</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes, <code>checkChannel</code>, which posts nothing</td>
-<td>no</td>
-<td>no</td>
-</tr>
-<tr>
-<td>Test message and preview</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes</td>
-<td>yes, sends the event <code>test</code></td>
-<td>yes, sends the <code>create</code> request</td>
-</tr>
-</tbody>
-</table>
-<p>Notes on the cells:</p>
+<p>Every entry is true for this release. An entry that depends on the bridge says "if the bridge declares it": a Bridge
+offers only what its <code>info</code> announces, and Muster adapts to the rest. <a href="write-a-bridge/">Write a bridge</a> lists the
+features.</p>
+<dl>
+<dt>Needs a Connection</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — yes</li>
+<li>Outgoing webhook, events mode — no</li>
+<li>Outgoing webhook, template mode — no</li>
+</ul>
+</dd>
+<dt>One message per Alert Group, kept up to date</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — yes</li>
+<li>Outgoing webhook, events mode — no: one request per event</li>
+<li>Outgoing webhook, template mode — yes, through your requests</li>
+</ul>
+</dd>
+<dt>Edits of the Root message</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — yes, until the bridge's edit window</li>
+<li>Outgoing webhook, events mode — no</li>
+<li>Outgoing webhook, template mode — yes, through the <code>update</code> request</li>
+</ul>
+</dd>
+<dt>Buttons</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — if the bridge declares <code>buttons</code></li>
+<li>Outgoing webhook, events mode — no</li>
+<li>Outgoing webhook, template mode — no</li>
+</ul>
+</dd>
+<dt>Without buttons</dt>
+<dd>
+<ul>
+<li>Mattermost — the web UI and the API</li>
+<li>Telegram — the web UI and the API</li>
+<li>Bridge — <a href="../concepts/statuses-and-commands/#text-commands">Text commands</a> in the Thread if the bridge declares
+  <code>thread_messages</code>; otherwise the web UI and the API</li>
+<li>Outgoing webhook, events mode — the web UI and the API</li>
+<li>Outgoing webhook, template mode — the web UI and the API</li>
+</ul>
+</dd>
+<dt>Thread</dt>
+<dd>
+<ul>
+<li>Mattermost — replies under the Root message</li>
+<li>Telegram — the comments of the Root message, in the channel's discussion group</li>
+<li>Bridge — replies under the Root message</li>
+<li>Outgoing webhook, events mode — no: each event is separate</li>
+<li>Outgoing webhook, template mode — optional <code>reply_in_thread</code>, with an optional <code>open_thread</code></li>
+</ul>
+</dd>
+<dt>Loud</dt>
+<dd>
+<ul>
+<li>Mattermost — a new post with Mentions</li>
+<li>Telegram — a new message</li>
+<li>Bridge — a new message that the bridge posts with <code>notify</code></li>
+<li>Outgoing webhook, events mode — <code>notify</code> is true</li>
+<li>Outgoing webhook, template mode — <code>.Notify</code> is true</li>
+</ul>
+</dd>
+<dt>Quiet</dt>
+<dd>
+<ul>
+<li>Mattermost — an edit, or a post without a Mention</li>
+<li>Telegram — an edit, or a message sent with <code>disable_notification</code></li>
+<li>Bridge — an edit, or a message without a notification if the bridge declares <code>quiet_messages</code></li>
+<li>Outgoing webhook, events mode — <code>notify</code> is false</li>
+<li>Outgoing webhook, template mode — <code>.Notify</code> is false</li>
+</ul>
+</dd>
+<dt>Mentions</dt>
+<dd>
+<ul>
+<li>Mattermost — nobody, <code>@channel</code> <code>@all</code> <code>@here</code>, users, Mattermost groups</li>
+<li>Telegram — nobody, users</li>
+<li>Bridge — nobody, users</li>
+<li>Outgoing webhook, events mode — nobody, everyone, users, groups, as data</li>
+<li>Outgoing webhook, template mode — the same, as data</li>
+</ul>
+</dd>
+<dt>Account links</dt>
+<dd>
+<ul>
+<li>Mattermost — yes: a code the bot sends by direct message</li>
+<li>Telegram — yes: a link that opens the bot</li>
+<li>Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages</li>
+<li>Outgoing webhook, events mode — not needed: no one presses anything</li>
+<li>Outgoing webhook, template mode — not needed</li>
+</ul>
+</dd>
+<dt>Rate limits</dt>
+<dd>
+<ul>
+<li>Mattermost — Connection 5 requests/s; Destination the same by default</li>
+<li>Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together</li>
+<li>Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares</li>
+<li>Outgoing webhook, events mode — Destination 5 requests/s</li>
+<li>Outgoing webhook, template mode — Destination 5 requests/s</li>
+</ul>
+</dd>
+<dt>Edit window</dt>
+<dd>
+<ul>
+<li>Mattermost — none by default; the server setting <code>PostEditTimeLimit</code> is unlimited, so keep it</li>
+<li>Telegram — none for the bot's own messages</li>
+<li>Bridge — the bridge declares it, or none; Muster publishes a new Root message past it</li>
+<li>Outgoing webhook, events mode — not applicable</li>
+<li>Outgoing webhook, template mode — the chat's own; Muster does not know it</li>
+</ul>
+</dd>
+<dt>Storms</dt>
+<dd>
+<ul>
+<li>Mattermost — one Storm summary per Route</li>
+<li>Telegram — one Storm summary per Route</li>
+<li>Bridge — one Storm summary per Route</li>
+<li>Outgoing webhook, events mode — every event is sent, no summary</li>
+<li>Outgoing webhook, template mode — one Storm summary</li>
+</ul>
+</dd>
+<dt>Proxy</dt>
+<dd>
+<ul>
+<li>Mattermost — on the Connection</li>
+<li>Telegram — on the Connection</li>
+<li>Bridge — on the Connection</li>
+<li>Outgoing webhook, events mode — on the Destination</li>
+<li>Outgoing webhook, template mode — on the Destination</li>
+</ul>
+</dd>
+<dt>Destination check</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — yes, <code>checkChannel</code>, which posts nothing</li>
+<li>Outgoing webhook, events mode — no</li>
+<li>Outgoing webhook, template mode — no</li>
+</ul>
+</dd>
+<dt>Test message and preview</dt>
+<dd>
+<ul>
+<li>Mattermost — yes</li>
+<li>Telegram — yes</li>
+<li>Bridge — yes</li>
+<li>Outgoing webhook, events mode — yes, sends the event <code>test</code></li>
+<li>Outgoing webhook, template mode — yes, sends the <code>create</code> request</li>
+</ul>
+</dd>
+</dl>
+<p>Notes on the entries:</p>
 <ul>
 <li><strong>Rate limits.</strong> These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
   default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of

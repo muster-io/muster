@@ -2603,32 +2603,16 @@ back. To change it, enter the whole new URL.</p>
 <p>Without a URL nothing is sent, and <strong>System status</strong> suggests setting one up: "Set up an outgoing heartbeat so that a
 stopped Muster is noticed."</p>
 <h2 id="what-muster-sends">What Muster sends<a class="headerlink" href="#what-muster-sends" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>interval</td>
-<td>1 minute (<code>outgoing_heartbeat.interval</code>)</td>
-</tr>
-<tr>
-<td>method</td>
-<td><code>GET</code> (<code>outgoing_heartbeat.method</code>)</td>
-</tr>
-<tr>
-<td>timeout</td>
-<td>10 seconds for one request (<code>outgoing_heartbeat.timeout</code>)</td>
-</tr>
-<tr>
-<td>retry</td>
-<td>none: a failure is counted and logged, and the next tick is the retry</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Interval</dt>
+<dd>1 minute (<code>outgoing_heartbeat.interval</code>)</dd>
+<dt>Method</dt>
+<dd><code>GET</code> (<code>outgoing_heartbeat.method</code>)</dd>
+<dt>Timeout</dt>
+<dd>10 seconds for one request (<code>outgoing_heartbeat.timeout</code>)</dd>
+<dt>Retry</dt>
+<dd>None: a failure is counted and logged, and the next tick is the retry.</dd>
+</dl>
 <p>Only the <strong>Leader</strong> sends it, so it stops when no replica leads, and it stops when Muster is down. Both are what you want
 a dead man's switch to see. See <a href="../high-availability/#the-leader">High availability</a>. The call goes through the
 <a href="../../messengers/proxies/#what-the-outbound-address-policy-checks">outbound address policy</a> like every other outbound

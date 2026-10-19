@@ -45,11 +45,20 @@ The chart never generates the master keys. Create a Secret yourself and name it 
 without it. The Secret holds, under the key names that the values `masterKeysKey`, `database.passwordKey` and
 `bootstrapAdmin.passwordKey` name:
 
-| Key (default) | Holds |
-|---|---|
-| `secret-keys` | the master key of the Keyring, as `openssl rand -base64 32` prints it |
-| `database-password` | the password of the database user |
-| `bootstrap-password` (no default; set `bootstrapAdmin.passwordKey`) | the password of the first Admin |
+`secret-keys`
+:   the default of `masterKeysKey`
+
+    Holds the master key of the Keyring, as `openssl rand -base64 32` prints it.
+
+`database-password`
+:   the default of `database.passwordKey`
+
+    Holds the password of the database user.
+
+`bootstrap-password`
+:   no default; set `bootstrapAdmin.passwordKey`
+
+    Holds the password of the first Admin.
 
 ```sh
 kubectl create namespace muster
@@ -129,10 +138,15 @@ system. The readiness probe checks only the database, and a startup probe gives 
 
 Muster has two addresses that other systems use, and the chart takes both as values:
 
-| Value | Environment variable | Used for |
-|---|---|---|
-| `publicURL` | `MUSTER_PUBLIC_URL` | people: the web UI, links in messages, the OIDC redirect |
-| `ingestURL` | `MUSTER_INGEST_URL` | machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook |
+`publicURL`
+:   environment variable: `MUSTER_PUBLIC_URL`
+
+    Used for people: the web UI, links in messages, the OIDC redirect.
+
+`ingestURL`
+:   environment variable: `MUSTER_INGEST_URL`
+
+    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.
 
 `ingestURL` defaults to `publicURL`. Muster never derives either from an Ingress or a route: set them to the addresses
 that people and machines really use, or the links it builds will be wrong.

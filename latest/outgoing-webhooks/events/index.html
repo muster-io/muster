@@ -2810,139 +2810,75 @@ field, for example <code>/events/headers/0/value</code>: the value is shown to e
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>version</code></td>
-<td><code>1</code>.</td>
-</tr>
-<tr>
-<td><code>event</code></td>
-<td>The lifecycle event, one of the names below.</td>
-</tr>
-<tr>
-<td><code>notify</code></td>
-<td><code>true</code> exactly when the event is Loud.</td>
-</tr>
-<tr>
-<td><code>mentions</code></td>
-<td>Who the event mentions under the Destination's Mention settings, as data: <code>{"type": "everyone"}</code>, <code>{"type": "group", "name": …}</code> or <code>{"type": "user", "id": …, "name": …, "login": …}</code>. Always <code>[]</code> for a Quiet event.</td>
-</tr>
-<tr>
-<td><code>sequence</code></td>
-<td>The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps, and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".</td>
-</tr>
-<tr>
-<td><code>occurred_at</code></td>
-<td>When the event was recorded.</td>
-</tr>
-<tr>
-<td><code>actor</code></td>
-<td>Who made the change: a <code>user</code> or <code>service_account</code> with <code>id</code>, <code>name</code> (and the user's <code>login</code>, or the <code>token_name</code> used) and the <code>transport</code> (<code>ui</code>, <code>api</code>, <code>mattermost</code>, <code>telegram</code>, <code>bridge</code>, <code>cli</code>), or <code>system</code> with the <code>reason</code>, for example <code>timer</code>.</td>
-</tr>
-<tr>
-<td><code>alert_group</code></td>
-<td>The Alert Group as it was when the event was recorded: number, <code>id</code>, title, <code>summary</code>, status, the <code>owner</code> (<code>id</code>, <code>name</code>, <code>login</code>) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.</td>
-</tr>
-<tr>
-<td><code>alerts</code></td>
-<td>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>version</code></dt>
+<dd><code>1</code>.</dd>
+<dt><code>event</code></dt>
+<dd>The lifecycle event, one of the names below.</dd>
+<dt><code>notify</code></dt>
+<dd><code>true</code> exactly when the event is Loud.</dd>
+<dt><code>mentions</code></dt>
+<dd>Who the event mentions under the Destination's Mention settings, as data: <code>{"type": "everyone"}</code>,
+<code>{"type": "group", "name": …}</code> or <code>{"type": "user", "id": …, "name": …, "login": …}</code>. Always <code>[]</code> for a Quiet
+event.</dd>
+<dt><code>sequence</code></dt>
+<dd>The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
+and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".</dd>
+<dt><code>occurred_at</code></dt>
+<dd>When the event was recorded.</dd>
+<dt><code>actor</code></dt>
+<dd>Who made the change: a <code>user</code> or <code>service_account</code> with <code>id</code>, <code>name</code> (and the user's <code>login</code>, or the <code>token_name</code>
+used) and the <code>transport</code> (<code>ui</code>, <code>api</code>, <code>mattermost</code>, <code>telegram</code>, <code>bridge</code>, <code>cli</code>), or <code>system</code> with the <code>reason</code>,
+for example <code>timer</code>.</dd>
+<dt><code>alert_group</code></dt>
+<dd>The Alert Group as it was when the event was recorded: number, <code>id</code>, title, <code>summary</code>, status, the <code>owner</code> (<code>id</code>,
+<code>name</code>, <code>login</code>) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.</dd>
+<dt><code>alerts</code></dt>
+<dd>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</dd>
+</dl>
 <p>The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.</p>
 <h3 id="event-names">Event names<a class="headerlink" href="#event-names" title="Permanent link">&para;</a></h3>
 <p>Every row of the lifecycle event tables is one event, Quiet ones and those with nothing to show in a messenger
 included. What delivery itself does — a Publication, a Storm summary, a final edit — is not a lifecycle event and is
 never sent.</p>
-<table>
-<thead>
-<tr>
-<th><code>event</code></th>
-<th><code>notify</code></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>created</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>alerts_added</code></td>
-<td>true while firing; false while acknowledged or snoozed</td>
-</tr>
-<tr>
-<td><code>alert_replaced</code>, <code>alert_resolved</code>, <code>alert_continued</code>, <code>annotations_changed</code>, <code>severity_raised</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>urgency_raised</code></td>
-<td>true when the rise ends a Snooze or removes the acknowledgement; false otherwise</td>
-</tr>
-<tr>
-<td><code>reopened</code></td>
-<td>true while firing or acknowledged; false while snoozed</td>
-</tr>
-<tr>
-<td><code>snooze_ended</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>resolved</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>moved_to_default_route</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>acknowledged</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>takeover</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>unacknowledged</code></td>
-<td>true when disabling or deleting the Owner released it; false for the Command</td>
-</tr>
-<tr>
-<td><code>unresolved</code>, <code>snoozed</code>, <code>unsnoozed</code>, <code>note_added</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>ack_timeout</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>unclaimed</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>reminder</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>reminder_answered</code></td>
-<td>false</td>
-</tr>
-<tr>
-<td><code>auto_unacknowledged</code></td>
-<td>true</td>
-</tr>
-<tr>
-<td><code>notices_missed</code></td>
-<td>true</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>created</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>alerts_added</code></dt>
+<dd><code>notify</code>: true while firing; false while acknowledged or snoozed</dd>
+<dt><code>alert_replaced</code>, <code>alert_resolved</code>, <code>alert_continued</code>, <code>annotations_changed</code>, <code>severity_raised</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>urgency_raised</code></dt>
+<dd><code>notify</code>: true when the rise ends a Snooze or removes the acknowledgement; false otherwise</dd>
+<dt><code>reopened</code></dt>
+<dd><code>notify</code>: true while firing or acknowledged; false while snoozed</dd>
+<dt><code>snooze_ended</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>resolved</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>moved_to_default_route</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>acknowledged</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>takeover</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>unacknowledged</code></dt>
+<dd><code>notify</code>: true when disabling or deleting the Owner released it; false for the Command</dd>
+<dt><code>unresolved</code>, <code>snoozed</code>, <code>unsnoozed</code>, <code>note_added</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>ack_timeout</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>unclaimed</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>reminder</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>reminder_answered</code></dt>
+<dd><code>notify</code>: false</dd>
+<dt><code>auto_unacknowledged</code></dt>
+<dd><code>notify</code>: true</dd>
+<dt><code>notices_missed</code></dt>
+<dd><code>notify</code>: true</dd>
+</dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>
 <h3 id="versioning">Versioning<a class="headerlink" href="#versioning" title="Permanent link">&para;</a></h3>
@@ -2959,36 +2895,19 @@ Group's order.</p>
   order per Alert Group, none dropped and with no age limit.</li>
 </ul>
 <h2 id="how-the-answer-counts">How the answer counts<a class="headerlink" href="#how-the-answer-counts" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Answer</th>
-<th>Outcome</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>2xx</code></td>
-<td>Delivered.</td>
-</tr>
-<tr>
-<td><code>429</code> or <code>503</code> with <code>Retry-After</code></td>
-<td>The same event is sent again exactly when asked.</td>
-</tr>
-<tr>
-<td><code>408</code>, any other <code>5xx</code>, a timeout or a network error</td>
-<td>Retried with backoff; after <code>delivery.transient_budget</code> the Destination becomes Broken.</td>
-</tr>
-<tr>
-<td><code>401</code>, <code>403</code>, <code>404</code>, <code>410</code></td>
-<td>The Destination becomes Broken; the event waits and is the probe.</td>
-</tr>
-<tr>
-<td><code>400</code>, <code>413</code>, <code>422</code>, a redirect, any other answer</td>
-<td>That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never followed; the error names its target.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>2xx</code></dt>
+<dd>Delivered.</dd>
+<dt><code>429</code> or <code>503</code> with <code>Retry-After</code></dt>
+<dd>The same event is sent again exactly when asked.</dd>
+<dt><code>408</code>, any other <code>5xx</code>, a timeout or a network error</dt>
+<dd>Retried with backoff; after <code>delivery.transient_budget</code> the Destination becomes Broken.</dd>
+<dt><code>401</code>, <code>403</code>, <code>404</code>, <code>410</code></dt>
+<dd>The Destination becomes Broken; the event waits and is the probe.</dd>
+<dt><code>400</code>, <code>413</code>, <code>422</code>, a redirect, any other answer</dt>
+<dd>That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never
+followed; the error names its target.</dd>
+</dl>
 <p>Requests go through the outbound address policy: a URL that resolves to a link-local, cloud metadata, multicast or
 unspecified address is refused under every policy, and loopback and private addresses need an allowed network. A
 refused request makes the Destination Broken with the rule as the reason, because every later request would be

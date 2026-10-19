@@ -2734,28 +2734,15 @@ docker<span class="w"> </span>compose<span class="w"> </span><span class="nb">ex
 </code></pre></div>
 <p>The image has no shell, so run the binary directly. A command that reads a password from standard input needs
 <code>kubectl exec -i</code> or <code>docker compose exec -T</code>.</p>
-<table>
-<thead>
-<tr>
-<th>Command</th>
-<th>Needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>doctor</code>, <code>migrate</code>, <code>secrets rotate-key</code></td>
-<td>the database settings, <code>MUSTER_PUBLIC_URL</code> and the master keys (<code>MUSTER_SECRET_KEYS</code> or <code>MUSTER_SECRET_KEYS_FILE</code>)</td>
-</tr>
-<tr>
-<td><code>admin</code>, <code>ingest replay</code></td>
-<td>the database settings and <code>MUSTER_PUBLIC_URL</code>; they do not open the Keyring</td>
-</tr>
-<tr>
-<td><code>bridge check</code>, <code>version</code></td>
-<td>nothing</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>doctor</code>, <code>migrate</code>, <code>secrets rotate-key</code></dt>
+<dd>Need the database settings, <code>MUSTER_PUBLIC_URL</code> and the master keys (<code>MUSTER_SECRET_KEYS</code> or
+<code>MUSTER_SECRET_KEYS_FILE</code>).</dd>
+<dt><code>admin</code>, <code>ingest replay</code></dt>
+<dd>Need the database settings and <code>MUSTER_PUBLIC_URL</code>; they do not open the Keyring.</dd>
+<dt><code>bridge check</code>, <code>version</code></dt>
+<dd>Need nothing.</dd>
+</dl>
 <p>The <a href="../../reference/environment/">environment reference</a> lists the variables, and <a href="../../install/database/">the database</a>
 the ways to set the connection.</p>
 <h2 id="-actor"><code>--actor</code><a class="headerlink" href="#-actor" title="Permanent link">&para;</a></h2>
@@ -2768,48 +2755,24 @@ command exits 2 before it connects, and nothing changes. <code>migrate</code> an
 </code></pre></div>
 <p>Checks and <strong>only reads</strong>. Each check prints one line, <code>OK</code>, <code>WARN</code> or <code>FAIL</code>, then its name and detail. The command
 exits 1 when a check fails. A warning does not fail it.</p>
-<table>
-<thead>
-<tr>
-<th>Check</th>
-<th>Looks at</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>database</code></td>
-<td>the main connection works</td>
-</tr>
-<tr>
-<td><code>postgresql_version</code></td>
-<td>PostgreSQL 14 or newer</td>
-</tr>
-<tr>
-<td><code>session_connection</code></td>
-<td>the session connection supports advisory locks and <code>LISTEN</code>, and the mode of each pooler</td>
-</tr>
-<tr>
-<td><code>tls_main</code>, <code>tls_session</code></td>
-<td>whether each connection is encrypted; <code>WARN</code>, not <code>FAIL</code>, when it is not</td>
-</tr>
-<tr>
-<td><code>key_canary</code></td>
-<td>the master keys can decrypt the canary, so they belong to this database</td>
-</tr>
-<tr>
-<td><code>keyring</code></td>
-<td>the active key is held, and which other keys are still needed, removable or not active yet</td>
-</tr>
-<tr>
-<td><code>clock_skew</code></td>
-<td>the replica's clock against the database clock, <code>WARN</code> above 2 seconds</td>
-</tr>
-<tr>
-<td><code>connection &lt;name&gt;</code>, <code>destination &lt;name&gt;</code></td>
-<td>the check of every Connection and every Destination that has one</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>database</code></dt>
+<dd>Looks at: the main connection works.</dd>
+<dt><code>postgresql_version</code></dt>
+<dd>Looks at: PostgreSQL 14 or newer.</dd>
+<dt><code>session_connection</code></dt>
+<dd>Looks at: the session connection supports advisory locks and <code>LISTEN</code>, and the mode of each pooler.</dd>
+<dt><code>tls_main</code>, <code>tls_session</code></dt>
+<dd>Looks at: whether each connection is encrypted; <code>WARN</code>, not <code>FAIL</code>, when it is not.</dd>
+<dt><code>key_canary</code></dt>
+<dd>Looks at: the master keys can decrypt the canary, so they belong to this database.</dd>
+<dt><code>keyring</code></dt>
+<dd>Looks at: the active key is held, and which other keys are still needed, removable or not active yet.</dd>
+<dt><code>clock_skew</code></dt>
+<dd>Looks at: the replica's clock against the database clock, <code>WARN</code> above 2 seconds.</dd>
+<dt><code>connection &lt;name&gt;</code>, <code>destination &lt;name&gt;</code></dt>
+<dd>Looks at: the check of every Connection and every Destination that has one.</dd>
+</dl>
 <p>Run it after an install, after a <a href="../backup-and-restore/">restore</a>, after an <a href="../upgrades/">upgrade</a>, and when you suspect
 the database, a pooler or the keys.</p>
 <h2 id="muster-migrate"><code>muster migrate</code><a class="headerlink" href="#muster-migrate" title="Permanent link">&para;</a></h2>

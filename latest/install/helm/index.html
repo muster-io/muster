@@ -2696,28 +2696,23 @@ the tag itself, such as <code>v1.2.3</code>.</p>
 <p>The chart never generates the master keys. Create a Secret yourself and name it in <code>existingSecret</code>; rendering fails
 without it. The Secret holds, under the key names that the values <code>masterKeysKey</code>, <code>database.passwordKey</code> and
 <code>bootstrapAdmin.passwordKey</code> name:</p>
-<table>
-<thead>
-<tr>
-<th>Key (default)</th>
-<th>Holds</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>secret-keys</code></td>
-<td>the master key of the Keyring, as <code>openssl rand -base64 32</code> prints it</td>
-</tr>
-<tr>
-<td><code>database-password</code></td>
-<td>the password of the database user</td>
-</tr>
-<tr>
-<td><code>bootstrap-password</code> (no default; set <code>bootstrapAdmin.passwordKey</code>)</td>
-<td>the password of the first Admin</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>secret-keys</code></dt>
+<dd>
+<p>the default of <code>masterKeysKey</code></p>
+<p>Holds the master key of the Keyring, as <code>openssl rand -base64 32</code> prints it.</p>
+</dd>
+<dt><code>database-password</code></dt>
+<dd>
+<p>the default of <code>database.passwordKey</code></p>
+<p>Holds the password of the database user.</p>
+</dd>
+<dt><code>bootstrap-password</code></dt>
+<dd>
+<p>no default; set <code>bootstrapAdmin.passwordKey</code></p>
+<p>Holds the password of the first Admin.</p>
+</dd>
+</dl>
 <div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>create<span class="w"> </span>namespace<span class="w"> </span>muster
 kubectl<span class="w"> </span>-n<span class="w"> </span>muster<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>muster<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--from-literal<span class="o">=</span>secret-keys<span class="o">=</span><span class="s2">"</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w"> </span><span class="m">32</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
@@ -2784,27 +2779,18 @@ lock, so that the pods of a rollout do not migrate at once. The pods run as a no
 system. The readiness probe checks only the database, and a startup probe gives a slow start up to five minutes.</p>
 <h2 id="the-two-public-addresses">The two public addresses<a class="headerlink" href="#the-two-public-addresses" title="Permanent link">&para;</a></h2>
 <p>Muster has two addresses that other systems use, and the chart takes both as values:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Environment variable</th>
-<th>Used for</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>publicURL</code></td>
-<td><code>MUSTER_PUBLIC_URL</code></td>
-<td>people: the web UI, links in messages, the OIDC redirect</td>
-</tr>
-<tr>
-<td><code>ingestURL</code></td>
-<td><code>MUSTER_INGEST_URL</code></td>
-<td>machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>publicURL</code></dt>
+<dd>
+<p>environment variable: <code>MUSTER_PUBLIC_URL</code></p>
+<p>Used for people: the web UI, links in messages, the OIDC redirect.</p>
+</dd>
+<dt><code>ingestURL</code></dt>
+<dd>
+<p>environment variable: <code>MUSTER_INGEST_URL</code></p>
+<p>Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.</p>
+</dd>
+</dl>
 <p><code>ingestURL</code> defaults to <code>publicURL</code>. Muster never derives either from an Ingress or a route: set them to the addresses
 that people and machines really use, or the links it builds will be wrong.</p>
 <p>Muster serves ingestion on its own listener (<code>8081</code>) apart from the web UI and the API (<code>8080</code>), and the chart gives

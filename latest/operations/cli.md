@@ -36,11 +36,15 @@ docker compose exec muster muster doctor
 The image has no shell, so run the binary directly. A command that reads a password from standard input needs
 `kubectl exec -i` or `docker compose exec -T`.
 
-| Command | Needs |
-|---|---|
-| `doctor`, `migrate`, `secrets rotate-key` | the database settings, `MUSTER_PUBLIC_URL` and the master keys (`MUSTER_SECRET_KEYS` or `MUSTER_SECRET_KEYS_FILE`) |
-| `admin`, `ingest replay` | the database settings and `MUSTER_PUBLIC_URL`; they do not open the Keyring |
-| `bridge check`, `version` | nothing |
+`doctor`, `migrate`, `secrets rotate-key`
+:   Need the database settings, `MUSTER_PUBLIC_URL` and the master keys (`MUSTER_SECRET_KEYS` or
+    `MUSTER_SECRET_KEYS_FILE`).
+
+`admin`, `ingest replay`
+:   Need the database settings and `MUSTER_PUBLIC_URL`; they do not open the Keyring.
+
+`bridge check`, `version`
+:   Need nothing.
 
 The [environment reference](../reference/environment.md) lists the variables, and [the database](../install/database.md)
 the ways to set the connection.
@@ -61,16 +65,29 @@ muster doctor
 Checks and **only reads**. Each check prints one line, `OK`, `WARN` or `FAIL`, then its name and detail. The command
 exits 1 when a check fails. A warning does not fail it.
 
-| Check | Looks at |
-|---|---|
-| `database` | the main connection works |
-| `postgresql_version` | PostgreSQL 14 or newer |
-| `session_connection` | the session connection supports advisory locks and `LISTEN`, and the mode of each pooler |
-| `tls_main`, `tls_session` | whether each connection is encrypted; `WARN`, not `FAIL`, when it is not |
-| `key_canary` | the master keys can decrypt the canary, so they belong to this database |
-| `keyring` | the active key is held, and which other keys are still needed, removable or not active yet |
-| `clock_skew` | the replica's clock against the database clock, `WARN` above 2 seconds |
-| `connection <name>`, `destination <name>` | the check of every Connection and every Destination that has one |
+`database`
+:   Looks at: the main connection works.
+
+`postgresql_version`
+:   Looks at: PostgreSQL 14 or newer.
+
+`session_connection`
+:   Looks at: the session connection supports advisory locks and `LISTEN`, and the mode of each pooler.
+
+`tls_main`, `tls_session`
+:   Looks at: whether each connection is encrypted; `WARN`, not `FAIL`, when it is not.
+
+`key_canary`
+:   Looks at: the master keys can decrypt the canary, so they belong to this database.
+
+`keyring`
+:   Looks at: the active key is held, and which other keys are still needed, removable or not active yet.
+
+`clock_skew`
+:   Looks at: the replica's clock against the database clock, `WARN` above 2 seconds.
+
+`connection <name>`, `destination <name>`
+:   Looks at: the check of every Connection and every Destination that has one.
 
 Run it after an install, after a [restore](backup-and-restore.md), after an [upgrade](upgrades.md), and when you suspect
 the database, a pooler or the keys.

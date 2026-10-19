@@ -11,12 +11,26 @@ when `MusterDestinationBroken` fires, use the [runbook](../operations/runbooks/M
 
 Every failed attempt is sorted into a class, and the class decides what happens:
 
-| Class | Examples | Result |
-|---|---|---|
-| Retry after | The messenger answers `429` and says how long to wait | Muster waits exactly that long and then sends the latest state. It is not counted as an attempt. |
-| Transient | A `5xx`, a timeout, a network error | Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After **10 attempts within 30 minutes** (`delivery.transient_budget`) the Destination becomes Broken as *unavailable*. |
-| Fatal | The messenger refuses the bot or the request for good | The Destination becomes Broken **at once**. |
-| Unknown | An answer Muster does not recognize | Not retried. That one delivery ends as *Not delivered*, and the Destination stays healthy. |
+Retry after
+:   examples: the messenger answers `429` and says how long to wait
+
+    Muster waits exactly that long and then sends the latest state. It is not counted as an attempt.
+
+Transient
+:   examples: a `5xx`, a timeout, a network error
+
+    Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After **10 attempts within 30
+    minutes** (`delivery.transient_budget`) the Destination becomes Broken as *unavailable*.
+
+Fatal
+:   examples: the messenger refuses the bot or the request for good
+
+    The Destination becomes Broken **at once**.
+
+Unknown
+:   examples: an answer Muster does not recognize
+
+    Not retried. That one delivery ends as *Not delivered*, and the Destination stays healthy.
 
 What is Fatal depends on the messenger:
 
@@ -109,12 +123,20 @@ Muster edits a Root message for as long as its Alert Group is open, which can ta
 depends on the messenger. This is not about a Broken Destination, but the messages that Muster can no longer edit look
 similar from the outside, so here is the whole picture.
 
-| Destination | Edit window |
-|---|---|
-| Telegram | None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age. |
-| Mattermost | The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then answers has not been verified. See [Keep posts editable](../messengers/mattermost.md#keep-posts-editable). |
-| Bridge | The bridge declares it in its info, as `limits.edit_max_age_seconds`, or declares none. |
-| Outgoing webhook | Muster does not know the chat's rules. In template mode an `update` request that the chat refuses ends as Not delivered or Broken by the usual classes. |
+Telegram
+:   None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.
+
+Mattermost
+:   The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If
+    an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then
+    answers has not been verified. See [Keep posts editable](../messengers/mattermost.md#keep-posts-editable).
+
+Bridge
+:   The bridge declares it in its info, as `limits.edit_max_age_seconds`, or declares none.
+
+Outgoing webhook
+:   Muster does not know the chat's rules. In template mode an `update` request that the chat refuses ends as Not
+    delivered or Broken by the usual classes.
 
 For a **Bridge** with an edit window, Muster stops editing a Root message 60 seconds before the window closes
 (`bridge.edit_window_margin`). After that:

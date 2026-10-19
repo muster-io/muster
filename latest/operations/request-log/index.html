@@ -2657,32 +2657,17 @@ check before saving, also of a Connection that does not exist yet, the Destinati
 probe of a Broken Destination.</p>
 <p><strong>Requests that reach Muster</strong> on the ingest listener, each with the answer Muster gave, refused ones included — a bad
 signature, a wrong secret token, a Connection in the other event delivery mode:</p>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Path</th>
-<th>What it is</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>press</code></td>
-<td><code>/api/v1/callbacks/mattermost/{connection_id}</code></td>
-<td>a button press in Mattermost</td>
-</tr>
-<tr>
-<td><code>update</code></td>
-<td><code>/api/v1/callbacks/telegram/{connection_id}</code></td>
-<td>a Telegram update in the webhook mode</td>
-</tr>
-<tr>
-<td><code>push</code></td>
-<td><code>/api/v1/callbacks/bridge/{connection_id}</code></td>
-<td>an event a bridge pushes</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>press</code></dt>
+<dt><code>/api/v1/callbacks/mattermost/{connection_id}</code></dt>
+<dd>A button press in Mattermost.</dd>
+<dt><code>update</code></dt>
+<dt><code>/api/v1/callbacks/telegram/{connection_id}</code></dt>
+<dd>A Telegram update in the webhook mode.</dd>
+<dt><code>push</code></dt>
+<dt><code>/api/v1/callbacks/bridge/{connection_id}</code></dt>
+<dd>An event a bridge pushes.</dd>
+</dl>
 <p>A record holds:</p>
 <ul>
 <li>the time, and the direction: <strong>Sent</strong> (→) or <strong>Received</strong> (←);</li>
@@ -2710,28 +2695,15 @@ signature, a wrong secret token, a Connection in the other event delivery mode:<
 </ul>
 <h2 id="bounds">Bounds<a class="headerlink" href="#bounds" title="Permanent link">&para;</a></h2>
 <p>The bounds are built in; nothing configures them.</p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>request_log.max_records</code></td>
-<td>the newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of new Connections in an Organization</td>
-</tr>
-<tr>
-<td><code>request_log.max_age</code></td>
-<td>7 days on the business clock</td>
-</tr>
-<tr>
-<td><code>request_log.body_max</code></td>
-<td>16 KB (16,384 bytes) of each request or answer body</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>request_log.max_records</code></dt>
+<dd>The newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of
+new Connections in an Organization.</dd>
+<dt><code>request_log.max_age</code></dt>
+<dd>7 days on the business clock.</dd>
+<dt><code>request_log.body_max</code></dt>
+<dd>16 KB (16,384 bytes) of each request or answer body.</dd>
+</dl>
 <ul>
 <li>A record past either bound is neither listed nor shown, even before it is deleted. The Leader deletes such records
   every minute (the task <code>request_log_pruning</code>).</li>
@@ -2765,32 +2737,16 @@ Every masked value reads <code>[redacted]</code>.</p>
 </ul>
 <p>Headers and bodies are untrusted text. The record view shows them as plain text and never renders HTML or Markdown.</p>
 <h2 id="who-may-read-it">Who may read it<a class="headerlink" href="#who-may-read-it" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>To</th>
-<th>Needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>list the records of a Connection, or of a check run</td>
-<td><code>connections:read</code></td>
-</tr>
-<tr>
-<td>list the records of a Destination</td>
-<td><code>destinations:read</code></td>
-</tr>
-<tr>
-<td>open a record of a Connection, or of a check before saving</td>
-<td><code>connections:read</code></td>
-</tr>
-<tr>
-<td>open a record of an outgoing webhook Destination</td>
-<td><code>destinations:read</code></td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>To list the records of a Connection, or of a check run</dt>
+<dd>needs: <code>connections:read</code></dd>
+<dt>To list the records of a Destination</dt>
+<dd>needs: <code>destinations:read</code></dd>
+<dt>To open a record of a Connection, or of a check before saving</dt>
+<dd>needs: <code>connections:read</code></dd>
+<dt>To open a record of an outgoing webhook Destination</dt>
+<dd>needs: <code>destinations:read</code></dd>
+</dl>
 <p>A messenger Destination's requests are its Connection's: its list shows the records of its Connection that concern
 it, and opening one of them needs <code>connections:read</code>. The built-in Roles — Admin, Responder and Viewer — hold both
 Permissions; a Personal access token may hold fewer.</p>

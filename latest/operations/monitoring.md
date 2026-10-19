@@ -21,10 +21,11 @@ in the `*_info` metrics, which the dashboard joins. No metric carries an alert l
 
 The chart renders one group of rules, named `muster`, when you enable one of:
 
-| Value | Renders | Needs |
-|---|---|---|
-| `alerting.prometheusRule.enabled` | a `PrometheusRule` | the Prometheus Operator CRDs |
-| `alerting.vmRule.enabled` | a `VMRule` | the VictoriaMetrics Operator CRDs |
+`alerting.prometheusRule.enabled`
+:   renders: a `PrometheusRule` · needs: the Prometheus Operator CRDs
+
+`alerting.vmRule.enabled`
+:   renders: a `VMRule` · needs: the VictoriaMetrics Operator CRDs
 
 Both take extra labels (`alerting.prometheusRule.labels`, `alerting.vmRule.labels`) for the rule selector of your
 operator. Each rule has a `description` and a `runbook_url` that points to its [runbook](runbooks/index.md), built from
@@ -91,10 +92,16 @@ The chart ships one dashboard, "Muster", with the fixed uid `muster`, a data sou
 `namespace`/`job`, `integration`, `route` and `destination`. It has four rows: Overview, Ingestion, Delivery and
 Platform. You enable it in either or both ways, each behind its own flag:
 
-| Value | Renders | Notes |
-|---|---|---|
-| `dashboard.configMap.enabled` | a `ConfigMap` with the dashboard JSON | for the Grafana sidecar; `dashboard.configMap.labels` defaults to `grafana_dashboard: "1"` |
-| `dashboard.grafanaDashboard.enabled` | a `GrafanaDashboard` of the Grafana Operator | references that ConfigMap, so it needs `dashboard.configMap.enabled` too; `instanceSelector`, `folder` and `allowCrossNamespaceImport` are values |
+`dashboard.configMap.enabled`
+:   renders: a `ConfigMap` with the dashboard JSON
+
+    For the Grafana sidecar; `dashboard.configMap.labels` defaults to `grafana_dashboard: "1"`.
+
+`dashboard.grafanaDashboard.enabled`
+:   renders: a `GrafanaDashboard` of the Grafana Operator
+
+    References that ConfigMap, so it needs `dashboard.configMap.enabled` too; `instanceSelector`, `folder` and
+    `allowCrossNamespaceImport` are values.
 
 ## Internal alerts
 

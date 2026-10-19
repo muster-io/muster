@@ -2852,32 +2852,16 @@ Once an Alert has resolved by any route, the next firing of the same fingerprint
 <h2 id="why-an-alert-resolved">Why an Alert resolved<a class="headerlink" href="#why-an-alert-resolved" title="Permanent link">&para;</a></h2>
 <p>Every Alert resolved by Muster carries one of four reasons, which the Integration's Alerts view shows and the metric
 <code>muster_alerts_resolved_total</code> counts:</p>
-<table>
-<thead>
-<tr>
-<th>Reason</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>resolved</code></td>
-<td>Alertmanager sent <code>resolved</code>, for the Alert or for its whole group.</td>
-</tr>
-<tr>
-<td><code>gone</code></td>
-<td>Missing from at least two consecutive Snapshots for the minimum absence.</td>
-</tr>
-<tr>
-<td><code>stale</code></td>
-<td>Its group sent nothing for three learned repeat intervals, with a live Heartbeat.</td>
-</tr>
-<tr>
-<td><code>integration_deleted</code></td>
-<td>Its Integration was deleted.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>resolved</code></dt>
+<dd>Alertmanager sent <code>resolved</code>, for the Alert or for its whole group.</dd>
+<dt><code>gone</code></dt>
+<dd>Missing from at least two consecutive Snapshots for the minimum absence.</dd>
+<dt><code>stale</code></dt>
+<dd>Its group sent nothing for three learned repeat intervals, with a live Heartbeat.</dd>
+<dt><code>integration_deleted</code></dt>
+<dd>Its Integration was deleted.</dd>
+</dl>
 <p>When the last Alert of an Alert Group resolves, the Alert Group is resolved by the system with the reason of the last
 one. See <a href="../alert-groups/#reopening">Alert Groups</a> for what happens if the problem returns. If processing ever misbehaves,
 <code>muster ingest replay</code> reprocesses Stored Snapshots, and because processing is idempotent it changes nothing that was

@@ -2733,56 +2733,31 @@ Signing secret as in the events mode, <code>Content-Type: application/json</code
 <code>Content-Type</code> header of its own, and <code>User-Agent: Muster/&lt;version&gt;</code> when it has no <code>User-Agent</code> of its own. The
 requests go through Muster's outbound address policy and the Destination's proxy; redirects are never followed. The answers map to outcomes as in the <a href="../events/#how-the-answer-counts">events mode</a>.</p>
 <h2 id="what-the-templates-read">What the templates read<a class="headerlink" href="#what-the-templates-read" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Field</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>.AlertGroup</code></td>
-<td><code>Number</code>, <code>Title</code>, <code>Summary</code>, <code>Status</code>, <code>Route</code>, <code>SeverityLevel</code>, <code>Urgent</code>, <code>StartedAt</code>, <code>URL</code>, <code>ReopenCount</code>, <code>Owner</code>; absent (nil) for a Storm summary</td>
-</tr>
-<tr>
-<td><code>.Alerts</code></td>
-<td>the Alerts, as in Alertmanager: <code>Status</code>, <code>Labels</code>, <code>Annotations</code>, <code>StartsAt</code>, <code>EndsAt</code>, <code>GeneratorURL</code>, <code>Fingerprint</code>; with <code>.Alerts.Firing</code> and <code>.Alerts.Resolved</code></td>
-</tr>
-<tr>
-<td><code>.Status</code>, <code>.GroupLabels</code>, <code>.CommonLabels</code>, <code>.CommonAnnotations</code>, <code>.ExternalURL</code></td>
-<td>as in Alertmanager templates</td>
-</tr>
-<tr>
-<td><code>.Storm</code></td>
-<td>for a Storm summary only: <code>Route</code>, <code>AlertGroupCount</code>, <code>UrgentCount</code>, <code>Final</code> (the Storm ended) and <code>URL</code> (the Route's Alert Groups in Muster)</td>
-</tr>
-<tr>
-<td><code>.Response</code></td>
-<td>the values the extraction rules found, by name</td>
-</tr>
-<tr>
-<td><code>.Event</code></td>
-<td>the lifecycle event a Thread reply carries, such as <code>alerts_added</code>; empty otherwise</td>
-</tr>
-<tr>
-<td><code>.Notify</code></td>
-<td><code>true</code> when the message is Loud</td>
-</tr>
-<tr>
-<td><code>.Mentions</code></td>
-<td>the Mention targets of a Loud message (see below)</td>
-</tr>
-<tr>
-<td><code>.Secrets</code></td>
-<td>the Destination's Secrets, by name</td>
-</tr>
-<tr>
-<td><code>.Final</code></td>
-<td>in the final edit only: "No longer updated here; current state in Muster: {link}"</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>.AlertGroup</code></dt>
+<dd><code>Number</code>, <code>Title</code>, <code>Summary</code>, <code>Status</code>, <code>Route</code>, <code>SeverityLevel</code>, <code>Urgent</code>, <code>StartedAt</code>, <code>URL</code>, <code>ReopenCount</code>,
+<code>Owner</code>; absent (nil) for a Storm summary.</dd>
+<dt><code>.Alerts</code></dt>
+<dd>The Alerts, as in Alertmanager: <code>Status</code>, <code>Labels</code>, <code>Annotations</code>, <code>StartsAt</code>, <code>EndsAt</code>, <code>GeneratorURL</code>,
+<code>Fingerprint</code>; with <code>.Alerts.Firing</code> and <code>.Alerts.Resolved</code>.</dd>
+<dt><code>.Status</code>, <code>.GroupLabels</code>, <code>.CommonLabels</code>, <code>.CommonAnnotations</code>, <code>.ExternalURL</code></dt>
+<dd>As in Alertmanager templates.</dd>
+<dt><code>.Storm</code></dt>
+<dd>For a Storm summary only: <code>Route</code>, <code>AlertGroupCount</code>, <code>UrgentCount</code>, <code>Final</code> (the Storm ended) and <code>URL</code> (the
+Route's Alert Groups in Muster).</dd>
+<dt><code>.Response</code></dt>
+<dd>The values the extraction rules found, by name.</dd>
+<dt><code>.Event</code></dt>
+<dd>The lifecycle event a Thread reply carries, such as <code>alerts_added</code>; empty otherwise.</dd>
+<dt><code>.Notify</code></dt>
+<dd><code>true</code> when the message is Loud.</dd>
+<dt><code>.Mentions</code></dt>
+<dd>The Mention targets of a Loud message (see below).</dd>
+<dt><code>.Secrets</code></dt>
+<dd>The Destination's Secrets, by name.</dd>
+<dt><code>.Final</code></dt>
+<dd>In the final edit only: "No longer updated here; current state in Muster: {link}".</dd>
+</dl>
 <p>Alert data reach the templates <strong>as received</strong>, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with <code>toJson</code> (or <code>js</code> inside a string), so that a label with a quote or a line break cannot
 break the body.</p>

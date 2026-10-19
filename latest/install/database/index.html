@@ -2605,24 +2605,13 @@ creates it. Neither the Helm chart nor the compose example backs up the database
 <h2 id="as-a-url-or-as-fields">As a URL or as fields<a class="headerlink" href="#as-a-url-or-as-fields" title="Permanent link">&para;</a></h2>
 <p>Give the database to Muster in one of two forms. The settings are in the
 <a href="../../reference/environment/">environment reference</a>.</p>
-<table>
-<thead>
-<tr>
-<th>Form</th>
-<th>Variables</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>a URL</td>
-<td><code>MUSTER_DATABASE_URL</code>, such as <code>postgres://muster:&lt;password&gt;@db.example.org:5432/muster?sslmode=require</code></td>
-</tr>
-<tr>
-<td>fields</td>
-<td><code>MUSTER_DATABASE_HOST</code>, <code>MUSTER_DATABASE_PORT</code> (default <code>5432</code>), <code>MUSTER_DATABASE_NAME</code>, <code>MUSTER_DATABASE_USER</code>, <code>MUSTER_DATABASE_PASSWORD</code> or <code>MUSTER_DATABASE_PASSWORD_FILE</code>, <code>MUSTER_DATABASE_SSLMODE</code> (default <code>prefer</code>)</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>A URL</dt>
+<dd><code>MUSTER_DATABASE_URL</code>, such as <code>postgres://muster:&lt;password&gt;@db.example.org:5432/muster?sslmode=require</code></dd>
+<dt>Fields</dt>
+<dd><code>MUSTER_DATABASE_HOST</code>, <code>MUSTER_DATABASE_PORT</code> (default <code>5432</code>), <code>MUSTER_DATABASE_NAME</code>, <code>MUSTER_DATABASE_USER</code>,
+<code>MUSTER_DATABASE_PASSWORD</code> or <code>MUSTER_DATABASE_PASSWORD_FILE</code>, <code>MUSTER_DATABASE_SSLMODE</code> (default <code>prefer</code>)</dd>
+</dl>
 <p>When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
 <code>sslmode</code> into the connection and takes the password only from it, so <code>PGPORT</code>, <code>PGSSLMODE</code>, <code>PGPASSWORD</code> and
 <code>PGPASSFILE</code> change nothing. The database driver still reads the other <code>PG*</code> variables, such as <code>PGSSLROOTCERT</code>, for
@@ -2715,24 +2704,13 @@ it and completes a <code>LISTEN/NOTIFY</code> round trip. Behind a transaction p
 stops with an error that names <code>MUSTER_DATABASE_SESSION_URL</code>.</p>
 <p>So when the main connection goes through PgBouncer in transaction mode, give Muster a session connection that reaches
 PostgreSQL directly or through a pooler in session mode:</p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>MUSTER_DATABASE_SESSION_URL</code></td>
-<td>a whole URL for the session connection</td>
-</tr>
-<tr>
-<td><code>MUSTER_DATABASE_SESSION_HOST</code>, <code>MUSTER_DATABASE_SESSION_PORT</code></td>
-<td>only the host and the port; the user, password, database and <code>sslmode</code> are those of the main connection</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>MUSTER_DATABASE_SESSION_URL</code></dt>
+<dd>A whole URL for the session connection.</dd>
+<dt><code>MUSTER_DATABASE_SESSION_HOST</code></dt>
+<dt><code>MUSTER_DATABASE_SESSION_PORT</code></dt>
+<dd>Only the host and the port; the user, password, database and <code>sslmode</code> are those of the main connection.</dd>
+</dl>
 <p>In the chart, these are <code>database.sessionHost</code> and <code>database.sessionPort</code>. With CloudNativePG, the main connection can
 use a <code>Pooler</code> object in transaction mode, whose Service takes the <code>Pooler</code>'s name, here <code>muster-db-pooler-rw</code>, and the
 session connection the <code>-rw</code> Service of the <code>Cluster</code>:</p>
@@ -2751,47 +2729,20 @@ queries fail with errors about missing prepared statements. Set <code>max_prepar
 <p>PgBouncer is optional. Most installations connect straight to PostgreSQL, and then no session setting is needed.</p>
 <h2 id="tls">TLS<a class="headerlink" href="#tls" title="Permanent link">&para;</a></h2>
 <p><code>MUSTER_DATABASE_SSLMODE</code> (or <code>sslmode</code> in the URL) takes the values of PostgreSQL's client library:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Encrypts</th>
-<th>Checks the server</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>disable</code></td>
-<td>never</td>
-<td>nothing</td>
-</tr>
-<tr>
-<td><code>allow</code></td>
-<td>only when the server insists</td>
-<td>nothing</td>
-</tr>
-<tr>
-<td><code>prefer</code> (default)</td>
-<td>when the server offers TLS, else falls back to plain text</td>
-<td>nothing</td>
-</tr>
-<tr>
-<td><code>require</code></td>
-<td>always</td>
-<td>nothing: protects against listening in, not against an impostor</td>
-</tr>
-<tr>
-<td><code>verify-ca</code></td>
-<td>always</td>
-<td>the certificate chain against a trusted CA</td>
-</tr>
-<tr>
-<td><code>verify-full</code></td>
-<td>always</td>
-<td>the chain, and that the certificate names the host you connect to</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>disable</code></dt>
+<dd>encrypts: never · checks the server: nothing</dd>
+<dt><code>allow</code></dt>
+<dd>encrypts: only when the server insists · checks the server: nothing</dd>
+<dt><code>prefer</code> (default)</dt>
+<dd>encrypts: when the server offers TLS, else falls back to plain text · checks the server: nothing</dd>
+<dt><code>require</code></dt>
+<dd>encrypts: always · checks the server: nothing: protects against listening in, not against an impostor</dd>
+<dt><code>verify-ca</code></dt>
+<dd>encrypts: always · checks the server: the certificate chain against a trusted CA</dd>
+<dt><code>verify-full</code></dt>
+<dd>encrypts: always · checks the server: the chain, and that the certificate names the host you connect to</dd>
+</dl>
 <p><code>prefer</code> makes a fresh installation work, but it also connects without encryption to a server that has none. Muster tells
 you: <code>muster doctor</code> reports each connection as encrypted or not, and a start with an unencrypted connection logs a
 warning. For anything but a single machine, set <code>require</code> at least, and <code>verify-full</code> where you can: the certificate then

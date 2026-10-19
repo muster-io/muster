@@ -4055,60 +4055,36 @@ that was deleted, is <code>gone</code>. A reply may carry buttons, such as "Stil
 <h2 id="required-and-optional-features">Required and optional features<a class="headerlink" href="#required-and-optional-features" title="Permanent link">&para;</a></h2>
 <p>The <code>capabilities</code> of <code>info</code> declare the optional features. A missing member means the feature is not offered, and
 Muster adapts:</p>
-<table>
-<thead>
-<tr>
-<th>Feature</th>
-<th>Without it</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>buttons</code></td>
-<td>Muster sends no buttons. When the bridge has <code>thread_messages</code>, a Root message that is not resolved ends with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write <strong>Text commands</strong> in the Thread. Without either, the link to Muster is the only way to act.</td>
-</tr>
-<tr>
-<td><code>thread_messages</code></td>
-<td>Muster receives no Text commands. <code>all</code> reports every message of a person in a Thread of a message of the bot, <code>mentions_only</code> only those that mention the bot (the commands line then says "mentioning the bot").</td>
-</tr>
-<tr>
-<td><code>direct_messages</code> with <code>bot_can_start</code>, and a <code>user_lookup</code> other than <code>none</code></td>
-<td>Account links work by token only: the person sends the token to the bot. With both, a person can also link by a code that the bot sends.</td>
-</tr>
-<tr>
-<td><code>private_answers</code></td>
-<td>Muster's answer to a press appears in the Thread of the message instead of privately. <code>ephemeral</code> is a message only the person sees, <code>popup</code> a short plain-text pop-up.</td>
-</tr>
-<tr>
-<td><code>native_mentions</code></td>
-<td>A Mention marker is rendered as the person's name in plain text, which notifies nobody.</td>
-</tr>
-<tr>
-<td><code>quiet_messages</code></td>
-<td>A Quiet message (<code>notify: false</code>) is posted as an ordinary message, without Mentions.</td>
-</tr>
-<tr>
-<td><code>status_color</code></td>
-<td>The bridge shows the <code>emoji</code> of the status instead of the <code>color</code>.</td>
-</tr>
-<tr>
-<td><code>deletion_events</code></td>
-<td>Muster learns that a Root message was deleted from <code>gone</code> on its next edit or Thread reply, instead of at once.</td>
-</tr>
-<tr>
-<td><code>delete</code></td>
-<td>Muster L1 never deletes messages, so nothing changes.</td>
-</tr>
-<tr>
-<td><code>link_url_template</code></td>
-<td>The profile shows the Account link token without a link that opens the bot.</td>
-</tr>
-<tr>
-<td><code>edit_max_age_seconds</code></td>
-<td>A value of <code>null</code> means Muster edits a Root message for as long as its Alert Group changes.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>buttons</code></dt>
+<dd>Without it: Muster sends no buttons. When the bridge has <code>thread_messages</code>, a Root message that is not resolved ends
+with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write <strong>Text
+commands</strong> in the Thread. Without either, the link to Muster is the only way to act.</dd>
+<dt><code>thread_messages</code></dt>
+<dd>Without it: Muster receives no Text commands. <code>all</code> reports every message of a person in a Thread of a message of
+the bot, <code>mentions_only</code> only those that mention the bot (the commands line then says "mentioning the bot").</dd>
+<dt><code>direct_messages</code> with <code>bot_can_start</code>, and a <code>user_lookup</code> other than <code>none</code></dt>
+<dd>Without it: Account links work by token only: the person sends the token to the bot. With both, a person can also
+link by a code that the bot sends.</dd>
+<dt><code>private_answers</code></dt>
+<dd>Without it: Muster's answer to a press appears in the Thread of the message instead of privately. <code>ephemeral</code> is a
+message only the person sees, <code>popup</code> a short plain-text pop-up.</dd>
+<dt><code>native_mentions</code></dt>
+<dd>Without it: a Mention marker is rendered as the person's name in plain text, which notifies nobody.</dd>
+<dt><code>quiet_messages</code></dt>
+<dd>Without it: a Quiet message (<code>notify: false</code>) is posted as an ordinary message, without Mentions.</dd>
+<dt><code>status_color</code></dt>
+<dd>Without it: the bridge shows the <code>emoji</code> of the status instead of the <code>color</code>.</dd>
+<dt><code>deletion_events</code></dt>
+<dd>Without it: Muster learns that a Root message was deleted from <code>gone</code> on its next edit or Thread reply, instead of
+at once.</dd>
+<dt><code>delete</code></dt>
+<dd>Without it: Muster L1 never deletes messages, so nothing changes.</dd>
+<dt><code>link_url_template</code></dt>
+<dd>Without it: the profile shows the Account link token without a link that opens the bot.</dd>
+<dt><code>edit_max_age_seconds</code></dt>
+<dd>Without it: a value of <code>null</code> means Muster edits a Root message for as long as its Alert Group changes.</dd>
+</dl>
 <p>A bridge sends <code>press</code> events only with <code>buttons</code>, <code>thread_message</code> events only with <code>thread_messages</code>, and
 <code>message_deleted</code> events only with <code>deletion_events</code>. Muster handles every event type whatever its copy of <code>info</code>
 says, so an event sent just after a feature was switched on is not lost.</p>
@@ -4219,28 +4195,15 @@ answered.</p>
 </code></pre></div>
 <p>The bridge shows <code>text</code> to the person who caused the event <code>event_id</code>, as plain text of at most 500 characters, and
 answers where:</p>
-<table>
-<thead>
-<tr>
-<th>The event</th>
-<th>Where the bridge shows the answer</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>a <code>press</code></td>
-<td>privately (<code>ephemeral</code> or <code>popup</code>) when the messenger allows it, with <code>private_answers</code>, and the press is recent enough; otherwise in the Thread of the message (<code>thread</code>)</td>
-</tr>
-<tr>
-<td>a <code>thread_message</code></td>
-<td>in that Thread (<code>thread</code>), never as a pop-up</td>
-</tr>
-<tr>
-<td>an <code>account_link</code></td>
-<td>in the direct chat it came from (<code>direct</code>)</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>A <code>press</code></dt>
+<dd>Privately (<code>ephemeral</code> or <code>popup</code>) when the messenger allows it, with <code>private_answers</code>, and the press is recent
+enough; otherwise in the Thread of the message (<code>thread</code>).</dd>
+<dt>A <code>thread_message</code></dt>
+<dd>In that Thread (<code>thread</code>), never as a pop-up.</dd>
+<dt>An <code>account_link</code></dt>
+<dd>In the direct chat it came from (<code>direct</code>).</dd>
+</dl>
 <p>An event that the bridge no longer knows, or can no longer answer anywhere, is <code>gone</code>.</p>
 <pre class="mermaid"><code>sequenceDiagram
   autonumber
@@ -4277,42 +4240,35 @@ Connection. It drops a press or a Text command whose <code>occurred_at</code> is
 <h2 id="error-classes">Error classes<a class="headerlink" href="#error-classes" title="Permanent link">&para;</a></h2>
 <p>Errors are RFC 9457 problems (<code>application/problem+json</code>) with a <code>class</code> member that <strong>the bridge chooses</strong>, because
 only the bridge knows what its messenger's codes mean. Muster acts on the class:</p>
-<table>
-<thead>
-<tr>
-<th><code>class</code></th>
-<th>Means</th>
-<th>Muster</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>transient</code></td>
-<td>a temporary failure: the messenger is down, a timeout</td>
-<td>retries with exponential backoff; repeated failures make the Destination Broken</td>
-</tr>
-<tr>
-<td><code>rate_limited</code></td>
-<td>the messenger or the bridge throttles; send <code>Retry-After</code> in seconds</td>
-<td>waits exactly that long, for the channel, or for every channel of the bot when <code>scope</code> is <code>bot</code>; not counted as a failure; a wait longer than 15 minutes, or none given, is treated as <code>transient</code></td>
-</tr>
-<tr>
-<td><code>gone</code></td>
-<td>the message no longer exists: deleted, or its Thread is gone</td>
-<td>publishes the Alert Group again once; with <code>reason</code> <code>edit_window_closed</code>, treats the message as past its edit window</td>
-</tr>
-<tr>
-<td><code>forbidden</code></td>
-<td>the channel is missing, the bot was removed from it or lacks a right, the bot was blocked</td>
-<td>marks the Destination Broken until a check succeeds</td>
-</tr>
-<tr>
-<td><code>invalid</code></td>
-<td>the request cannot succeed as sent: too long, malformed, an unknown id</td>
-<td>ends that delivery as Not delivered, without retrying</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>transient</code></dt>
+<dd>
+<p>A temporary failure: the messenger is down, a timeout.</p>
+<p>Muster retries with exponential backoff; repeated failures make the Destination Broken.</p>
+</dd>
+<dt><code>rate_limited</code></dt>
+<dd>
+<p>The messenger or the bridge throttles; send <code>Retry-After</code> in seconds.</p>
+<p>Muster waits exactly that long, for the channel, or for every channel of the bot when <code>scope</code> is <code>bot</code>; not counted
+as a failure; a wait longer than 15 minutes, or none given, is treated as <code>transient</code>.</p>
+</dd>
+<dt><code>gone</code></dt>
+<dd>
+<p>The message no longer exists: deleted, or its Thread is gone.</p>
+<p>Muster publishes the Alert Group again once; with <code>reason</code> <code>edit_window_closed</code>, treats the message as past its edit
+window.</p>
+</dd>
+<dt><code>forbidden</code></dt>
+<dd>
+<p>The channel is missing, the bot was removed from it or lacks a right, the bot was blocked.</p>
+<p>Muster marks the Destination Broken until a check succeeds.</p>
+</dd>
+<dt><code>invalid</code></dt>
+<dd>
+<p>The request cannot succeed as sent: too long, malformed, an unknown id.</p>
+<p>Muster ends that delivery as Not delivered, without retrying.</p>
+</dd>
+</dl>
 <p>The problem members are <code>title</code>, <code>status</code>, an optional <code>detail</code>, the <code>class</code>, and for <code>rate_limited</code> a <code>scope</code> of
 <code>channel</code> (the default) or <code>bot</code>. The <code>detail</code> is shown to the Admin as the reason, as untrusted text, so write it for a
 person and never put a secret in it.</p>
@@ -4335,85 +4291,37 @@ else.</p>
 channel."), and Muster probes it with <code>checkChannel</code> until the channel works again.</p>
 <p><strong>An answer without a <code>class</code>.</strong> Muster still classifies a problem without a <code>class</code>, or an answer that is not a
 problem, by its status, so a plain framework error does no harm:</p>
-<table>
-<thead>
-<tr>
-<th>Status</th>
-<th>Class</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>401</code>, <code>403</code></td>
-<td><code>forbidden</code></td>
-</tr>
-<tr>
-<td><code>408</code></td>
-<td><code>transient</code></td>
-</tr>
-<tr>
-<td><code>429</code>, and <code>503</code> with <code>Retry-After</code></td>
-<td><code>rate_limited</code></td>
-</tr>
-<tr>
-<td>other <code>5xx</code>, timeouts and network errors</td>
-<td><code>transient</code></td>
-</tr>
-<tr>
-<td><code>404</code>, <code>410</code>, a redirect and everything else</td>
-<td><code>invalid</code></td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>401</code>, <code>403</code></dt>
+<dd>class: <code>forbidden</code></dd>
+<dt><code>408</code></dt>
+<dd>class: <code>transient</code></dd>
+<dt><code>429</code>, and <code>503</code> with <code>Retry-After</code></dt>
+<dd>class: <code>rate_limited</code></dd>
+<dt>Other <code>5xx</code>, timeouts and network errors</dt>
+<dd>class: <code>transient</code></dd>
+<dt><code>404</code>, <code>410</code>, a redirect and everything else</dt>
+<dd>class: <code>invalid</code></dd>
+</dl>
 <p>No status is ever read as <code>gone</code>. Muster also follows no redirects, and treats one as a configuration error.</p>
 <p><strong>An example mapping.</strong> Parley, a fictional messenger, answers its own error codes. The bridge for Parley maps them
 like this, as the <code>classify</code> function above does:</p>
-<table>
-<thead>
-<tr>
-<th>Parley says</th>
-<th>Class</th>
-<th>Why</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>502</code>, a timeout, <code>unavailable</code></td>
-<td><code>transient</code></td>
-<td>the messenger is down</td>
-</tr>
-<tr>
-<td><code>slow_down</code>, with <code>retry_in</code> seconds</td>
-<td><code>rate_limited</code></td>
-<td>send <code>Retry-After</code>; use <code>scope</code> <code>bot</code> if the limit holds for the whole account</td>
-</tr>
-<tr>
-<td><code>message_not_found</code>, <code>thread_removed</code></td>
-<td><code>gone</code></td>
-<td>the message or its Thread is deleted</td>
-</tr>
-<tr>
-<td><code>edit_too_old</code></td>
-<td><code>gone</code> with <code>reason</code> <code>edit_window_closed</code></td>
-<td>the message exists, but cannot be edited any more</td>
-</tr>
-<tr>
-<td><code>channel_not_found</code>, <code>not_a_member</code>, <code>bot_banned</code>, <code>no_permission</code></td>
-<td><code>forbidden</code></td>
-<td>the channel is unusable until somebody fixes it</td>
-</tr>
-<tr>
-<td><code>text_too_long</code>, <code>bad_request</code></td>
-<td><code>invalid</code></td>
-<td>this request cannot succeed</td>
-</tr>
-<tr>
-<td><code>user_blocked_bot</code> on a direct message</td>
-<td><code>forbidden</code></td>
-<td>the account cannot receive a message from the bot</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>502</code>, a timeout, <code>unavailable</code></dt>
+<dd>class: <code>transient</code> · why: the messenger is down</dd>
+<dt><code>slow_down</code>, with <code>retry_in</code> seconds</dt>
+<dd>class: <code>rate_limited</code> · why: send <code>Retry-After</code>; use <code>scope</code> <code>bot</code> if the limit holds for the whole account</dd>
+<dt><code>message_not_found</code>, <code>thread_removed</code></dt>
+<dd>class: <code>gone</code> · why: the message or its Thread is deleted</dd>
+<dt><code>edit_too_old</code></dt>
+<dd>class: <code>gone</code> with <code>reason</code> <code>edit_window_closed</code> · why: the message exists, but cannot be edited any more</dd>
+<dt><code>channel_not_found</code>, <code>not_a_member</code>, <code>bot_banned</code>, <code>no_permission</code></dt>
+<dd>class: <code>forbidden</code> · why: the channel is unusable until somebody fixes it</dd>
+<dt><code>text_too_long</code>, <code>bad_request</code></dt>
+<dd>class: <code>invalid</code> · why: this request cannot succeed</dd>
+<dt><code>user_blocked_bot</code> on a direct message</dt>
+<dd>class: <code>forbidden</code> · why: the account cannot receive a message from the bot</dd>
+</dl>
 <h3 id="edit-windows">Edit windows<a class="headerlink" href="#edit-windows" title="Permanent link">&para;</a></h3>
 <p>Some messengers let a bot edit a message only for a while. Declare how long in <code>limits.edit_max_age_seconds</code>. Muster
 then stops editing a Root message once it is as old as that, less 60 seconds, measured from its publication on Muster's
@@ -4460,37 +4368,28 @@ the Alert Group as on the current one, so the bridge must keep reporting them.</
 <code>occurred_at</code>; Muster handles each <code>id</code> of a Connection once. An <code>id</code> is up to 200 printable ASCII characters without
 spaces, because it travels as the <code>webhook-id</code> header of a push. A bridge delivers every event at least once, so
 Muster deduplicates.</p>
-<table>
-<thead>
-<tr>
-<th><code>type</code></th>
-<th>When</th>
-<th>Needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>press</code></td>
-<td>a person pressed a button of a message of the bot, already confirmed to the messenger</td>
-<td><code>buttons</code></td>
-</tr>
-<tr>
-<td><code>thread_message</code></td>
-<td>a person, never the bot itself, wrote in the Thread of a message of the bot</td>
-<td><code>thread_messages</code></td>
-</tr>
-<tr>
-<td><code>account_link</code></td>
-<td>a person sent the bot an Account link token, or opened the <code>link_url_template</code> link</td>
-<td>always</td>
-</tr>
-<tr>
-<td><code>message_deleted</code></td>
-<td>a message of the bot was deleted in the messenger</td>
-<td><code>deletion_events</code></td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>press</code></dt>
+<dd>
+<p>needs: <code>buttons</code></p>
+<p>A person pressed a button of a message of the bot, already confirmed to the messenger.</p>
+</dd>
+<dt><code>thread_message</code></dt>
+<dd>
+<p>needs: <code>thread_messages</code></p>
+<p>A person, never the bot itself, wrote in the Thread of a message of the bot.</p>
+</dd>
+<dt><code>account_link</code></dt>
+<dd>
+<p>needs: always</p>
+<p>A person sent the bot an Account link token, or opened the <code>link_url_template</code> link.</p>
+</dd>
+<dt><code>message_deleted</code></dt>
+<dd>
+<p>needs: <code>deletion_events</code></p>
+<p>A message of the bot was deleted in the messenger.</p>
+</dd>
+</dl>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ev-1001"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"press"</span><span class="p">,</span>
@@ -4564,28 +4463,14 @@ each event, one per request, to the callback address that the Connection shows:<
 <div class="highlight"><pre><span></span><code>&lt;MUSTER_INGEST_URL&gt;/api/v1/callbacks/bridge/&lt;connection id&gt;
 </code></pre></div>
 <p>The request is signed as <a href="https://www.standardwebhooks.com/">Standard Webhooks</a> specifies:</p>
-<table>
-<thead>
-<tr>
-<th>Header</th>
-<th>Value</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>webhook-id</code></td>
-<td>the event's <code>id</code>, kept across retries</td>
-</tr>
-<tr>
-<td><code>webhook-timestamp</code></td>
-<td>the Unix time of this attempt, in seconds</td>
-</tr>
-<tr>
-<td><code>webhook-signature</code></td>
-<td><code>v1,</code> followed by the base64 of HMAC-SHA256 over <code>&lt;webhook-id&gt;.&lt;webhook-timestamp&gt;.&lt;body&gt;</code></td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>webhook-id</code></dt>
+<dd>The event's <code>id</code>, kept across retries.</dd>
+<dt><code>webhook-timestamp</code></dt>
+<dd>The Unix time of this attempt, in seconds.</dd>
+<dt><code>webhook-signature</code></dt>
+<dd><code>v1,</code> followed by the base64 of HMAC-SHA256 over <code>&lt;webhook-id&gt;.&lt;webhook-timestamp&gt;.&lt;body&gt;</code>.</dd>
+</dl>
 <p>The push secret is <code>whsec_</code> followed by the base64 of at least 24 random bytes. The HMAC key is <strong>the decoded bytes</strong>:
 strip the prefix <code>whsec_</code> and base64-decode the rest. The signed content is the three values joined with full stops,
 followed by the exact body that you send. <code>webhook-signature</code> may hold several signatures separated by spaces, which is
@@ -4809,48 +4694,24 @@ channel of <code>--channel</code>, delete its own message there when the bridge 
 <div class="highlight"><pre><span></span><code>muster<span class="w"> </span>bridge<span class="w"> </span>check<span class="w"> </span>http://127.0.0.1:18095<span class="w"> </span>--token-file<span class="w"> </span>./token<span class="w"> </span>--channel<span class="w"> </span>alerts<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--forbidden-channel<span class="w"> </span>nobot<span class="w"> </span>--handle<span class="w"> </span>alice<span class="w"> </span>--no-interactive
 </code></pre></div>
-<table>
-<thead>
-<tr>
-<th>Flag</th>
-<th>Does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>--token-file &lt;file&gt;</code></td>
-<td>the bridge's token, alone in the file (required)</td>
-</tr>
-<tr>
-<td><code>--channel &lt;id&gt;</code></td>
-<td>a channel the bot can post to (required)</td>
-</tr>
-<tr>
-<td><code>--forbidden-channel &lt;id&gt;</code></td>
-<td>a channel the bot cannot use, which must answer <code>forbidden</code>; without it the step <code>forbidden_channel</code> is skipped</td>
-</tr>
-<tr>
-<td><code>--handle &lt;handle&gt;</code></td>
-<td>a person to look up and write to; without it <code>user_lookup</code> and <code>direct_message</code> are skipped</td>
-</tr>
-<tr>
-<td><code>--push-listen &lt;addr&gt;</code></td>
-<td>where the push listener listens, <code>127.0.0.1:0</code> by default</td>
-</tr>
-<tr>
-<td><code>--push-url &lt;url&gt;</code></td>
-<td>where the bridge reaches the push listener, the listener's own address by default</td>
-</tr>
-<tr>
-<td><code>--push-secret-file &lt;file&gt;</code></td>
-<td>the push secret, <code>whsec_</code> and base64, instead of a generated one</td>
-</tr>
-<tr>
-<td><code>--no-interactive</code></td>
-<td>skip <code>press</code> and <code>push</code>, which need a person</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>--token-file &lt;file&gt;</code></dt>
+<dd>The bridge's token, alone in the file (required).</dd>
+<dt><code>--channel &lt;id&gt;</code></dt>
+<dd>A channel the bot can post to (required).</dd>
+<dt><code>--forbidden-channel &lt;id&gt;</code></dt>
+<dd>A channel the bot cannot use, which must answer <code>forbidden</code>; without it the step <code>forbidden_channel</code> is skipped.</dd>
+<dt><code>--handle &lt;handle&gt;</code></dt>
+<dd>A person to look up and write to; without it <code>user_lookup</code> and <code>direct_message</code> are skipped.</dd>
+<dt><code>--push-listen &lt;addr&gt;</code></dt>
+<dd>Where the push listener listens, <code>127.0.0.1:0</code> by default.</dd>
+<dt><code>--push-url &lt;url&gt;</code></dt>
+<dd>Where the bridge reaches the push listener, the listener's own address by default.</dd>
+<dt><code>--push-secret-file &lt;file&gt;</code></dt>
+<dd>The push secret, <code>whsec_</code> and base64, instead of a generated one.</dd>
+<dt><code>--no-interactive</code></dt>
+<dd>Skip <code>press</code> and <code>push</code>, which need a person.</dd>
+</dl>
 <p>Flags may come before or after the URL. The check prints one line per step as it ends: <code>PASS &lt;step&gt;</code>,
 <code>FAIL &lt;step&gt;: &lt;reason&gt;</code> or <code>SKIP &lt;step&gt;: &lt;why&gt;</code>. The steps run in this order: <code>info</code>, <code>channel_check</code>, <code>post</code>,
 <code>replayed_key</code>, <code>buttons</code>, <code>edit</code>, <code>thread_reply</code>, <code>thread_ref</code>, <code>forbidden_channel</code>, <code>user_lookup</code>, <code>direct_message</code>,

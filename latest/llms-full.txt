@@ -291,11 +291,20 @@ The chart never generates the master keys. Create a Secret yourself and name it 
 without it. The Secret holds, under the key names that the values `masterKeysKey`, `database.passwordKey` and
 `bootstrapAdmin.passwordKey` name:
 
-| Key (default) | Holds |
-|---|---|
-| `secret-keys` | the master key of the Keyring, as `openssl rand -base64 32` prints it |
-| `database-password` | the password of the database user |
-| `bootstrap-password` (no default; set `bootstrapAdmin.passwordKey`) | the password of the first Admin |
+`secret-keys`
+:   the default of `masterKeysKey`
+
+    Holds the master key of the Keyring, as `openssl rand -base64 32` prints it.
+
+`database-password`
+:   the default of `database.passwordKey`
+
+    Holds the password of the database user.
+
+`bootstrap-password`
+:   no default; set `bootstrapAdmin.passwordKey`
+
+    Holds the password of the first Admin.
 
 ```sh
 kubectl create namespace muster
@@ -375,10 +384,15 @@ system. The readiness probe checks only the database, and a startup probe gives 
 
 Muster has two addresses that other systems use, and the chart takes both as values:
 
-| Value | Environment variable | Used for |
-|---|---|---|
-| `publicURL` | `MUSTER_PUBLIC_URL` | people: the web UI, links in messages, the OIDC redirect |
-| `ingestURL` | `MUSTER_INGEST_URL` | machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook |
+`publicURL`
+:   environment variable: `MUSTER_PUBLIC_URL`
+
+    Used for people: the web UI, links in messages, the OIDC redirect.
+
+`ingestURL`
+:   environment variable: `MUSTER_INGEST_URL`
+
+    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.
 
 `ingestURL` defaults to `publicURL`. Muster never derives either from an Ingress or a route: set them to the addresses
 that people and machines really use, or the links it builds will be wrong.
@@ -461,10 +475,12 @@ creates it. Neither the Helm chart nor the compose example backs up the database
 Give the database to Muster in one of two forms. The settings are in the
 [environment reference](https://muster-io.github.io/muster/latest/reference/environment.md).
 
-| Form | Variables |
-|---|---|
-| a URL | `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require` |
-| fields | `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`, `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`) |
+A URL
+:   `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require`
+
+Fields
+:   `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`,
+    `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`)
 
 When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
 `sslmode` into the connection and takes the password only from it, so `PGPORT`, `PGSSLMODE`, `PGPASSWORD` and
@@ -581,10 +597,12 @@ stops with an error that names `MUSTER_DATABASE_SESSION_URL`.
 So when the main connection goes through PgBouncer in transaction mode, give Muster a session connection that reaches
 PostgreSQL directly or through a pooler in session mode:
 
-| Setting | Meaning |
-|---|---|
-| `MUSTER_DATABASE_SESSION_URL` | a whole URL for the session connection |
-| `MUSTER_DATABASE_SESSION_HOST`, `MUSTER_DATABASE_SESSION_PORT` | only the host and the port; the user, password, database and `sslmode` are those of the main connection |
+`MUSTER_DATABASE_SESSION_URL`
+:   A whole URL for the session connection.
+
+`MUSTER_DATABASE_SESSION_HOST`
+`MUSTER_DATABASE_SESSION_PORT`
+:   Only the host and the port; the user, password, database and `sslmode` are those of the main connection.
 
 In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
 use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the
@@ -609,14 +627,23 @@ PgBouncer is optional. Most installations connect straight to PostgreSQL, and th
 
 `MUSTER_DATABASE_SSLMODE` (or `sslmode` in the URL) takes the values of PostgreSQL's client library:
 
-| Value | Encrypts | Checks the server |
-|---|---|---|
-| `disable` | never | nothing |
-| `allow` | only when the server insists | nothing |
-| `prefer` (default) | when the server offers TLS, else falls back to plain text | nothing |
-| `require` | always | nothing: protects against listening in, not against an impostor |
-| `verify-ca` | always | the certificate chain against a trusted CA |
-| `verify-full` | always | the chain, and that the certificate names the host you connect to |
+`disable`
+:   encrypts: never · checks the server: nothing
+
+`allow`
+:   encrypts: only when the server insists · checks the server: nothing
+
+`prefer` (default)
+:   encrypts: when the server offers TLS, else falls back to plain text · checks the server: nothing
+
+`require`
+:   encrypts: always · checks the server: nothing: protects against listening in, not against an impostor
+
+`verify-ca`
+:   encrypts: always · checks the server: the certificate chain against a trusted CA
+
+`verify-full`
+:   encrypts: always · checks the server: the chain, and that the certificate names the host you connect to
 
 `prefer` makes a fresh installation work, but it also connects without encryption to a server that has none. Muster tells
 you: `muster doctor` reports each connection as encrypted or not, and a start with an unencrypted connection logs a
@@ -1271,29 +1298,124 @@ decides which Alert Groups reach which Destinations; see [Routes and Group keys]
 
 ## What each Destination type can do
 
-Every cell is true for this release. A cell that depends on the bridge says "if the bridge declares it": a Bridge offers
-only what its `info` announces, and Muster adapts to the rest. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md) lists the features.
+Every entry is true for this release. An entry that depends on the bridge says "if the bridge declares it": a Bridge
+offers only what its `info` announces, and Muster adapts to the rest. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md) lists the
+features.
 
-| | Mattermost | Telegram | Bridge | Outgoing webhook, events mode | Outgoing webhook, template mode |
-|---|---|---|---|---|---|
-| Needs a Connection | yes | yes | yes | no | no |
-| One message per Alert Group, kept up to date | yes | yes | yes | no: one request per event | yes, through your requests |
-| Edits of the Root message | yes | yes | yes, until the bridge's edit window | no | yes, through the `update` request |
-| Buttons | yes | yes | if the bridge declares `buttons` | no | no |
-| Without buttons | the web UI and the API | the web UI and the API | [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares `thread_messages`; otherwise the web UI and the API | the web UI and the API | the web UI and the API |
-| Thread | replies under the Root message | the comments of the Root message, in the channel's discussion group | replies under the Root message | no: each event is separate | optional `reply_in_thread`, with an optional `open_thread` |
-| Loud | a new post with Mentions | a new message | a new message that the bridge posts with `notify` | `notify` is true | `.Notify` is true |
-| Quiet | an edit, or a post without a Mention | an edit, or a message sent with `disable_notification` | an edit, or a message without a notification if the bridge declares `quiet_messages` | `notify` is false | `.Notify` is false |
-| Mentions | nobody, `@channel` `@all` `@here`, users, Mattermost groups | nobody, users | nobody, users | nobody, everyone, users, groups, as data | the same, as data |
-| Account links | yes: a code the bot sends by direct message | yes: a link that opens the bot | yes: a token sent to the bot, and a code if the bridge can find people and send direct messages | not needed: no one presses anything | not needed |
-| Rate limits | Connection 5 requests/s; Destination the same by default | Connection 15 messages/s; Destination 10 requests/min, sends and edits together | Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares | Destination 5 requests/s | Destination 5 requests/s |
-| Edit window | none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it | none for the bot's own messages | the bridge declares it, or none; Muster publishes a new Root message past it | not applicable | the chat's own; Muster does not know it |
-| Storms | one Storm summary per Route | one Storm summary per Route | one Storm summary per Route | every event is sent, no summary | one Storm summary |
-| Proxy | on the Connection | on the Connection | on the Connection | on the Destination | on the Destination |
-| Destination check | yes | yes | yes, `checkChannel`, which posts nothing | no | no |
-| Test message and preview | yes | yes | yes | yes, sends the event `test` | yes, sends the `create` request |
+Needs a Connection
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
 
-Notes on the cells:
+One message per Alert Group, kept up to date
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — no: one request per event
+    - Outgoing webhook, template mode — yes, through your requests
+
+Edits of the Root message
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes, until the bridge's edit window
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — yes, through the `update` request
+
+Buttons
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — if the bridge declares `buttons`
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
+
+Without buttons
+:   - Mattermost — the web UI and the API
+    - Telegram — the web UI and the API
+    - Bridge — [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares
+      `thread_messages`; otherwise the web UI and the API
+    - Outgoing webhook, events mode — the web UI and the API
+    - Outgoing webhook, template mode — the web UI and the API
+
+Thread
+:   - Mattermost — replies under the Root message
+    - Telegram — the comments of the Root message, in the channel's discussion group
+    - Bridge — replies under the Root message
+    - Outgoing webhook, events mode — no: each event is separate
+    - Outgoing webhook, template mode — optional `reply_in_thread`, with an optional `open_thread`
+
+Loud
+:   - Mattermost — a new post with Mentions
+    - Telegram — a new message
+    - Bridge — a new message that the bridge posts with `notify`
+    - Outgoing webhook, events mode — `notify` is true
+    - Outgoing webhook, template mode — `.Notify` is true
+
+Quiet
+:   - Mattermost — an edit, or a post without a Mention
+    - Telegram — an edit, or a message sent with `disable_notification`
+    - Bridge — an edit, or a message without a notification if the bridge declares `quiet_messages`
+    - Outgoing webhook, events mode — `notify` is false
+    - Outgoing webhook, template mode — `.Notify` is false
+
+Mentions
+:   - Mattermost — nobody, `@channel` `@all` `@here`, users, Mattermost groups
+    - Telegram — nobody, users
+    - Bridge — nobody, users
+    - Outgoing webhook, events mode — nobody, everyone, users, groups, as data
+    - Outgoing webhook, template mode — the same, as data
+
+Account links
+:   - Mattermost — yes: a code the bot sends by direct message
+    - Telegram — yes: a link that opens the bot
+    - Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages
+    - Outgoing webhook, events mode — not needed: no one presses anything
+    - Outgoing webhook, template mode — not needed
+
+Rate limits
+:   - Mattermost — Connection 5 requests/s; Destination the same by default
+    - Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together
+    - Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares
+    - Outgoing webhook, events mode — Destination 5 requests/s
+    - Outgoing webhook, template mode — Destination 5 requests/s
+
+Edit window
+:   - Mattermost — none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it
+    - Telegram — none for the bot's own messages
+    - Bridge — the bridge declares it, or none; Muster publishes a new Root message past it
+    - Outgoing webhook, events mode — not applicable
+    - Outgoing webhook, template mode — the chat's own; Muster does not know it
+
+Storms
+:   - Mattermost — one Storm summary per Route
+    - Telegram — one Storm summary per Route
+    - Bridge — one Storm summary per Route
+    - Outgoing webhook, events mode — every event is sent, no summary
+    - Outgoing webhook, template mode — one Storm summary
+
+Proxy
+:   - Mattermost — on the Connection
+    - Telegram — on the Connection
+    - Bridge — on the Connection
+    - Outgoing webhook, events mode — on the Destination
+    - Outgoing webhook, template mode — on the Destination
+
+Destination check
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes, `checkChannel`, which posts nothing
+    - Outgoing webhook, events mode — no
+    - Outgoing webhook, template mode — no
+
+Test message and preview
+:   - Mattermost — yes
+    - Telegram — yes
+    - Bridge — yes
+    - Outgoing webhook, events mode — yes, sends the event `test`
+    - Outgoing webhook, template mode — yes, sends the `create` request
+
+Notes on the entries:
 
 - **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
   default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of
@@ -1988,16 +2110,29 @@ proxy:
 
 A failed step names its cause with a code:
 
-| Code | Cause |
-|---|---|
-| `token_invalid` | The bridge refused the token. |
-| `protocol_version_unknown` | The bridge speaks a protocol version that this Muster does not speak. |
-| `protocol_mismatch` | The answer does not match the protocol, or is larger than 64 KiB. |
-| `event_delivery_not_offered` | The bridge does not offer the Connection's event delivery mode. |
-| `proxy_refused` | The Connection's proxy refused its credentials (`407`). |
-| `timeout`, `connect_failed`, `dns_failed`, `tls_failed` | Muster got no answer from the bridge. |
-| `blocked` | The outbound address policy does not allow the bridge's address. |
-| `request_failed` | The bridge answered with another error; the message names its class and the bridge's text. |
+`token_invalid`
+:   The bridge refused the token.
+
+`protocol_version_unknown`
+:   The bridge speaks a protocol version that this Muster does not speak.
+
+`protocol_mismatch`
+:   The answer does not match the protocol, or is larger than 64 KiB.
+
+`event_delivery_not_offered`
+:   The bridge does not offer the Connection's event delivery mode.
+
+`proxy_refused`
+:   The Connection's proxy refused its credentials (`407`).
+
+`timeout`, `connect_failed`, `dns_failed`, `tls_failed`
+:   Muster got no answer from the bridge.
+
+`blocked`
+:   The outbound address policy does not allow the bridge's address.
+
+`request_failed`
+:   The bridge answered with another error; the message names its class and the bridge's text.
 
 ## Check before saving
 
@@ -3091,19 +3226,44 @@ Content-Type: application/json
 The `capabilities` of `info` declare the optional features. A missing member means the feature is not offered, and
 Muster adapts:
 
-| Feature | Without it |
-|---|---|
-| `buttons` | Muster sends no buttons. When the bridge has `thread_messages`, a Root message that is not resolved ends with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write **Text commands** in the Thread. Without either, the link to Muster is the only way to act. |
-| `thread_messages` | Muster receives no Text commands. `all` reports every message of a person in a Thread of a message of the bot, `mentions_only` only those that mention the bot (the commands line then says "mentioning the bot"). |
-| `direct_messages` with `bot_can_start`, and a `user_lookup` other than `none` | Account links work by token only: the person sends the token to the bot. With both, a person can also link by a code that the bot sends. |
-| `private_answers` | Muster's answer to a press appears in the Thread of the message instead of privately. `ephemeral` is a message only the person sees, `popup` a short plain-text pop-up. |
-| `native_mentions` | A Mention marker is rendered as the person's name in plain text, which notifies nobody. |
-| `quiet_messages` | A Quiet message (`notify: false`) is posted as an ordinary message, without Mentions. |
-| `status_color` | The bridge shows the `emoji` of the status instead of the `color`. |
-| `deletion_events` | Muster learns that a Root message was deleted from `gone` on its next edit or Thread reply, instead of at once. |
-| `delete` | Muster L1 never deletes messages, so nothing changes. |
-| `link_url_template` | The profile shows the Account link token without a link that opens the bot. |
-| `edit_max_age_seconds` | A value of `null` means Muster edits a Root message for as long as its Alert Group changes. |
+`buttons`
+:   Without it: Muster sends no buttons. When the bridge has `thread_messages`, a Root message that is not resolved ends
+    with the commands line, such as "Reply in the Thread: ack · resolve · snooze 1h", and people write **Text
+    commands** in the Thread. Without either, the link to Muster is the only way to act.
+
+`thread_messages`
+:   Without it: Muster receives no Text commands. `all` reports every message of a person in a Thread of a message of
+    the bot, `mentions_only` only those that mention the bot (the commands line then says "mentioning the bot").
+
+`direct_messages` with `bot_can_start`, and a `user_lookup` other than `none`
+:   Without it: Account links work by token only: the person sends the token to the bot. With both, a person can also
+    link by a code that the bot sends.
+
+`private_answers`
+:   Without it: Muster's answer to a press appears in the Thread of the message instead of privately. `ephemeral` is a
+    message only the person sees, `popup` a short plain-text pop-up.
+
+`native_mentions`
+:   Without it: a Mention marker is rendered as the person's name in plain text, which notifies nobody.
+
+`quiet_messages`
+:   Without it: a Quiet message (`notify: false`) is posted as an ordinary message, without Mentions.
+
+`status_color`
+:   Without it: the bridge shows the `emoji` of the status instead of the `color`.
+
+`deletion_events`
+:   Without it: Muster learns that a Root message was deleted from `gone` on its next edit or Thread reply, instead of
+    at once.
+
+`delete`
+:   Without it: Muster L1 never deletes messages, so nothing changes.
+
+`link_url_template`
+:   Without it: the profile shows the Account link token without a link that opens the bot.
+
+`edit_max_age_seconds`
+:   Without it: a value of `null` means Muster edits a Root message for as long as its Alert Group changes.
 
 A bridge sends `press` events only with `buttons`, `thread_message` events only with `thread_messages`, and
 `message_deleted` events only with `deletion_events`. Muster handles every event type whatever its copy of `info`
@@ -3243,11 +3403,15 @@ Content-Type: application/json
 The bridge shows `text` to the person who caused the event `event_id`, as plain text of at most 500 characters, and
 answers where:
 
-| The event | Where the bridge shows the answer |
-|---|---|
-| a `press` | privately (`ephemeral` or `popup`) when the messenger allows it, with `private_answers`, and the press is recent enough; otherwise in the Thread of the message (`thread`) |
-| a `thread_message` | in that Thread (`thread`), never as a pop-up |
-| an `account_link` | in the direct chat it came from (`direct`) |
+A `press`
+:   Privately (`ephemeral` or `popup`) when the messenger allows it, with `private_answers`, and the press is recent
+    enough; otherwise in the Thread of the message (`thread`).
+
+A `thread_message`
+:   In that Thread (`thread`), never as a pop-up.
+
+An `account_link`
+:   In the direct chat it came from (`direct`).
 
 An event that the bridge no longer knows, or can no longer answer anywhere, is `gone`.
 
@@ -3292,13 +3456,32 @@ Connection. It drops a press or a Text command whose `occurred_at` is more than 
 Errors are RFC 9457 problems (`application/problem+json`) with a `class` member that **the bridge chooses**, because
 only the bridge knows what its messenger's codes mean. Muster acts on the class:
 
-| `class` | Means | Muster |
-|---|---|---|
-| `transient` | a temporary failure: the messenger is down, a timeout | retries with exponential backoff; repeated failures make the Destination Broken |
-| `rate_limited` | the messenger or the bridge throttles; send `Retry-After` in seconds | waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted as a failure; a wait longer than 15 minutes, or none given, is treated as `transient` |
-| `gone` | the message no longer exists: deleted, or its Thread is gone | publishes the Alert Group again once; with `reason` `edit_window_closed`, treats the message as past its edit window |
-| `forbidden` | the channel is missing, the bot was removed from it or lacks a right, the bot was blocked | marks the Destination Broken until a check succeeds |
-| `invalid` | the request cannot succeed as sent: too long, malformed, an unknown id | ends that delivery as Not delivered, without retrying |
+`transient`
+:   A temporary failure: the messenger is down, a timeout.
+
+    Muster retries with exponential backoff; repeated failures make the Destination Broken.
+
+`rate_limited`
+:   The messenger or the bridge throttles; send `Retry-After` in seconds.
+
+    Muster waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted
+    as a failure; a wait longer than 15 minutes, or none given, is treated as `transient`.
+
+`gone`
+:   The message no longer exists: deleted, or its Thread is gone.
+
+    Muster publishes the Alert Group again once; with `reason` `edit_window_closed`, treats the message as past its edit
+    window.
+
+`forbidden`
+:   The channel is missing, the bot was removed from it or lacks a right, the bot was blocked.
+
+    Muster marks the Destination Broken until a check succeeds.
+
+`invalid`
+:   The request cannot succeed as sent: too long, malformed, an unknown id.
+
+    Muster ends that delivery as Not delivered, without retrying.
 
 The problem members are `title`, `status`, an optional `detail`, the `class`, and for `rate_limited` a `scope` of
 `channel` (the default) or `bot`. The `detail` is shown to the Admin as the reason, as untrusted text, so write it for a
@@ -3335,28 +3518,46 @@ channel."), and Muster probes it with `checkChannel` until the channel works aga
 **An answer without a `class`.** Muster still classifies a problem without a `class`, or an answer that is not a
 problem, by its status, so a plain framework error does no harm:
 
-| Status | Class |
-|---|---|
-| `401`, `403` | `forbidden` |
-| `408` | `transient` |
-| `429`, and `503` with `Retry-After` | `rate_limited` |
-| other `5xx`, timeouts and network errors | `transient` |
-| `404`, `410`, a redirect and everything else | `invalid` |
+`401`, `403`
+:   class: `forbidden`
+
+`408`
+:   class: `transient`
+
+`429`, and `503` with `Retry-After`
+:   class: `rate_limited`
+
+Other `5xx`, timeouts and network errors
+:   class: `transient`
+
+`404`, `410`, a redirect and everything else
+:   class: `invalid`
 
 No status is ever read as `gone`. Muster also follows no redirects, and treats one as a configuration error.
 
 **An example mapping.** Parley, a fictional messenger, answers its own error codes. The bridge for Parley maps them
 like this, as the `classify` function above does:
 
-| Parley says | Class | Why |
-|---|---|---|
-| `502`, a timeout, `unavailable` | `transient` | the messenger is down |
-| `slow_down`, with `retry_in` seconds | `rate_limited` | send `Retry-After`; use `scope` `bot` if the limit holds for the whole account |
-| `message_not_found`, `thread_removed` | `gone` | the message or its Thread is deleted |
-| `edit_too_old` | `gone` with `reason` `edit_window_closed` | the message exists, but cannot be edited any more |
-| `channel_not_found`, `not_a_member`, `bot_banned`, `no_permission` | `forbidden` | the channel is unusable until somebody fixes it |
-| `text_too_long`, `bad_request` | `invalid` | this request cannot succeed |
-| `user_blocked_bot` on a direct message | `forbidden` | the account cannot receive a message from the bot |
+`502`, a timeout, `unavailable`
+:   class: `transient` · why: the messenger is down
+
+`slow_down`, with `retry_in` seconds
+:   class: `rate_limited` · why: send `Retry-After`; use `scope` `bot` if the limit holds for the whole account
+
+`message_not_found`, `thread_removed`
+:   class: `gone` · why: the message or its Thread is deleted
+
+`edit_too_old`
+:   class: `gone` with `reason` `edit_window_closed` · why: the message exists, but cannot be edited any more
+
+`channel_not_found`, `not_a_member`, `bot_banned`, `no_permission`
+:   class: `forbidden` · why: the channel is unusable until somebody fixes it
+
+`text_too_long`, `bad_request`
+:   class: `invalid` · why: this request cannot succeed
+
+`user_blocked_bot` on a direct message
+:   class: `forbidden` · why: the account cannot receive a message from the bot
 
 ### Edit windows
 
@@ -3414,12 +3615,25 @@ The bridge reports what people do in the messenger as events. Every event has a 
 spaces, because it travels as the `webhook-id` header of a push. A bridge delivers every event at least once, so
 Muster deduplicates.
 
-| `type` | When | Needs |
-|---|---|---|
-| `press` | a person pressed a button of a message of the bot, already confirmed to the messenger | `buttons` |
-| `thread_message` | a person, never the bot itself, wrote in the Thread of a message of the bot | `thread_messages` |
-| `account_link` | a person sent the bot an Account link token, or opened the `link_url_template` link | always |
-| `message_deleted` | a message of the bot was deleted in the messenger | `deletion_events` |
+`press`
+:   needs: `buttons`
+
+    A person pressed a button of a message of the bot, already confirmed to the messenger.
+
+`thread_message`
+:   needs: `thread_messages`
+
+    A person, never the bot itself, wrote in the Thread of a message of the bot.
+
+`account_link`
+:   needs: always
+
+    A person sent the bot an Account link token, or opened the `link_url_template` link.
+
+`message_deleted`
+:   needs: `deletion_events`
+
+    A message of the bot was deleted in the messenger.
 
 ```json
 {
@@ -3513,11 +3727,14 @@ each event, one per request, to the callback address that the Connection shows:
 
 The request is signed as [Standard Webhooks](https://www.standardwebhooks.com/) specifies:
 
-| Header | Value |
-|---|---|
-| `webhook-id` | the event's `id`, kept across retries |
-| `webhook-timestamp` | the Unix time of this attempt, in seconds |
-| `webhook-signature` | `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` |
+`webhook-id`
+:   The event's `id`, kept across retries.
+
+`webhook-timestamp`
+:   The Unix time of this attempt, in seconds.
+
+`webhook-signature`
+:   `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>`.
 
 The push secret is `whsec_` followed by the base64 of at least 24 random bytes. The HMAC key is **the decoded bytes**:
 strip the prefix `whsec_` and base64-decode the rest. The signed content is the three values joined with full stops,
@@ -3740,16 +3957,29 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
   --forbidden-channel nobot --handle alice --no-interactive
 ```
 
-| Flag | Does |
-|---|---|
-| `--token-file <file>` | the bridge's token, alone in the file (required) |
-| `--channel <id>` | a channel the bot can post to (required) |
-| `--forbidden-channel <id>` | a channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped |
-| `--handle <handle>` | a person to look up and write to; without it `user_lookup` and `direct_message` are skipped |
-| `--push-listen <addr>` | where the push listener listens, `127.0.0.1:0` by default |
-| `--push-url <url>` | where the bridge reaches the push listener, the listener's own address by default |
-| `--push-secret-file <file>` | the push secret, `whsec_` and base64, instead of a generated one |
-| `--no-interactive` | skip `press` and `push`, which need a person |
+`--token-file <file>`
+:   The bridge's token, alone in the file (required).
+
+`--channel <id>`
+:   A channel the bot can post to (required).
+
+`--forbidden-channel <id>`
+:   A channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped.
+
+`--handle <handle>`
+:   A person to look up and write to; without it `user_lookup` and `direct_message` are skipped.
+
+`--push-listen <addr>`
+:   Where the push listener listens, `127.0.0.1:0` by default.
+
+`--push-url <url>`
+:   Where the bridge reaches the push listener, the listener's own address by default.
+
+`--push-secret-file <file>`
+:   The push secret, `whsec_` and base64, instead of a generated one.
+
+`--no-interactive`
+:   Skip `press` and `push`, which need a person.
 
 Flags may come before or after the URL. The check prints one line per step as it ends: `PASS <step>`,
 `FAIL <step>: <reason>` or `SKIP <step>: <why>`. The steps run in this order: `info`, `channel_check`, `post`,
@@ -4104,17 +4334,38 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `version` | `1`. |
-| `event` | The lifecycle event, one of the names below. |
-| `notify` | `true` exactly when the event is Loud. |
-| `mentions` | Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`, `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet event. |
-| `sequence` | The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps, and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer". |
-| `occurred_at` | When the event was recorded. |
-| `actor` | Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name` used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`, for example `timer`. |
-| `alert_group` | The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`, `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster. |
-| `alerts` | One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason. |
+`version`
+:   `1`.
+
+`event`
+:   The lifecycle event, one of the names below.
+
+`notify`
+:   `true` exactly when the event is Loud.
+
+`mentions`
+:   Who the event mentions under the Destination's Mention settings, as data: `{"type": "everyone"}`,
+    `{"type": "group", "name": …}` or `{"type": "user", "id": …, "name": …, "login": …}`. Always `[]` for a Quiet
+    event.
+
+`sequence`
+:   The Alert Group's lifecycle event number. It grows with every lifecycle event of the Alert Group, may have gaps,
+    and does not start at 1 for a Destination added to the Route later: rely only on "greater means newer".
+
+`occurred_at`
+:   When the event was recorded.
+
+`actor`
+:   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`,
+    for example `timer`.
+
+`alert_group`
+:   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
+    `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.
+
+`alerts`
+:   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
 
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
@@ -4124,26 +4375,59 @@ Every row of the lifecycle event tables is one event, Quiet ones and those with 
 included. What delivery itself does — a Publication, a Storm summary, a final edit — is not a lifecycle event and is
 never sent.
 
-| `event` | `notify` |
-|---|---|
-| `created` | true |
-| `alerts_added` | true while firing; false while acknowledged or snoozed |
-| `alert_replaced`, `alert_resolved`, `alert_continued`, `annotations_changed`, `severity_raised` | false |
-| `urgency_raised` | true when the rise ends a Snooze or removes the acknowledgement; false otherwise |
-| `reopened` | true while firing or acknowledged; false while snoozed |
-| `snooze_ended` | true |
-| `resolved` | false |
-| `moved_to_default_route` | false |
-| `acknowledged` | false |
-| `takeover` | true |
-| `unacknowledged` | true when disabling or deleting the Owner released it; false for the Command |
-| `unresolved`, `snoozed`, `unsnoozed`, `note_added` | false |
-| `ack_timeout` | true |
-| `unclaimed` | false |
-| `reminder` | true |
-| `reminder_answered` | false |
-| `auto_unacknowledged` | true |
-| `notices_missed` | true |
+`created`
+:   `notify`: true
+
+`alerts_added`
+:   `notify`: true while firing; false while acknowledged or snoozed
+
+`alert_replaced`, `alert_resolved`, `alert_continued`, `annotations_changed`, `severity_raised`
+:   `notify`: false
+
+`urgency_raised`
+:   `notify`: true when the rise ends a Snooze or removes the acknowledgement; false otherwise
+
+`reopened`
+:   `notify`: true while firing or acknowledged; false while snoozed
+
+`snooze_ended`
+:   `notify`: true
+
+`resolved`
+:   `notify`: false
+
+`moved_to_default_route`
+:   `notify`: false
+
+`acknowledged`
+:   `notify`: false
+
+`takeover`
+:   `notify`: true
+
+`unacknowledged`
+:   `notify`: true when disabling or deleting the Owner released it; false for the Command
+
+`unresolved`, `snoozed`, `unsnoozed`, `note_added`
+:   `notify`: false
+
+`ack_timeout`
+:   `notify`: true
+
+`unclaimed`
+:   `notify`: false
+
+`reminder`
+:   `notify`: true
+
+`reminder_answered`
+:   `notify`: false
+
+`auto_unacknowledged`
+:   `notify`: true
+
+`notices_missed`
+:   `notify`: true
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.
@@ -4165,13 +4449,21 @@ New event names and new fields are added within `version` 1. Removing a field or
 
 ## How the answer counts
 
-| Answer | Outcome |
-|---|---|
-| `2xx` | Delivered. |
-| `429` or `503` with `Retry-After` | The same event is sent again exactly when asked. |
-| `408`, any other `5xx`, a timeout or a network error | Retried with backoff; after `delivery.transient_budget` the Destination becomes Broken. |
-| `401`, `403`, `404`, `410` | The Destination becomes Broken; the event waits and is the probe. |
-| `400`, `413`, `422`, a redirect, any other answer | That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never followed; the error names its target. |
+`2xx`
+:   Delivered.
+
+`429` or `503` with `Retry-After`
+:   The same event is sent again exactly when asked.
+
+`408`, any other `5xx`, a timeout or a network error
+:   Retried with backoff; after `delivery.transient_budget` the Destination becomes Broken.
+
+`401`, `403`, `404`, `410`
+:   The Destination becomes Broken; the event waits and is the probe.
+
+`400`, `413`, `422`, a redirect, any other answer
+:   That event ends as Not delivered and the next one follows; the Destination stays healthy. A redirect is never
+    followed; the error names its target.
 
 Requests go through the outbound address policy: a URL that resolves to a link-local, cloud metadata, multicast or
 unspecified address is refused under every policy, and loopback and private addresses need an allowed network. A
@@ -4324,18 +4616,38 @@ requests go through Muster's outbound address policy and the Destination's proxy
 
 ## What the templates read
 
-| Field | Value |
-|---|---|
-| `.AlertGroup` | `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`, `Owner`; absent (nil) for a Storm summary |
-| `.Alerts` | the Alerts, as in Alertmanager: `Status`, `Labels`, `Annotations`, `StartsAt`, `EndsAt`, `GeneratorURL`, `Fingerprint`; with `.Alerts.Firing` and `.Alerts.Resolved` |
-| `.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL` | as in Alertmanager templates |
-| `.Storm` | for a Storm summary only: `Route`, `AlertGroupCount`, `UrgentCount`, `Final` (the Storm ended) and `URL` (the Route's Alert Groups in Muster) |
-| `.Response` | the values the extraction rules found, by name |
-| `.Event` | the lifecycle event a Thread reply carries, such as `alerts_added`; empty otherwise |
-| `.Notify` | `true` when the message is Loud |
-| `.Mentions` | the Mention targets of a Loud message (see below) |
-| `.Secrets` | the Destination's Secrets, by name |
-| `.Final` | in the final edit only: "No longer updated here; current state in Muster: {link}" |
+`.AlertGroup`
+:   `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`,
+    `Owner`; absent (nil) for a Storm summary.
+
+`.Alerts`
+:   The Alerts, as in Alertmanager: `Status`, `Labels`, `Annotations`, `StartsAt`, `EndsAt`, `GeneratorURL`,
+    `Fingerprint`; with `.Alerts.Firing` and `.Alerts.Resolved`.
+
+`.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL`
+:   As in Alertmanager templates.
+
+`.Storm`
+:   For a Storm summary only: `Route`, `AlertGroupCount`, `UrgentCount`, `Final` (the Storm ended) and `URL` (the
+    Route's Alert Groups in Muster).
+
+`.Response`
+:   The values the extraction rules found, by name.
+
+`.Event`
+:   The lifecycle event a Thread reply carries, such as `alerts_added`; empty otherwise.
+
+`.Notify`
+:   `true` when the message is Loud.
+
+`.Mentions`
+:   The Mention targets of a Loud message (see below).
+
+`.Secrets`
+:   The Destination's Secrets, by name.
+
+`.Final`
+:   In the final edit only: "No longer updated here; current state in Muster: {link}".
 
 Alert data reach the templates **as received**, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with `toJson` (or `js` inside a string), so that a label with a quote or a line break cannot
@@ -4800,6 +5112,8 @@ In the examples, Keycloak runs at `https://keycloak.example.org` with the realm 
 
 In the Keycloak admin console, open the realm, then **Clients → Create client**:
 
+<!-- tablecheck: allow the names fit; the long values are URLs to copy, longer than a phone line in any layout -->
+
 | Setting | Value |
 |---|---|
 | Client type | OpenID Connect |
@@ -4859,6 +5173,8 @@ background:
 ## 4. Configure Muster
 
 Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oidc-settings`:
+
+<!-- tablecheck: allow the names fit; the long values are URLs to copy, longer than a phone line in any layout -->
 
 | Setting | Value |
 |---|---|
@@ -5045,19 +5361,42 @@ so that a person can say "I have this one". The two often look alike, but you ca
 
 ## What an Alert Group has
 
-| Attribute | Meaning |
-|---|---|
-| Number, `#N` | Assigned per Organization, without gaps, when the Alert Group is created. It is what people say aloud: "I took #412". |
-| Status | `firing`, `acknowledged`, `snoozed` or `resolved`. See [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md). |
-| Owner | The user who acknowledged it. Only a user can be an Owner; a Service account cannot. |
-| Title | The `alertname` that its Alerts share. When Alerts with different `alertname` values join it, the Group key values instead, such as `cluster=prod, namespace=payments`. It is set when the Alert Group is created and changes at most once, at that switch. |
-| Summary | The `summary` annotation of the first of its Alerts that has one. It is set once. |
-| Route | The [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers. |
-| Severity level | The highest Severity level of its firing Alerts: critical, warning or info. |
-| Urgent | Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as Urgent (`organization.critical_is_urgent`, on by default). |
-| Reopen count | How many times Muster reopened it. |
-| Alerts | One entry per fingerprint, firing first, resolved ones struck through with their reason. |
-| Timeline | The ordered record of everything that happened to it. |
+Number, `#N`
+:   Assigned per Organization, without gaps, when the Alert Group is created. It is what people say aloud: "I took
+    #412".
+
+Status
+:   `firing`, `acknowledged`, `snoozed` or `resolved`. See [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
+
+Owner
+:   The user who acknowledged it. Only a user can be an Owner; a Service account cannot.
+
+Title
+:   The `alertname` that its Alerts share. When Alerts with different `alertname` values join it, the Group key values
+    instead, such as `cluster=prod, namespace=payments`. It is set when the Alert Group is created and changes at most
+    once, at that switch.
+
+Summary
+:   The `summary` annotation of the first of its Alerts that has one. It is set once.
+
+Route
+:   The [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers.
+
+Severity level
+:   The highest Severity level of its firing Alerts: critical, warning or info.
+
+Urgent
+:   Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as
+    Urgent (`organization.critical_is_urgent`, on by default).
+
+Reopen count
+:   How many times Muster reopened it.
+
+Alerts
+:   One entry per fingerprint, firing first, resolved ones struck through with their reason.
+
+Timeline
+:   The ordered record of everything that happened to it.
 
 The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
@@ -5174,10 +5513,15 @@ Alerts resolve or a person resolves it.
 
 ## How long Alert Groups are kept
 
-| What | Kept for |
-|---|---|
-| Alerts in Alert Groups, Timeline entries, delivery events | `retention.alert_details`, 90 days |
-| The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes | `retention.alert_group_summaries`, 2 years |
+`retention.alert_details`
+:   kept for: 90 days
+
+    Alerts in Alert Groups, Timeline entries, delivery events.
+
+`retention.alert_group_summaries`
+:   kept for: 2 years
+
+    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes.
 
 After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
 summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime
@@ -5224,11 +5568,14 @@ A Matcher is a condition on one label, written as in Alertmanager: `=`, `!=`, `=
 RE2 regular expression. The Matchers of a Route are all required: they combine with AND. The Route editor builds them
 from fields; the API takes the same structure; an invalid expression is refused with a pointer to the field.
 
-| Matchers | Takes |
-|---|---|
-| `team="payments"` and `severity="critical"` | Alerts of the payments team that are critical |
-| `namespace=~"prod-.*"` | Alerts in any namespace that starts with `prod-` |
-| `alertname!="Watchdog"` | everything except the Watchdog |
+`team="payments"` and `severity="critical"`
+:   Takes Alerts of the payments team that are critical.
+
+`namespace=~"prod-.*"`
+:   Takes Alerts in any namespace that starts with `prod-`.
+
+`alertname!="Watchdog"`
+:   Takes everything except the Watchdog.
 
 A missing label counts as an empty value. So `team!="payments"` also matches an Alert that has no `team` label.
 
@@ -5249,13 +5596,20 @@ you reload.
 When you create a Route, you choose a **Route profile**. A profile only fills in the settings; it is not stored, and you
 can change every field afterwards. There are two:
 
-| Setting | On-call | Informational |
-|---|---|---|
-| Ack timeout (`route.ack_timeout`) | on; first notice after 15 minutes | off |
-| Reminders (`route.reminders`) | on; first after 4 hours | off |
-| Snooze durations (`route.snooze_durations`) | 1 h, 4 h, 24 h | 1 d, 3 d, 7 d |
-| Group key (`route.group_key`) | `alertname`, `severity`, `cluster` | the same |
-| Reopen window and Grace period | 15 minutes each | the same |
+Ack timeout (`route.ack_timeout`)
+:   On-call: on; first notice after 15 minutes · Informational: off
+
+Reminders (`route.reminders`)
+:   On-call: on; first after 4 hours · Informational: off
+
+Snooze durations (`route.snooze_durations`)
+:   On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
+
+Group key (`route.group_key`)
+:   On-call: `alertname`, `severity`, `cluster` · Informational: the same
+
+Reopen window and Grace period
+:   On-call: 15 minutes each · Informational: the same
 
 Choose **Informational** for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
 notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and
@@ -5532,12 +5886,17 @@ Once an Alert has resolved by any route, the next firing of the same fingerprint
 Every Alert resolved by Muster carries one of four reasons, which the Integration's Alerts view shows and the metric
 `muster_alerts_resolved_total` counts:
 
-| Reason | Meaning |
-|---|---|
-| `resolved` | Alertmanager sent `resolved`, for the Alert or for its whole group. |
-| `gone` | Missing from at least two consecutive Snapshots for the minimum absence. |
-| `stale` | Its group sent nothing for three learned repeat intervals, with a live Heartbeat. |
-| `integration_deleted` | Its Integration was deleted. |
+`resolved`
+:   Alertmanager sent `resolved`, for the Alert or for its whole group.
+
+`gone`
+:   Missing from at least two consecutive Snapshots for the minimum absence.
+
+`stale`
+:   Its group sent nothing for three learned repeat intervals, with a live Heartbeat.
+
+`integration_deleted`
+:   Its Integration was deleted.
 
 When the last Alert of an Alert Group resolves, the Alert Group is resolved by the system with the reason of the last
 one. See [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#reopening) for what happens if the problem returns. If processing ever misbehaves,
@@ -5557,27 +5916,62 @@ or a reply in the Thread, and a Quiet change is an edit of the Root message or a
 
 ## Which changes are Loud
 
-| Change | Loud or Quiet | Mentions |
-|---|---|---|
-| A new Alert Group starts | Loud, as a new Root message | the Destination's `new_alert_group` setting |
-| New Alerts join a **firing** Alert Group | Loud, as a Thread reply; batched | `new_alerts` |
-| New Alerts join an acknowledged or snoozed Alert Group | Quiet | nobody |
-| A Reopen into firing | Loud | `reopen` |
-| A Reopen into acknowledged | Loud | the Owner only |
-| A Reopen into snoozed | Quiet | nobody |
-| A Snooze ends while Alerts still fire | Loud, listing what accumulated | `snooze_ended` |
-| A rise to Urgent that ends a Snooze or removes an acknowledgement | Loud, with the reason | the Owner it removed, and `rise_to_urgent` |
-| A rise in Severity level that changes nothing else | Quiet | nobody |
-| A Takeover | Loud | the previous Owner |
-| An ack timeout notice | Loud | `ack_timeout` |
-| A Reminder | Loud | the Owner |
-| Auto-unacknowledge | Loud, with the reason | the Owner it removed |
-| The Owner is disabled or deleted | Loud | nobody |
-| Several notices missed during downtime | Loud, as one reply | as the notices it stands for |
-| Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve | Quiet | nobody |
-| An Alert resolves, is replaced or continues, or its annotations change | Quiet | nobody |
-| The system resolves the Alert Group | Quiet, with a Thread reply that gives the reason | nobody |
-| A Note | Quiet, and not sent to messengers | nobody |
+A new Alert Group starts
+:   Loud, as a new Root message · mentions: the Destination's `new_alert_group` setting
+
+New Alerts join a **firing** Alert Group
+:   Loud, as a Thread reply; batched · mentions: `new_alerts`
+
+New Alerts join an acknowledged or snoozed Alert Group
+:   Quiet · mentions: nobody
+
+A Reopen into firing
+:   Loud · mentions: `reopen`
+
+A Reopen into acknowledged
+:   Loud · mentions: the Owner only
+
+A Reopen into snoozed
+:   Quiet · mentions: nobody
+
+A Snooze ends while Alerts still fire
+:   Loud, listing what accumulated · mentions: `snooze_ended`
+
+A rise to Urgent that ends a Snooze or removes an acknowledgement
+:   Loud, with the reason · mentions: the Owner it removed, and `rise_to_urgent`
+
+A rise in Severity level that changes nothing else
+:   Quiet · mentions: nobody
+
+A Takeover
+:   Loud · mentions: the previous Owner
+
+An ack timeout notice
+:   Loud · mentions: `ack_timeout`
+
+A Reminder
+:   Loud · mentions: the Owner
+
+Auto-unacknowledge
+:   Loud, with the reason · mentions: the Owner it removed
+
+The Owner is disabled or deleted
+:   Loud · mentions: nobody
+
+Several notices missed during downtime
+:   Loud, as one reply · mentions: as the notices it stands for
+
+Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve
+:   Quiet · mentions: nobody
+
+An Alert resolves, is replaced or continues, or its annotations change
+:   Quiet · mentions: nobody
+
+The system resolves the Alert Group
+:   Quiet, with a Thread reply that gives the reason · mentions: nobody
+
+A Note
+:   Quiet, and not sent to messengers · mentions: nobody
 
 The pattern: Muster rings when something needs a human who may not be looking, such as a new problem, one that returned,
 one that nobody took, or one that someone took and went quiet. It does not ring for what a person just did, because that
@@ -5600,12 +5994,26 @@ You cannot change the loudness of an event. You can change whom it Mentions.
 
 ## What Loud means in each Destination
 
-| Destination | A Loud change is | A Quiet change is |
-|---|---|---|
-| Mattermost | a new post, with its Mentions in the text of the post | an edit, or a new post without a Mention |
-| Telegram | a new message, in the channel for a Root message and in the discussion group for a Thread reply | an edit, or a new message sent with `disable_notification` |
-| Bridge | a new message that the bridge posts with `notify` on, with its Mentions | an edit, or a new message that the bridge posts without a notification where it declares `quiet_messages` |
-| Outgoing webhook | an event with `notify` true (events mode), or `.Notify` true in a template (template mode) | `notify` false |
+Mattermost
+:   A Loud change is a new post, with its Mentions in the text of the post.
+
+    A Quiet change is an edit, or a new post without a Mention.
+
+Telegram
+:   A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.
+
+    A Quiet change is an edit, or a new message sent with `disable_notification`.
+
+Bridge
+:   A Loud change is a new message that the bridge posts with `notify` on, with its Mentions.
+
+    A Quiet change is an edit, or a new message that the bridge posts without a notification where it declares
+    `quiet_messages`.
+
+Outgoing webhook
+:   A Loud change is an event with `notify` true (events mode), or `.Notify` true in a template (template mode).
+
+    A Quiet change is `notify` false.
 
 A few details:
 
@@ -5751,14 +6159,38 @@ The ack timeout runs only while an Alert Group is Firing, and an Alert Group is 
 Each carries its reason, which you see on the Alert Group page, in its Timeline and, in a messenger, in the Root
 message or a Thread reply.
 
-| Transition | When | Reason you see |
-|---|---|---|
-| Open → Resolved | The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), or its Integration was deleted. This also ends a Snooze. | The reason of the last Alert |
-| Resolved by the system → previous status | An Alert with the same Route and Group key values fires within the Reopen window. | The Reopen, with the Reopen count |
-| Snoozed → Firing | The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated. | The Snooze ended |
-| Snoozed or Acknowledged → Firing | A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the default). | The rise to Urgent |
-| Acknowledged → Firing | The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering. | "No answer to the last two Reminders" |
-| Acknowledged → Firing | The Owner was disabled or deleted. | "The owner was disabled" or "The owner was deleted" |
+Open → Resolved
+:   reason you see: the reason of the last Alert
+
+    The last Alert resolved: Alertmanager sent `resolved`, or the Alert went [Gone or Stale](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), or
+    its Integration was deleted. This also ends a Snooze.
+
+Resolved by the system → previous status
+:   reason you see: the Reopen, with the Reopen count
+
+    An Alert with the same Route and Group key values fires within the Reopen window.
+
+Snoozed → Firing
+:   reason you see: the Snooze ended
+
+    The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.
+
+Snoozed or Acknowledged → Firing
+:   reason you see: the rise to Urgent
+
+    A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert
+    Group was already Urgent, and removes an acknowledgement when the Route has `route.urgent_rise_removes_ack` on (the
+    default).
+
+Acknowledged → Firing
+:   reason you see: "No answer to the last two Reminders"
+
+    The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.
+
+Acknowledged → Firing
+:   reason you see: "The owner was disabled" or "The owner was deleted"
+
+    The Owner was disabled or deleted.
 
 ## Commands
 
@@ -5804,10 +6236,11 @@ Every command is a Quiet event except the Takeover. See [Loud and Quiet](https:/
 A **Snooze preset** ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
 end when the command runs:
 
-| Preset | API value | Ends at |
-|---|---|---|
-| Until tomorrow 09:00 | `tomorrow` | the next start of the working day |
-| Until Monday 09:00 | `week_start` | the next start of the working day on the first day of the week |
+Until tomorrow 09:00
+:   API value: `tomorrow` · ends at: the next start of the working day
+
+Until Monday 09:00
+:   API value: `week_start` · ends at: the next start of the working day on the first day of the week
 
 "Next" is strictly after now. With the working day starting at 09:00:
 
@@ -5833,10 +6266,15 @@ who pressed or wrote, and otherwise in the Organization's.
 **Settings.** Two Organization settings define the presets, as the fields `workday_start` and `week_start` of the
 organization in the API:
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `organization.workday_start` | `09:00` | the start of the working day, `HH:MM` on the 24-hour clock |
-| `organization.week_start` | `monday` | the first day of the week, `monday` to `sunday` |
+`organization.workday_start`
+:   default: `09:00`
+
+    The start of the working day, `HH:MM` on the 24-hour clock.
+
+`organization.week_start`
+:   default: `monday`
+
+    The first day of the week, `monday` to `sunday`.
 
 **API.** A Snooze takes `preset`, `tomorrow` or `week_start`, as a third choice beside `until` and `no_end`, with an
 optional `time_zone`:
@@ -5889,14 +6327,26 @@ command is recorded in the Audit log with its actor and the Transport.
 The **Transport** is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
 to all of them.
 
-| Transport | How | Notes |
-|---|---|---|
-| Web UI | buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve | everything above, including bulk commands, Notes and Unresolve |
-| API | `POST` to `/api/v1/alert-groups/{id}/acknowledge` and its siblings, with a session or a token | the same; see the [API reference](https://muster-io.github.io/muster/latest/reference/api.md) |
-| Mattermost | a button on the message | Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it |
-| Telegram | an inline button on the message | the same |
-| Bridge | a button on the message, if the bridge declares `buttons`; or a **Text command** in the Thread, if it declares `thread_messages` | the same |
-| `system` | Muster itself | the automatic transitions above, shown in the Timeline |
+Web UI
+:   how: buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve · notes: everything above,
+    including bulk commands, Notes and Unresolve
+
+API
+:   how: `POST` to `/api/v1/alert-groups/{id}/acknowledge` and its siblings, with a session or a token · notes: the
+    same; see the [API reference](https://muster-io.github.io/muster/latest/reference/api.md)
+
+Mattermost
+:   how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it
+
+Telegram
+:   how: an inline button on the message · notes: the same
+
+Bridge
+:   how: a button on the message, if the bridge declares `buttons`; or a **Text command** in the Thread, if it declares
+    `thread_messages` · notes: the same
+
+`system`
+:   how: Muster itself · notes: the automatic transitions above, shown in the Timeline
 
 Messengers never offer Unresolve or Notes, and never a Snooze with no end. A person who presses a button in a messenger
 must have linked their messenger account to their Muster user; see [Link your messenger
@@ -6036,12 +6486,26 @@ when `MusterDestinationBroken` fires, use the [runbook](https://muster-io.github
 
 Every failed attempt is sorted into a class, and the class decides what happens:
 
-| Class | Examples | Result |
-|---|---|---|
-| Retry after | The messenger answers `429` and says how long to wait | Muster waits exactly that long and then sends the latest state. It is not counted as an attempt. |
-| Transient | A `5xx`, a timeout, a network error | Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After **10 attempts within 30 minutes** (`delivery.transient_budget`) the Destination becomes Broken as *unavailable*. |
-| Fatal | The messenger refuses the bot or the request for good | The Destination becomes Broken **at once**. |
-| Unknown | An answer Muster does not recognize | Not retried. That one delivery ends as *Not delivered*, and the Destination stays healthy. |
+Retry after
+:   examples: the messenger answers `429` and says how long to wait
+
+    Muster waits exactly that long and then sends the latest state. It is not counted as an attempt.
+
+Transient
+:   examples: a `5xx`, a timeout, a network error
+
+    Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After **10 attempts within 30
+    minutes** (`delivery.transient_budget`) the Destination becomes Broken as *unavailable*.
+
+Fatal
+:   examples: the messenger refuses the bot or the request for good
+
+    The Destination becomes Broken **at once**.
+
+Unknown
+:   examples: an answer Muster does not recognize
+
+    Not retried. That one delivery ends as *Not delivered*, and the Destination stays healthy.
 
 What is Fatal depends on the messenger:
 
@@ -6134,12 +6598,20 @@ Muster edits a Root message for as long as its Alert Group is open, which can ta
 depends on the messenger. This is not about a Broken Destination, but the messages that Muster can no longer edit look
 similar from the outside, so here is the whole picture.
 
-| Destination | Edit window |
-|---|---|
-| Telegram | None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age. |
-| Mattermost | The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then answers has not been verified. See [Keep posts editable](https://muster-io.github.io/muster/latest/messengers/mattermost.md#keep-posts-editable). |
-| Bridge | The bridge declares it in its info, as `limits.edit_max_age_seconds`, or declares none. |
-| Outgoing webhook | Muster does not know the chat's rules. In template mode an `update` request that the chat refuses ends as Not delivered or Broken by the usual classes. |
+Telegram
+:   None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.
+
+Mattermost
+:   The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If
+    an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then
+    answers has not been verified. See [Keep posts editable](https://muster-io.github.io/muster/latest/messengers/mattermost.md#keep-posts-editable).
+
+Bridge
+:   The bridge declares it in its info, as `limits.edit_max_age_seconds`, or declares none.
+
+Outgoing webhook
+:   Muster does not know the chat's rules. In template mode an `update` request that the chat refuses ends as Not
+    delivered or Broken by the usual classes.
 
 For a **Bridge** with an edit window, Muster stops editing a Root message 60 seconds before the window closes
 (`bridge.edit_window_margin`). After that:
@@ -6167,10 +6639,15 @@ the same text. An outgoing webhook in events mode sends no final event, and its 
 Muster keeps all its state in PostgreSQL, and encrypts its secrets with the [master keys](https://muster-io.github.io/muster/latest/operations/key-rotation.md) from the
 environment. Neither the Helm chart nor the compose example backs up anything, so you back up two things, **separately**:
 
-| What | Holds | Without it |
-|---|---|---|
-| the database | Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted | everything is gone |
-| the master keys (`MUSTER_SECRET_KEYS`) | the keys that decrypt the Secrets and sign the buttons in messages | Muster refuses to start on the database, and its encrypted Secrets cannot be read |
+The database
+:   Holds Integrations, Routes, Alert Groups, people, the Audit log and every Secret, encrypted.
+
+    Without it, everything is gone.
+
+The master keys (`MUSTER_SECRET_KEYS`)
+:   Hold the keys that decrypt the Secrets and sign the buttons in messages.
+
+    Without them, Muster refuses to start on the database, and its encrypted Secrets cannot be read.
 
 ## Why they are kept apart
 
@@ -6382,12 +6859,19 @@ Signing secret of an outgoing webhook Destination does not change (Muster only r
 
 ## If something goes wrong
 
-| Symptom | Cause | What to do |
-|---|---|---|
-| `Replicas {names} do not hold key {id} yet.` | a live replica has not restarted with the new key | finish the rollout, or wait until the record of a gone replica expires |
-| `key {id} is not in the master keys of this process` | you ran the command without the new key in `MUSTER_SECRET_KEYS` | give the command the same environment as the server |
-| a replica stops with "master key does not match the database" | it lacks the active key | add the key back to its environment |
-| exit code 2 | `--activate` or `--actor` is missing | add the flag |
+`Replicas {names} do not hold key {id} yet.`
+:   cause: a live replica has not restarted with the new key · what to do: finish the rollout, or wait until the record
+    of a gone replica expires
+
+`key {id} is not in the master keys of this process`
+:   cause: you ran the command without the new key in `MUSTER_SECRET_KEYS` · what to do: give the command the same
+    environment as the server
+
+A replica stops with "master key does not match the database"
+:   cause: it lacks the active key · what to do: add the key back to its environment
+
+Exit code 2
+:   cause: `--activate` or `--actor` is missing · what to do: add the flag
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/high-availability.md -->
 # High availability
@@ -6539,10 +7023,11 @@ in the `*_info` metrics, which the dashboard joins. No metric carries an alert l
 
 The chart renders one group of rules, named `muster`, when you enable one of:
 
-| Value | Renders | Needs |
-|---|---|---|
-| `alerting.prometheusRule.enabled` | a `PrometheusRule` | the Prometheus Operator CRDs |
-| `alerting.vmRule.enabled` | a `VMRule` | the VictoriaMetrics Operator CRDs |
+`alerting.prometheusRule.enabled`
+:   renders: a `PrometheusRule` · needs: the Prometheus Operator CRDs
+
+`alerting.vmRule.enabled`
+:   renders: a `VMRule` · needs: the VictoriaMetrics Operator CRDs
 
 Both take extra labels (`alerting.prometheusRule.labels`, `alerting.vmRule.labels`) for the rule selector of your
 operator. Each rule has a `description` and a `runbook_url` that points to its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md), built from
@@ -6609,10 +7094,16 @@ The chart ships one dashboard, "Muster", with the fixed uid `muster`, a data sou
 `namespace`/`job`, `integration`, `route` and `destination`. It has four rows: Overview, Ingestion, Delivery and
 Platform. You enable it in either or both ways, each behind its own flag:
 
-| Value | Renders | Notes |
-|---|---|---|
-| `dashboard.configMap.enabled` | a `ConfigMap` with the dashboard JSON | for the Grafana sidecar; `dashboard.configMap.labels` defaults to `grafana_dashboard: "1"` |
-| `dashboard.grafanaDashboard.enabled` | a `GrafanaDashboard` of the Grafana Operator | references that ConfigMap, so it needs `dashboard.configMap.enabled` too; `instanceSelector`, `folder` and `allowCrossNamespaceImport` are values |
+`dashboard.configMap.enabled`
+:   renders: a `ConfigMap` with the dashboard JSON
+
+    For the Grafana sidecar; `dashboard.configMap.labels` defaults to `grafana_dashboard: "1"`.
+
+`dashboard.grafanaDashboard.enabled`
+:   renders: a `GrafanaDashboard` of the Grafana Operator
+
+    References that ConfigMap, so it needs `dashboard.configMap.enabled` too; `instanceSelector`, `folder` and
+    `allowCrossNamespaceImport` are values.
 
 ## Internal alerts
 
@@ -6685,12 +7176,17 @@ stopped Muster is noticed."
 
 ## What Muster sends
 
-| Setting | Value |
-|---|---|
-| interval | 1 minute (`outgoing_heartbeat.interval`) |
-| method | `GET` (`outgoing_heartbeat.method`) |
-| timeout | 10 seconds for one request (`outgoing_heartbeat.timeout`) |
-| retry | none: a failure is counted and logged, and the next tick is the retry |
+Interval
+:   1 minute (`outgoing_heartbeat.interval`)
+
+Method
+:   `GET` (`outgoing_heartbeat.method`)
+
+Timeout
+:   10 seconds for one request (`outgoing_heartbeat.timeout`)
+
+Retry
+:   None: a failure is counted and logged, and the next tick is the retry.
 
 Only the **Leader** sends it, so it stops when no replica leads, and it stops when Muster is down. Both are what you want
 a dead man's switch to see. See [High availability](https://muster-io.github.io/muster/latest/operations/high-availability.md#the-leader). The call goes through the
@@ -6749,11 +7245,15 @@ docker compose exec muster muster doctor
 The image has no shell, so run the binary directly. A command that reads a password from standard input needs
 `kubectl exec -i` or `docker compose exec -T`.
 
-| Command | Needs |
-|---|---|
-| `doctor`, `migrate`, `secrets rotate-key` | the database settings, `MUSTER_PUBLIC_URL` and the master keys (`MUSTER_SECRET_KEYS` or `MUSTER_SECRET_KEYS_FILE`) |
-| `admin`, `ingest replay` | the database settings and `MUSTER_PUBLIC_URL`; they do not open the Keyring |
-| `bridge check`, `version` | nothing |
+`doctor`, `migrate`, `secrets rotate-key`
+:   Need the database settings, `MUSTER_PUBLIC_URL` and the master keys (`MUSTER_SECRET_KEYS` or
+    `MUSTER_SECRET_KEYS_FILE`).
+
+`admin`, `ingest replay`
+:   Need the database settings and `MUSTER_PUBLIC_URL`; they do not open the Keyring.
+
+`bridge check`, `version`
+:   Need nothing.
 
 The [environment reference](https://muster-io.github.io/muster/latest/reference/environment.md) lists the variables, and [the database](https://muster-io.github.io/muster/latest/install/database.md)
 the ways to set the connection.
@@ -6774,16 +7274,29 @@ muster doctor
 Checks and **only reads**. Each check prints one line, `OK`, `WARN` or `FAIL`, then its name and detail. The command
 exits 1 when a check fails. A warning does not fail it.
 
-| Check | Looks at |
-|---|---|
-| `database` | the main connection works |
-| `postgresql_version` | PostgreSQL 14 or newer |
-| `session_connection` | the session connection supports advisory locks and `LISTEN`, and the mode of each pooler |
-| `tls_main`, `tls_session` | whether each connection is encrypted; `WARN`, not `FAIL`, when it is not |
-| `key_canary` | the master keys can decrypt the canary, so they belong to this database |
-| `keyring` | the active key is held, and which other keys are still needed, removable or not active yet |
-| `clock_skew` | the replica's clock against the database clock, `WARN` above 2 seconds |
-| `connection <name>`, `destination <name>` | the check of every Connection and every Destination that has one |
+`database`
+:   Looks at: the main connection works.
+
+`postgresql_version`
+:   Looks at: PostgreSQL 14 or newer.
+
+`session_connection`
+:   Looks at: the session connection supports advisory locks and `LISTEN`, and the mode of each pooler.
+
+`tls_main`, `tls_session`
+:   Looks at: whether each connection is encrypted; `WARN`, not `FAIL`, when it is not.
+
+`key_canary`
+:   Looks at: the master keys can decrypt the canary, so they belong to this database.
+
+`keyring`
+:   Looks at: the active key is held, and which other keys are still needed, removable or not active yet.
+
+`clock_skew`
+:   Looks at: the replica's clock against the database clock, `WARN` above 2 seconds.
+
+`connection <name>`, `destination <name>`
+:   Looks at: the check of every Connection and every Destination that has one.
 
 Run it after an install, after a [restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md), after an [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), and when you suspect
 the database, a pooler or the keys.
@@ -6897,11 +7410,17 @@ probe of a Broken Destination.
 **Requests that reach Muster** on the ingest listener, each with the answer Muster gave, refused ones included — a bad
 signature, a wrong secret token, a Connection in the other event delivery mode:
 
-| Operation | Path | What it is |
-|---|---|---|
-| `press` | `/api/v1/callbacks/mattermost/{connection_id}` | a button press in Mattermost |
-| `update` | `/api/v1/callbacks/telegram/{connection_id}` | a Telegram update in the webhook mode |
-| `push` | `/api/v1/callbacks/bridge/{connection_id}` | an event a bridge pushes |
+`press`
+`/api/v1/callbacks/mattermost/{connection_id}`
+:   A button press in Mattermost.
+
+`update`
+`/api/v1/callbacks/telegram/{connection_id}`
+:   A Telegram update in the webhook mode.
+
+`push`
+`/api/v1/callbacks/bridge/{connection_id}`
+:   An event a bridge pushes.
 
 A record holds:
 
@@ -6932,11 +7451,15 @@ A record holds:
 
 The bounds are built in; nothing configures them.
 
-| Setting | Value |
-|---|---|
-| `request_log.max_records` | the newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of new Connections in an Organization |
-| `request_log.max_age` | 7 days on the business clock |
-| `request_log.body_max` | 16 KB (16,384 bytes) of each request or answer body |
+`request_log.max_records`
+:   The newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of
+    new Connections in an Organization.
+
+`request_log.max_age`
+:   7 days on the business clock.
+
+`request_log.body_max`
+:   16 KB (16,384 bytes) of each request or answer body.
 
 - A record past either bound is neither listed nor shown, even before it is deleted. The Leader deletes such records
   every minute (the task `request_log_pruning`).
@@ -6973,12 +7496,17 @@ Headers and bodies are untrusted text. The record view shows them as plain text 
 
 ## Who may read it
 
-| To | Needs |
-|---|---|
-| list the records of a Connection, or of a check run | `connections:read` |
-| list the records of a Destination | `destinations:read` |
-| open a record of a Connection, or of a check before saving | `connections:read` |
-| open a record of an outgoing webhook Destination | `destinations:read` |
+To list the records of a Connection, or of a check run
+:   needs: `connections:read`
+
+To list the records of a Destination
+:   needs: `destinations:read`
+
+To open a record of a Connection, or of a check before saving
+:   needs: `connections:read`
+
+To open a record of an outgoing webhook Destination
+:   needs: `destinations:read`
 
 A messenger Destination's requests are its Connection's: its list shows the records of its Connection that concern
 it, and opening one of them needs `connections:read`. The built-in Roles — Admin, Responder and Viewer — hold both

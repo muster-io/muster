@@ -2657,37 +2657,18 @@ the rotation restores only with the key that was active then.</p>
 <p>Nothing else changes: Personal access tokens and Service account tokens are stored as hashes and are not affected, and the
 Signing secret of an outgoing webhook Destination does not change (Muster only re-encrypts it).</p>
 <h2 id="if-something-goes-wrong">If something goes wrong<a class="headerlink" href="#if-something-goes-wrong" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Symptom</th>
-<th>Cause</th>
-<th>What to do</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>Replicas {names} do not hold key {id} yet.</code></td>
-<td>a live replica has not restarted with the new key</td>
-<td>finish the rollout, or wait until the record of a gone replica expires</td>
-</tr>
-<tr>
-<td><code>key {id} is not in the master keys of this process</code></td>
-<td>you ran the command without the new key in <code>MUSTER_SECRET_KEYS</code></td>
-<td>give the command the same environment as the server</td>
-</tr>
-<tr>
-<td>a replica stops with "master key does not match the database"</td>
-<td>it lacks the active key</td>
-<td>add the key back to its environment</td>
-</tr>
-<tr>
-<td>exit code 2</td>
-<td><code>--activate</code> or <code>--actor</code> is missing</td>
-<td>add the flag</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>Replicas {names} do not hold key {id} yet.</code></dt>
+<dd>cause: a live replica has not restarted with the new key · what to do: finish the rollout, or wait until the record
+of a gone replica expires</dd>
+<dt><code>key {id} is not in the master keys of this process</code></dt>
+<dd>cause: you ran the command without the new key in <code>MUSTER_SECRET_KEYS</code> · what to do: give the command the same
+environment as the server</dd>
+<dt>A replica stops with "master key does not match the database"</dt>
+<dd>cause: it lacks the active key · what to do: add the key back to its environment</dd>
+<dt>Exit code 2</dt>
+<dd>cause: <code>--activate</code> or <code>--actor</code> is missing · what to do: add the flag</dd>
+</dl>
 
 
 

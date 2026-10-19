@@ -2660,37 +2660,29 @@ error to dismiss. It means that the people it serves are not seeing their alerts
 when <code>MusterDestinationBroken</code> fires, use the <a href="../../operations/runbooks/MusterDestinationBroken/">runbook</a>.</p>
 <h2 id="when-a-destination-becomes-broken">When a Destination becomes Broken<a class="headerlink" href="#when-a-destination-becomes-broken" title="Permanent link">&para;</a></h2>
 <p>Every failed attempt is sorted into a class, and the class decides what happens:</p>
-<table>
-<thead>
-<tr>
-<th>Class</th>
-<th>Examples</th>
-<th>Result</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Retry after</td>
-<td>The messenger answers <code>429</code> and says how long to wait</td>
-<td>Muster waits exactly that long and then sends the latest state. It is not counted as an attempt.</td>
-</tr>
-<tr>
-<td>Transient</td>
-<td>A <code>5xx</code>, a timeout, a network error</td>
-<td>Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After <strong>10 attempts within 30 minutes</strong> (<code>delivery.transient_budget</code>) the Destination becomes Broken as <em>unavailable</em>.</td>
-</tr>
-<tr>
-<td>Fatal</td>
-<td>The messenger refuses the bot or the request for good</td>
-<td>The Destination becomes Broken <strong>at once</strong>.</td>
-</tr>
-<tr>
-<td>Unknown</td>
-<td>An answer Muster does not recognize</td>
-<td>Not retried. That one delivery ends as <em>Not delivered</em>, and the Destination stays healthy.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Retry after</dt>
+<dd>
+<p>examples: the messenger answers <code>429</code> and says how long to wait</p>
+<p>Muster waits exactly that long and then sends the latest state. It is not counted as an attempt.</p>
+</dd>
+<dt>Transient</dt>
+<dd>
+<p>examples: a <code>5xx</code>, a timeout, a network error</p>
+<p>Muster retries with exponential backoff and jitter, from 2 seconds up to 5 minutes. After <strong>10 attempts within 30
+minutes</strong> (<code>delivery.transient_budget</code>) the Destination becomes Broken as <em>unavailable</em>.</p>
+</dd>
+<dt>Fatal</dt>
+<dd>
+<p>examples: the messenger refuses the bot or the request for good</p>
+<p>The Destination becomes Broken <strong>at once</strong>.</p>
+</dd>
+<dt>Unknown</dt>
+<dd>
+<p>examples: an answer Muster does not recognize</p>
+<p>Not retried. That one delivery ends as <em>Not delivered</em>, and the Destination stays healthy.</p>
+</dd>
+</dl>
 <p>What is Fatal depends on the messenger:</p>
 <ul>
 <li><strong>Mattermost</strong>: <code>401</code> or <code>403</code>, such as an invalid token or a bot removed from the channel, and <code>404</code> for the channel,
@@ -2794,32 +2786,19 @@ was unavailable".</p>
 <p>Muster edits a Root message for as long as its Alert Group is open, which can take days. Whether a messenger lets it
 depends on the messenger. This is not about a Broken Destination, but the messages that Muster can no longer edit look
 similar from the outside, so here is the whole picture.</p>
-<table>
-<thead>
-<tr>
-<th>Destination</th>
-<th>Edit window</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Telegram</td>
-<td>None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.</td>
-</tr>
-<tr>
-<td>Mattermost</td>
-<td>The server setting <code>ServiceSettings.PostEditTimeLimit</code>, which is unlimited (<code>-1</code>) by default. Keep the default. If an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then answers has not been verified. See <a href="../../messengers/mattermost/#keep-posts-editable">Keep posts editable</a>.</td>
-</tr>
-<tr>
-<td>Bridge</td>
-<td>The bridge declares it in its info, as <code>limits.edit_max_age_seconds</code>, or declares none.</td>
-</tr>
-<tr>
-<td>Outgoing webhook</td>
-<td>Muster does not know the chat's rules. In template mode an <code>update</code> request that the chat refuses ends as Not delivered or Broken by the usual classes.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Telegram</dt>
+<dd>None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.</dd>
+<dt>Mattermost</dt>
+<dd>The server setting <code>ServiceSettings.PostEditTimeLimit</code>, which is unlimited (<code>-1</code>) by default. Keep the default. If
+an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then
+answers has not been verified. See <a href="../../messengers/mattermost/#keep-posts-editable">Keep posts editable</a>.</dd>
+<dt>Bridge</dt>
+<dd>The bridge declares it in its info, as <code>limits.edit_max_age_seconds</code>, or declares none.</dd>
+<dt>Outgoing webhook</dt>
+<dd>Muster does not know the chat's rules. In template mode an <code>update</code> request that the chat refuses ends as Not
+delivered or Broken by the usual classes.</dd>
+</dl>
 <p>For a <strong>Bridge</strong> with an edit window, Muster stops editing a Root message 60 seconds before the window closes
 (<code>bridge.edit_window_margin</code>). After that:</p>
 <ul>

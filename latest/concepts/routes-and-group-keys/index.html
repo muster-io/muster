@@ -2806,28 +2806,14 @@ receiver and a repeat interval. A Route of Muster is evaluated after the Alert h
 <p>A Matcher is a condition on one label, written as in Alertmanager: <code>=</code>, <code>!=</code>, <code>=~</code> and <code>!~</code>, where the last two take an
 RE2 regular expression. The Matchers of a Route are all required: they combine with AND. The Route editor builds them
 from fields; the API takes the same structure; an invalid expression is refused with a pointer to the field.</p>
-<table>
-<thead>
-<tr>
-<th>Matchers</th>
-<th>Takes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>team="payments"</code> and <code>severity="critical"</code></td>
-<td>Alerts of the payments team that are critical</td>
-</tr>
-<tr>
-<td><code>namespace=~"prod-.*"</code></td>
-<td>Alerts in any namespace that starts with <code>prod-</code></td>
-</tr>
-<tr>
-<td><code>alertname!="Watchdog"</code></td>
-<td>everything except the Watchdog</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>team="payments"</code> and <code>severity="critical"</code></dt>
+<dd>Takes Alerts of the payments team that are critical.</dd>
+<dt><code>namespace=~"prod-.*"</code></dt>
+<dd>Takes Alerts in any namespace that starts with <code>prod-</code>.</dd>
+<dt><code>alertname!="Watchdog"</code></dt>
+<dd>Takes everything except the Watchdog.</dd>
+</dl>
 <p>A missing label counts as an empty value. So <code>team!="payments"</code> also matches an Alert that has no <code>team</code> label.</p>
 <h3 id="order-and-the-default-route">Order, and the Default route<a class="headerlink" href="#order-and-the-default-route" title="Permanent link">&para;</a></h3>
 <p>Routes are evaluated in list order, and the first Route that matches takes the Alert. Put the narrow Routes first and
@@ -2840,42 +2826,18 @@ you reload.</p>
 <h3 id="route-profiles">Route profiles<a class="headerlink" href="#route-profiles" title="Permanent link">&para;</a></h3>
 <p>When you create a Route, you choose a <strong>Route profile</strong>. A profile only fills in the settings; it is not stored, and you
 can change every field afterwards. There are two:</p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>On-call</th>
-<th>Informational</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Ack timeout (<code>route.ack_timeout</code>)</td>
-<td>on; first notice after 15 minutes</td>
-<td>off</td>
-</tr>
-<tr>
-<td>Reminders (<code>route.reminders</code>)</td>
-<td>on; first after 4 hours</td>
-<td>off</td>
-</tr>
-<tr>
-<td>Snooze durations (<code>route.snooze_durations</code>)</td>
-<td>1 h, 4 h, 24 h</td>
-<td>1 d, 3 d, 7 d</td>
-</tr>
-<tr>
-<td>Group key (<code>route.group_key</code>)</td>
-<td><code>alertname</code>, <code>severity</code>, <code>cluster</code></td>
-<td>the same</td>
-</tr>
-<tr>
-<td>Reopen window and Grace period</td>
-<td>15 minutes each</td>
-<td>the same</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Ack timeout (<code>route.ack_timeout</code>)</dt>
+<dd>On-call: on; first notice after 15 minutes · Informational: off</dd>
+<dt>Reminders (<code>route.reminders</code>)</dt>
+<dd>On-call: on; first after 4 hours · Informational: off</dd>
+<dt>Snooze durations (<code>route.snooze_durations</code>)</dt>
+<dd>On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d</dd>
+<dt>Group key (<code>route.group_key</code>)</dt>
+<dd>On-call: <code>alertname</code>, <code>severity</code>, <code>cluster</code> · Informational: the same</dd>
+<dt>Reopen window and Grace period</dt>
+<dd>On-call: 15 minutes each · Informational: the same</dd>
+</dl>
 <p>Choose <strong>Informational</strong> for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
 notices, no Reminders, and long Snooze durations. Choose <strong>On-call</strong> for the rest. See <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and
 commands</a> for what the timers do.</p>

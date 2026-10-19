@@ -2925,47 +2925,41 @@ itself if the problem returns within the Reopen window. After a person resolved 
 <h3 id="transitions-muster-makes-on-its-own">Transitions Muster makes on its own<a class="headerlink" href="#transitions-muster-makes-on-its-own" title="Permanent link">&para;</a></h3>
 <p>Each carries its reason, which you see on the Alert Group page, in its Timeline and, in a messenger, in the Root
 message or a Thread reply.</p>
-<table>
-<thead>
-<tr>
-<th>Transition</th>
-<th>When</th>
-<th>Reason you see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Open → Resolved</td>
-<td>The last Alert resolved: Alertmanager sent <code>resolved</code>, or the Alert went <a href="../snapshot-semantics/">Gone or Stale</a>, or its Integration was deleted. This also ends a Snooze.</td>
-<td>The reason of the last Alert</td>
-</tr>
-<tr>
-<td>Resolved by the system → previous status</td>
-<td>An Alert with the same Route and Group key values fires within the Reopen window.</td>
-<td>The Reopen, with the Reopen count</td>
-</tr>
-<tr>
-<td>Snoozed → Firing</td>
-<td>The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.</td>
-<td>The Snooze ended</td>
-</tr>
-<tr>
-<td>Snoozed or Acknowledged → Firing</td>
-<td>A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert Group was already Urgent, and removes an acknowledgement when the Route has <code>route.urgent_rise_removes_ack</code> on (the default).</td>
-<td>The rise to Urgent</td>
-</tr>
-<tr>
-<td>Acknowledged → Firing</td>
-<td>The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.</td>
-<td>"No answer to the last two Reminders"</td>
-</tr>
-<tr>
-<td>Acknowledged → Firing</td>
-<td>The Owner was disabled or deleted.</td>
-<td>"The owner was disabled" or "The owner was deleted"</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Open → Resolved</dt>
+<dd>
+<p>reason you see: the reason of the last Alert</p>
+<p>The last Alert resolved: Alertmanager sent <code>resolved</code>, or the Alert went <a href="../snapshot-semantics/">Gone or Stale</a>, or
+its Integration was deleted. This also ends a Snooze.</p>
+</dd>
+<dt>Resolved by the system → previous status</dt>
+<dd>
+<p>reason you see: the Reopen, with the Reopen count</p>
+<p>An Alert with the same Route and Group key values fires within the Reopen window.</p>
+</dd>
+<dt>Snoozed → Firing</dt>
+<dd>
+<p>reason you see: the Snooze ended</p>
+<p>The Snooze ends while Alerts still fire. It has no Owner, and the message lists what accumulated.</p>
+</dd>
+<dt>Snoozed or Acknowledged → Firing</dt>
+<dd>
+<p>reason you see: the rise to Urgent</p>
+<p>A rise in Severity level makes the Alert Group Urgent. It ends a Snooze, unless the Snooze was set while the Alert
+Group was already Urgent, and removes an acknowledgement when the Route has <code>route.urgent_rise_removes_ack</code> on (the
+default).</p>
+</dd>
+<dt>Acknowledged → Firing</dt>
+<dd>
+<p>reason you see: "No answer to the last two Reminders"</p>
+<p>The Route's auto-unacknowledge removes the acknowledgement of an Owner who stopped answering.</p>
+</dd>
+<dt>Acknowledged → Firing</dt>
+<dd>
+<p>reason you see: "The owner was disabled" or "The owner was deleted"</p>
+<p>The Owner was disabled or deleted.</p>
+</dd>
+</dl>
 <h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3046,27 +3040,12 @@ message or a Thread reply.</p>
 <h3 id="snooze-presets">Snooze presets<a class="headerlink" href="#snooze-presets" title="Permanent link">&para;</a></h3>
 <p>A <strong>Snooze preset</strong> ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
 end when the command runs:</p>
-<table>
-<thead>
-<tr>
-<th>Preset</th>
-<th>API value</th>
-<th>Ends at</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Until tomorrow 09:00</td>
-<td><code>tomorrow</code></td>
-<td>the next start of the working day</td>
-</tr>
-<tr>
-<td>Until Monday 09:00</td>
-<td><code>week_start</code></td>
-<td>the next start of the working day on the first day of the week</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Until tomorrow 09:00</dt>
+<dd>API value: <code>tomorrow</code> · ends at: the next start of the working day</dd>
+<dt>Until Monday 09:00</dt>
+<dd>API value: <code>week_start</code> · ends at: the next start of the working day on the first day of the week</dd>
+</dl>
 <p>"Next" is strictly after now. With the working day starting at 09:00:</p>
 <ul>
 <li>At 02:00, "Until tomorrow 09:00" ends at 09:00 the same day. The night belongs to the day before it, so "tomorrow"
@@ -3088,27 +3067,18 @@ a button in a messenger and a Text command carry no time zone, so they count in 
 who pressed or wrote, and otherwise in the Organization's.</p>
 <p><strong>Settings.</strong> Two Organization settings define the presets, as the fields <code>workday_start</code> and <code>week_start</code> of the
 organization in the API:</p>
-<table>
-<thead>
-<tr>
-<th>Setting</th>
-<th>Default</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>organization.workday_start</code></td>
-<td><code>09:00</code></td>
-<td>the start of the working day, <code>HH:MM</code> on the 24-hour clock</td>
-</tr>
-<tr>
-<td><code>organization.week_start</code></td>
-<td><code>monday</code></td>
-<td>the first day of the week, <code>monday</code> to <code>sunday</code></td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>organization.workday_start</code></dt>
+<dd>
+<p>default: <code>09:00</code></p>
+<p>The start of the working day, <code>HH:MM</code> on the 24-hour clock.</p>
+</dd>
+<dt><code>organization.week_start</code></dt>
+<dd>
+<p>default: <code>monday</code></p>
+<p>The first day of the week, <code>monday</code> to <code>sunday</code>.</p>
+</dd>
+</dl>
 <p><strong>API.</strong> A Snooze takes <code>preset</code>, <code>tomorrow</code> or <code>week_start</code>, as a third choice beside <code>until</code> and <code>no_end</code>, with an
 optional <code>time_zone</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"preset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tomorrow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"time_zone"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Europe/Berlin"</span><span class="p">}</span>
@@ -3147,47 +3117,23 @@ command is recorded in the Audit log with its actor and the Transport.</p>
 <h2 id="where-a-command-comes-from">Where a command comes from<a class="headerlink" href="#where-a-command-comes-from" title="Permanent link">&para;</a></h2>
 <p>The <strong>Transport</strong> is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
 to all of them.</p>
-<table>
-<thead>
-<tr>
-<th>Transport</th>
-<th>How</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Web UI</td>
-<td>buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve</td>
-<td>everything above, including bulk commands, Notes and Unresolve</td>
-</tr>
-<tr>
-<td>API</td>
-<td><code>POST</code> to <code>/api/v1/alert-groups/{id}/acknowledge</code> and its siblings, with a session or a token</td>
-<td>the same; see the <a href="../../reference/api/">API reference</a></td>
-</tr>
-<tr>
-<td>Mattermost</td>
-<td>a button on the message</td>
-<td>Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it</td>
-</tr>
-<tr>
-<td>Telegram</td>
-<td>an inline button on the message</td>
-<td>the same</td>
-</tr>
-<tr>
-<td>Bridge</td>
-<td>a button on the message, if the bridge declares <code>buttons</code>; or a <strong>Text command</strong> in the Thread, if it declares <code>thread_messages</code></td>
-<td>the same</td>
-</tr>
-<tr>
-<td><code>system</code></td>
-<td>Muster itself</td>
-<td>the automatic transitions above, shown in the Timeline</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Web UI</dt>
+<dd>how: buttons on the Alert Group page and in the list, with dialogs for Snooze and Resolve · notes: everything above,
+including bulk commands, Notes and Unresolve</dd>
+<dt>API</dt>
+<dd>how: <code>POST</code> to <code>/api/v1/alert-groups/{id}/acknowledge</code> and its siblings, with a session or a token · notes: the
+same; see the <a href="../../reference/api/">API reference</a></dd>
+<dt>Mattermost</dt>
+<dd>how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it</dd>
+<dt>Telegram</dt>
+<dd>how: an inline button on the message · notes: the same</dd>
+<dt>Bridge</dt>
+<dd>how: a button on the message, if the bridge declares <code>buttons</code>; or a <strong>Text command</strong> in the Thread, if it declares
+<code>thread_messages</code> · notes: the same</dd>
+<dt><code>system</code></dt>
+<dd>how: Muster itself · notes: the automatic transitions above, shown in the Timeline</dd>
+</dl>
 <p>Messengers never offer Unresolve or Notes, and never a Snooze with no end. A person who presses a button in a messenger
 must have linked their messenger account to their Muster user; see <a href="../../messengers/account-links/">Link your messenger
 accounts</a>. A press from an unlinked account changes nothing, and the person is told

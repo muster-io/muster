@@ -10,27 +10,62 @@ or a reply in the Thread, and a Quiet change is an edit of the Root message or a
 
 ## Which changes are Loud
 
-| Change | Loud or Quiet | Mentions |
-|---|---|---|
-| A new Alert Group starts | Loud, as a new Root message | the Destination's `new_alert_group` setting |
-| New Alerts join a **firing** Alert Group | Loud, as a Thread reply; batched | `new_alerts` |
-| New Alerts join an acknowledged or snoozed Alert Group | Quiet | nobody |
-| A Reopen into firing | Loud | `reopen` |
-| A Reopen into acknowledged | Loud | the Owner only |
-| A Reopen into snoozed | Quiet | nobody |
-| A Snooze ends while Alerts still fire | Loud, listing what accumulated | `snooze_ended` |
-| A rise to Urgent that ends a Snooze or removes an acknowledgement | Loud, with the reason | the Owner it removed, and `rise_to_urgent` |
-| A rise in Severity level that changes nothing else | Quiet | nobody |
-| A Takeover | Loud | the previous Owner |
-| An ack timeout notice | Loud | `ack_timeout` |
-| A Reminder | Loud | the Owner |
-| Auto-unacknowledge | Loud, with the reason | the Owner it removed |
-| The Owner is disabled or deleted | Loud | nobody |
-| Several notices missed during downtime | Loud, as one reply | as the notices it stands for |
-| Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve | Quiet | nobody |
-| An Alert resolves, is replaced or continues, or its annotations change | Quiet | nobody |
-| The system resolves the Alert Group | Quiet, with a Thread reply that gives the reason | nobody |
-| A Note | Quiet, and not sent to messengers | nobody |
+A new Alert Group starts
+:   Loud, as a new Root message · mentions: the Destination's `new_alert_group` setting
+
+New Alerts join a **firing** Alert Group
+:   Loud, as a Thread reply; batched · mentions: `new_alerts`
+
+New Alerts join an acknowledged or snoozed Alert Group
+:   Quiet · mentions: nobody
+
+A Reopen into firing
+:   Loud · mentions: `reopen`
+
+A Reopen into acknowledged
+:   Loud · mentions: the Owner only
+
+A Reopen into snoozed
+:   Quiet · mentions: nobody
+
+A Snooze ends while Alerts still fire
+:   Loud, listing what accumulated · mentions: `snooze_ended`
+
+A rise to Urgent that ends a Snooze or removes an acknowledgement
+:   Loud, with the reason · mentions: the Owner it removed, and `rise_to_urgent`
+
+A rise in Severity level that changes nothing else
+:   Quiet · mentions: nobody
+
+A Takeover
+:   Loud · mentions: the previous Owner
+
+An ack timeout notice
+:   Loud · mentions: `ack_timeout`
+
+A Reminder
+:   Loud · mentions: the Owner
+
+Auto-unacknowledge
+:   Loud, with the reason · mentions: the Owner it removed
+
+The Owner is disabled or deleted
+:   Loud · mentions: nobody
+
+Several notices missed during downtime
+:   Loud, as one reply · mentions: as the notices it stands for
+
+Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve
+:   Quiet · mentions: nobody
+
+An Alert resolves, is replaced or continues, or its annotations change
+:   Quiet · mentions: nobody
+
+The system resolves the Alert Group
+:   Quiet, with a Thread reply that gives the reason · mentions: nobody
+
+A Note
+:   Quiet, and not sent to messengers · mentions: nobody
 
 The pattern: Muster rings when something needs a human who may not be looking, such as a new problem, one that returned,
 one that nobody took, or one that someone took and went quiet. It does not ring for what a person just did, because that
@@ -53,12 +88,26 @@ You cannot change the loudness of an event. You can change whom it Mentions.
 
 ## What Loud means in each Destination
 
-| Destination | A Loud change is | A Quiet change is |
-|---|---|---|
-| Mattermost | a new post, with its Mentions in the text of the post | an edit, or a new post without a Mention |
-| Telegram | a new message, in the channel for a Root message and in the discussion group for a Thread reply | an edit, or a new message sent with `disable_notification` |
-| Bridge | a new message that the bridge posts with `notify` on, with its Mentions | an edit, or a new message that the bridge posts without a notification where it declares `quiet_messages` |
-| Outgoing webhook | an event with `notify` true (events mode), or `.Notify` true in a template (template mode) | `notify` false |
+Mattermost
+:   A Loud change is a new post, with its Mentions in the text of the post.
+
+    A Quiet change is an edit, or a new post without a Mention.
+
+Telegram
+:   A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.
+
+    A Quiet change is an edit, or a new message sent with `disable_notification`.
+
+Bridge
+:   A Loud change is a new message that the bridge posts with `notify` on, with its Mentions.
+
+    A Quiet change is an edit, or a new message that the bridge posts without a notification where it declares
+    `quiet_messages`.
+
+Outgoing webhook
+:   A Loud change is an event with `notify` true (events mode), or `.Notify` true in a template (template mode).
+
+    A Quiet change is `notify` false.
 
 A few details:
 

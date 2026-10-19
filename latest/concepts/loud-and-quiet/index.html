@@ -2660,112 +2660,46 @@ a Loud change <strong>Mentions</strong>.</p>
 a message, even to add a Mention, does not ring a phone. So a Loud change is always a <strong>new message</strong>, a new Root message
 or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a Mention.</p>
 <h2 id="which-changes-are-loud">Which changes are Loud<a class="headerlink" href="#which-changes-are-loud" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Change</th>
-<th>Loud or Quiet</th>
-<th>Mentions</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>A new Alert Group starts</td>
-<td>Loud, as a new Root message</td>
-<td>the Destination's <code>new_alert_group</code> setting</td>
-</tr>
-<tr>
-<td>New Alerts join a <strong>firing</strong> Alert Group</td>
-<td>Loud, as a Thread reply; batched</td>
-<td><code>new_alerts</code></td>
-</tr>
-<tr>
-<td>New Alerts join an acknowledged or snoozed Alert Group</td>
-<td>Quiet</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>A Reopen into firing</td>
-<td>Loud</td>
-<td><code>reopen</code></td>
-</tr>
-<tr>
-<td>A Reopen into acknowledged</td>
-<td>Loud</td>
-<td>the Owner only</td>
-</tr>
-<tr>
-<td>A Reopen into snoozed</td>
-<td>Quiet</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>A Snooze ends while Alerts still fire</td>
-<td>Loud, listing what accumulated</td>
-<td><code>snooze_ended</code></td>
-</tr>
-<tr>
-<td>A rise to Urgent that ends a Snooze or removes an acknowledgement</td>
-<td>Loud, with the reason</td>
-<td>the Owner it removed, and <code>rise_to_urgent</code></td>
-</tr>
-<tr>
-<td>A rise in Severity level that changes nothing else</td>
-<td>Quiet</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>A Takeover</td>
-<td>Loud</td>
-<td>the previous Owner</td>
-</tr>
-<tr>
-<td>An ack timeout notice</td>
-<td>Loud</td>
-<td><code>ack_timeout</code></td>
-</tr>
-<tr>
-<td>A Reminder</td>
-<td>Loud</td>
-<td>the Owner</td>
-</tr>
-<tr>
-<td>Auto-unacknowledge</td>
-<td>Loud, with the reason</td>
-<td>the Owner it removed</td>
-</tr>
-<tr>
-<td>The Owner is disabled or deleted</td>
-<td>Loud</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>Several notices missed during downtime</td>
-<td>Loud, as one reply</td>
-<td>as the notices it stands for</td>
-</tr>
-<tr>
-<td>Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve</td>
-<td>Quiet</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>An Alert resolves, is replaced or continues, or its annotations change</td>
-<td>Quiet</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>The system resolves the Alert Group</td>
-<td>Quiet, with a Thread reply that gives the reason</td>
-<td>nobody</td>
-</tr>
-<tr>
-<td>A Note</td>
-<td>Quiet, and not sent to messengers</td>
-<td>nobody</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>A new Alert Group starts</dt>
+<dd>Loud, as a new Root message · mentions: the Destination's <code>new_alert_group</code> setting</dd>
+<dt>New Alerts join a <strong>firing</strong> Alert Group</dt>
+<dd>Loud, as a Thread reply; batched · mentions: <code>new_alerts</code></dd>
+<dt>New Alerts join an acknowledged or snoozed Alert Group</dt>
+<dd>Quiet · mentions: nobody</dd>
+<dt>A Reopen into firing</dt>
+<dd>Loud · mentions: <code>reopen</code></dd>
+<dt>A Reopen into acknowledged</dt>
+<dd>Loud · mentions: the Owner only</dd>
+<dt>A Reopen into snoozed</dt>
+<dd>Quiet · mentions: nobody</dd>
+<dt>A Snooze ends while Alerts still fire</dt>
+<dd>Loud, listing what accumulated · mentions: <code>snooze_ended</code></dd>
+<dt>A rise to Urgent that ends a Snooze or removes an acknowledgement</dt>
+<dd>Loud, with the reason · mentions: the Owner it removed, and <code>rise_to_urgent</code></dd>
+<dt>A rise in Severity level that changes nothing else</dt>
+<dd>Quiet · mentions: nobody</dd>
+<dt>A Takeover</dt>
+<dd>Loud · mentions: the previous Owner</dd>
+<dt>An ack timeout notice</dt>
+<dd>Loud · mentions: <code>ack_timeout</code></dd>
+<dt>A Reminder</dt>
+<dd>Loud · mentions: the Owner</dd>
+<dt>Auto-unacknowledge</dt>
+<dd>Loud, with the reason · mentions: the Owner it removed</dd>
+<dt>The Owner is disabled or deleted</dt>
+<dd>Loud · mentions: nobody</dd>
+<dt>Several notices missed during downtime</dt>
+<dd>Loud, as one reply · mentions: as the notices it stands for</dd>
+<dt>Acknowledge, Unacknowledge, Snooze, Unsnooze, Resolve, Unresolve</dt>
+<dd>Quiet · mentions: nobody</dd>
+<dt>An Alert resolves, is replaced or continues, or its annotations change</dt>
+<dd>Quiet · mentions: nobody</dd>
+<dt>The system resolves the Alert Group</dt>
+<dd>Quiet, with a Thread reply that gives the reason · mentions: nobody</dd>
+<dt>A Note</dt>
+<dd>Quiet, and not sent to messengers · mentions: nobody</dd>
+</dl>
 <p>The pattern: Muster rings when something needs a human who may not be looking, such as a new problem, one that returned,
 one that nobody took, or one that someone took and went quiet. It does not ring for what a person just did, because that
 person is looking. The Takeover is the only result of a person's command that is Loud, because the previous Owner has
@@ -2811,37 +2745,29 @@ just lost the Alert Group.</p>
 </table>
 <p>You cannot change the loudness of an event. You can change whom it Mentions.</p>
 <h2 id="what-loud-means-in-each-destination">What Loud means in each Destination<a class="headerlink" href="#what-loud-means-in-each-destination" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Destination</th>
-<th>A Loud change is</th>
-<th>A Quiet change is</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Mattermost</td>
-<td>a new post, with its Mentions in the text of the post</td>
-<td>an edit, or a new post without a Mention</td>
-</tr>
-<tr>
-<td>Telegram</td>
-<td>a new message, in the channel for a Root message and in the discussion group for a Thread reply</td>
-<td>an edit, or a new message sent with <code>disable_notification</code></td>
-</tr>
-<tr>
-<td>Bridge</td>
-<td>a new message that the bridge posts with <code>notify</code> on, with its Mentions</td>
-<td>an edit, or a new message that the bridge posts without a notification where it declares <code>quiet_messages</code></td>
-</tr>
-<tr>
-<td>Outgoing webhook</td>
-<td>an event with <code>notify</code> true (events mode), or <code>.Notify</code> true in a template (template mode)</td>
-<td><code>notify</code> false</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt>Mattermost</dt>
+<dd>
+<p>A Loud change is a new post, with its Mentions in the text of the post.</p>
+<p>A Quiet change is an edit, or a new post without a Mention.</p>
+</dd>
+<dt>Telegram</dt>
+<dd>
+<p>A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.</p>
+<p>A Quiet change is an edit, or a new message sent with <code>disable_notification</code>.</p>
+</dd>
+<dt>Bridge</dt>
+<dd>
+<p>A Loud change is a new message that the bridge posts with <code>notify</code> on, with its Mentions.</p>
+<p>A Quiet change is an edit, or a new message that the bridge posts without a notification where it declares
+<code>quiet_messages</code>.</p>
+</dd>
+<dt>Outgoing webhook</dt>
+<dd>
+<p>A Loud change is an event with <code>notify</code> true (events mode), or <code>.Notify</code> true in a template (template mode).</p>
+<p>A Quiet change is <code>notify</code> false.</p>
+</dd>
+</dl>
 <p>A few details:</p>
 <ul>
 <li><strong>Mattermost.</strong> A reply in a Thread notifies the Thread's followers by their own settings, and a Mention makes the

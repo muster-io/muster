@@ -2645,27 +2645,12 @@ the internal Service yourself, or the pods on port 8082.</p>
 in the <code>*_info</code> metrics, which the dashboard joins. No metric carries an alert label, a user or an Alert Group number.</p>
 <h2 id="alert-rules">Alert rules<a class="headerlink" href="#alert-rules" title="Permanent link">&para;</a></h2>
 <p>The chart renders one group of rules, named <code>muster</code>, when you enable one of:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Renders</th>
-<th>Needs</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>alerting.prometheusRule.enabled</code></td>
-<td>a <code>PrometheusRule</code></td>
-<td>the Prometheus Operator CRDs</td>
-</tr>
-<tr>
-<td><code>alerting.vmRule.enabled</code></td>
-<td>a <code>VMRule</code></td>
-<td>the VictoriaMetrics Operator CRDs</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>alerting.prometheusRule.enabled</code></dt>
+<dd>renders: a <code>PrometheusRule</code> · needs: the Prometheus Operator CRDs</dd>
+<dt><code>alerting.vmRule.enabled</code></dt>
+<dd>renders: a <code>VMRule</code> · needs: the VictoriaMetrics Operator CRDs</dd>
+</dl>
 <p>Both take extra labels (<code>alerting.prometheusRule.labels</code>, <code>alerting.vmRule.labels</code>) for the rule selector of your
 operator. Each rule has a <code>description</code> and a <code>runbook_url</code> that points to its <a href="../runbooks/">runbook</a>, built from
 <code>alerting.runbookBaseURL</code> and the version of Muster the chart deploys.</p>
@@ -2721,27 +2706,19 @@ Point the receiver <code>platform-direct</code> at a path that does not depend o
 <p>The chart ships one dashboard, "Muster", with the fixed uid <code>muster</code>, a data source variable, and the variables
 <code>namespace</code>/<code>job</code>, <code>integration</code>, <code>route</code> and <code>destination</code>. It has four rows: Overview, Ingestion, Delivery and
 Platform. You enable it in either or both ways, each behind its own flag:</p>
-<table>
-<thead>
-<tr>
-<th>Value</th>
-<th>Renders</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>dashboard.configMap.enabled</code></td>
-<td>a <code>ConfigMap</code> with the dashboard JSON</td>
-<td>for the Grafana sidecar; <code>dashboard.configMap.labels</code> defaults to <code>grafana_dashboard: "1"</code></td>
-</tr>
-<tr>
-<td><code>dashboard.grafanaDashboard.enabled</code></td>
-<td>a <code>GrafanaDashboard</code> of the Grafana Operator</td>
-<td>references that ConfigMap, so it needs <code>dashboard.configMap.enabled</code> too; <code>instanceSelector</code>, <code>folder</code> and <code>allowCrossNamespaceImport</code> are values</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>dashboard.configMap.enabled</code></dt>
+<dd>
+<p>renders: a <code>ConfigMap</code> with the dashboard JSON</p>
+<p>For the Grafana sidecar; <code>dashboard.configMap.labels</code> defaults to <code>grafana_dashboard: "1"</code>.</p>
+</dd>
+<dt><code>dashboard.grafanaDashboard.enabled</code></dt>
+<dd>
+<p>renders: a <code>GrafanaDashboard</code> of the Grafana Operator</p>
+<p>References that ConfigMap, so it needs <code>dashboard.configMap.enabled</code> too; <code>instanceSelector</code>, <code>folder</code> and
+<code>allowCrossNamespaceImport</code> are values.</p>
+</dd>
+</dl>
 <h2 id="internal-alerts">Internal alerts<a class="headerlink" href="#internal-alerts" title="Permanent link">&para;</a></h2>
 <p>Muster raises its own problems as <strong>Internal alerts</strong>: <code>MusterSnapshotTruncated</code>, <code>MusterHeartbeatLost</code>,
 <code>MusterDestinationBroken</code>, <code>MusterTemplateError</code> and <code>MusterOIDCSecretExpiring</code>. They are Alerts of the built-in

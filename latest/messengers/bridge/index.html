@@ -2764,48 +2764,24 @@ proxy:</p>
 <li><strong><code>event_delivery</code></strong>: whether the bridge offers the Connection's event delivery mode.</li>
 </ol>
 <p>A failed step names its cause with a code:</p>
-<table>
-<thead>
-<tr>
-<th>Code</th>
-<th>Cause</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>token_invalid</code></td>
-<td>The bridge refused the token.</td>
-</tr>
-<tr>
-<td><code>protocol_version_unknown</code></td>
-<td>The bridge speaks a protocol version that this Muster does not speak.</td>
-</tr>
-<tr>
-<td><code>protocol_mismatch</code></td>
-<td>The answer does not match the protocol, or is larger than 64 KiB.</td>
-</tr>
-<tr>
-<td><code>event_delivery_not_offered</code></td>
-<td>The bridge does not offer the Connection's event delivery mode.</td>
-</tr>
-<tr>
-<td><code>proxy_refused</code></td>
-<td>The Connection's proxy refused its credentials (<code>407</code>).</td>
-</tr>
-<tr>
-<td><code>timeout</code>, <code>connect_failed</code>, <code>dns_failed</code>, <code>tls_failed</code></td>
-<td>Muster got no answer from the bridge.</td>
-</tr>
-<tr>
-<td><code>blocked</code></td>
-<td>The outbound address policy does not allow the bridge's address.</td>
-</tr>
-<tr>
-<td><code>request_failed</code></td>
-<td>The bridge answered with another error; the message names its class and the bridge's text.</td>
-</tr>
-</tbody>
-</table>
+<dl>
+<dt><code>token_invalid</code></dt>
+<dd>The bridge refused the token.</dd>
+<dt><code>protocol_version_unknown</code></dt>
+<dd>The bridge speaks a protocol version that this Muster does not speak.</dd>
+<dt><code>protocol_mismatch</code></dt>
+<dd>The answer does not match the protocol, or is larger than 64 KiB.</dd>
+<dt><code>event_delivery_not_offered</code></dt>
+<dd>The bridge does not offer the Connection's event delivery mode.</dd>
+<dt><code>proxy_refused</code></dt>
+<dd>The Connection's proxy refused its credentials (<code>407</code>).</dd>
+<dt><code>timeout</code>, <code>connect_failed</code>, <code>dns_failed</code>, <code>tls_failed</code></dt>
+<dd>Muster got no answer from the bridge.</dd>
+<dt><code>blocked</code></dt>
+<dd>The outbound address policy does not allow the bridge's address.</dd>
+<dt><code>request_failed</code></dt>
+<dd>The bridge answered with another error; the message names its class and the bridge's text.</dd>
+</dl>
 <h2 id="check-before-saving">Check before saving<a class="headerlink" href="#check-before-saving" title="Permanent link">&para;</a></h2>
 <p>The check above reads a saved Connection. <strong>Check connection</strong> in the form of a new Connection, or on the page of a
 saved one while the form holds changes, checks the values in the form before anything is saved, with
