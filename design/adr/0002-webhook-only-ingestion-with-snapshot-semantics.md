@@ -11,6 +11,13 @@
 - Amended: 2026-10-08 — Stored Snapshots are processed in arrival order per Alertmanager group, not per Integration:
   up to `processing.parallel_groups` Alertmanager groups of one Integration at the same time, so that one
   Integration's burst meets NFR-2 (D285)
+- Amended: 2026-10-19 — after a live test of Grafana OSS 13.2.4 ([verified facts](../facts.md#grafana)), Grafana
+  Alerting's webhook contact point is a source in L1: its built-in Alertmanager sends the same payload, with the same
+  `groupKey`, whole groups and repeats. A `resolved` with an older `startsAt` resolves the current firing when its
+  `endsAt` is later than the current `startsAt`, because the replicas of a Grafana HA pair give the copies of one alert
+  different `startsAt` (F-111); a truncated Snapshot from Grafana, which has a top-level `orgId`, with
+  `status: resolved` resolves only the Alerts it lists, because Grafana computes that status from the listed alerts
+  (F-110; D383)
 
 ## Context
 
@@ -75,10 +82,10 @@ a closed network and Alertmanager inside it.
 ## Decision
 
 **Position.** Muster sits after Alertmanager and does not replace it: inhibition, deduplication of HA rule evaluators and
-Alertmanager silences stay there. In the first release (L1) the only alert source is Alertmanager's webhook, plus one
-Heartbeat per Integration; the Connection mode of every Integration is `webhook-only`. A generic inbound webhook for
-other sources is deferred to a later layer (L2); any script can already reach Muster through Alertmanager's
-`POST /api/v2/alerts`.
+Alertmanager silences stay there. In the first release (L1) the alert sources are Alertmanager's webhook and Grafana
+Alerting's webhook contact point, whose built-in Alertmanager sends the same payload, plus one Heartbeat per
+Integration; the Connection mode of every Integration is `webhook-only`. A generic inbound webhook for other sources is
+deferred to a later layer (L2); any script can already reach Muster through Alertmanager's `POST /api/v2/alerts`.
 
 **Integration.** One Integration per Alertmanager cluster — typically one per Kubernetes cluster; an HA pair is one
 Integration. Each has its own Integration tokens, its own Heartbeat and optional Static labels that are added to every

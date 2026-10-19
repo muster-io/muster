@@ -132,18 +132,18 @@ issue: 20
   | firing | firing, same `startsAt` | `last_seen_at`, annotations refreshed | `annotations_changed` when they differ |
   | firing | firing, newer `startsAt` | Continuation: `starts_at` updated | `continued` |
   | firing | any, with a newer `startsAt` than listed; resolved by a `resolved` with the same `startsAt` | nothing (an old copy); a firing Alert's presence stays listed | — |
-  | resolved | firing, `startsAt` not older | resolved, reason `resolved` | `resolved` |
-  | resolved | resolved, or firing with a newer `startsAt` | nothing, not counted | — |
+  | resolved | firing, `startsAt` not older; firing with a newer `startsAt` than listed and a listed `endsAt` later than it (S-096) | resolved, reason `resolved` | `resolved` |
+  | resolved | resolved, or firing with a newer `startsAt` than listed and no listed `endsAt` later than it | nothing, not counted | — |
   | resolved | no row | dropped, `muster_ingest_resolved_dropped_total` + 1 | — |
 
   Resolved Alerts never create rows; times are kept to the microsecond, as PostgreSQL stores them. A Snapshot with
   `status: resolved` (C-06.FR-21) resolves every Alert still firing with an active presence in its `groupKey`, listed or
-  not, as if each were listed as resolved. A late Snapshot — received more than the duplicate window before the
-  current window of its `groupKey` started, as in a replay — applies only the `resolved` rows of the table and changes
-  no presence, window or learned interval; this is what makes replay (S-021) change nothing. A Snapshot received less
-  than that before the window started is a request that committed after a later one (schema.md §5): it counts in the
-  current window — its Alerts are listed there and a truncated one marks the window — but opens no window, learns
-  nothing and decides no absence.
+  not, as if each were listed as resolved; a truncated one from Grafana resolves only the Alerts it lists (S-096). A
+  late Snapshot — received more than the duplicate window before the current window of its `groupKey` started, as in a
+  replay — applies only the `resolved` rows of the table and changes no presence, window or learned interval; this is
+  what makes replay (S-021) change nothing. A Snapshot received less than that before the window started is a request
+  that committed after a later one (schema.md §5): it counts in the current window — its Alerts are listed there and a
+  truncated one marks the window — but opens no window, learns nothing and decides no absence.
 - **Presence and the duplicate window** (C-06.FR-5, FR-6, FR-7; `alertmanager_groups`, `alert_presences`): an Alert that
   resolves, for any reason, ends its active presences (`gone`), so that only the presences of its current firing decide
   its absence. A Snapshot of

@@ -14,8 +14,8 @@ node or domain. An Alert Group contains Alerts.
 _Avoid_: Target, Sub-alert, Instance
 
 **Snapshot**:
-One notification from Alertmanager that lists the current Alerts of one Alertmanager group. It is input, not an
-Alert.
+One notification from Alertmanager — Grafana's built-in one included, through a webhook contact point — that lists the
+current Alerts of one Alertmanager group. It is input, not an Alert.
 _Avoid_: Alert, Event
 
 **Alert Group**:
@@ -69,7 +69,7 @@ A Snapshot kept exactly as received, for debugging, previews and replay.
 _Avoid_: Raw webhook, raw body
 
 **Truncated Snapshot**:
-A Snapshot from which Alertmanager left out some Alerts because of its `max_alerts` limit.
+A Snapshot from which Alertmanager left out some Alerts because of its `max_alerts` limit (Max alerts in Grafana).
 
 **Heartbeat**:
 A regular signal from an Integration that proves the path from the alert source to Muster works.
