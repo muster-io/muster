@@ -173,21 +173,24 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   a mark with the state of the live-updates stream of FR-25, so that a person on a phone at night knows whether the
   list in front of them is live:
 
-  | State | While | Mark |
+  | State | While | Mark (from 640 CSS pixels up) |
   |---|---|---|
-  | `connecting` | from the page load until the stream first opens | grey dot; "Connecting…" once `live.reconnecting_after` has passed |
-  | `live` | the stream is open | green dot and "Live" |
-  | `reconnecting` | the stream has been closed for `live.reconnecting_after`, and the browser or the shell tries again | amber dot and "Reconnecting…" |
-  | `offline` | the stream has been closed for `live.offline_after`, counted from the page load before it first opened | red dot and "Offline" |
+  | `connecting` | from the page load until the stream first opens | grey ring; "Connecting…" once `live.reconnecting_after` has passed |
+  | `live` | the stream is open | green filled dot and "Live" |
+  | `reconnecting` | the stream has been closed for `live.reconnecting_after`, and the browser or the shell tries again | amber half-filled dot and "Reconnecting…" |
+  | `offline` | the stream has been closed for `live.offline_after`, counted from the page load before it first opened | red ring with a slash and "Offline" |
 
   A drop shorter than `live.reconnecting_after`, such as a replica restarting, leaves the mark as it was. The mark's
   text is a status region (`role="status"`, announced politely) whose changes a screen reader reads out. Pressing the
   mark shows what its state means — "What you see may be out of date" in every state but `live` — and, in `offline`,
   a button that reloads the page. Whenever the stream opens again after a loss, whether the browser reconnected it or
-  the shell opened a new one (FR-25), every query is read again and the mark returns to `live`. From 360 CSS pixels up
-  the mark keeps its dot, and its text in every state but `live`, without horizontal scrolling of the page. The mark
-  sends nothing to the server and is not recorded anywhere (NFR-7). When the session has ended, the SPA goes to the
-  sign-in page as FR-25 says.
+  the shell opened a new one (FR-25), every query is read again and the mark returns to `live`. Below 640 CSS pixels
+  (the `sm` breakpoint) the mark shows only its dot in every state, its text in the status region and in what pressing
+  it shows, so that the navigation keeps its width; each state's dot has its own shape, as in the table, so that no
+  state is told by colour alone. From 640 CSS pixels up the dot has its text beside it in every state but
+  `connecting` before `live.reconnecting_after` has passed. The page does not scroll horizontally from 360 CSS pixels
+  up. The mark sends nothing to the server and is not recorded anywhere (NFR-7). When the session has ended, the SPA
+  goes to the sign-in page as FR-25 says.
 
 ### Alert Group page
 
@@ -300,8 +303,10 @@ Checked with the fake Alertmanager, through the API and the UI.
   cannot reach it again, the mark turns to "Reconnecting…" after `live.reconnecting_after` and to "Offline" after
   `live.offline_after`, each change in its status region; once the stream can be reached again, the mark turns back to
   "Live" and the tab counts include an Alert Group created meanwhile, without a reload. A drop shorter than
-  `live.reconnecting_after` leaves "Live". 360 CSS pixels wide and in Russian, «Нет связи» shows in the header of the
-  list and of an Alert Group page without horizontal scrolling of the page.
+  `live.reconnecting_after` leaves "Live". 360 CSS pixels wide, in English and in Russian, with the stream lost the
+  header of the list shows only the dot of `reconnecting` and then of `offline`, and that of an Alert Group page only
+  the dot of `offline`, while the status region holds "Reconnecting…" and then "Offline" («Переподключение…», «Нет
+  связи»); the main navigation keeps its width, without horizontal scrolling of the page.
 
 ## Related ADRs
 

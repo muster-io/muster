@@ -1325,6 +1325,16 @@
     "newTab": "(opens in a new tab)",
     "title": "Links"
   },
+  "liveUpdates": {
+    "connecting": "Connecting…",
+    "connectingExplained": "Connecting to live updates. What you see may be out of date.",
+    "live": "Live",
+    "liveExplained": "Live updates are on: lists and pages change as soon as something happens.",
+    "lostExplained": "No live updates since {{time}}. What you see may be out of date; it is read again as soon as the connection is back.",
+    "offline": "Offline",
+    "reconnecting": "Reconnecting…",
+    "reload": "Reload page"
+  },
   "lookupTables": {
     "back": "Back to the Lookup tables",
     "create": {

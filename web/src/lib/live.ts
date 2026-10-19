@@ -4,8 +4,10 @@
 // Live hints (ADR-0009): one EventSource on the live-updates stream. A hint {type, id} names what changed and
 // invalidates the queries registered for its type, so the SPA reads the change through the API again; a page that must
 // decide itself what a hint changes, such as the Alert Group list that holds its rows still, listens to it instead.
-// After a reconnect every query is invalidated, as hints may have been missed. When the session ends, the server closes the
-// stream and the browser's reconnect gets 401, which closes the EventSource for good.
+// After a reconnect every query is invalidated, as hints may have been missed: when the browser reconnected the same
+// EventSource and when the shell opened a new one after the old one closed for good, since the state of the stream
+// (live-status.ts), which the mark in the header shows, spans both. When the session ends, the server closes the stream
+// and the browser's reconnect gets 401, which closes the EventSource for good.
 
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
@@ -50,6 +52,7 @@ import {
   getListSystemNoticesQueryKey,
 } from "../api/gen/endpoints/system/system";
 import { HintEventType, type HintEvent } from "../api/gen/model";
+import { type LiveStatus, liveStatus } from "./live-status";
 
 const HINT_TYPES: readonly HintEventType[] = Object.values(HintEventType);
 
@@ -218,13 +221,15 @@ export interface LiveOptions {
   onClosed: () => void;
   /** The EventSource constructor, replaced in tests. */
   eventSource?: new (url: string) => EventSourceLike;
+  /** The state of the stream that the stream's events are reported to; the page's own, liveStatus, by default. */
+  status?: LiveStatus;
 }
 
 /** Opens the stream and returns the function that closes it. */
 export function connectLiveUpdates(queryClient: QueryClient, options: LiveOptions): () => void {
   const Source = options.eventSource ?? EventSource;
+  const status = options.status ?? liveStatus;
   const source = new Source(LIVE_UPDATES_URL);
-  let opened = false;
   let closed = false;
   source.addEventListener("hint", (event) => {
     const hint = parseHint(event instanceof MessageEvent ? event.data : undefined);
@@ -233,12 +238,13 @@ export function connectLiveUpdates(queryClient: QueryClient, options: LiveOption
     }
   });
   source.addEventListener("open", () => {
-    if (opened) {
+    // An open after an earlier one, of this EventSource or of one before it, follows a loss.
+    if (status.opened()) {
       void queryClient.invalidateQueries();
     }
-    opened = true;
   });
   source.addEventListener("error", () => {
+    status.failed(source.readyState);
     if (source.readyState === EventSource.CLOSED && !closed) {
       closed = true;
       options.onClosed();

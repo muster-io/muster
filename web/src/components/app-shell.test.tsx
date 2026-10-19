@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The shell in a real browser: the navigation filtered by Permissions, and the banner area that a system-notices hint
-// updates without a reload.
+// The shell in a real browser: the navigation filtered by Permissions, the banner area that a system-notices hint
+// updates without a reload, and the live updates, read again whenever the stream opens after a loss.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -19,17 +19,21 @@ import { render } from "vitest-browser-react";
 import { getListSystemNoticesQueryKey } from "../api/gen/endpoints/system/system";
 import type { Permission, Session, SystemNotice } from "../api/gen/model";
 import i18n from "../i18n";
-import { type SessionRead, safeReturnTo } from "../lib/api";
+import { SESSION_QUERY_KEY, type SessionRead, safeReturnTo } from "../lib/api";
 import { connectLiveUpdates } from "../lib/live";
+import { createLiveStatus, liveStatus } from "../lib/live-status";
 import { browserTimeZone, formatTime } from "../lib/time";
 import { guardTarget } from "../routes/__root";
-import { NAVIGATION, Navigation, type NavEntry, visibleEntries } from "./app-shell";
+import { AppShell, NAVIGATION, Navigation, type NavEntry, visibleEntries } from "./app-shell";
 import { NoticeBanners } from "./notice-banners";
 
-/** A stand-in for the browser's EventSource that the test drives. */
+/** A stand-in for the browser's EventSource that the test drives; it may replace the global one. */
 class FakeEventSource extends EventTarget {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
   static last: FakeEventSource | undefined;
-  readyState: number = EventSource.CONNECTING;
+  readyState: number = FakeEventSource.CONNECTING;
   readonly url: string;
   constructor(url: string) {
     super();
@@ -37,18 +41,18 @@ class FakeEventSource extends EventTarget {
     FakeEventSource.last = this;
   }
   open() {
-    this.readyState = EventSource.OPEN;
+    this.readyState = FakeEventSource.OPEN;
     this.dispatchEvent(new Event("open"));
   }
   hint(type: string) {
     this.dispatchEvent(new MessageEvent("hint", { data: JSON.stringify({ type, id: null }) }));
   }
   fail() {
-    this.readyState = EventSource.CLOSED;
+    this.readyState = FakeEventSource.CLOSED;
     this.dispatchEvent(new Event("error"));
   }
   close() {
-    this.readyState = EventSource.CLOSED;
+    this.readyState = FakeEventSource.CLOSED;
   }
 }
 
@@ -76,6 +80,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -379,6 +385,7 @@ describe("banners", () => {
     const close = connectLiveUpdates(queryClient, {
       onClosed: () => {},
       eventSource: FakeEventSource,
+      status: createLiveStatus(),
     });
     const source = FakeEventSource.last!;
     source.open();
@@ -415,7 +422,12 @@ describe("banners", () => {
   test("a reconnect invalidates every query, and a closed stream reports the end", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const onClosed = vi.fn();
-    const close = connectLiveUpdates(queryClient, { onClosed, eventSource: FakeEventSource });
+    const status = createLiveStatus();
+    const close = connectLiveUpdates(queryClient, {
+      onClosed,
+      eventSource: FakeEventSource,
+      status,
+    });
     const source = FakeEventSource.last!;
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     source.open();
@@ -425,6 +437,84 @@ describe("banners", () => {
     source.fail();
     expect(onClosed).toHaveBeenCalledTimes(1);
     close();
+    // The loss started the store's timers, which must not outlive the test.
+    status.stop();
+  });
+});
+
+/** RECONNECT_DELAY_MS of the shell: how long it waits before it opens a new stream after a close for good. */
+const SHELL_REOPEN_MS = 10_000;
+
+const ACTIVE: SessionRead = {
+  session: {
+    state: "active",
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the shell reads only the user's name and login
+    user: { id: "US0000000000ME", name: "Me", login: "me", time_zone: null } as Session["user"],
+    csrf_token: "csrf",
+    expires_at: "2026-10-20T09:00:00Z",
+    idle_expires_at: "2026-10-20T09:00:00Z",
+    method: "local",
+    permissions: [],
+  },
+  ended: false,
+};
+
+describe("live updates in the shell", () => {
+  test("the shell's new stream after a close for good reads every query again on its first open", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const original = window.fetch;
+    const sessionReads = vi.fn();
+    vi.spyOn(window, "fetch").mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/api/v1/sessions/current")) {
+        sessionReads();
+        return Promise.resolve(json(200, ACTIVE.session));
+      }
+      return original(input, init);
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(SESSION_QUERY_KEY, ACTIVE);
+    const rootRoute = createRootRoute({
+      component: () => (
+        <AppShell>
+          <p>The page</p>
+        </AppShell>
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    const screen = await render(withProviders(queryClient, <RouterProvider router={router} />));
+    const mark = screen.getByTestId("live-indicator");
+    await expect.element(mark).toHaveAttribute("data-state", "connecting");
+    const first = FakeEventSource.last!;
+    expect(first.url).toBe("/api/v1/live-updates");
+    first.open();
+    await expect.element(mark).toHaveAttribute("data-state", "live");
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const fetchQuery = vi.spyOn(queryClient, "fetchQuery");
+    // The server closes the stream for good; the shell reads the session, which is still active.
+    first.fail();
+    expect(fetchQuery).toHaveBeenCalledTimes(1);
+    await fetchQuery.mock.results[0]?.value;
+    expect(sessionReads).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(SHELL_REOPEN_MS - 1);
+    expect(FakeEventSource.last).toBe(first);
+    vi.advanceTimersByTime(1);
+    const second = FakeEventSource.last!;
+    expect(second).not.toBe(first);
+    expect(invalidate).not.toHaveBeenCalled();
+    // The loss has lasted 10 s: the state is reconnecting, and the new stream does not start at connecting again.
+    expect(liveStatus.getSnapshot().state).toBe("reconnecting");
+
+    second.open();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith();
+    vi.useRealTimers();
+    await expect.element(mark).toHaveAttribute("data-state", "live");
   });
 });
 
