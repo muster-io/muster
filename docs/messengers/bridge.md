@@ -28,8 +28,8 @@ From your bridge, you need:
 Choose how the bridge reports **events** — the presses of buttons and the messages people write in a Thread — with the
 **event delivery** mode:
 
-- **`poll`** when the bridge cannot reach Muster. The replica that leads asks the bridge for new events, so the bridge
-  needs no address of Muster.
+- **`poll`** when the bridge cannot reach Muster. The Leader asks the bridge for new events, so the bridge needs no
+  address of Muster.
 - **`push`** when the bridge can reach `MUSTER_INGEST_URL`. The bridge posts each event to the Connection's callback
   address, `https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…`, which the Connection shows in
   `callback_url`, signed with a **push secret** that you configure on both sides. The push secret has the Standard

@@ -73,9 +73,9 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
   its record is younger than `replica.live_expiry`. A running replica that sees an active key it does not hold stops
   with the canary error.
 - **C-02.FR-10** One replica becomes Leader through a session advisory lock and runs only the singleton tasks: Telegram
-  polling, the Heartbeat lost and Stale checks, partition maintenance, database gauges, the "alive" mark, the outgoing
-  heartbeat and the OIDC client secret expiry check that raises `MusterOIDCSecretExpiring` (C-19.FR-5) — each added by
-  its capability; nothing else runs only on the Leader. The Leader pings over the lock session every
+  and Bridge polling, the Heartbeat lost and Stale checks, partition maintenance, database gauges, the "alive" mark, the
+  outgoing heartbeat and the OIDC client secret expiry check that raises `MusterOIDCSecretExpiring` (C-19.FR-5) — each
+  added by its capability; nothing else runs only on the Leader. The Leader pings over the lock session every
   `leader.ping_interval` and stops all singleton work if no ping succeeded for `leader.fencing_timeout`; the server ends
   a silent lock session within `leader.server_bound` (ADR-0007).
 - **C-02.FR-11** The Leader creates partitions ahead of time — Stored Snapshots daily, Timeline entries and other events

@@ -198,3 +198,6 @@ it opens update pull requests, and a manual run of the nightly workflow has a mu
 | C-01.FR-7 | partial | nightly mutation report; load test and two-replica run are S-004 |
 | C-01.FR-11 | partial | everything except Trivy on the image (S-003) |
 | C-01.AC-1 | partial | the GPL dependency part; the header part is S-001 |
+
+NFR-13 is not an ID of a capability, so `covers` does not list it: the story serves its spec-first part, the spec
+linted before the generators read it, and [coverage.md](coverage.md#non-functional-requirements) lists it there.

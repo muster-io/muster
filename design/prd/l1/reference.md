@@ -76,7 +76,7 @@ messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 | Where | Shown while | Text (English) | Capability |
 |---|---|---|---|
 | UI, every page | recovering after downtime | "Muster is recovering after downtime. Data may be incomplete until HH:MM." | C-02, C-03 |
-| UI, Admins | no replica is leading | "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused." | C-02, C-03 |
+| UI, Admins | no replica is leading | "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused." | C-02, C-03 |
 | OIDC settings | mapping empty or no groups claim | "Nobody will be able to sign in through OIDC." | C-03 |
 | OIDC settings | the client secret expires within `oidc.secret_expiry_lead` | "The client secret expires on {date}. Issue a new one in the identity provider and enter it here." | C-03 |
 | OIDC settings | Role sync would lower the last active Admin | "{user} stays Admin: they are the last active Admin, and the identity provider maps them to {role}. Make another user Admin first." | C-03 |
@@ -107,6 +107,7 @@ messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 | Thread reply | a Bridge Root message was republished past the edit window | "This message is no longer updated. The current one: {link}" | C-22 |
 | Alert Group page, delivery state | a Bridge Root message is past its edit window | "Past the edit window: updated on the next change of status" | C-22 |
 | Bridge answer to a person | a Text command ran · a Snooze duration is not one of the Route's | "Done: {command} #N" · "Snooze for one of: {durations}" | C-22 |
+| Bridge answer to a person | a Snooze Text command on an Alert Group whose Route has no Snooze durations | "This Alert Group's Route has no Snooze durations; nothing was changed." | C-22 |
 | Bridge answer to a person | a press or Text command from an account without an Account link | "Your account is not linked to Muster. Link it in your profile: {link}" | C-22 |
 | Bridge answer to a person | a press whose button data fails verification or belongs to another message | "This button could not be verified; nothing was changed." | C-22 |
 | Profile, link through a Bridge | the bridge refuses the direct message with the code · no account has the handle | "The bot cannot send you a direct message. Send it the token instead." · "No account with this {kind} was found." | C-22 |
@@ -246,7 +247,7 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | Rule | Severity | Default expression | For | Meaning |
 |---|---|---|---|---|
 | `MusterDown` | critical | `up{job="muster"} == 0` | 2m | the scrape target is down |
-| `MusterNoLeader` | critical | `max(muster_leader{job="muster"}) == 0` | 2m | no replica leads: Telegram polling, Heartbeat lost and Stale checks, partitions and the outgoing heartbeat have stopped; ingestion, delivery and timers keep working |
+| `MusterNoLeader` | critical | `max(muster_leader{job="muster"}) == 0` | 2m | no replica leads: Telegram and Bridge polling, Heartbeat lost and Stale checks, partitions and the outgoing heartbeat have stopped; ingestion, delivery and timers keep working |
 | `MusterDeliveryFailing` | critical | `max by (destination) (muster_delivery_queue{job="muster"}) > 0 unless on (destination) sum by (destination) (increase(muster_delivery_attempts_total{job="muster",outcome="delivered"}[10m])) > 0` | 5m | a Destination has queued deliveries and no successful delivery for 10 minutes |
 | `MusterDestinationBroken` | critical | `max by (destination) (muster_destination_broken{job="muster"}) == 1` | 5m | a Destination is Broken |
 | `MusterHeartbeatLost` | critical | `max by (integration) (muster_heartbeat_lost{job="muster"}) == 1` | 1m | an Integration is Heartbeat lost; the backup for the Internal alert |

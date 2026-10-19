@@ -254,7 +254,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-06.FR-17 | S-021 | complete |  |
 | C-06.FR-18 | S-021 (part), S-022 | complete |  |
 | C-06.FR-19 | S-020 (part), S-021 (part), S-022 (part), S-025 (part), S-027 (part), S-028 (part), S-031 | complete | Route, Severity level and Alert Group join with C-08 and C-09 (S-025, S-027, S-028, S-031) |
-| C-06.FR-20 | S-020 (part), S-021 | complete |  |
+| C-06.FR-20 | S-020 (part), S-021, S-065 (part) | complete | S-065 retries transient failures in the Snapshot's lane and keeps a failed Snapshot from holding back its lane |
 | C-06.AC-1 | S-020 | complete |  |
 | C-06.AC-2 | S-020 | complete |  |
 | C-06.AC-3 | S-021 (part), S-022 (part), S-023 | complete | verified by S-023: "never Stale without a Heartbeat" needs the Stale scan, which arrives with the Heartbeat (C-07); S-021 and S-022 check the learned interval |
@@ -825,6 +825,6 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-10 Retention | S-008, S-029, S-055 | partitions dropped by retention (S-008); batched deletes of summary rows and details (S-029, with the other owners of unpartitioned tables); editing the periods (S-055) |
 | NFR-11 Upgrades | S-003, S-006, S-060 | semantic versions through release-please (S-003); expand/contract migrations and the refusal of a newer schema (S-006); the upgrade page (S-060) |
 | NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073) |
-| NFR-13 API | S-002, S-010 | spec-first generation (S-002); cursor pagination, RFC 9457 errors with pointers, optimistic locking, UTC and `public_id` in URLs (S-010) |
+| NFR-13 API | S-002, S-010, S-011 | spec-first generation (S-002); RFC 9457 errors with pointers, UTC and `public_id` in URLs (S-010); optimistic locking with `ETag` and `If-Match`, and cursor pagination without `OFFSET` (S-011) |
 | NFR-14 Quality | S-001, S-002, S-004, S-014 | the coverage gate (S-001); the nightly mutation report (S-002); end-to-end tests with fake servers (S-004) and a real browser (S-014); evidence for every acceptance statement in each pull request (section 7 of the [README](README.md#7-lifecycle)) |
 | NFR-15 Phone width | S-030 | the Alert Group list and page at 360 CSS pixels, checked end to end at that width |

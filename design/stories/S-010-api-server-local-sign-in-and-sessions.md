@@ -286,3 +286,6 @@ None.
 | C-03.AC-11 | full | the Audit log read API that shows it is S-011 |
 | C-03.AC-12 | full | |
 | C-02.FR-19 | partial | the API and sign-in metrics that the catalogue assigns to C-03 |
+
+NFR-13 is not an ID of a capability, so `covers` does not list it: the story serves its RFC 9457 errors with pointers
+and the responses checked against the spec, and [coverage.md](coverage.md#non-functional-requirements) lists it there.

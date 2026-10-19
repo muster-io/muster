@@ -5,7 +5,7 @@ capability: C-06
 kind: be
 layer: L1
 depends_on: [S-061]
-covers: [C-06.FR-1, C-09.FR-3]
+covers: [C-06.FR-1, C-06.FR-20, C-09.FR-3]
 files_touched:
   - internal/ingest/lanes.go
   - internal/ingest/worker.go
@@ -325,6 +325,7 @@ E2E_REPLICAS=2 make e2e
 | ID | Covered | Note |
 |---|---|---|
 | C-06.FR-1 | partial | the order per Alertmanager group and the parallel lanes; the worker, `LISTEN/NOTIFY` and the lease are S-020 |
+| C-06.FR-20 | partial | in the lanes: a deadlock, a serialization failure or a fingerprint another lane inserted retries the Snapshot in its lane instead of failing it, and a body that does not parse fails at once and holds back no lane; failing, logging and counting are S-020, replay S-021 |
 | C-09.FR-3 | partial | the counter row only for creations and reopens, with joins and creations of one Alert Group at the same time; the grouping rules are S-028 |
 
 The non-functional requirements are not IDs of a capability: the story serves NFR-1 (the burst of one Integration
