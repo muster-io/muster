@@ -63,7 +63,8 @@ issue: 298
   `live.offline_after` (30 s) on the page's clock, and exposes it through `useSyncExternalStore`. An `error` while
   `live` starts both timers and leaves `live`; an `open` cancels them and returns to `live`. The shell's new
   EventSource after a close for good continues the same state, so a reopen does not start `connecting` again. The
-  first `open` of a new EventSource after a loss invalidates every query, as the browser's reconnect already does.
+  first `open` of a new EventSource after a loss invalidates every query, as the browser's reconnect already does, and
+  so does the first `open` after the stream failed before it ever opened, which is a reconnect too (C-09.FR-25).
 - **Mark** (`components/live-indicator.tsx`), in the header before the user menu: a button with a dot — green `live`,
   grey `connecting`, amber `reconnecting` (pulsing unless `prefers-reduced-motion`), red `offline` — and the state's
   text, visible at every width in `reconnecting` and `offline`, in `connecting` once `live.reconnecting_after` has

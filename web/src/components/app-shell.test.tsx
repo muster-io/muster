@@ -422,10 +422,11 @@ describe("banners", () => {
   test("a reconnect invalidates every query, and a closed stream reports the end", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const onClosed = vi.fn();
+    const status = createLiveStatus();
     const close = connectLiveUpdates(queryClient, {
       onClosed,
       eventSource: FakeEventSource,
-      status: createLiveStatus(),
+      status,
     });
     const source = FakeEventSource.last!;
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -436,6 +437,8 @@ describe("banners", () => {
     source.fail();
     expect(onClosed).toHaveBeenCalledTimes(1);
     close();
+    // The loss started the store's timers, which must not outlive the test.
+    status.stop();
   });
 });
 

@@ -6,11 +6,12 @@
 // is paused, then answered with `retry: 3000` and an event stream that ends at once, and the browser's reconnects are
 // aborted. The page clock moves the SPA's timers only, so the mark turns "Reconnecting…" after runFor(5 s) and
 // "Offline" after runFor(25 s) more, while the browser keeps reconnecting every 3 s on the real clock. Once the route
-// is removed, a reconnect reaches `muster dev`, the mark turns "Live" and the list is read again, its Firing count
-// including the Alert Group the fake Alertmanager created meanwhile. A loss of 4 s on the page clock leaves "Live". At
-// 360 × 740, in English and in Russian, the offline text shows in the header of the list and of an Alert Group page
-// without horizontal scrolling, "Reload page" loads the page again, and in live only the dot shows. The requests of the
-// page are the stream and its reads.
+// is removed, a reconnect reaches `muster dev`, the mark turns "Live" and the list is read again without a reload: the
+// Alert Group the fake Alertmanager created meanwhile gets its row, and the Firing count of the spec's Integration
+// grows by one. A loss of 4 s on the page clock leaves "Live". At 360 × 740, in English and in Russian, the offline text
+// shows in the header of the list and of an Alert Group page without horizontal scrolling, "Reload page" loads the page
+// again, and in live only the dot shows. The requests of the page are the stream and its reads; while the mark changes,
+// the page reads nothing it had not read before, and nothing about the connection itself.
 
 import { type Page, type Request, type Route, expect, test } from "@playwright/test";
 
@@ -33,6 +34,7 @@ test.describe.configure({ mode: "serial" });
 
 const LIVE_UPDATES = "/api/v1/live-updates";
 const FIRST_TITLE = "LiveMarkFirst";
+const WHILE_OFFLINE_TITLE = "LiveMarkWhileOffline";
 const OLGA = "live-olga";
 const OLGA_PASSWORD = "live-olga-password-1";
 
@@ -59,6 +61,14 @@ test.afterAll(async () => {
 
 function isLiveUpdates(url: URL): boolean {
   return url.pathname === LIVE_UPDATES;
+}
+
+/**
+ * The Firing tab of the list, filtered by the spec's Integration: its count is of the Alert Groups this spec creates
+ * only, so that one created meanwhile adds exactly one, whatever else `muster dev` is doing.
+ */
+function firingOfSpec(): string {
+  return `/alert-groups?tab=%22firing%22&integration=${encodeURIComponent(JSON.stringify([integrationId]))}`;
 }
 
 /** A one-time signal between the spec and a route handler. */
@@ -137,9 +147,30 @@ function isRead(request: Request): boolean {
   const url = new URL(request.url());
   return (
     request.method() === "GET" &&
+    url.origin === APP &&
     url.pathname.startsWith("/api/v1/") &&
     url.pathname !== LIVE_UPDATES
   );
+}
+
+/** A read of the rows of the list, which only a read of everything again or a hint of an open stream sends. */
+function isListRead(request: Request): boolean {
+  return isRead(request) && new URL(request.url()).pathname === "/api/v1/alert-groups";
+}
+
+/** A file of the SPA's build, such as a route loaded on demand; Vite puts all of them under /assets/. */
+function isAsset(url: URL): boolean {
+  return url.pathname.startsWith("/assets/");
+}
+
+/**
+ * What the mark could ask Muster about the connection by itself: the session and the System status. The page reads
+ * the session once when it loads, and again only when the stream is closed for good, which an aborted reconnect is not.
+ */
+const PROBES = ["/api/v1/sessions/current", "/api/v1/system-status"];
+
+function describeRequest(request: Request): string {
+  return `${request.method()} ${request.resourceType()} ${request.url()}`;
 }
 
 /** What the page may request: the stream, the reads of the API and the SPA's own files, all GETs to Muster. */
@@ -166,7 +197,7 @@ test("the mark follows the stream, and the list is read again once it is back", 
 
   // 4. The stream ends and its reconnects fail: "Live", then "Reconnecting…" after 5 s and "Offline" after 30 s.
   const lost = await routeStream(page, "abort");
-  await page.goto("/alert-groups?tab=%22firing%22");
+  await page.goto(firingOfSpec());
   await expect(tab(page, "Firing")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("link", { name: FIRST_TITLE, exact: true })).toBeVisible();
   const firing = await count(page, "Firing");
@@ -205,27 +236,57 @@ test("the mark follows the stream, and the list is read again once it is back", 
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Reload page" })).toHaveCount(0);
 
-  // 5. A new Alert Group meanwhile; once the stream can be reached again, the mark turns "Live" and the list is read
-  // again, without a reload.
+  // 5. A new Alert Group meanwhile, which the page does not show while the stream is lost; once the stream can be
+  // reached again, the mark turns "Live" and the list is read again, without a reload.
   await fam("PUT", "/groups/lm2", {
     receiver: "live-mark",
     route: "{}",
-    labels: { alertname: "LiveMarkWhileOffline" },
+    labels: { alertname: WHILE_OFFLINE_TITLE },
   });
   await fam("PUT", "/groups/lm2/alerts/b0", { labels: { team: "live-mark", pod: "b0" } });
   await notify(integrationId, "lm2", { reason: "first notification" });
+  const whileOffline = page.getByRole("link", { name: WHILE_OFFLINE_TITLE, exact: true });
   expect(await count(page, "Firing")).toBe(firing);
-  // While the mark changed, the page sent nothing but the browser's reconnects of the stream.
-  const whileLost = requests.slice(fromLoss).filter((r) => !isLiveUpdates(new URL(r.url())));
-  expect(whileLost.map((r) => `${r.method()} ${r.url()}`)).toEqual([]);
+  await expect(whileOffline).toHaveCount(0);
+
+  // While the mark changed, the page sent the browser's reconnects of the stream and, at most, reads it had sent
+  // before, such as the Routes and Integrations of the filter panel: only GETs, nothing it had not read before, and
+  // nothing the mark could ask about the connection itself.
+  const whileLost = requests.slice(fromLoss);
+  const readBefore = new Set(
+    requests
+      .slice(0, fromLoss)
+      .filter(isRead)
+      .map((r) => new URL(r.url()).pathname),
+  );
+  expect(whileLost.filter((r) => !allowed(r)).map(describeRequest)).toEqual([]);
+  expect(
+    whileLost
+      .filter((r) => {
+        const url = new URL(r.url());
+        return !isLiveUpdates(url) && !isAsset(url) && !(isRead(r) && readBefore.has(url.pathname));
+      })
+      .map(describeRequest),
+  ).toEqual([]);
+  expect(
+    whileLost.filter((r) => PROBES.includes(new URL(r.url()).pathname)).map(describeRequest),
+  ).toEqual([]);
+
   await lost.unroute();
   await expect(mark(page)).toHaveAttribute("data-state", "live");
   await expect(mark(page)).toHaveText("Live");
+  await expect(whileOffline).toBeVisible();
   await expect.poll(() => count(page, "Firing")).toBe(firing + 1);
+  expect(
+    requests
+      .slice(fromLoss)
+      .filter((r) => r.isNavigationRequest())
+      .map(describeRequest),
+  ).toEqual([]);
 
   // 6. A loss of 4 s on the page clock, the next reconnect let through: "Live" throughout.
   const brief = await routeStream(page, "pass");
-  await page.goto("/alert-groups?tab=%22firing%22");
+  await page.goto(firingOfSpec());
   await expect(page.getByRole("link", { name: FIRST_TITLE, exact: true })).toBeVisible();
   await brief.first.arrived.fired;
   await pauseClock(page);
@@ -236,9 +297,12 @@ test("the mark follows the stream, and the list is read again once it is back", 
     await page.clock.runFor(1_000);
     await expect(mark(page)).toHaveAttribute("data-state", "live");
   }
-  const readAgain = page.waitForRequest(isRead);
+  const reopened = page.waitForResponse((r) => isLiveUpdates(new URL(r.url())) && r.ok());
+  const readAgain = page.waitForRequest(isListRead);
   brief.second.released.fire();
-  // The open reads the page again; the timers of the loss are cancelled, so 5 s and 30 s pass without a change.
+  // The stream answers, and its open reads the rows of the list again, which nothing else reads while the stream is
+  // lost: the SPA has seen the open, so the timers of the loss are cancelled and 5 s and 30 s pass without a change.
+  await reopened;
   await readAgain;
   await page.clock.runFor(1_000);
   await expect(mark(page)).toHaveAttribute("data-state", "live");
@@ -250,9 +314,7 @@ test("the mark follows the stream, and the list is read again once it is back", 
   const streams = requests.filter((r) => isLiveUpdates(new URL(r.url())));
   expect(streams.length).toBeGreaterThanOrEqual(4);
   expect(requests.filter(isRead).length).toBeGreaterThan(0);
-  expect(
-    requests.filter((r) => !allowed(r)).map((r) => `${r.method()} ${r.resourceType()} ${r.url()}`),
-  ).toEqual([]);
+  expect(requests.filter((r) => !allowed(r)).map(describeRequest)).toEqual([]);
   expect(csp).toEqual([]);
 });
 

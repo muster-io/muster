@@ -4,8 +4,8 @@
 // The mark of the live updates in the header (C-09.FR-26): a dot and the text of the state in a status region, so that
 // a screen reader reads each change out, and the dot is never the only cue. Pressed, a popover says what the state
 // means and, in offline, offers to reload the page. The status region holds the button rather than sitting in it,
-// because the content of a button is presentational; the popover itself is portalled out of the region. The mark sends
-// nothing to the server and records nothing (NFR-7).
+// because the content of a button is presentational; the popover itself is portalled out of the region, a dialog named
+// by the state and described by its explanation. The mark sends nothing to the server and records nothing (NFR-7).
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -70,6 +70,7 @@ export function LiveMark({
   const { t } = useTranslation();
   const { time } = useTimeFormat();
   const { state } = snapshot;
+  const text = stateText(t, state);
   const explanation =
     state === "live"
       ? t("liveUpdates.liveExplained")
@@ -92,10 +93,10 @@ export function LiveMark({
             className={cn("size-2 shrink-0 rounded-full", DOT[state])}
           />
           <span data-testid="live-indicator-text" className={textClass(snapshot)}>
-            {stateText(t, state)}
+            {text}
           </span>
         </PopoverTrigger>
-        <PopoverContent align="end" className="max-w-[calc(100vw-2rem)]">
+        <PopoverContent align="end" aria-label={text} className="max-w-[calc(100vw-2rem)]">
           <PopoverDescription>{explanation}</PopoverDescription>
           {state === "offline" && (
             <Button size="sm" className="self-start" onClick={reload}>

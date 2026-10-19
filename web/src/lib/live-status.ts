@@ -3,11 +3,13 @@
 
 // The state of the live-updates stream that the mark in the header shows (C-09.FR-26): connecting from the page load
 // until the stream first opens, live while it is open, reconnecting once it has been lost for live.reconnecting_after
-// and offline once for live.offline_after, both counted from the page load before the first open. A loss shorter than
-// live.reconnecting_after, such as a replica restarting, leaves the state as it was. connectLiveUpdates reports every
-// open and error of the stream here, those of the shell's new EventSource after a close for good included, so that a
-// reopen continues the same state instead of starting at connecting again. The timers run on the page's clock. Nothing
-// here is sent anywhere or recorded (NFR-7).
+// and offline once it has been lost for live.offline_after. Before the first open both are counted from the page load:
+// live.reconnecting_after leaves the state at connecting and only makes its text show (overdue), and live.offline_after
+// turns it offline. A loss shorter than live.reconnecting_after, such as a replica restarting, leaves the state as it
+// was. connectLiveUpdates reports every open and error of the stream here, those of the shell's new EventSource after a
+// close for good included, so that a reopen continues the same state instead of starting at connecting again. An open
+// after a loss, or the first one after the stream failed before it ever opened, means every query is read again. The
+// timers run on the page's clock. Nothing here is sent anywhere or recorded (NFR-7).
 
 import { useSyncExternalStore } from "react";
 
@@ -32,11 +34,13 @@ export interface LiveSnapshot {
 export interface LiveStatus {
   /** Starts at connecting, as on a page load, with both timers counting. */
   start: () => void;
-  /** Stops the timers. */
+  /**
+   * Stops the timers and goes back to connecting, so that a mark shown again before the next start shows no old state.
+   */
   stop: () => void;
   /**
-   * Reports that the stream opened. Returns whether it had opened before since start, so that a loss came between and
-   * every query is read again.
+   * Reports that the stream opened. Returns whether it had opened or failed before since start, so that a loss came
+   * between, or the page has not been live since it loaded, and every query is read again.
    */
   opened: () => boolean;
   /** Reports an error of the stream with the EventSource's readyState. */
@@ -53,6 +57,7 @@ function now(): string {
 export function createLiveStatus(): LiveStatus {
   let snapshot: LiveSnapshot = { state: "connecting", lostAt: now(), overdue: false };
   let openedBefore = false;
+  let failedBefore = false;
   let reconnectingTimer: ReturnType<typeof setTimeout> | undefined;
   let offlineTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
@@ -85,13 +90,18 @@ export function createLiveStatus(): LiveStatus {
   return {
     start: () => {
       openedBefore = false;
+      failedBefore = false;
       set({ state: "connecting", lostAt: now(), overdue: false });
       arm();
     },
-    stop: clearTimers,
+    stop: () => {
+      clearTimers();
+      set({ state: "connecting", lostAt: now(), overdue: false });
+    },
     opened: () => {
-      const again = openedBefore;
+      const again = openedBefore || failedBefore;
       openedBefore = true;
+      failedBefore = false;
       clearTimers();
       if (snapshot.state !== "live" || snapshot.overdue) {
         set({ state: "live", overdue: false });
@@ -99,8 +109,13 @@ export function createLiveStatus(): LiveStatus {
       return again;
     },
     failed: (readyState) => {
+      if (readyState === OPEN) {
+        return;
+      }
+      // Hints may have been missed since the page loaded, even if the stream has never opened.
+      failedBefore = true;
       // A loss while live starts the timers; later errors of the same loss leave them counting.
-      if (readyState === OPEN || snapshot.state !== "live" || offlineTimer !== undefined) {
+      if (snapshot.state !== "live" || offlineTimer !== undefined) {
         return;
       }
       set({ lostAt: now() });

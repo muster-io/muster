@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The mark of the live updates in a real browser (C-09.FR-26): each state's dot, text and status region, where the text
-// shows, the popover with the explanation of reference.md and, in offline, the time of the loss in the user's time zone
-// and "Reload page"; in English and in Russian; and the mark following the page's store.
+// shows, the popover, a dialog named by the state, with the explanation of reference.md and, in offline, the time of the
+// loss in the user's time zone and "Reload page"; in English and in Russian; and the mark following the page's store.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -123,23 +123,35 @@ describe("the mark", () => {
   });
 
   test.each([
-    ["live", "Live updates are on: lists and pages change as soon as something happens."],
-    ["connecting", "Connecting to live updates. What you see may be out of date."],
-    ["reconnecting", LOST_TEXT],
-  ] as const)("pressed in %s, it explains the state without Reload page", async (state, text) => {
-    const reload = vi.fn();
-    const screen = await renderMark(snapshot(state), reload);
-    await screen.getByRole("button").click();
-    await expect.element(page.getByText(text, { exact: true })).toBeVisible();
-    await expect.element(page.getByRole("button", { name: "Reload page" })).not.toBeInTheDocument();
-    expect(reload).not.toHaveBeenCalled();
-  });
+    ["live", "Live", "Live updates are on: lists and pages change as soon as something happens."],
+    ["connecting", "Connecting…", "Connecting to live updates. What you see may be out of date."],
+    ["reconnecting", "Reconnecting…", LOST_TEXT],
+  ] as const)(
+    "pressed in %s, it explains the state in a dialog named %s, without Reload page",
+    async (state, name, text) => {
+      const reload = vi.fn();
+      const screen = await renderMark(snapshot(state), reload);
+      await screen.getByRole("button").click();
+      const dialog = page.getByRole("dialog", { name, exact: true });
+      await expect.element(dialog).toBeVisible();
+      await expect.element(dialog).toHaveAccessibleName(name);
+      await expect.element(dialog).toHaveAccessibleDescription(text);
+      await expect.element(dialog.getByText(text, { exact: true })).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "Reload page" }))
+        .not.toBeInTheDocument();
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
 
   test("pressed in offline, it names the time of the loss in the user's time zone and reloads the page", async () => {
     const reload = vi.fn();
     const screen = await renderMark(snapshot("offline"), reload);
     await screen.getByRole("button", { name: "Offline" }).click();
-    await expect.element(page.getByText(LOST_TEXT, { exact: true })).toBeVisible();
+    const dialog = page.getByRole("dialog", { name: "Offline", exact: true });
+    await expect.element(dialog).toHaveAccessibleName("Offline");
+    await expect.element(dialog).toHaveAccessibleDescription(LOST_TEXT);
+    await expect.element(dialog.getByText(LOST_TEXT, { exact: true })).toBeVisible();
     const button = page.getByRole("button", { name: "Reload page" });
     await expect.element(button).toBeVisible();
     expect(reload).not.toHaveBeenCalled();
@@ -188,6 +200,9 @@ describe("the mark", () => {
     const offline = await renderMark(snapshot("offline"), reload);
     await expect.element(offline.getByRole("status")).toHaveTextContent("Нет связи");
     await offline.getByRole("button", { name: "Нет связи" }).click();
+    await expect
+      .element(page.getByRole("dialog", { name: "Нет связи", exact: true }))
+      .toHaveAccessibleDescription(RU_LOST_TEXT);
     await expect.element(page.getByText(RU_LOST_TEXT, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Перезагрузить страницу" }).click();
     expect(reload).toHaveBeenCalledTimes(1);

@@ -3,8 +3,9 @@
 
 // The state of the live-updates stream (C-09.FR-26), driven through connectLiveUpdates with a stand-in EventSource and
 // fake timers: connecting until the first open, live on every open, reconnecting after live.reconnecting_after and
-// offline after live.offline_after, a loss shorter than live.reconnecting_after, and the shell's new EventSource after
-// a close for good, which continues the same state.
+// offline after live.offline_after, a loss shorter than live.reconnecting_after, the shell's new EventSource after a
+// close for good, which continues the same state, and a stream that failed before it first opened, whose first open
+// reads everything again.
 
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -111,7 +112,7 @@ describe("live-updates state", () => {
     expect(status.getSnapshot()).toEqual({ state: "live", lostAt: at(0), overdue: false });
   });
 
-  test("the first open turns live and reads nothing again", () => {
+  test("the first open, with no error before it, turns live and reads nothing again", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const source = connect();
     vi.advanceTimersByTime(1_000);
@@ -121,6 +122,38 @@ describe("live-updates state", () => {
     // The timers of the page load are cancelled.
     vi.advanceTimersByTime(60_000);
     expect(status.getSnapshot()).toEqual({ state: "live", lostAt: at(0), overdue: false });
+  });
+
+  test.each([
+    ["the browser's reconnect of the same EventSource", CONNECTING],
+    ["the shell's new EventSource after a close for good", CLOSED],
+  ] as const)(
+    "a stream that failed before it first opened reads everything again when %s opens",
+    (_, readyState) => {
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const first = connect();
+      vi.advanceTimersByTime(1_000);
+      first.lose(readyState);
+      vi.advanceTimersByTime(RECONNECTING_AFTER_MS);
+      expect(status.getSnapshot()).toEqual({ state: "connecting", lostAt: at(0), overdue: true });
+      const source = readyState === CLOSED ? connect() : first;
+      expect(invalidate).not.toHaveBeenCalled();
+
+      source.open();
+      expect(state()).toBe("live");
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      expect(invalidate).toHaveBeenCalledWith();
+    },
+  );
+
+  test("an error before the first open makes that open one after a loss; an error of an open stream does not", () => {
+    status.failed(OPEN);
+    expect(status.opened()).toBe(false);
+
+    status.start();
+    status.failed(CONNECTING);
+    expect(state()).toBe("connecting");
+    expect(status.opened()).toBe(true);
   });
 
   test("a loss turns reconnecting after 5 s and offline after 30 s; the next open returns to live and reads everything again", () => {
@@ -244,6 +277,35 @@ describe("live-updates state", () => {
     });
     expect(status.opened()).toBe(false);
     expect(state()).toBe("live");
+  });
+
+  test("stop goes back to connecting from any state, so that a mark shown again shows nothing old", () => {
+    const listener = vi.fn();
+    status.subscribe(listener);
+    status.opened();
+    status.failed(CONNECTING);
+    vi.advanceTimersByTime(OFFLINE_AFTER_MS);
+    expect(status.getSnapshot()).toEqual({ state: "offline", lostAt: at(0), overdue: false });
+    listener.mockClear();
+
+    status.stop();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(status.getSnapshot()).toEqual({
+      state: "connecting",
+      lostAt: at(OFFLINE_AFTER_MS),
+      overdue: false,
+    });
+
+    // Overdue is cleared too, and no timer is left to change it afterwards.
+    status.start();
+    vi.advanceTimersByTime(RECONNECTING_AFTER_MS);
+    expect(status.getSnapshot().overdue).toBe(true);
+    status.stop();
+    expect(status.getSnapshot().overdue).toBe(false);
+    listener.mockClear();
+    vi.advanceTimersByTime(OFFLINE_AFTER_MS * 2);
+    expect(listener).not.toHaveBeenCalled();
+    expect(state()).toBe("connecting");
   });
 
   test("subscribers hear every change until they unsubscribe", () => {
