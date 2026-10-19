@@ -24,7 +24,7 @@ remove a link of its own User.
 1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram** — or
    **Relink Telegram** once you have a Telegram link, which the new link replaces.
 2. Muster shows a link `https://t.me/<bot>?start=<token>`. Open it on the device where you use Telegram, within 10
-   minutes; the link works once.
+   minutes (`account_link.telegram_token_ttl`); the link works once.
 3. Telegram opens a chat with the bot. Press **Start**.
 4. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link at once.
 
@@ -39,12 +39,12 @@ linked to someone else; nothing changed.
    with or without the `@` — and select **Send code**.
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes; capital and small letters are the same. The bot confirms
+3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are the same. The bot confirms
    "Linked to Muster user {your name}".
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
 A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
-codes an hour, whoever asks; beyond that, wait until the oldest request is an hour old. A username the server does not
+codes an hour, whoever asks (`account_link.mattermost_code_requests`); beyond that, wait until the oldest request is an hour old. A username the server does not
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](mattermost.md#direct-messages).
@@ -65,7 +65,7 @@ which notifies nobody.
 
 1. In your profile, open **Messenger accounts**, choose the Bridge Connection and select **Link**.
 2. Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
-   as well. Within 10 minutes, send the token to the bot of that Connection in a direct message, or open the link,
+   as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token to the bot of that Connection in a direct message, or open the link,
    which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.
 3. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
    and the handle the bridge reported for your account.
@@ -85,14 +85,14 @@ login, username or user id — and that its bot can start a direct chat. Your pr
    messenger, as the field asks, and select **Send code**.
 2. The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
    code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes; capital and small letters are the same. The link is made at
+3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the same. The link is made at
    once, and the bot sends no confirmation.
 
 If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
 The limits are those of Mattermost: 5 attempts per code, a new request replaces your earlier one, 5 code requests an
-hour for you and at most 3 codes an hour for one account, whoever asks. An account that is linked to another User is
-refused.
+hour for you and at most 3 codes an hour for one account, whoever asks (`account_link.bridge_code_requests`). An account
+that is linked to another User is refused.
 
 ## Several Connections of one messenger
 

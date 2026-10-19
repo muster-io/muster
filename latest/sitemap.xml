@@ -22,10 +22,22 @@
         <loc>https://muster-io.github.io/muster/concepts/statuses-and-commands/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/configure/api-tokens/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/configure/messages-and-templates/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/configure/organization/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/install/database/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/install/helm/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/install/versions/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/integrations/alertmanager/</loc>

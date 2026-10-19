@@ -17,6 +17,9 @@ labels and its own health.
 Static labels are added to every alert of the Integration before routing, for example `cluster=prod-eu`, so that Routes
 and messages can tell the clusters apart.
 
+Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connection mode is `webhook-only`
+(`integration.connection_mode`), the only mode in this version.
+
 ## Create a token and paste the snippet
 
 In **Integrations**, create the Integration, then **Create token**. Muster shows the token and a ready Alertmanager
@@ -92,7 +95,7 @@ A critical alert goes to `muster-prod-eu` and `oncall`, any other alert to `must
 last line, a warning would reach only Muster. `amtool config routes test --config.file=alertmanager.yml
 severity=warning` prints the receivers an alert reaches; it should list Muster and your default receiver.
 
-- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet). See
+- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet, `snippet.repeat_interval`). See
   [Repeat intervals](#repeat-intervals) for why.
 
 Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and

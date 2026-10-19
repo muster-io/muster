@@ -52,8 +52,9 @@
 
 1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.
 2. [`api/openapi.yaml`](https://muster-io.github.io/muster/latest/api/openapi.yaml), the OpenAPI 3.1 document that the binary serves at `/api/v1/openapi.yaml`.
-3. [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md): the statuses of an Alert Group and the commands that change them.
-4. [The command line](https://muster-io.github.io/muster/latest/operations/cli.md): The commands are for emergencies, for setup and for diagnosis; everything else is in the web UI and the API.
+3. [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md): Personal access tokens, Service accounts, the rate limit, `ETag` and `If-Match`, pagination.
+4. [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md): the statuses of an Alert Group and the commands that change them.
+5. [The command line](https://muster-io.github.io/muster/latest/operations/cli.md): The commands are for emergencies, for setup and for diagnosis; everything else is in the web UI and the API.
 
 ## Document map
 
@@ -64,6 +65,13 @@
 
 - [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md): The Helm chart runs Muster on Kubernetes 1.30 or newer.
 - [The database](https://muster-io.github.io/muster/latest/install/database.md): Muster keeps everything in PostgreSQL 14 or newer, and nothing else stateful: no Redis and no queue.
+- [Requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md): What Muster needs, which versions it was checked against, and how to verify that a release you download is the one the project built.
+
+### Configure
+
+- [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md): Muster shows every Alert Group as one **Root message** in each Destination, and edits it as the Alert Group changes.
+- [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md): The **Organization** is the owner of all Users, Routes and data in Muster; there is one.
+- [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md): Everything the web UI does, a script can do through the API, as a person or as a non-person identity.
 
 ### Integrations
 
@@ -146,4 +154,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 571737 bytes, about 142934 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 609595 bytes, about 152398 tokens.

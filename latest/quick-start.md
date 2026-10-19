@@ -65,6 +65,11 @@ Open `http://localhost:8080` and sign in with the login `admin@example.org` and 
 grep MUSTER_BOOTSTRAP_ADMIN_PASSWORD .env
 ```
 
+Muster runs on a machine without HTTPS, such as a VM? Browsers keep the session only over HTTPS or on `localhost`, and the
+shortest way in is an SSH tunnel. On your own machine run `ssh -L 8080:localhost:8080 <vm>`, keep it open and browse to
+`http://localhost:8080`, with `MUSTER_PUBLIC_URL=http://localhost:8080` as above. See
+[Sign-in needs HTTPS or localhost](sign-in/index.md#sign-in-needs-https-or-localhost).
+
 Everything in the web UI and the API works only after sign-in: people sign in with a password or through
 [OpenID Connect](sign-in/oidc-keycloak.md), and automation with tokens. Each User has a Role — Admin, Responder or
 Viewer — that decides what they see and change. Add the people of your team as Users under **Access**; each of them
@@ -150,6 +155,8 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 ## Next steps
 
+- **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
+  under **Organization → General**: see [Organization settings](configure/organization.md#general).
 - **Connect a messenger.** Connect [Mattermost](messengers/mattermost.md) or [Telegram](messengers/telegram.md), add a
   Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
   [Routes and Group keys](concepts/routes-and-group-keys.md). Mattermost sends button presses to `MUSTER_PUBLIC_URL`
@@ -161,7 +168,11 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
   [muster-bridge-python](https://github.com/muster-io/muster-bridge-python), or try the
   [example bridge](messengers/write-a-bridge.md#the-example-bridge) from
   [`examples/chat`](https://github.com/muster-io/muster-bridge-go/tree/master/examples/chat) of the Go library: a
-  small chat with a web page, to see Muster's messages without a real messenger.
+  small chat with a web page, to see Muster's messages without a real messenger. It runs
+  [next to this Quick start](messengers/write-a-bridge.md#the-example-bridge) as one more service of the compose project.
+- **Change what messages say**, and add links to your dashboards and runbooks, as
+  [Messages and templates](configure/messages-and-templates.md) describes. [API tokens and
+  automation](configure/api-tokens.md) is for scripts and Terraform.
 - **Connect your Alertmanager** as [Connect Alertmanager](integrations/alertmanager.md) describes, and watch the path
   from it with a [Heartbeat](integrations/heartbeat.md).
 - **Learn how Muster groups alerts** in [Concepts](concepts/alert-groups.md).

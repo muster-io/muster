@@ -28,8 +28,8 @@ From your bridge, you need:
 Choose how the bridge reports **events** — the presses of buttons and the messages people write in a Thread — with the
 **event delivery** mode:
 
-- **`poll`** when the bridge cannot reach Muster. The Leader asks the bridge for new events, so the bridge needs no
-  address of Muster.
+- **`poll`** (`connection.bridge.event_delivery`, the default) when the bridge cannot reach Muster. The Leader asks the
+  bridge for new events, so the bridge needs no address of Muster.
 - **`push`** when the bridge can reach `MUSTER_INGEST_URL`. The bridge posts each event to the Connection's callback
   address, `https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…`, which the Connection shows in
   `callback_url`, signed with a **push secret** that you configure on both sides. The push secret has the Standard
@@ -233,7 +233,7 @@ the envelope the test would post, as JSON in the item `message`.
 A Bridge Destination becomes **Broken** when the bridge refuses it — it answers `forbidden`, for example because the
 bot was removed from the channel — with the bridge's text as the reason, or when the bridge keeps failing or does not
 answer for the whole Transient budget: 10 attempts within 30 minutes. A bridge that asks Muster to wait does not make
-a Destination Broken unless it asks for more than 15 minutes; an answer the bridge calls `invalid` ends that one
+a Destination Broken unless it asks for more than 15 minutes (`bridge.retry_after_max`); an answer the bridge calls `invalid` ends that one
 delivery as Not delivered and leaves the Destination healthy. When the bridge answers that a Root message is gone,
 Muster publishes the Alert Group again, once; an edit refused as `gone` with the `reason` `edit_window_closed` is not a
 deletion, but the end of the message's [edit window](#edit-windows).

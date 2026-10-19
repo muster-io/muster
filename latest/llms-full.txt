@@ -38,7 +38,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Quick start](https://muster-io.github.io/muster/latest/quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
   in about five minutes.
 - [Install](https://muster-io.github.io/muster/latest/install/helm.md): run Muster in production with [Helm](https://muster-io.github.io/muster/latest/install/helm.md) and an external
-  [PostgreSQL](https://muster-io.github.io/muster/latest/install/database.md).
+  [PostgreSQL](https://muster-io.github.io/muster/latest/install/database.md), and read the [requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md) and how
+  to verify a release.
 - [Integrations](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): connect the Alertmanager of a cluster, connect
   [Grafana Alerting](https://muster-io.github.io/muster/latest/integrations/grafana.md) directly or through an Alertmanager, and watch the path from Alertmanager
   with a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
@@ -50,6 +51,9 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md); [recipes](https://muster-io.github.io/muster/latest/outgoing-webhooks/recipes.md) for a phone call, a status page,
   a second chat and an issue tracker.
+- [Configure](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md): change what [messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md)
+  say, add links with Lookup tables and Link rules, set the [Organization](https://muster-io.github.io/muster/latest/configure/organization.md), and automate
+  with [API tokens](https://muster-io.github.io/muster/latest/configure/api-tokens.md).
 - [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md): Roles and ways to sign in; [OpenID Connect with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md),
   [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md), and [closed networks](https://muster-io.github.io/muster/latest/sign-in/closed-networks.md).
 - [Concepts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md): what an [Alert Group](https://muster-io.github.io/muster/latest/concepts/alert-groups.md) is, how
@@ -138,6 +142,11 @@ Open `http://localhost:8080` and sign in with the login `admin@example.org` and 
 grep MUSTER_BOOTSTRAP_ADMIN_PASSWORD .env
 ```
 
+Muster runs on a machine without HTTPS, such as a VM? Browsers keep the session only over HTTPS or on `localhost`, and the
+shortest way in is an SSH tunnel. On your own machine run `ssh -L 8080:localhost:8080 <vm>`, keep it open and browse to
+`http://localhost:8080`, with `MUSTER_PUBLIC_URL=http://localhost:8080` as above. See
+[Sign-in needs HTTPS or localhost](https://muster-io.github.io/muster/latest/sign-in/index.md#sign-in-needs-https-or-localhost).
+
 Everything in the web UI and the API works only after sign-in: people sign in with a password or through
 [OpenID Connect](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md), and automation with tokens. Each User has a Role — Admin, Responder or
 Viewer — that decides what they see and change. Add the people of your team as Users under **Access**; each of them
@@ -223,6 +232,8 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 ## Next steps
 
+- **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
+  under **Organization → General**: see [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#general).
 - **Connect a messenger.** Connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md) or [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), add a
   Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
   [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md). Mattermost sends button presses to `MUSTER_PUBLIC_URL`
@@ -234,7 +245,11 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
   [muster-bridge-python](https://github.com/muster-io/muster-bridge-python), or try the
   [example bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-example-bridge) from
   [`examples/chat`](https://github.com/muster-io/muster-bridge-go/tree/master/examples/chat) of the Go library: a
-  small chat with a web page, to see Muster's messages without a real messenger.
+  small chat with a web page, to see Muster's messages without a real messenger. It runs
+  [next to this Quick start](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-example-bridge) as one more service of the compose project.
+- **Change what messages say**, and add links to your dashboards and runbooks, as
+  [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md) describes. [API tokens and
+  automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md) is for scripts and Terraform.
 - **Connect your Alertmanager** as [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) describes, and watch the path
   from it with a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
 - **Learn how Muster groups alerts** in [Concepts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md).
@@ -671,6 +686,552 @@ certificates of the system. The fields form has no such setting. With
 `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`, the session connection takes the `sslmode` of the
 main connection; a `MUSTER_DATABASE_SESSION_URL` carries its own, `prefer` when it names none.
 
+<!-- Source: https://muster-io.github.io/muster/latest/install/versions.md -->
+# Requirements and tested versions
+
+What Muster needs, which versions it was checked against, and how to verify that a release you download is the one the
+project built. "Tested" means different things for different rows, so each row says which.
+
+- **CI** means an automated job that runs on the project's pull requests or nightly, and fails the build.
+- **Development stand** means a person ran the behaviour against a real server of that version and recorded what it did,
+  but no job repeats it. These facts are the ground the messenger and Alertmanager features rest on; the fake servers
+  that CI uses imitate them.
+
+## Requirements
+
+**PostgreSQL**
+:   14 or newer, directly or or through a pooler whose session connection is session-capable. Nothing else
+    stateful: no Redis, no queue. See [The database](https://muster-io.github.io/muster/latest/install/database.md).
+
+**Where Muster runs**
+:   Binaries and container images for Linux; binaries also for macOS; both on amd64 and arm64. The container image is
+    `linux/amd64` and `linux/arm64`. The [Quick start](https://muster-io.github.io/muster/latest/quick-start.md) needs Docker with the Compose plugin.
+
+**Kubernetes**
+:   1.30 or newer, for the [Helm chart](https://muster-io.github.io/muster/latest/install/helm.md).
+
+**A browser**
+:   For the web UI, one that keeps a `Secure` cookie: over HTTPS, or on `localhost`. See
+    [Sign-in needs HTTPS or localhost](https://muster-io.github.io/muster/latest/sign-in/index.md#sign-in-needs-https-or-localhost).
+
+## Tested versions
+
+PostgreSQL
+:   14 and 17 in **CI**: `make test-integration` runs the integration tests on both, in containers, on every pull
+    request. The compose example and the development database run PostgreSQL 17.
+
+Kubernetes and Helm
+:   Kubernetes 1.33.0 in **CI**: `make helm-check` lints the chart, renders it with the values files of the repository
+    and validates the result strictly against the schemas of 1.33.0. Helm v4.3.0 does the rendering, and also packages
+    the chart for a release. Nothing is run in a cluster by CI, and other versions from 1.30 are not checked.
+
+Alertmanager
+:   v0.34.1 on a **development stand**, with Prometheus v3.15.0 and vmalert v1.153.0: how it repeats, groups, restarts
+    and truncates is measured there. Other versions of Alertmanager send the same webhook; if one behaves differently,
+    the [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md) page and the Heartbeat are how you notice.
+
+Grafana
+:   OSS 13.2.4 on a **development stand**, as one instance on SQLite and as a pair of replicas on PostgreSQL 17, through
+    the webhook contact point of its built-in Alertmanager. See [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md).
+
+Mattermost
+:   11.2.2, a test server on the **development stand**, through REST API v4 with a bot account. CI runs the same
+    behaviour against a fake Mattermost server. See [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md).
+
+Telegram
+:   The cloud Bot API 10.3, on a **development stand**, with a test bot and a test channel. CI runs against a fake. See
+    [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md).
+
+The web UI
+:   Its component tests and its end-to-end tests run in Chromium in **CI**. Other browsers are not tested.
+
+## Image tags
+
+The images are `ghcr.io/muster-io/muster` and the tags are:
+
+- `vX.Y.Z`: a release. Use it, so that an upgrade is a decision you make.
+- `latest`: the newest release that is not a prerelease. A prerelease tag, such as `v1.4.0-rc.1`, never moves it.
+- `edge`: the newest commit on `master`, a development image.
+- `sha-<7 hex digits>`: the development image of one commit.
+
+## Verify a release
+
+!!! note "Before the first release"
+    No release exists yet, so there is nothing to verify, and the commands below have not been run against a real
+    release. The development images, `edge` and `sha-…`, are **not signed** and carry no SBOM attestation: the workflow
+    that builds them skips signing. Use these commands from the first release on, with its tag.
+
+A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image
+with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so a valid signature
+proves that the image was built by that workflow on that tag. Install cosign v3 or newer (the release signs with v3.1.3,
+in the new signature format), then:
+
+```sh
+VERSION=vX.Y.Z
+cosign verify ghcr.io/muster-io/muster:$VERSION \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+It prints the verified signature and exits `0`. To accept any release tag, replace `--certificate-identity` with
+`--certificate-identity-regexp '^https://github\.com/muster-io/muster/\.github/workflows/release\.yml@refs/tags/v'`.
+The signature covers the multi-architecture index and the image of each platform. To pin what you run, deploy the digest
+you verified, `ghcr.io/muster-io/muster@sha256:…`, rather than the tag.
+
+**The SBOM of the image** is an attestation that BuildKit attaches when the image is pushed, not a cosign attestation.
+Read it with Docker:
+
+```sh
+docker buildx imagetools inspect ghcr.io/muster-io/muster:$VERSION --format '{{ json .SBOM }}'
+```
+
+It prints the software bill of materials, one per platform.
+
+**The archives** are attached to the GitHub release: `muster_<version>_<os>_<arch>.tar.gz` for Linux and macOS on amd64
+and arm64, `checksums.txt` with their SHA-256 sums, and one SPDX JSON software bill of materials per archive. Download
+the archive and `checksums.txt` into one directory and check it:
+
+```sh
+sha256sum --ignore-missing -c checksums.txt
+```
+
+On macOS use `shasum -a 256 -c checksums.txt --ignore-missing`. `checksums.txt` is not signed: it finds a broken or
+swapped download from the same release, not a swapped release. For that, verify the image.
+
+The Helm chart is pushed with the release to `oci://ghcr.io/muster-io/charts` and is not signed by the release workflow.
+
+<!-- Source: https://muster-io.github.io/muster/latest/configure/messages-and-templates.md -->
+# Messages and templates
+
+Muster shows every Alert Group as one **Root message** in each Destination, and edits it as the Alert Group changes.
+Without any setup the message is complete: the status, the number and title, the environment and start time, the
+labels, the summary, the Alerts, the links and the buttons. This page is for the Admin who wants to change what it
+says: the template of a Route, whom a message mentions, and the links it carries.
+
+## What you can change, and what you cannot
+
+A Route has three templates, under **Routes → a Route → Message**. Each is **Built-in** or **Custom**.
+
+**Root message**
+:   The body of the message: the environment, the start time, the labels, the summary and the Alerts. The status
+    colour, the heading, the links, the notices, the footer and the buttons always come from Muster, so no template can
+    lose the buttons or the link to the Alert Group.
+
+**Alert line**
+:   The line of each Alert in the list of Alerts. It is also called the **Line template**.
+
+**Ack timeout notice**
+:   The reply Muster sends when nobody acknowledges an Alert Group in time.
+
+**Language** of the same section sets the language of the built-in texts of the Route, English or Russian
+(`route.language`, English by default). Times in messages are absolute and use the Organization's time zone, never
+relative: see [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#general).
+
+Choosing **Custom** fills the editor with the source of the built-in template in the Route's language, so you start
+from what people see today and edit it. Choosing **Built-in** again keeps your text until you leave the page.
+
+Each editor has a **Preview** under it. Choose the **Sample** it renders against: a **Built-in example**, the **Recent
+snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost or
+Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of the Route
+(up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not parse, or
+that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and column.
+
+The Outgoing webhook Destinations have templates of their own, written the same way: see
+[template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md).
+
+## The template language
+
+Templates are Go templates, the language of Alertmanager's own templates, and run in a sandbox:
+
+- The functions are those of Alertmanager's templates under their own names (`toUpper`, `toLower`, `title`, `join`,
+  `match`, `reReplaceAll`, `safeHtml`, `stringSlice`, `date`, `tz`, `humanizeDuration`, `toJson` and more), so an
+  Alertmanager template usually carries over. On top of them come the string, list, map, conversion and regular
+  expression (RE2) functions of the [sprout](https://github.com/go-sprout/sprout) library, `now` and `since` from
+  Muster's clock, and two Muster functions: `lookup` (see [Links](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#links)) and `mention`.
+- There is no function that reads the environment, files or the network; `env` does not exist. Muster has no list of
+  functions in the web UI: sprout's documentation and Alertmanager's template reference are the function reference,
+  and the editor names an unknown function when you save.
+- Loops are capped, a template may run for 2 seconds, and the output is cut at about 50,000 characters
+  (`template.output_cap`).
+
+What the Root message template reads:
+
+`.AlertGroup`
+:   `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`, `Owner`.
+
+`.Alerts`, `.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL`
+:   As in Alertmanager's templates. `.Alerts.Firing` and `.Alerts.Resolved` select by status.
+
+The line template reads **one Alert** directly, as `.Labels`, `.Annotations`, `.Status`, `.StartsAt`, `.EndsAt`,
+`.GeneratorURL` and `.Fingerprint`, and `.AlertGroup` as above.
+
+Alert data is safe by construction. Label and annotation values arrive already escaped for the Destination's markup,
+cut at 4 KB each (`message.value_cap`), and an `@` in them is neutralised with a zero-width space, so `@channel` in a
+label notifies nobody. Links in messages are `http` or `https` only.
+
+!!! tip "Two small examples"
+    A line template that shows the pod and its summary:
+
+    ```
+    {{ .Labels.pod }}: {{ .Annotations.summary }}
+    ```
+
+    A Root message template that shows the summary and the pods that fire:
+
+    ```
+    {{ .AlertGroup.Summary }}
+    {{ range .Alerts.Firing }}- {{ .Labels.pod }}
+    {{ end }}
+    ```
+
+    Check both in the preview with a sample that has Alerts before you save.
+
+If a template that was saved fails later, on data it did not expect, Muster does not drop the message. It renders the
+**Fallback template** instead, which shows every label under Muster's heading, footer and buttons. The Route shows
+**Template error** with the time and the error, the Timeline records that the fallback was used, and the Internal alert
+`MusterTemplateError` fires until the template renders again; see its
+[runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md). **Organization → System status** lists the template errors.
+
+A long message is shortened to the limit of the messenger by cutting the list of Alerts first, then the label sections.
+It always keeps the title, status, footer, buttons and the link. The list shows up to 10 lines of Alerts
+(`message.alerts_listed`); above that it shows the distinct values of each label that differs, and "Full list in
+Muster".
+
+## Whom a message mentions
+
+Each Destination has a **Mentions** section for six kinds of Loud event: nobody by default, or everyone in the chat,
+chosen Muster users, or messenger groups, as far as the messenger offers them (`destination.mentions`). The
+[Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md#mentions) page lists what each Destination type takes and why a user
+needs an Account link to be mentioned.
+
+In a template, `{{ mention "all" }}`, `{{ mention "channel" }}`, `{{ mention "here" }}`, `{{ mention "owner" }}` and
+`{{ mention "group" "oncall" }}` write a trusted Mention that Muster renders for the messenger. A literal `@all` written
+in a template is escaped and mentions nobody.
+
+## Links
+
+Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
+in the message and as the **Links** block on the Alert Group page.
+
+A **Lookup table** is a table of values: a key and one value per named column. Open **Organization → Lookup tables →
+Create table**, name it, add the columns and the rows. Limits: 50 columns and 10,000 rows, names and column names up to
+200 characters, a description up to 2,000, a key or value up to 4,096 (`lookup_table.size_max`).
+
+A **Link rule** turns an Alert Group, or each value of a label, into a link. Open **Organization → Link rules → Create
+rule** and fill in:
+
+**Name**
+:   Shown as the text of the link.
+
+**Matchers**
+:   Conditions on the Alert Group's common labels. A label that only some Alerts carry counts as missing. Without
+    Matchers the rule applies to every Alert Group.
+
+**Scope**
+:   **Alert Group** gives one link. **Each value of label** gives one link per distinct value of a label among the
+    Alerts.
+
+**URL template**
+:   A Go template. It reads `.Labels` (the common labels for the scope Alert Group, the labels of the first Alert with
+    the value otherwise), `.Value` (the label's value) and the data of the Root message template. `lookup "table" key
+    "column"` reads one cell and gives an empty text when the table, the key or the column does not exist. A template
+    that writes nothing, or something that is not an `http` or `https` URL, gives no link.
+
+All the Link rules of one message together read at most 100 rows with `lookup` in one render
+(`template.lookups_per_render`); the 101st is a template error, and a Link rule that fails is left out of the message
+and counted.
+
+Example: a dashboard per cluster.
+
+1. Create the Lookup table `dashboards` with the column `url` and one row for each cluster: the key `prod-eu`, the
+   value `https://grafana.example.org/d/abc123/prod-eu`.
+2. Create the Link rule `Dashboard`, scope **Alert Group**, with the URL template
+   `{{ lookup "dashboards" .Labels.cluster "url" }}`.
+3. The preview of the rule shows the link for a sample. Alert Groups with `cluster="prod-eu"` now carry **Dashboard**.
+
+A rule with the scope **Each value of label** and the label `pod` can build one log link per pod:
+`https://logs.example.org/search?pod={{ .Value | urlquery }}`.
+
+Muster adds links without a rule as well: the annotations `runbook_url` and `dashboard_url`, shown as **Runbook** and
+**Dashboard**, and the `generatorURL` of the first firing Alert, shown as **Source**.
+
+The built-in Link rule **Explore** opens the query of the Alert in Grafana's Explore. It reads the Lookup table
+`grafana` with the columns `address` (the address of your Grafana) and `datasource_uid`, and the key is the value of the
+`environment` label, else of the `cluster` label. It cannot be deleted, renamed or given another scope; its Matchers and
+URL template can be changed. A Lookup table that a Link rule reads cannot be deleted or renamed.
+
+The API has `lookup-tables` and `link-rules` for the same: see the [API reference](https://muster-io.github.io/muster/latest/reference/api.md). A list of
+Lookup tables comes at most 50 to a page (`lookup_table.page_max`), since each carries its rows.
+
+## Thread replies
+
+Lifecycle events that are Thread replies, such as a Takeover or a Reopen, are sent at once. Only new Alerts are
+batched, by the Route's **Thread batching window** (**Routes → a Route → Delivery**, `route.thread_batching_window`, 60
+seconds by default): the first new Alert is sent at once and opens the window, and the new Alerts that arrive within it
+are sent as one reply when it closes. After a quiet period longer than the window, the next one is again immediate. A
+reply lists the first 10 new Alerts and then "…and K more" (`delivery.thread_alerts_listed`).
+
+<!-- Source: https://muster-io.github.io/muster/latest/configure/organization.md -->
+# Organization settings
+
+The **Organization** is the owner of all Users, Routes and data in Muster; there is one. Its settings change behaviour
+for everyone, so only Admins open them: choose **Organization** in the main navigation, then a page of its
+sub-navigation. Every change is recorded in the Audit log (**Organization → Audit log**) with a before and after, and two Admins
+editing the same page do not overwrite each other: the second save is refused with "Someone else changed these settings.
+Reload to see them.", and you
+reload and apply your change again.
+
+The defaults below are what a new installation has.
+
+## General
+
+**Organization → General**
+
+**Name** (`organization.name`, `Muster`)
+:   The name of the Organization.
+
+**Time zone of messages** (`organization.time_zone`, `UTC`)
+:   The time zone of every time in a message in a messenger. It is `UTC` until you change it, so a new installation
+    shows times such as "started 07:12" in UTC. Times in messages are absolute, never "5 minutes ago". Each User sees the
+    web UI in their own time zone, which they set in their profile.
+
+**Start of the working day** (`organization.workday_start`, `09:00`) and **First day of the week** (`organization.week_start`, `monday`)
+:   The Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00" end at this time of day and on this day, in the
+    time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
+    See [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
+
+## Severity levels
+
+**Organization → Severity levels**
+
+Alerts say how bad they are in a label. Muster turns its values into three **Severity levels**: critical, warning and
+info.
+
+**Severity label** (`organization.severity_label`, `severity`)
+:   The label that carries the severity.
+
+**Mapping** (`organization.severity_mapping`)
+:   Values of that label and their level. By default `critical` is critical, `warning` is warning, and `info` and `none`
+    are info. A label that is missing counts as info; any other value counts as warning and is shown as received.
+
+**Emoji and colours** (`organization.severity_styles`)
+:   The emoji and the colour of each level: critical 🟥 `#d32f2f`, warning 🟧 `#f57c00`, info 🟦 `#1976d2`.
+
+**Values seen** (`organization.severity_values_window`, the last 14 days)
+:   The values of the severity label that arrived, with their counts. A value with no mapping is marked "No mapping —
+    counts as warning" and has a **Map** action. If your alerts use `P1` and `page`, map them to critical here.
+
+## Alert handling
+
+**Organization → Alert handling**
+
+**Critical is Urgent** (`organization.critical_is_urgent`, on)
+:   An Alert Group whose Severity level is critical is **Urgent**. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md).
+
+**Instance labels** (`organization.instance_labels`, `pod`, `instance`, `container`, `endpoint`)
+:   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
+    Group, and the Timeline names the label that changed.
+
+Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
+status.
+
+## Security
+
+**Organization → Security**
+
+**TOTP required** (`organization.totp_required`, **Nobody**)
+:   **Nobody**, **Local users** (Users who sign in with a password) or **Everyone** (OIDC users too). A person the
+    policy covers who has no TOTP sets it up right after their next sign-in. See [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md).
+
+**Token grace for OIDC users without an offline token** (`auth.oidc_token_grace`, 7 days)
+:   Applies to Users who sign in through OpenID Connect when the identity provider granted no offline token. Their
+    Personal access tokens work while their last OIDC sign-in is no older than this; after that they get `401` with the
+    code `oidc_recheck_required` until the person signs in through OIDC again. Service account tokens are not affected.
+    See [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md).
+
+## Outbound addresses
+
+**Organization → Outbound addresses**
+
+The **Outbound address policy** (`organization.outbound_policy`) says which network addresses Muster may call:
+Destinations, Connections, the identity provider, proxies and the outgoing heartbeat. The check runs after the name is
+resolved, so a name that points at a blocked address is blocked.
+
+- **Standard** (the default) allows private addresses and blocks loopback.
+- **Strict** allows only public addresses and the entries you allow.
+
+**Allowed** and **Denied** (`organization.outbound_allowed`, `organization.outbound_denied`, both empty) take a network
+such as `10.0.0.0/8`, an address, a host name or a domain such as `*.example.org`. A denied entry always wins. Some
+addresses are always blocked and no allowed entry opens them: link-local, cloud metadata, unspecified and multicast
+addresses. A chat server on the loopback address, for one, needs `127.0.0.0/8` in **Allowed** under Standard.
+
+## Retention
+
+**Organization → Retention**
+
+**Stored Snapshots (days)** (`retention.stored_snapshots`, 14)
+:   Snapshots kept as received, for debugging, previews and replay.
+
+**Alert details (days)** (`retention.alert_details`, 90)
+:   Alerts inside Alert Groups, Timeline entries and delivery events. Never Notes.
+
+**Alert Group summaries (days)** (`retention.alert_group_summaries`, 730)
+:   The summary row of an Alert Group, with its Notes.
+
+**Audit log (days)** (`retention.audit_log`, 365)
+:   Who changed or did what.
+
+Each period is 1 to 36,500 days. The summaries must be kept at least as long as the details, because details go first;
+a save that breaks this is refused (`retention_order`).
+
+## Elsewhere
+
+Other Organization pages have their own guides: **Keyring** in [Key rotation](https://muster-io.github.io/muster/latest/operations/key-rotation.md), **Outgoing
+heartbeat** (`outgoing_heartbeat.url`, unset) in [Outgoing heartbeat](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md), **Lookup
+tables** and **Link rules** in [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#links), and **System status** and the
+**Audit log** for what is wrong or who changed what.
+
+## The API
+
+`GET /api/v1/organization` reads the Organization and its `ETag`; `PUT /api/v1/organization` replaces the fields above
+with `If-Match` set to that ETag, as [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md#conventions) shows. The fields are
+`name`, `time_zone`, `workday_start`, `week_start`, `severity_label`, `severity_mapping`, `severity_styles`,
+`critical_is_urgent`, `instance_labels`, `outgoing_heartbeat` (required, with `proxy`, whose `enabled` is
+required; `url` is write-only and kept when omitted), `retention` (`stored_snapshots_days`, `alert_details_days`,
+`alert_group_summaries_days`, `audit_log_days`), `totp_required` (`nobody`, `local_users` or `everyone`) and
+`oidc_token_grace_seconds`. The outbound policy is `GET` and `PUT /api/v1/organization/outbound-policy`, and the values
+seen are `GET /api/v1/organization/severity-values`. Reading the Organization needs any sign-in; reading the outbound
+policy and the values seen needs `organization:read`, and changing anything needs `organization:write`; only the Admin
+Role holds both. `workday_start` and `week_start` are optional on an update.
+
+<!-- Source: https://muster-io.github.io/muster/latest/configure/api-tokens.md -->
+# API tokens and automation
+
+Everything the web UI does, a script can do through the API, as a person or as a non-person identity. This page shows
+how to get a token, how to call the API, and what to expect from it. The [API reference](https://muster-io.github.io/muster/latest/reference/api.md) lists
+every operation, its Permission and its answers; the binary serves the same specification at `/api/v1/openapi.yaml`.
+
+## Two kinds of token
+
+A **Personal access token** acts as a User. It has the Permissions you choose, never more than you hold, and it loses
+what your Role loses. Use it for your own scripts. Its prefix is `mstr_pat_`.
+
+A **Service account** is an identity that is not a person, such as Terraform or a pipeline. It has a name, a Role and
+any number of tokens, whose prefix is `mstr_sat_`. It cannot sign in to the web UI and has no Account links.
+
+!!! note "A Service account cannot become an Owner"
+    The Owner of an Alert Group is always a User. Acknowledge from a Service account is refused with `409` and the code
+    `owner_must_be_user`. It may Resolve, Snooze and add Notes, and the Timeline shows the Service account as the actor.
+    A Personal access token acts as its User, so acknowledging with one makes that User the Owner.
+
+An **Integration token** (`mstr_int_`) is a third kind and is not for the API: it sends alerts and Heartbeats only, and
+the API does not accept it. See [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md).
+
+The prefix `mstr_` and the kind in it let secret scanners find a token that leaked into a repository. If one does,
+revoke it.
+
+## Create a Personal access token
+
+Tokens are created in the web UI. A token cannot create or revoke another token, so there is no API call to start from
+nothing.
+
+1. Open **Profile**, **Personal access tokens**, and select **Create token**.
+2. Give it a **Name** that says where it is used, such as `laptop-scripts`.
+3. Under **Permissions** tick what the script needs. You see only the Permissions you hold. A script that reads Alert
+   Groups needs `alert-groups:read`; one that also acknowledges needs `alert-groups:acknowledge`.
+4. Choose **Expires on**. A token may have no expiry (`token.expiry` is none by default), but the page warns about a
+   token that never expires: choose a date.
+5. Select **Create**. The dialog shows the token once. Copy it before you close it: only a hash is kept.
+
+The list shows when each token was created, when and from which address it was last used, and when it expires.
+**Revoke** stops a script that uses it at once. The Audit log records a request made with a token as "alex via token
+laptop-scripts".
+
+## Create a Service account
+
+1. Open **Access → Service accounts** and select **Create service account**.
+2. Give it a **Name** and a **Role**: Admin, Responder or Viewer. You can give only a Role whose Permissions you hold.
+3. On its page, under **Tokens**, select **Create token**, give it a name and an expiry, and copy the value once.
+
+Its tokens act with the Role of the account, and changing the Role changes every token at once. To change a token
+without a gap, create the second token, switch the pipeline to it and revoke the first. **Disable** stops all its tokens
+until you **Enable** it; **Delete** revokes them for good.
+
+## Call the API
+
+Send the token as a bearer token. The API is under `/api/v1` of the address people open, `MUSTER_PUBLIC_URL`:
+
+```sh
+MUSTER=https://muster.example.org
+TOKEN=mstr_pat_...
+curl -sS -H "Authorization: Bearer $TOKEN" "$MUSTER/api/v1/alert-groups?status=firing&limit=20"
+```
+
+The answer is JSON: `items` and `next_cursor`. A request with no token, or a wrong one, gets `401`; one with a token
+that lacks the Permission gets `403`. Every operation in the reference names the Permission it needs.
+
+Snooze the Alert Group `AGK7M3QX9P2RTA` until a time (the token needs `alert-groups:snooze`):
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"until": "2026-10-20T08:00:00Z"}' "$MUSTER/api/v1/alert-groups/AGK7M3QX9P2RTA/snooze"
+```
+
+A call on the interactive path, such as a check of a Connection, answers `503` with `Retry-After` when Muster's limit
+toward the messenger leaves no room within 5 seconds (`delivery.interactive_budget`); retry after the pause.
+
+A few operations need the web session and refuse a token with `403` (`session_required`): changing your own password,
+TOTP, Account links and tokens.
+
+### Conventions
+
+**Identifiers**
+:   URLs carry the `public_id` of a resource, such as `AGK7M3QX9P2RTA`, never the `#N` of an Alert Group.
+
+**Pagination**
+:   `limit` is 50 by default and at most 500 (`api.page_size`). A page carries `next_cursor`; send it back as `cursor`
+    for the next page. There are no offsets.
+
+**Changing configuration**
+:   Routes, Destinations, the Organization and other configuration carry an `ETag`, in a header and in the body. Read
+    it, then update with `PUT` and `If-Match` set to it. A stale value gets `412`, a missing header `428`. This stops
+    two writers from overwriting each other.
+
+    ```sh
+    curl -sS -D - -o /dev/null -H "Authorization: Bearer $TOKEN" "$MUSTER/api/v1/organization" | grep -i '^etag'
+    ```
+
+    Then send the changed Organization with `-X PUT -H 'If-Match: <that value>'`. An omitted optional field keeps its
+    stored value, and an explicit `null` clears one that can be cleared.
+
+**Errors**
+:   RFC 9457 problems (`application/problem+json`) with a stable `type` and `code`, and `errors[]` with a JSON pointer to
+    each invalid field.
+
+**Times and units**
+:   RFC 3339 in UTC; durations in whole seconds in `*_seconds`; retention in `*_days`.
+
+**Secrets**
+:   Write-only. A read shows whether a secret is set and when it changed, never its value.
+
+### Rate limit
+
+The API is limited per token: 20 requests per second with bursts of 100 (`api.rate_limit`), counted on each Muster
+replica. A request over the limit gets `429` with `Retry-After` in seconds; wait that long and retry. Another token is
+not affected. Web sessions and ingestion are not limited.
+
+## Tokens of OIDC users
+
+A Personal access token of a User who signs in through OpenID Connect follows the identity provider. If the provider
+refuses the person at a background re-check, the token gets `401` with the code `oidc_recheck_required` and the text
+"Sign in through OIDC to make your tokens work again", and works again after the person's next OIDC sign-in, without a
+new token. When the provider granted no offline token, the tokens also stop once the last OIDC sign-in is older than the
+Organization's grace period (`auth.oidc_token_grace`, 7 days; **Organization → Security**, see
+[Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#security)). Your profile shows the date until which your tokens work. Service
+account tokens are not affected, which is why automation belongs on a Service account.
+
+A web session has its own lifetimes: see [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in).
+
 <!-- Source: https://muster-io.github.io/muster/latest/integrations/alertmanager.md -->
 # Connect Alertmanager
 
@@ -690,6 +1251,9 @@ labels and its own health.
 
 Static labels are added to every alert of the Integration before routing, for example `cluster=prod-eu`, so that Routes
 and messages can tell the clusters apart.
+
+Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connection mode is `webhook-only`
+(`integration.connection_mode`), the only mode in this version.
 
 ## Create a token and paste the snippet
 
@@ -766,7 +1330,7 @@ A critical alert goes to `muster-prod-eu` and `oncall`, any other alert to `must
 last line, a warning would reach only Muster. `amtool config routes test --config.file=alertmanager.yml
 severity=warning` prints the receivers an alert reaches; it should list Muster and your default receiver.
 
-- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet). See
+- Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet, `snippet.repeat_interval`). See
   [Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals) for why.
 
 Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and
@@ -2084,8 +2648,8 @@ From your bridge, you need:
 Choose how the bridge reports **events** — the presses of buttons and the messages people write in a Thread — with the
 **event delivery** mode:
 
-- **`poll`** when the bridge cannot reach Muster. The Leader asks the bridge for new events, so the bridge needs no
-  address of Muster.
+- **`poll`** (`connection.bridge.event_delivery`, the default) when the bridge cannot reach Muster. The Leader asks the
+  bridge for new events, so the bridge needs no address of Muster.
 - **`push`** when the bridge can reach `MUSTER_INGEST_URL`. The bridge posts each event to the Connection's callback
   address, `https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…`, which the Connection shows in
   `callback_url`, signed with a **push secret** that you configure on both sides. The push secret has the Standard
@@ -2289,7 +2853,7 @@ the envelope the test would post, as JSON in the item `message`.
 A Bridge Destination becomes **Broken** when the bridge refuses it — it answers `forbidden`, for example because the
 bot was removed from the channel — with the bridge's text as the reason, or when the bridge keeps failing or does not
 answer for the whole Transient budget: 10 attempts within 30 minutes. A bridge that asks Muster to wait does not make
-a Destination Broken unless it asks for more than 15 minutes; an answer the bridge calls `invalid` ends that one
+a Destination Broken unless it asks for more than 15 minutes (`bridge.retry_after_max`); an answer the bridge calls `invalid` ends that one
 delivery as Not delivered and leaves the Destination healthy. When the bridge answers that a Root message is gone,
 Muster publishes the Alert Group again, once; an edit refused as `gone` with the `reason` `edit_window_closed` is not a
 deletion, but the end of the message's [edit window](https://muster-io.github.io/muster/latest/messengers/bridge.md#edit-windows).
@@ -2961,9 +3525,47 @@ and people answer with Text commands in Threads.
    Muster User whose account is linked to the person who pressed, so link an account first: copy the token from your
    profile, pick the person under "You are", open their direct chat with the bot under "Direct", and send the token.
 
+**Next to the Quick start:** run the example as one more service of the compose project, so that Muster reaches it by
+name and nothing on the host's loopback is involved.
+
+1. In the directory of the [Quick start](https://muster-io.github.io/muster/latest/quick-start.md), where `docker-compose.yml` and `.env` are, add a token to
+   `.env` and write a file `compose.override.yaml` next to them, which Docker Compose merges into the project by itself.
+   `docker compose up -d --wait` then starts the example, and leaves Muster running if it already runs:
+
+    ```sh
+    echo "EXAMPLE_BRIDGE_TOKEN=$(openssl rand -hex 16)" >> .env
+    cat >compose.override.yaml <<'EOF'
+    services:
+      example-bridge:
+        image: ghcr.io/muster-io/muster-example-bridge:edge
+        environment:
+          BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}
+        ports:
+          - "127.0.0.1:8095:8095"
+        restart: unless-stopped
+    EOF
+    docker compose up -d --wait
+    ```
+
+    The example's page is published on the loopback of the host only, at `http://127.0.0.1:8095/`, because it has no
+    authentication (see the warning above). On a VM, reach it with an SSH tunnel, `ssh -L 8095:localhost:8095 <vm>`.
+    The whole port is published, so `/v1/` is reachable on the host's loopback too, and it needs the token. Muster
+    reaches
+    the example inside the compose network.
+2. Create a Bridge Connection with the base URL `http://example-bridge:8095`, the token from `.env`
+   (`grep EXAMPLE_BRIDGE_TOKEN .env`) and the event delivery **Polling**. The Organization's outbound address policy
+   is **Standard**, which allows the private address that the name resolves to; only loopback is blocked.
+3. Then do the check of step 3 above, which shows "Messenger: Example chat", and steps 4 and 5: a Destination for the
+   channel `alerts`, and an account link to press buttons. Do not create the loopback Connection of step 3.
+
+To remove the example and keep Muster and its data, run `docker compose rm -sf example-bridge` and delete
+`compose.override.yaml`. Do not run `docker compose down -v` for this: it deletes Muster's database too.
+
 For **Push**, choose a push secret (see [Push](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#push)), enter it in the Connection, and restart the example with
 `BRIDGE_PUSH_URL` set to the callback address that the Connection shows, and the secret in `BRIDGE_PUSH_SECRET` or in
-the file of `-push-secret-file`.
+the file of `-push-secret-file`. With the compose service, set `BRIDGE_PUSH_URL` in the override's `environment` to the
+callback address with the service name of Muster, `http://muster:8080/api/v1/callbacks/bridge/<id>`, not `localhost`:
+the example reaches Muster inside the compose network.
 
 ## The protocol without a library
 
@@ -3481,7 +4083,7 @@ only the bridge knows what its messenger's codes mean. Muster acts on the class:
 :   The messenger or the bridge throttles; send `Retry-After` in seconds.
 
     Muster waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted
-    as a failure; a wait longer than 15 minutes, or none given, is treated as `transient`.
+    as a failure; a wait longer than 15 minutes (`bridge.retry_after_max`), or none given, is treated as `transient`.
 
 `gone`
 :   The message no longer exists: deleted, or its Thread is gone.
@@ -3724,7 +4326,7 @@ Authorization: Bearer <token>
 
 - Return the events after `cursor`, oldest first, at once when there are any. Without `cursor`, return all of them.
   When there are none, hold the request open until one arrives or until `wait` seconds have passed, and then return an
-  empty list. `wait` is 0 to 60, 25 by default. Muster waits for your answer up to `wait` plus 15 seconds.
+  empty list. `wait` is 0 to 60, 25 by default (`bridge.poll_wait` is the 25 that Muster sends). Muster waits for your answer up to `wait` plus 15 seconds.
 - `next_cursor` is opaque to Muster. Muster handles the batch and sends the `next_cursor` with its next call; only
   then may you forget the events before that cursor. Keep events that Muster has not passed for at least 24 hours.
 - A cursor that you do not know is `invalid`; Muster then polls again without one. Return only the events of the
@@ -4129,7 +4731,7 @@ remove a link of its own User.
 1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram** — or
    **Relink Telegram** once you have a Telegram link, which the new link replaces.
 2. Muster shows a link `https://t.me/<bot>?start=<token>`. Open it on the device where you use Telegram, within 10
-   minutes; the link works once.
+   minutes (`account_link.telegram_token_ttl`); the link works once.
 3. Telegram opens a chat with the bot. Press **Start**.
 4. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link at once.
 
@@ -4144,12 +4746,12 @@ linked to someone else; nothing changed.
    with or without the `@` — and select **Send code**.
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes; capital and small letters are the same. The bot confirms
+3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are the same. The bot confirms
    "Linked to Muster user {your name}".
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
 A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
-codes an hour, whoever asks; beyond that, wait until the oldest request is an hour old. A username the server does not
+codes an hour, whoever asks (`account_link.mattermost_code_requests`); beyond that, wait until the oldest request is an hour old. A username the server does not
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](https://muster-io.github.io/muster/latest/messengers/mattermost.md#direct-messages).
@@ -4170,7 +4772,7 @@ which notifies nobody.
 
 1. In your profile, open **Messenger accounts**, choose the Bridge Connection and select **Link**.
 2. Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
-   as well. Within 10 minutes, send the token to the bot of that Connection in a direct message, or open the link,
+   as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token to the bot of that Connection in a direct message, or open the link,
    which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.
 3. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
    and the handle the bridge reported for your account.
@@ -4190,14 +4792,14 @@ login, username or user id — and that its bot can start a direct chat. Your pr
    messenger, as the field asks, and select **Send code**.
 2. The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
    code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes; capital and small letters are the same. The link is made at
+3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the same. The link is made at
    once, and the bot sends no confirmation.
 
 If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
 The limits are those of Mattermost: 5 attempts per code, a new request replaces your earlier one, 5 code requests an
-hour for you and at most 3 codes an hour for one account, whoever asks. An account that is linked to another User is
-refused.
+hour for you and at most 3 codes an hour for one account, whoever asks (`account_link.bridge_code_requests`). An account
+that is linked to another User is refused.
 
 ## Several Connections of one messenger
 
@@ -4578,6 +5180,9 @@ An outgoing webhook Destination in the **template mode** keeps one message per A
 API, the way Muster keeps a message in Mattermost or Telegram: a **create** request posts it, an **update** request
 edits it to the current state, and optional **open thread** and **reply in thread** requests carry the follow-ups.
 You write each request as Go templates; Muster sends them, signed, and reads the values it needs from the answers.
+
+The messages that Muster keeps in a messenger are customised with templates written the same way: see
+[Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md).
 
 For an ordered stream of every lifecycle event instead, use the [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md); the mode `both` sends both.
 
@@ -5083,21 +5688,29 @@ Every signed-in person also manages their own profile: password, TOTP, Account l
 
 ## Ways to sign in
 
-- **Local users.** An Admin creates a user with a login, and Muster returns a single-use link, valid for 24 hours, where
-  the person sets a password. Muster sends no email; the Admin hands the link over. The first Admin comes from
+- **Local users.** An Admin creates a user with a login, and Muster returns a single-use link, valid for 24 hours
+  (`auth.password_setup_link_ttl`), where the person sets a password of at least 12 characters
+  (`auth.password_min_length`). Muster sends no email; the Admin hands the link over. The first Admin comes from
   `MUSTER_BOOTSTRAP_ADMIN_EMAIL` and its password at the first start, as the [Quick start](https://muster-io.github.io/muster/latest/quick-start.md) shows.
 - **OpenID Connect.** People sign in at your identity provider, and a mapping from the groups in their token to Roles
   decides what they may do. [Sign-in with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md) is a complete walkthrough.
 - **TOTP.** A second step with a one-time code from an authenticator app, for local and OIDC users alike; the
   Organization can require it. See [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md).
 - **Personal access tokens.** A person creates them in the profile for scripts. A token acts as its User, with at most
-  that User's Permissions, and can be narrowed to fewer. It can expire, and the Audit log names the token with the
-  person.
+  that User's Permissions, and can be narrowed to fewer. It can expire (`token.expiry`; a token has no expiry unless
+  you set one, and the page warns about that), and the Audit log names the token with the person. The API limits each
+  token (`api.rate_limit`). See [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md).
 - **Service accounts.** An identity that is not a person, for automation such as a pipeline. It has a Role and any number
   of tokens, cannot sign in to the web UI, and cannot become the Owner of an Alert Group.
 
 Operations that change one's own account, such as the password, TOTP, tokens and Account links, need the web session; a
 token is refused there.
+
+A web session ends after 12 hours without a request (`auth.session_idle_timeout`), or 7 days after sign-in
+(`auth.session_lifetime`). Both are built in. A session of an OIDC user whose identity provider granted no offline token
+ends 12 hours after sign-in (`auth.oidc_fallback_session_lifetime`), and a background re-check asks the identity provider
+about every OIDC user who has an offline token and a live session or a usable Personal access token, every 15 minutes
+(`auth.oidc_recheck_interval`).
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](https://muster-io.github.io/muster/latest/sign-in/closed-networks.md).
 
@@ -5228,6 +5841,10 @@ Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oi
 | Skip TOTP when the IdP asserted MFA | off by default; on skips Muster's own TOTP step when the ID token's `amr` claim says that Keycloak used multi-factor authentication. Keycloak sends `amr` only when the client has an *Authentication Method Reference (AMR)* mapper |
 | Proxy | the HTTP, HTTPS or SOCKS5 proxy through which Muster reaches Keycloak, if it needs one |
 
+The settings behind the three rows above Proxy are `oidc.unmatched_role` (none: sign-in is refused), `oidc.sync_role`
+(on) and
+`oidc.skip_totp_with_idp_mfa` (off).
+
 Then press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.
@@ -5277,7 +5894,7 @@ see [Closed networks](https://muster-io.github.io/muster/latest/sign-in/closed-n
 ## Enrol
 
 People enrol from their **profile**: they scan a QR code with the authenticator app and confirm with the first code.
-Enrolment gives the person **10 recovery codes**, each of ten characters and usable once. They are shown **once**:
+Enrolment gives the person **10 recovery codes** (`auth.totp_recovery_codes`), each of ten characters and usable once. They are shown **once**:
 save them somewhere safe. In the profile a person can generate new recovery codes, which replace the unused ones, and
 remove TOTP. Removing it needs the current password (a local user) or a current code or recovery code.
 
@@ -5692,9 +6309,11 @@ namespace or the service.
 ### Preview before you save
 
 The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
-default, at most the retention of Stored Snapshots) and shows how many Alert Groups the current and the proposed key
-would produce, with the 5 largest as examples. It covers the Alerts that the Route would take at its place in the
-current order, each Alert once, and it works for a Route you are still creating. Use it before every change of a key.
+default, at most the retention of Stored Snapshots; `routing.group_key_preview_period`) and shows how many Alert Groups
+the current and the proposed key would produce, with the 5 largest as examples (`routing.group_key_preview_examples`).
+It covers the Alerts that the Route would take
+at its place in the current order, each Alert once, and it works for a Route you are still creating. Use it before every
+change of a key.
 
 ### Do not put Instance labels in the key
 
@@ -5861,7 +6480,7 @@ it for too long:
 > route.
 
 Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed` or,
-from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps.
+from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps (`processing.repeat_samples`).
 Until it has learned an interval, `stale_after` is `processing.stale_after_unlearned`, 25 hours. Alertmanager sends a
 repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are about `repeat_interval` +
 `group_interval`. With a 10-minute `repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster
