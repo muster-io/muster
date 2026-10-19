@@ -1856,10 +1856,12 @@ that would carry it.</p>
    <code>sum by (outcome) (increase(muster_delivery_attempts_total{job="muster",destination="&lt;id&gt;"}[15m]))</code>. <code>transient</code>
    and <code>unknown</code> point at the network or the messenger; <code>retry_after</code> at rate limits; <code>fatal</code> and <code>markup_rejected</code> at
    the configuration or the message; <code>template_error</code> at a template, see <a href="../MusterTemplateError/">MusterTemplateError</a>.</li>
-<li>Read the log lines <code>delivery_attempt</code> for the Destination (<code>destination</code> is its id): <code>outcome</code>, <code>attempt</code>,
-   <code>duration_ms</code> and <code>retry_after_ms</code>. <code>outbound_blocked</code> means that the outbound address policy refused the address
-   or the proxy (<code>rule</code> names why); <code>delivery_work_failed</code> that the worker itself could not attempt, for example
-   because the database connection was lost.</li>
+<li>Read the log lines <code>delivery_attempt</code> for the Destination (<code>destination</code> is its id): <code>outcome</code>, <code>code</code> (the HTTP
+   status of the answer or the <code>error_code</code> of a Telegram answer, 0 when the outcome carries no status), <code>reason</code> (the
+   masked error the messenger answered or the call failed with), <code>attempt</code>, <code>duration_ms</code> and <code>retry_after_ms</code>.
+   <code>outbound_blocked</code> means that the outbound address policy refused the address or the proxy (<code>rule</code> names why);
+   <code>delivery_work_failed</code> that the worker itself could not attempt, for example because the database connection was
+   lost.</li>
 <li>Compare with all outbound calls of the delivery client class:
    <code>sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))</code>. Failures across
    every Destination point at the network, a proxy or DNS rather than one messenger.</li>
