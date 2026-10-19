@@ -1094,7 +1094,7 @@ export const UnresolveAlertGroupResponse = zod.object({
 })
 
 /**
- * A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+ * A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
  * @summary Snooze
  */
 export const snoozeAlertGroupPathAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1106,8 +1106,10 @@ export const SnoozeAlertGroupParams = zod.object({
 
 export const SnoozeAlertGroupBody = zod.object({
   "until": zod.iso.datetime({"offset":true}).optional().describe('A future time.'),
-  "no_end": zod.literal(true).optional().describe('Snooze until someone unsnoozes it.')
-}).describe('Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.')
+  "no_end": zod.literal(true).optional().describe('Snooze until someone unsnoozes it.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.'),
+  "time_zone": zod.string().optional().describe('IANA time zone in which the end of `preset` is computed; only with `preset`.')
+}).describe('Exactly one of `until`, `no_end` and `preset`; none or more than one is `422` `one_of_required`, and a past `until` is `422` `out_of_range` at `/until`. A Snooze with no end is chosen explicitly, never by leaving a field out; the UI shows a warning before sending `no_end`. `time_zone` goes only with `preset`, so a `time_zone` without `preset` is `422` `unsupported` at `/time_zone`, and a time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/time_zone`. Without `time_zone` the end of a preset is computed in the profile time zone of the User the caller acts as, else in the Organization\'s. In `runBulkCommand` the pointers start with `/snooze`.')
 
 export const snoozeAlertGroupResponseAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1487,7 +1489,7 @@ export const AnswerReminderResponse = zod.object({
 })
 
 /**
- * Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+ * Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
  * @summary Run a Command on several Alert Groups
  */
 export const runBulkCommandBodyAlertGroupIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1503,7 +1505,9 @@ export const RunBulkCommandBody = zod.object({
   "note": zod.string().max(runBulkCommandBodyNoteMax).optional().describe('For `resolve`; optional.'),
   "snooze": zod.object({
   "until": zod.iso.datetime({"offset":true}).optional().describe('A future time.'),
-  "no_end": zod.literal(true).optional().describe('Snooze until someone unsnoozes it.')
+  "no_end": zod.literal(true).optional().describe('Snooze until someone unsnoozes it.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.'),
+  "time_zone": zod.string().optional().describe('IANA time zone in which the end of `preset` is computed; only with `preset`.')
 }).optional().describe('Required for `snooze`.')
 }).describe('A Command on up to `alert_group.bulk_max` Alert Groups. Arguments belong to their command: `snooze` for `snooze`, `note` for `resolve`; others are ignored.')
 
@@ -1519,4 +1523,25 @@ export const RunBulkCommandResponse = zod.object({
   "message": zod.string().nullish().describe('For example "skipped: owned by Alice".')
 }))
 }).describe('One outcome per Alert Group; a refusal never stops the others.')
+
+/**
+ * The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+ * @summary List the ends of the Snooze presets
+ */
+export const ListSnoozePresetsQueryParams = zod.object({
+  "time_zone": zod.string().optional().describe('IANA time zone of the ends; defaults to the caller\'s profile time zone, else the Organization\'s.')
+})
+
+export const listSnoozePresetsResponseWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+
+export const ListSnoozePresetsResponse = zod.object({
+  "time_zone": zod.string().describe('The IANA time zone of the ends — the request\'s, else the caller\'s profile time zone, else the Organization\'s.'),
+  "workday_start": zod.string().regex(listSnoozePresetsResponseWorkdayStartRegExp).describe('The start of the working day, `organization.workday_start`.'),
+  "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
+  "items": zod.array(zod.object({
+  "preset": zod.enum(['tomorrow', 'week_start']).describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.'),
+  "until": zod.iso.datetime({"offset":true}).describe('The end a Snooze with this preset would set now.')
+})).describe('One item per Snooze preset, in the order `tomorrow`, `week_start`.')
+})
 

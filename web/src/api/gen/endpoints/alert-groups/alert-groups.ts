@@ -56,12 +56,14 @@ import type {
   ListAlertGroupNotesParams,
   ListAlertGroupsParams,
   ListRelatedAlertGroupsParams,
+  ListSnoozePresetsParams,
   NotFoundResponse,
   Note,
   NoteInput,
   NoteList,
   RelatedAlertGroupList,
   ResolveRequest,
+  SnoozePresetList,
   SnoozeRequest,
   TimelineEntryList,
   TooManyRequestsResponse,
@@ -1315,7 +1317,7 @@ export const useUnresolveAlertGroup = <TError = UnauthorizedResponse | Forbidden
 }
 
 /**
- * A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from firing, acknowledged and snoozed.
+ * A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset (`preset`), chosen explicitly. A preset's end is computed when the Command runs and stored as an instant. Allowed from firing, acknowledged and snoozed.
  * @summary Snooze
  */
 export const snoozeAlertGroup = async (alertGroupId: string,
@@ -1757,7 +1759,7 @@ export const useAnswerReminder = <TError = UnauthorizedResponse | ForbiddenRespo
 }
 
 /**
- * Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
+ * Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every Alert Group gets the same end; the pointers of its problems start with `/snooze`.
  * @summary Run a Command on several Alert Groups
  */
 export const runBulkCommand = async (bulkCommandRequest: BulkCommandRequest, options?: Parameters<typeof apiFetch>[1]): Promise<BulkCommandResult> => {
@@ -1836,3 +1838,111 @@ export const useRunBulkCommand = <TError = BadRequestResponse | UnauthorizedResp
       > => {
       return useMutation(getRunBulkCommandMutationOptions(options), queryClient);
     }
+    export const getListSnoozePresetsUrl = (params?: ListSnoozePresetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/snooze-presets?${stringifiedParams}` : `/api/v1/snooze-presets`
+}
+
+/**
+ * The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`, computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+ * @summary List the ends of the Snooze presets
+ */
+export const listSnoozePresets = async (params?: ListSnoozePresetsParams, options?: Parameters<typeof apiFetch>[1]): Promise<SnoozePresetList> => {
+
+  return apiFetch<SnoozePresetList>(getListSnoozePresetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSnoozePresetsQueryKey = (params?: ListSnoozePresetsParams,) => {
+    return [
+    `/api/v1/snooze-presets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListSnoozePresetsQueryOptions = <TData = Awaited<ReturnType<typeof listSnoozePresets>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: ListSnoozePresetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSnoozePresetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSnoozePresets>>> = ({ signal }) => listSnoozePresets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListSnoozePresetsQueryResult = NonNullable<Awaited<ReturnType<typeof listSnoozePresets>>>
+export type ListSnoozePresetsQueryError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
+
+
+export function useListSnoozePresets<TData = Awaited<ReturnType<typeof listSnoozePresets>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params: undefined |  ListSnoozePresetsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSnoozePresets>>,
+          TError,
+          Awaited<ReturnType<typeof listSnoozePresets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSnoozePresets<TData = Awaited<ReturnType<typeof listSnoozePresets>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListSnoozePresetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSnoozePresets>>,
+          TError,
+          Awaited<ReturnType<typeof listSnoozePresets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListSnoozePresets<TData = Awaited<ReturnType<typeof listSnoozePresets>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListSnoozePresetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the ends of the Snooze presets
+ */
+
+export function useListSnoozePresets<TData = Awaited<ReturnType<typeof listSnoozePresets>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListSnoozePresetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSnoozePresets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListSnoozePresetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

@@ -654,7 +654,7 @@ func (q *Queries) GetLastReminderSeq(ctx context.Context, arg GetLastReminderSeq
 }
 
 const getListSettings = `-- name: GetListSettings :one
-SELECT retention_alert_details_days, time_zone
+SELECT retention_alert_details_days, time_zone, workday_start, week_start
 FROM organizations
 WHERE id = $1
 `
@@ -662,14 +662,21 @@ WHERE id = $1
 type GetListSettingsRow struct {
 	RetentionAlertDetailsDays int64
 	TimeZone                  string
+	WorkdayStart              string
+	WeekStart                 string
 }
 
-// GetListSettings reads what the list and the reads of one Alert Group need of the Organization: retention.alert_details
-// and organization.time_zone.
+// GetListSettings reads what the list, the reads of one Alert Group and the Snooze presets need of the Organization:
+// retention.alert_details, organization.time_zone, organization.workday_start and organization.week_start.
 func (q *Queries) GetListSettings(ctx context.Context, orgID int64) (GetListSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getListSettings, orgID)
 	var i GetListSettingsRow
-	err := row.Scan(&i.RetentionAlertDetailsDays, &i.TimeZone)
+	err := row.Scan(
+		&i.RetentionAlertDetailsDays,
+		&i.TimeZone,
+		&i.WorkdayStart,
+		&i.WeekStart,
+	)
 	return i, err
 }
 
@@ -791,6 +798,26 @@ func (q *Queries) GetTimerPolicy(ctx context.Context, arg GetTimerPolicyParams) 
 		&i.AutoUnacknowledge,
 	)
 	return i, err
+}
+
+const getUserTimeZone = `-- name: GetUserTimeZone :one
+SELECT coalesce(time_zone, '')::text AS time_zone
+FROM users
+WHERE org_id = $1 AND id = $2
+`
+
+type GetUserTimeZoneParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetUserTimeZone reads the profile time zone of a User, in which the Snooze presets of that User's Commands end; empty
+// while the profile follows the browser.
+func (q *Queries) GetUserTimeZone(ctx context.Context, arg GetUserTimeZoneParams) (string, error) {
+	row := q.db.QueryRow(ctx, getUserTimeZone, arg.OrgID, arg.ID)
+	var time_zone string
+	err := row.Scan(&time_zone)
+	return time_zone, err
 }
 
 const insertDowntimeEntries = `-- name: InsertDowntimeEntries :exec

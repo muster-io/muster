@@ -917,24 +917,80 @@ func TestIntegrationAlertsOrgLastSeenIndex(t *testing.T) {
 	})
 }
 
+// TestIntegrationSnoozePresets runs 0015 over an existing Organization: up gives it workday_start 09:00 and week_start
+// monday under validated CHECKs, which refuse 24:00, 9:00 and weekend and accept 08:30 with sunday; down drops both
+// columns; up again gives the defaults back.
+func TestIntegrationSnoozePresets(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 14)
+		columns := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'organizations' AND column_name IN ('workday_start', 'week_start')`)
+		}
+		settings := func(t *testing.T) string {
+			t.Helper()
+			var start, week string
+			if err := e.d.Pool.QueryRow(t.Context(), `SELECT workday_start, week_start FROM organizations`).Scan(&start,
+				&week); err != nil {
+				t.Fatal(err)
+			}
+			return start + "|" + week
+		}
+		if got := columns(t); got != 0 {
+			t.Fatal("before 0015: the columns exist")
+		}
+
+		e.step(t, 1)
+		if got := settings(t); got != "09:00|monday" {
+			t.Errorf("after up: %s", got)
+		}
+		if got := e.constraints(t, []string{"organizations"}, "organizations_w"); got !=
+			"organizations.organizations_week_start_check:true organizations.organizations_workday_start_check:true" {
+			t.Errorf("after up: constraints %s", got)
+		}
+		for _, set := range []string{"workday_start = '24:00'", "workday_start = '9:00'", "workday_start = '09:60'",
+			"week_start = 'weekend'", "week_start = 'Monday'"} {
+			_, err := e.d.Pool.Exec(t.Context(), `UPDATE organizations SET `+set)
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" {
+				t.Errorf("%s: %v", set, err)
+			}
+		}
+		e.exec(t, `UPDATE organizations SET workday_start = '08:30', week_start = 'sunday'`)
+		if got := settings(t); got != "08:30|sunday" {
+			t.Errorf("an accepted change: %s", got)
+		}
+
+		e.step(t, -1)
+		if got := columns(t); got != 0 {
+			t.Error("after down: the columns are left")
+		}
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 15 || settings(t) != "09:00|monday" {
+			t.Errorf("up again: version %d, dirty %v, %v, %s", v, dirty, err, settings(t))
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (14)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (15)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":14`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":15`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":14`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":15`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -950,10 +1006,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (14)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (15)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":14`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":15`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

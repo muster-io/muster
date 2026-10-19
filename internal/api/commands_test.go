@@ -62,8 +62,19 @@ func (f *fakeCommands) Unresolve(_ context.Context, c groups.Caller, id string) 
 func (f *fakeCommands) Snooze(_ context.Context, c groups.Caller, id string, end groups.SnoozeEnd) (groups.Result,
 	error) {
 	f.ends = append(f.ends, end)
-	if (end.Until == nil) != end.NoEnd {
+	choices := 0
+	for _, given := range []bool{end.Until != nil, end.NoEnd, end.Preset != ""} {
+		if given {
+			choices++
+		}
+	}
+	switch {
+	case choices != 1:
 		return groups.Result{}, &groups.FieldError{Pointer: "", Code: groups.CodeOneOfRequired, Detail: "x"}
+	case end.TimeZone != nil && end.Preset == "":
+		return groups.Result{}, &groups.FieldError{Pointer: "/time_zone", Code: groups.CodeUnsupported, Detail: "x"}
+	case end.TimeZone != nil && *end.TimeZone == "Mars/Base":
+		return groups.Result{}, &groups.FieldError{Pointer: "/time_zone", Code: groups.CodeInvalid, Detail: "x"}
 	}
 	return f.record("snooze", c, id)
 }
@@ -243,6 +254,59 @@ func TestBulkCommandAPI(t *testing.T) {
 	if a.status != http.StatusForbidden || len(fc.bulks) != 3 ||
 		a.json(t)["detail"] != "This needs the Permission alert-groups:resolve." {
 		t.Errorf("viewer = %d %s", a.status, a.body)
+	}
+}
+
+// TestSnoozePresetAPI is C-10.FR-18, C-10.AC-17 and C-10.AC-22 on the API: preset and time_zone of a Snooze reach the
+// command layer for one Alert Group and for a bulk Snooze, whose problems point into /snooze; the refusals of the
+// command layer are 422 at their pointers, and an unknown preset is refused by the request validation with 400 before
+// it.
+func TestSnoozePresetAPI(t *testing.T) {
+	x, fc := newCommandsAPI(t)
+	path := "/api/v1/alert-groups/" + groupID + "/snooze"
+	a := x.as(t, fullToken, http.MethodPost, path, `{"preset":"tomorrow","time_zone":"UTC"}`)
+	if e := fc.ends[len(fc.ends)-1]; a.status != http.StatusOK || e.Preset != groups.PresetTomorrow ||
+		e.TimeZone == nil || *e.TimeZone != "UTC" || e.Until != nil || e.NoEnd {
+		t.Errorf("preset with a time zone = %d %s %+v", a.status, a.body, e)
+	}
+	a = x.as(t, fullToken, http.MethodPost, path, `{"preset":"week_start"}`)
+	if e := fc.ends[len(fc.ends)-1]; a.status != http.StatusOK || e.Preset != groups.PresetWeekStart ||
+		e.TimeZone != nil {
+		t.Errorf("preset = %d %s %+v", a.status, a.body, e)
+	}
+	until := t0.Add(time.Hour).Format(time.RFC3339)
+	for body, want := range map[string]string{
+		`{"preset":"tomorrow","until":"` + until + `"}`: " one_of_required",
+		`{"until":"` + until + `","time_zone":"UTC"}`:   "/time_zone unsupported",
+		`{"preset":"tomorrow","time_zone":"Mars/Base"}`: "/time_zone invalid_format",
+		`{"time_zone":"UTC"}`:                           " one_of_required",
+	} {
+		if a := x.as(t, fullToken, http.MethodPost, path, body); a.status != http.StatusUnprocessableEntity ||
+			problemCode(t, a) != want {
+			t.Errorf("%s = %d %s, want %s", body, a.status, a.body, want)
+		}
+	}
+	calls := len(fc.ends)
+	if a := x.as(t, fullToken, http.MethodPost, path, `{"preset":"someday"}`); a.status != http.StatusBadRequest ||
+		problemCode(t, a) != "/preset invalid_format" || len(fc.ends) != calls {
+		t.Errorf("an unknown preset = %d %s", a.status, a.body)
+	}
+	bulk := func(snooze string) answer {
+		return x.as(t, fullToken, http.MethodPost, "/api/v1/alert-groups/bulk-commands",
+			`{"command":"snooze","alert_group_ids":["`+groupID+`","AGBBBBBBBBBBBB"],"snooze":`+snooze+`}`)
+	}
+	if a := bulk(`{"preset":"week_start","time_zone":"Asia/Tokyo"}`); a.status != http.StatusOK ||
+		fc.bulks[0].Snooze.Preset != groups.PresetWeekStart || *fc.bulks[0].Snooze.TimeZone != "Asia/Tokyo" {
+		t.Errorf("bulk preset = %d %s %+v", a.status, a.body, fc.bulks[0].Snooze)
+	}
+	fc.err = &groups.FieldError{Pointer: "/snooze/time_zone", Code: groups.CodeInvalid, Detail: "x"}
+	if a := bulk(`{"preset":"week_start","time_zone":"Mars/Base"}`); a.status != http.StatusUnprocessableEntity ||
+		problemCode(t, a) != "/snooze/time_zone invalid_format" {
+		t.Errorf("bulk Mars/Base = %d %s", a.status, a.body)
+	}
+	bulks := len(fc.bulks)
+	if a := bulk(`{"preset":"someday"}`); a.status != http.StatusBadRequest || len(fc.bulks) != bulks {
+		t.Errorf("bulk unknown preset = %d %s", a.status, a.body)
 	}
 }
 

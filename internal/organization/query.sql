@@ -2,8 +2,8 @@
 -- Copyright The Muster Authors
 
 -- name: GetOrganization :one
-SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
 FROM organizations
 ORDER BY id
@@ -11,14 +11,14 @@ LIMIT 1;
 
 -- name: CreateOrganization :one
 INSERT INTO organizations (
-    public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-    instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+    public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+    critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
     retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
     created_at, updated_at
 )
 VALUES (
-    @public_id, @name, @time_zone, @severity_label, @severity_mapping, @severity_styles, @critical_is_urgent,
-    @instance_labels, @retention_stored_snapshots_days, @retention_alert_details_days,
+    @public_id, @name, @time_zone, @workday_start, @week_start, @severity_label, @severity_mapping, @severity_styles,
+    @critical_is_urgent, @instance_labels, @retention_stored_snapshots_days, @retention_alert_details_days,
     @retention_alert_group_summaries_days, @retention_audit_log_days, @totp_required, @oidc_token_grace_seconds,
     @created_at, @created_at
 )
@@ -66,8 +66,8 @@ LIMIT @max_values;
 
 -- GetSettings reads the organization resource, with the state of its Secrets but not their values.
 -- name: GetSettings :one
-SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
-       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
+       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
@@ -97,6 +97,8 @@ WHERE id = @org_id;
 UPDATE organizations
 SET name                                         = @name,
     time_zone                                    = @time_zone,
+    workday_start                                = @workday_start,
+    week_start                                   = @week_start,
     severity_label                               = @severity_label,
     severity_mapping                             = @severity_mapping,
     severity_styles                              = @severity_styles,

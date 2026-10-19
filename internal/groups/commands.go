@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -200,21 +201,45 @@ type skippedError struct {
 
 func (e *skippedError) Error() string { return "owned by another user" }
 
-// SnoozeEnd is the end of a Snooze, chosen explicitly: a future Until, or NoEnd (C-10.FR-6).
+// SnoozeEnd is the end of a Snooze, chosen explicitly: a future Until, NoEnd, or a Snooze preset whose end the Command
+// computes (C-10.FR-6, FR-17, FR-18). TimeZone is the time zone of the preset when the request names one; without it
+// the Command takes the caller's (readPresetBasis).
 type SnoozeEnd struct {
-	Until *time.Time
-	NoEnd bool
+	Until    *time.Time
+	NoEnd    bool
+	Preset   SnoozePreset
+	TimeZone *string
+	// zone is the time zone a resolved preset was computed in, which its Audit log entry names.
+	zone string
 }
 
-// check refuses a Snooze with neither or both of the choices, or an end that is not in the future at now; pointer is
-// where the Snooze is in the request.
+// check refuses a Snooze with none or more than one of the choices, an end that is not in the future at now, an
+// unknown preset, and a time zone without a preset or one Muster does not know; pointer is where the Snooze is in the
+// request.
 func (e SnoozeEnd) check(pointer string, now time.Time) error {
-	if (e.Until == nil) != e.NoEnd {
+	choices := 0
+	for _, given := range []bool{e.Until != nil, e.NoEnd, e.Preset != ""} {
+		if given {
+			choices++
+		}
+	}
+	if choices != 1 {
 		return &FieldError{Pointer: pointer, Code: CodeOneOfRequired,
-			Detail: "Give exactly one of until and no_end: true."}
+			Detail: "Give exactly one of until, no_end: true and preset."}
 	}
 	if e.Until != nil && !e.Until.After(now) {
 		return &FieldError{Pointer: pointer + "/until", Code: CodeOutOfRange, Detail: "The Snooze end is not in the future."}
+	}
+	if e.Preset != "" && !slices.Contains(PresetOrder(), e.Preset) {
+		return &FieldError{Pointer: pointer + "/preset", Code: CodeInvalid, Detail: "No such Snooze preset."}
+	}
+	if e.TimeZone != nil && e.Preset == "" {
+		return &FieldError{Pointer: pointer + "/time_zone", Code: CodeUnsupported,
+			Detail: "A time zone goes only with a Snooze preset."}
+	}
+	if e.TimeZone != nil && !organization.ValidTimeZone(*e.TimeZone) {
+		return &FieldError{Pointer: pointer + "/time_zone", Code: CodeInvalid,
+			Detail: "The time zone is not an IANA time zone name."}
 	}
 	return nil
 }
@@ -242,7 +267,8 @@ func (s *Service) Unresolve(ctx context.Context, c Caller, publicID string) (Res
 	return s.command(ctx, c, CommandUnresolve, publicID, args{})
 }
 
-// Snooze is the Command Snooze until end, which names exactly one future until or no_end (C-10.FR-6).
+// Snooze is the Command Snooze until end, which names exactly one of a future until, no_end and a Snooze preset
+// (C-10.FR-6, FR-18); a preset's end is computed before the Alert Group is locked (resolveEnd).
 func (s *Service) Snooze(ctx context.Context, c Caller, publicID string, end SnoozeEnd) (Result, error) {
 	return s.command(ctx, c, CommandSnooze, publicID, args{end: &end})
 }
@@ -261,7 +287,7 @@ func (s *Service) AnswerReminder(ctx context.Context, c Caller, publicID string)
 // args are the arguments of a Command: the end of a Snooze, the text of a Note — Add Note's, or the one of Resolve —
 // with where it is in the request (noteAt, /note by default) and, for Add Note, the Note to add, whether it is an item
 // of a bulk command — whose Acknowledge skips an Alert Group another user owns — and whether its Permission and
-// arguments were checked already, once for the whole bulk command.
+// arguments were checked, and the end of a Snooze preset computed, already, once for the whole bulk command.
 type args struct {
 	end     *SnoozeEnd
 	note    *string
@@ -325,10 +351,10 @@ func (s *Service) refused(ctx context.Context, c Caller, cmd Command, group, cod
 }
 
 // run is the dispatcher's entry for one Command on the Alert Group publicID, which every Transport reaches through
-// the Commands above: the Permission and the arguments, unless a bulk command checked them already, then, in a
-// transaction of its own on the locked row, precondition, transition, Audit log, Timeline, re-render and hints. A
-// refusal rolls everything back and writes only command_refused. It returns the outcome and the #N of the Alert
-// Group, 0 when there is none.
+// the Commands above: the Permission and the arguments, and the end of a Snooze preset, unless a bulk command did so
+// already, then, in a transaction of its own on the locked row, precondition, transition, Audit log, Timeline,
+// re-render and hints. A refusal rolls everything back and writes only command_refused. It returns the outcome and the
+// #N of the Alert Group, 0 when there is none.
 func (s *Service) run(ctx context.Context, c Caller, cmd Command, publicID string, a args) (Outcome, int64, error) {
 	if !a.checked {
 		if err := s.permit(ctx, c, cmd, publicID, 1); err != nil {
@@ -338,6 +364,10 @@ func (s *Service) run(ctx context.Context, c Caller, cmd Command, publicID strin
 			return "", 0, err
 		}
 		if err := a.check("", s.clock.Now()); err != nil {
+			return "", 0, err
+		}
+		var err error
+		if a.end, err = s.resolveEnd(ctx, c, a.end); err != nil {
 			return "", 0, err
 		}
 	}
@@ -743,6 +773,9 @@ func (t snooze) apply(_ context.Context, _ Queries, g *Group, c *change) error {
 	if t.end.Until != nil {
 		g.SnoozeUntil = ptr(t.end.Until.UTC().Truncate(time.Microsecond))
 		details["until"] = g.SnoozeUntil.Format(time.RFC3339)
+	}
+	if t.end.Preset != "" {
+		details["preset"], details["time_zone"] = string(t.end.Preset), t.end.zone
 	}
 	c.action, c.details = ActionSnoozed, details
 	c.add(entry{Event: EventSnoozed, From: from, To: StatusSnoozed, PreviousOwner: previous,

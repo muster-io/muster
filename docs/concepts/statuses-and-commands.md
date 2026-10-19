@@ -78,7 +78,7 @@ message or a Thread reply.
 | **Unacknowledge** | Acknowledged | The Alert Group is Firing again, without an Owner, and the ack timeout starts over. Any user who may acknowledge can do it, not only the Owner. |
 | **Resolve** | Firing, Acknowledged, Snoozed | The Alert Group is Resolved by the person. A Note can come with it. |
 | **Unresolve** | Resolved by a person | The Alert Group is Firing again without an Owner. Web UI and API only. |
-| **Snooze** | Firing, Acknowledged, Snoozed | The Alert Group is Snoozed until a time in the future, or with no end. A Snooze with a new end changes the end. |
+| **Snooze** | Firing, Acknowledged, Snoozed | The Alert Group is Snoozed until a time in the future, until a [Snooze preset](#snooze-presets), or with no end. A Snooze with a new end changes the end. |
 | **Unsnooze** | Snoozed | The Alert Group is Firing again without an Owner, and the ack timeout starts over. |
 | **Add Note** | any | A Note appears in the Timeline with its author. Web UI and API only. |
 | **Still on it** | Acknowledged, while a Reminder waits | The Owner answers the Reminder. See below. |
@@ -88,10 +88,11 @@ Details:
 - **Takeover.** Acknowledging an Alert Group that somebody else owns moves it to you, without asking. The previous Owner
   is Mentioned in a Loud Thread reply, and your Reminders start from zero. The web UI says "Take over from {Owner}" on the
   button.
-- **Snooze.** The web UI and the API accept any future time, or no end. The API makes you say which: a request names
-  either `until` or `no_end`. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone
-  unsnoozes it". Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`:
-  1 hour, 4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).
+- **Snooze.** The web UI and the API accept any future time, or no end, and the API also a [Snooze
+  preset](#snooze-presets). The API makes you say which: a request names exactly one of `until`, `no_end` and
+  `preset`. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
+  Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
+  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).
 - **Unresolve** is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
   already resolved.
@@ -106,6 +107,56 @@ Details:
   one Takeover in the Timeline.
 
 Every command is a Quiet event except the Takeover. See [Loud and Quiet](loud-and-quiet.md).
+
+### Snooze presets
+
+A **Snooze preset** ends a Snooze at the start of the working day instead of after a duration. Muster turns it into an
+end when the command runs:
+
+| Preset | API value | Ends at |
+|---|---|---|
+| Until tomorrow 09:00 | `tomorrow` | the next start of the working day |
+| Until Monday 09:00 | `week_start` | the next start of the working day on the first day of the week |
+
+"Next" is strictly after now. With the working day starting at 09:00:
+
+- At 02:00, "Until tomorrow 09:00" ends at 09:00 the same day. The night belongs to the day before it, so "tomorrow"
+  is the morning about to come, seven hours away.
+- At 08:59 it ends one minute later: the preset means "until the working day starts".
+- At 09:00 sharp, and at any later time of the day, it ends at 09:00 the next day.
+- There is no working-week calendar, so on Friday evening "Until tomorrow 09:00" ends on Saturday at 09:00. For a
+  weekend, use `week_start`, which ends on Monday at 09:00.
+- The start is the time on the clock on the day of the end. A start that the clocks skip moves forward by the change:
+  02:30 on the night the clocks jump from 02:00 to 03:00 is 03:30. A start that the clocks show twice, when they go
+  back, is the first of the two.
+
+The end is stored as a time. A later change of the settings or of a time zone never moves a Snooze already set, and the
+Snooze ends like any other: if Alerts still fire, the Alert Group is Firing again without an Owner, with a Loud message.
+
+**Time zone.** The preset counts in the time zone that the request names in `time_zone`. Without one, it counts in the
+profile time zone of the user who snoozes, also through a Personal access token, and otherwise in the Organization's
+time zone (`organization.time_zone`). A Service account has no profile, so it always gets the Organization's.
+
+**Settings.** Two Organization settings define the presets, as the fields `workday_start` and `week_start` of the
+organization in the API:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `organization.workday_start` | `09:00` | the start of the working day, `HH:MM` on the 24-hour clock |
+| `organization.week_start` | `monday` | the first day of the week, `monday` to `sunday` |
+
+**API.** A Snooze takes `preset`, `tomorrow` or `week_start`, as a third choice beside `until` and `no_end`, with an
+optional `time_zone`:
+
+```json
+{"preset": "tomorrow", "time_zone": "Europe/Berlin"}
+```
+
+A `time_zone` without `preset` is refused with `422` `unsupported`, and a time zone Muster does not know with `422`
+`invalid_format`. A bulk Snooze with a preset computes the end once, so every Alert Group gets the same end.
+`GET /api/v1/snooze-presets`, with an optional `time_zone`, answers the end that each preset would set now and the time
+zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
+preset and the time zone beside the end. See the [API reference](../reference/api.md).
 
 ### Who may
 

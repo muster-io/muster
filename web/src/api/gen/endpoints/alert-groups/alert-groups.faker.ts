@@ -37,8 +37,10 @@ import {
   MentionName,
   ResolverKind,
   SeverityLevel,
+  SnoozePreset,
   TimelineKind,
-  Transport
+  Transport,
+  Weekday
 } from '../../model';
 import type {
   AlertGroup,
@@ -52,6 +54,7 @@ import type {
   Note,
   NoteList,
   RelatedAlertGroupList,
+  SnoozePresetList,
   TimelineAlertsEntry,
   TimelineDeliveryEntry,
   TimelineEntryList,
@@ -185,4 +188,6 @@ export const getAnswerReminderResponseMock = (overrideResponse: Partial<Extract<
       }, undefined]), notices: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['alerts_still_firing','replacement','details_removed','firing_again_after_manual_resolve','newer_alert_group_exists'] as const), count: faker.helpers.arrayElement([faker.number.int(), null]), label: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), retention_days: faker.helpers.arrayElement([faker.number.int(), null]), resolved_number: faker.helpers.arrayElement([faker.number.int(), null]), related_alert_group: faker.helpers.arrayElement([{id: faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), number: faker.number.int()}, undefined])})), undefined]), links: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({kind: faker.helpers.arrayElement(['runbook','dashboard','source','link_rule'] as const), name: faker.string.alpha({length: {min: 10, max: 20}}), link_rule_id: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), undefined]), url: faker.internet.url()})), undefined]), allowed_commands: faker.helpers.arrayElements(Object.values(CommandName))}, ...overrideResponse})
 
 export const getRunBulkCommandResponseMock = (overrideResponse: Partial<Extract<BulkCommandResult, object>> = {}): BulkCommandResult => ({results: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({alert_group_id: faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), number: faker.helpers.arrayElement([faker.number.int(), null]), outcome: faker.helpers.arrayElement(Object.values(BulkOutcome)), code: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), message: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null])})), ...overrideResponse})
+
+export const getListSnoozePresetsResponseMock = (overrideResponse: Partial<Extract<SnoozePresetList, object>> = {}): SnoozePresetList => ({time_zone: faker.string.alpha({length: {min: 10, max: 20}}), workday_start: faker.helpers.fromRegExp("^([01][0-9]|2[0-3]):[0-5][0-9]$"), week_start: faker.helpers.arrayElement(Object.values(Weekday)), items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({preset: faker.helpers.arrayElement(Object.values(SnoozePreset)), until: faker.date.past().toISOString().slice(0, 19) + 'Z'})), ...overrideResponse})
 

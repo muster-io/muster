@@ -48,8 +48,9 @@ func (s *fakeStore) GetOrganization(context.Context) (dbgen.GetOrganizationRow, 
 	}
 	o := s.org
 	row := dbgen.GetOrganizationRow{
-		ID: 7, PublicID: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel,
-		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent,
+		ID: 7, PublicID: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart,
+		WeekStart: o.WeekStart, SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping,
+		SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent,
 		InstanceLabels: o.InstanceLabels, RetentionStoredSnapshotsDays: o.RetentionStoredSnapshotsDays,
 		RetentionAlertDetailsDays: o.RetentionAlertDetailsDays, RetentionAuditLogDays: o.RetentionAuditLogDays,
 		RetentionAlertGroupSummariesDays: o.RetentionAlertGroupSummariesDays, TotpRequired: o.TotpRequired,
@@ -108,7 +109,8 @@ func TestEnsureCreatesTheDefaults(t *testing.T) {
 	if _, err := publicid.Parse(publicid.Organization, o.PublicID); err != nil {
 		t.Errorf("public id %q: %v", o.PublicID, err)
 	}
-	if o.Name != "Muster" || o.TimeZone != "UTC" || o.SeverityLabel != "severity" || !o.CriticalIsUrgent ||
+	if o.Name != "Muster" || o.TimeZone != "UTC" || o.WorkdayStart != "09:00" || o.WeekStart != "monday" ||
+		o.SeverityLabel != "severity" || !o.CriticalIsUrgent ||
 		strings.Join(o.InstanceLabels, ",") != "pod,instance,container,endpoint" ||
 		o.RetentionStoredSnapshotsDays != 14 || o.RetentionAlertDetailsDays != 90 ||
 		o.RetentionAlertGroupSummariesDays != 730 || o.RetentionAuditLogDays != 365 || o.TotpRequired != "nobody" ||
@@ -232,8 +234,9 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 	mapping, _ := json.Marshal(d.SeverityMapping)
 	styles, _ := json.Marshal(d.SeverityStyles)
 	return &fakeSettings{row: dbgen.GetSettingsRow{
-		ID: 7, PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, SeverityLabel: d.SeverityLabel,
-		SeverityMapping: mapping, SeverityStyles: styles, CriticalIsUrgent: true, InstanceLabels: d.InstanceLabels,
+		ID: 7, PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
+		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel, SeverityMapping: mapping, SeverityStyles: styles,
+		CriticalIsUrgent: true, InstanceLabels: d.InstanceLabels,
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
 		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1,
@@ -275,6 +278,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	}
 	s.updates = append(s.updates, arg)
 	s.row.Name, s.row.TimeZone, s.row.SeverityLabel = arg.Name, arg.TimeZone, arg.SeverityLabel
+	s.row.WorkdayStart, s.row.WeekStart = arg.WorkdayStart, arg.WeekStart
 	s.row.SeverityMapping, s.row.SeverityStyles = arg.SeverityMapping, arg.SeverityStyles
 	s.row.CriticalIsUrgent, s.row.InstanceLabels = arg.CriticalIsUrgent, arg.InstanceLabels
 	s.row.RetentionStoredSnapshotsDays = arg.RetentionStoredSnapshotsDays
@@ -392,7 +396,8 @@ func TestOrganizationGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	hb := o.OutgoingHeartbeat
-	if o.PublicID != "RGAAAAAAAAAAAA" || o.TOTPRequired != TOTPNobody || o.OIDCTokenGrace != 7*24*time.Hour ||
+	if o.PublicID != "RGAAAAAAAAAAAA" || o.WorkdayStart != "09:00" || o.WeekStart != "monday" ||
+		o.TOTPRequired != TOTPNobody || o.OIDCTokenGrace != 7*24*time.Hour ||
 		!hb.URL.Set || !hb.URL.UpdatedAt.Equal(at) || hb.ProxyPassword.Set || hb.ProxyPassword.UpdatedAt != nil ||
 		!hb.Proxy.Enabled || hb.Proxy.Type != "http" || *hb.Proxy.Username != "u" || len(o.SeverityMapping) != 4 ||
 		o.Version != 1 {
@@ -459,6 +464,10 @@ func TestOrganizationUpdate(t *testing.T) {
 		{"/name", func(in *Input) { in.Name = " Ops " }, func(o Organization) bool { return o.Name == "Ops" }},
 		{"/time_zone", func(in *Input) { in.TimeZone = "Europe/Berlin" },
 			func(o Organization) bool { return o.TimeZone == "Europe/Berlin" }},
+		{"/workday_start", func(in *Input) { in.WorkdayStart = new("23:59") },
+			func(o Organization) bool { return o.WorkdayStart == "23:59" }},
+		{"/week_start", func(in *Input) { in.WeekStart = new("saturday") },
+			func(o Organization) bool { return o.WeekStart == "saturday" }},
 		{"/severity_label", func(in *Input) { in.SeverityLabel = "level" },
 			func(o Organization) bool { return o.SeverityLabel == "level" }},
 		{"/severity_mapping", func(in *Input) {
@@ -542,6 +551,12 @@ func TestOrganizationUpdateValidation(t *testing.T) {
 		{"/name", CodeInvalidFormat, func(in *Input) { in.Name = "a\nb" }},
 		{"/time_zone", CodeInvalidFormat, func(in *Input) { in.TimeZone = "Mars/Olympus" }},
 		{"/time_zone", CodeInvalidFormat, func(in *Input) { in.TimeZone = "Local" }},
+		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("24:00") }},
+		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("9:00") }},
+		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("09:60") }},
+		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("") }},
+		{"/week_start", CodeInvalidFormat, func(in *Input) { in.WeekStart = new("weekend") }},
+		{"/week_start", CodeInvalidFormat, func(in *Input) { in.WeekStart = new("Monday") }},
 		{"/severity_label", CodeInvalidFormat, func(in *Input) { in.SeverityLabel = "2severity" }},
 		{"/severity_mapping/4/value", CodeTooShort, func(in *Input) {
 			in.SeverityMapping = append(in.SeverityMapping, SeverityMapping{"", SeverityInfo})
@@ -626,6 +641,75 @@ func TestRetentionOrder(t *testing.T) {
 	}
 	if string(s.audit[0].Diff) != `[{"pointer":"/retention/alert_group_summaries_days","before":730,"after":90}]` {
 		t.Errorf("diff %s", s.audit[0].Diff)
+	}
+}
+
+// TestSnoozePresetSettings is C-20.FR-9 and C-20.AC-7 on the service: the read carries the start of the working day
+// and the first day of the week; 24:00, 9:00 and weekend are refused with invalid_format at the field and change
+// nothing; 08:30 with sunday is stored, recorded as organization.updated with both fields in its diff and announced;
+// an update that omits both keeps them, also when it changes another field.
+func TestSnoozePresetSettings(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, err := svc.Get(t.Context())
+	if err != nil || o.WorkdayStart != "09:00" || o.WeekStart != "monday" {
+		t.Fatalf("Get = %+v, %v", o, err)
+	}
+	for _, c := range []struct {
+		pointer string
+		change  func(*Input)
+	}{
+		{"/workday_start", func(in *Input) { in.WorkdayStart = new("24:00") }},
+		{"/workday_start", func(in *Input) { in.WorkdayStart = new("9:00") }},
+		{"/week_start", func(in *Input) { in.WeekStart = new("weekend") }},
+	} {
+		in := inputOf(o)
+		in.WorkdayStart, in.WeekStart = new("08:30"), new("sunday")
+		c.change(&in)
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != c.pointer || f.Code != CodeInvalidFormat {
+			t.Errorf("%s: %v", c.pointer, err)
+		}
+		if len(s.updates) != 0 || len(s.audit) != 0 || len(s.hints) != 0 || s.row.WorkdayStart != "09:00" ||
+			s.row.WeekStart != "monday" {
+			t.Errorf("%s: a refused update changed the organization", c.pointer)
+		}
+	}
+
+	in := inputOf(o)
+	in.WorkdayStart, in.WeekStart = new("08:30"), new("sunday")
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || got.WorkdayStart != "08:30" || got.WeekStart != "sunday" || len(s.updates) != 1 ||
+		s.updates[0].WorkdayStart != "08:30" || s.updates[0].WeekStart != "sunday" {
+		t.Fatalf("08:30 with sunday = %+v, %v", got, err)
+	}
+	if len(s.audit) != 1 || s.audit[0].Action != ActionUpdated || string(s.audit[0].Diff) !=
+		`[{"pointer":"/workday_start","before":"09:00","after":"08:30"},`+
+			`{"pointer":"/week_start","before":"monday","after":"sunday"}]` {
+		t.Errorf("audit = %+v", s.audit)
+	}
+	if len(s.hints) != 1 || s.hints[0] != (db.Hint{OrgID: 7, Type: HintOrganization}) {
+		t.Errorf("hints = %+v", s.hints)
+	}
+
+	in = inputOf(got)
+	if in.WorkdayStart != nil || in.WeekStart != nil {
+		t.Fatalf("inputOf sets the settings: %+v", in)
+	}
+	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		kept.WorkdayStart != "08:30" || kept.WeekStart != "sunday" || len(s.updates) != 1 || len(s.audit) != 1 {
+		t.Errorf("an update that omits both = %+v, %v, %d writes", kept, err, len(s.updates))
+	}
+	in.Name = "Ops"
+	kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || kept.WorkdayStart != "08:30" || kept.WeekStart != "sunday" || len(s.updates) != 2 ||
+		s.updates[1].WorkdayStart != "08:30" || s.updates[1].WeekStart != "sunday" ||
+		string(s.audit[1].Diff) != `[{"pointer":"/name","before":"Muster","after":"Ops"}]` {
+		t.Errorf("another change that omits both = %+v, %v, diff %s", kept, err, s.audit[len(s.audit)-1].Diff)
+	}
+	if read, err := svc.Get(t.Context()); err != nil || read.WorkdayStart != "08:30" || read.WeekStart != "sunday" {
+		t.Errorf("read back %+v, %v", read, err)
 	}
 }
 

@@ -24,6 +24,8 @@ func Defaults() Settings {
 	return Settings{
 		Name:          "Muster",
 		TimeZone:      "UTC",
+		WorkdayStart:  "09:00",
+		WeekStart:     "monday",
 		SeverityLabel: "severity",
 		// Any other value counts as warning, and a missing label as info (organization.severity_mapping).
 		SeverityMapping: []SeverityMapping{
@@ -94,6 +96,8 @@ func ensureOrganization(ctx context.Context, s Store, now time.Time) (int64, str
 		PublicID:                         id,
 		Name:                             d.Name,
 		TimeZone:                         d.TimeZone,
+		WorkdayStart:                     d.WorkdayStart,
+		WeekStart:                        d.WeekStart,
 		SeverityLabel:                    d.SeverityLabel,
 		SeverityMapping:                  mapping,
 		SeverityStyles:                   styles,

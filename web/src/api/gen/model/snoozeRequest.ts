@@ -17,13 +17,17 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { SnoozePreset } from './snoozePreset';
 
 /**
- * Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.
+ * Exactly one of `until`, `no_end` and `preset`; none or more than one is `422` `one_of_required`, and a past `until` is `422` `out_of_range` at `/until`. A Snooze with no end is chosen explicitly, never by leaving a field out; the UI shows a warning before sending `no_end`. `time_zone` goes only with `preset`, so a `time_zone` without `preset` is `422` `unsupported` at `/time_zone`, and a time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/time_zone`. Without `time_zone` the end of a preset is computed in the profile time zone of the User the caller acts as, else in the Organization's. In `runBulkCommand` the pointers start with `/snooze`.
  */
 export interface SnoozeRequest {
   /** A future time. */
   until?: string;
   /** Snooze until someone unsnoozes it. */
   no_end?: true;
+  preset?: SnoozePreset;
+  /** IANA time zone in which the end of `preset` is computed; only with `preset`. */
+  time_zone?: string;
 }

@@ -25,6 +25,7 @@ import * as zod from 'zod';
  * @summary Read the Organization
  */
 
+export const getOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const getOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const getOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -41,6 +42,8 @@ export const getOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-h
 export const GetOrganizationResponse = zod.object({
   "name": zod.string().min(1),
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
+  "workday_start": zod.string().regex(getOrganizationResponseOneWorkdayStartRegExp).describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
+  "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -83,7 +86,7 @@ export const GetOrganizationResponse = zod.object({
 }))
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation, `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second, defensive check of the same rules. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
  * @summary Update the Organization
  */
 export const UpdateOrganizationHeader = zod.object({
@@ -91,6 +94,7 @@ export const UpdateOrganizationHeader = zod.object({
 })
 
 
+export const updateOrganizationBodyOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationBodyOneRetentionAlertDetailsDaysMax = 36500;
@@ -106,6 +110,8 @@ export const updateOrganizationBodyOneOidcTokenGraceSecondsMax = 3153600000;
 export const UpdateOrganizationBody = zod.object({
   "name": zod.string().min(1),
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
+  "workday_start": zod.string().regex(updateOrganizationBodyOneWorkdayStartRegExp).optional().describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
+  "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).optional().describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -140,6 +146,7 @@ export const UpdateOrganizationBody = zod.object({
 }))
 
 
+export const updateOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -156,6 +163,8 @@ export const updateOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Z
 export const UpdateOrganizationResponse = zod.object({
   "name": zod.string().min(1),
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
+  "workday_start": zod.string().regex(updateOrganizationResponseOneWorkdayStartRegExp).describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
+  "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),

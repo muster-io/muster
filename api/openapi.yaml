@@ -1774,8 +1774,10 @@ paths:
         on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422`
         at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`,
         with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`.
-        A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request
-        validation; `out_of_range` is the second, defensive check of the same bounds.
+        A retention period or `oidc_token_grace_seconds` beyond its `maximum`, a `workday_start` that is not `HH:MM` on
+        the 24-hour clock and a `week_start` that is not a day of the week are refused with `400` by request validation,
+        `invalid_format` at `/workday_start` or `/week_start`; `out_of_range` and `invalid_format` are the second,
+        defensive check of the same rules.
         A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with
         the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
       x-permission: organization:write
@@ -3741,8 +3743,9 @@ paths:
       tags:
       - Alert groups
       summary: Snooze
-      description: 'A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from
-        firing, acknowledged and snoozed.'
+      description: 'A Snooze until a future time (`until`), with no end (`no_end: true`) or until a Snooze preset
+        (`preset`), chosen explicitly. A preset''s end is computed when the Command runs and stored as an instant. Allowed
+        from firing, acknowledged and snoozed.'
       x-permission: alert-groups:snooze
       x-permission-check: dispatcher
       x-listener: app
@@ -3765,6 +3768,10 @@ paths:
               no_end:
                 value:
                   no_end: true
+              preset:
+                value:
+                  preset: tomorrow
+                  time_zone: Europe/Berlin
       responses:
         '200':
           description: The outcome and the Alert Group.
@@ -3938,7 +3945,8 @@ paths:
         the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge
         skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs
         the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`,
-        `snooze` and `unsnooze` need `alert-groups:snooze`).'
+        `snooze` and `unsnooze` need `alert-groups:snooze`). A bulk Snooze with a `preset` computes its end once, so every
+        Alert Group gets the same end; the pointers of its problems start with `/snooze`.'
       x-permission:
       - alert-groups:acknowledge
       - alert-groups:resolve
@@ -3971,6 +3979,15 @@ paths:
                   - AGK7M3QX9P2RTA
                   snooze:
                     no_end: true
+              snooze_preset:
+                value:
+                  command: snooze
+                  alert_group_ids:
+                  - AGK7M3QX9P2RTA
+                  - AGC71D0EH5MXQB
+                  snooze:
+                    preset: week_start
+                    time_zone: UTC
               resolve:
                 value:
                   command: resolve
@@ -4009,6 +4026,56 @@ paths:
                       message: not found
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /snooze-presets:
+    get:
+      operationId: listSnoozePresets
+      tags:
+      - Alert groups
+      summary: List the ends of the Snooze presets
+      description: The end that a Snooze with each Snooze preset would set now, in the order `tomorrow`, `week_start`,
+        computed like the Snooze itself from `organization.workday_start` and `organization.week_start` on the business
+        clock. The time zone is `time_zone` when given, else the profile time zone of the User the caller acts as, else
+        the Organization's; the answer names the one it used. A time zone Muster does not know (or `Local`) is `422`
+        `invalid_format` at `/query/time_zone`. It reads and changes nothing else.
+      x-permission: alert-groups:snooze
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - name: time_zone
+        in: query
+        description: IANA time zone of the ends; defaults to the caller's profile time zone, else the Organization's.
+        schema:
+          type: string
+        example: Europe/Berlin
+      responses:
+        '200':
+          description: The ends of the Snooze presets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnoozePresetList'
+              examples:
+                berlin:
+                  summary: Tuesday 20 October 2026, 02:00 in Berlin
+                  value:
+                    time_zone: Europe/Berlin
+                    workday_start: '09:00'
+                    week_start: monday
+                    items:
+                    - preset: tomorrow
+                      until: '2026-10-20T07:00:00Z'
+                    - preset: week_start
+                      until: '2026-10-26T08:00:00Z'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -7884,10 +7951,11 @@ components:
         - code: duplicate
           description: A value appears twice where it must be unique.
         - code: unsupported
-          description: The value is valid but not supported here, such as `owner=me` for a Service account token.
+          description: The value is valid but not supported here, such as `owner=me` for a Service account token, or a
+            Snooze's `time_zone` without `preset`.
         - code: one_of_required
-          description: Exactly one of several fields must be given, such as `until` or `no_end`, or the parameters
-            `connection` and `destination` of `listRequestLog`, of which it takes one, or `run` alone.
+          description: Exactly one of several fields must be given, such as `until`, `no_end` or `preset` of a Snooze, or
+            the parameters `connection` and `destination` of `listRequestLog`, of which it takes one, or `run` alone.
         - code: permission_not_held
           description: A token asks for a Permission its owner does not hold, or a token assigns a Role holding a Permission
             the token does not hold (`/role`).
@@ -9291,6 +9359,19 @@ components:
       - nobody
       - local_users
       - everyone
+    Weekday:
+      type: string
+      description: A day of the week. As the Organization's `week_start` it is `organization.week_start` (default
+        `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working
+        day; omit it on an update to keep it.
+      enum:
+      - monday
+      - tuesday
+      - wednesday
+      - thursday
+      - friday
+      - saturday
+      - sunday
     SeverityMappingEntry:
       type: object
       required:
@@ -9367,6 +9448,15 @@ components:
         time_zone:
           type: string
           description: IANA time zone used for times in messages.
+        workday_start:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM`
+            on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A
+            change applies to Snoozes set afterwards and never moves one already set.
+          example: '09:00'
+        week_start:
+          $ref: '#/components/schemas/Weekday'
         severity_label:
           type: string
           description: Label that carries severity.
@@ -9404,6 +9494,8 @@ components:
       - type: object
         required:
         - id
+        - workday_start
+        - week_start
         - outgoing_heartbeat
         - etag
         properties:
@@ -11374,8 +11466,13 @@ components:
           description: Optional Note recorded in the same request.
     SnoozeRequest:
       type: object
-      description: Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is
-        chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.
+      description: Exactly one of `until`, `no_end` and `preset`; none or more than one is `422` `one_of_required`, and a
+        past `until` is `422` `out_of_range` at `/until`. A Snooze with no end is chosen explicitly, never by leaving a
+        field out; the UI shows a warning before sending `no_end`. `time_zone` goes only with `preset`, so a `time_zone`
+        without `preset` is `422` `unsupported` at `/time_zone`, and a time zone Muster does not know (or `Local`) is
+        `422` `invalid_format` at `/time_zone`. Without `time_zone` the end of a preset is computed in the profile time
+        zone of the User the caller acts as, else in the Organization's. In `runBulkCommand` the pointers start with
+        `/snooze`.
       properties:
         until:
           type: string
@@ -11386,6 +11483,56 @@ components:
           enum:
           - true
           description: Snooze until someone unsnoozes it.
+        preset:
+          $ref: '#/components/schemas/SnoozePreset'
+        time_zone:
+          type: string
+          description: IANA time zone in which the end of `preset` is computed; only with `preset`.
+          example: Europe/Berlin
+    SnoozePreset:
+      type: string
+      description: A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`)
+        after now, `week_start` at the first start of the working day on the first day of the week
+        (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and
+        before the start of the working day `tomorrow` ends the same morning.
+      enum:
+      - tomorrow
+      - week_start
+    SnoozePresetList:
+      type: object
+      required:
+      - time_zone
+      - workday_start
+      - week_start
+      - items
+      properties:
+        time_zone:
+          type: string
+          description: The IANA time zone of the ends — the request's, else the caller's profile time zone, else the
+            Organization's.
+        workday_start:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: The start of the working day, `organization.workday_start`.
+        week_start:
+          $ref: '#/components/schemas/Weekday'
+        items:
+          type: array
+          description: One item per Snooze preset, in the order `tomorrow`, `week_start`.
+          items:
+            $ref: '#/components/schemas/SnoozePresetEnd'
+    SnoozePresetEnd:
+      type: object
+      required:
+      - preset
+      - until
+      properties:
+        preset:
+          $ref: '#/components/schemas/SnoozePreset'
+        until:
+          type: string
+          format: date-time
+          description: The end a Snooze with this preset would set now.
     CommandOutcome:
       type: string
       description: '`unchanged` for an idempotent repeat, such as Acknowledge by the current Owner.'

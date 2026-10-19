@@ -71,10 +71,14 @@ type OutboundPolicy struct {
 
 // Settings are the Organization and its settings.
 type Settings struct {
-	ID               int64
-	PublicID         string
-	Name             string
-	TimeZone         string
+	ID       int64
+	PublicID string
+	Name     string
+	TimeZone string
+	// WorkdayStart is organization.workday_start, HH:MM on the 24-hour clock.
+	WorkdayStart string
+	// WeekStart is organization.week_start, monday to sunday.
+	WeekStart        string
 	SeverityLabel    string
 	SeverityMapping  []SeverityMapping
 	SeverityStyles   []SeverityStyle
@@ -115,6 +119,8 @@ func Current(ctx context.Context, s Store) (Settings, error) {
 		PublicID:         org.PublicID,
 		Name:             org.Name,
 		TimeZone:         org.TimeZone,
+		WorkdayStart:     org.WorkdayStart,
+		WeekStart:        org.WeekStart,
 		SeverityLabel:    org.SeverityLabel,
 		CriticalIsUrgent: org.CriticalIsUrgent,
 		InstanceLabels:   org.InstanceLabels,

@@ -286,7 +286,8 @@ func (f *fakeDB) CountGroups(_ context.Context, p dbgen.CountGroupsParams) ([]db
 func (f *fakeDB) GetListSettings(context.Context, int64) (dbgen.GetListSettingsRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return dbgen.GetListSettingsRow{RetentionAlertDetailsDays: f.details, TimeZone: f.timeZone},
+	return dbgen.GetListSettingsRow{RetentionAlertDetailsDays: f.details, TimeZone: f.timeZone,
+			WorkdayStart: f.workdayStart, WeekStart: f.weekStart},
 		f.call("GetListSettings")
 }
 

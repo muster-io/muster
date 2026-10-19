@@ -2357,6 +2357,24 @@ func (e SnapshotState) Valid() bool {
 	}
 }
 
+// Defines values for SnoozePreset.
+const (
+	Tomorrow  SnoozePreset = "tomorrow"
+	WeekStart SnoozePreset = "week_start"
+)
+
+// Valid indicates whether the value is a known member of the SnoozePreset enum.
+func (e SnoozePreset) Valid() bool {
+	switch e {
+	case Tomorrow:
+		return true
+	case WeekStart:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SnoozeRequestNoEnd.
 const (
 	True SnoozeRequestNoEnd = true
@@ -3197,6 +3215,39 @@ func (e WebhookMentionTargetType) Valid() bool {
 	case WebhookMentionTargetTypeGroup:
 		return true
 	case WebhookMentionTargetTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Weekday.
+const (
+	Friday    Weekday = "friday"
+	Monday    Weekday = "monday"
+	Saturday  Weekday = "saturday"
+	Sunday    Weekday = "sunday"
+	Thursday  Weekday = "thursday"
+	Tuesday   Weekday = "tuesday"
+	Wednesday Weekday = "wednesday"
+)
+
+// Valid indicates whether the value is a known member of the Weekday enum.
+func (e Weekday) Valid() bool {
+	switch e {
+	case Friday:
+		return true
+	case Monday:
+		return true
+	case Saturday:
+		return true
+	case Sunday:
+		return true
+	case Thursday:
+		return true
+	case Tuesday:
+		return true
+	case Wednesday:
 		return true
 	default:
 		return false
@@ -5441,6 +5492,12 @@ type Organization struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart Weekday `json:"week_start"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart string `json:"workday_start"`
 }
 
 // OrganizationBase defines model for OrganizationBase.
@@ -5467,6 +5524,12 @@ type OrganizationBase struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart *Weekday `json:"week_start,omitempty"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart *string `json:"workday_start,omitempty"`
 }
 
 // OrganizationInput defines model for OrganizationInput.
@@ -5500,6 +5563,12 @@ type OrganizationInput struct {
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
 	TotpRequired TotpPolicy `json:"totp_required"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart *Weekday `json:"week_start,omitempty"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	WorkdayStart *string `json:"workday_start,omitempty"`
 }
 
 // OutboundPolicy defines model for OutboundPolicy.
@@ -6332,10 +6401,43 @@ type SigningSecretStatus struct {
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
 type SnapshotState string
 
-// SnoozeRequest Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.
+// SnoozePreset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+type SnoozePreset string
+
+// SnoozePresetEnd defines model for SnoozePresetEnd.
+type SnoozePresetEnd struct {
+	// Preset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+	Preset SnoozePreset `json:"preset"`
+
+	// Until The end a Snooze with this preset would set now.
+	Until time.Time `json:"until"`
+}
+
+// SnoozePresetList defines model for SnoozePresetList.
+type SnoozePresetList struct {
+	// Items One item per Snooze preset, in the order `tomorrow`, `week_start`.
+	Items []SnoozePresetEnd `json:"items"`
+
+	// TimeZone The IANA time zone of the ends — the request's, else the caller's profile time zone, else the Organization's.
+	TimeZone string `json:"time_zone"`
+
+	// WeekStart A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+	WeekStart Weekday `json:"week_start"`
+
+	// WorkdayStart The start of the working day, `organization.workday_start`.
+	WorkdayStart string `json:"workday_start"`
+}
+
+// SnoozeRequest Exactly one of `until`, `no_end` and `preset`; none or more than one is `422` `one_of_required`, and a past `until` is `422` `out_of_range` at `/until`. A Snooze with no end is chosen explicitly, never by leaving a field out; the UI shows a warning before sending `no_end`. `time_zone` goes only with `preset`, so a `time_zone` without `preset` is `422` `unsupported` at `/time_zone`, and a time zone Muster does not know (or `Local`) is `422` `invalid_format` at `/time_zone`. Without `time_zone` the end of a preset is computed in the profile time zone of the User the caller acts as, else in the Organization's. In `runBulkCommand` the pointers start with `/snooze`.
 type SnoozeRequest struct {
 	// NoEnd Snooze until someone unsnoozes it.
 	NoEnd *SnoozeRequestNoEnd `json:"no_end,omitempty"`
+
+	// Preset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+	Preset *SnoozePreset `json:"preset,omitempty"`
+
+	// TimeZone IANA time zone in which the end of `preset` is computed; only with `preset`.
+	TimeZone *string `json:"time_zone,omitempty"`
 
 	// Until A future time.
 	Until *time.Time `json:"until,omitempty"`
@@ -7292,6 +7394,9 @@ type WebhookUser struct {
 	Name  string   `json:"name"`
 }
 
+// Weekday A day of the week. As the Organization's `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.
+type Weekday string
+
 // AccountLinkId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type AccountLinkId = PublicId
 
@@ -7962,6 +8067,12 @@ type CompleteOidcSignInParams struct {
 type StartOidcSignInParams struct {
 	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
+}
+
+// ListSnoozePresetsParams defines parameters for ListSnoozePresets.
+type ListSnoozePresetsParams struct {
+	// TimeZone IANA time zone of the ends; defaults to the caller's profile time zone, else the Organization's.
+	TimeZone *string `form:"time_zone,omitempty" json:"time_zone,omitempty"`
 }
 
 // ListStoredSnapshotsParams defines parameters for ListStoredSnapshots.
@@ -10404,6 +10515,9 @@ type ServerInterface interface {
 	// GetSignInOptions Read sign-in options
 	// (GET /sign-in-options)
 	GetSignInOptions(w http.ResponseWriter, r *http.Request)
+	// ListSnoozePresets List the ends of the Snooze presets
+	// (GET /snooze-presets)
+	ListSnoozePresets(w http.ResponseWriter, r *http.Request, params ListSnoozePresetsParams)
 	// ListStoredSnapshots List Stored Snapshots
 	// (GET /stored-snapshots)
 	ListStoredSnapshots(w http.ResponseWriter, r *http.Request, params ListStoredSnapshotsParams)
@@ -15278,6 +15392,39 @@ func (siw *ServerInterfaceWrapper) GetSignInOptions(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListSnoozePresets operation middleware
+func (siw *ServerInterfaceWrapper) ListSnoozePresets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSnoozePresetsParams
+
+	// ------------- Optional query parameter "time_zone" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "time_zone", r.URL.Query(), &params.TimeZone, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "time_zone"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "time_zone", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSnoozePresets(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListStoredSnapshots operation middleware
 func (siw *ServerInterfaceWrapper) ListStoredSnapshots(w http.ResponseWriter, r *http.Request) {
 
@@ -16163,6 +16310,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/alert-groups/{alert_group_id}/notes", wrapper.CreateAlertGroupNote)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/alert-groups/{alert_group_id}/still-on-it", wrapper.AnswerReminder)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/alert-groups/bulk-commands", wrapper.RunBulkCommand)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/snooze-presets", wrapper.ListSnoozePresets)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/live-updates", wrapper.StreamLiveUpdates)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/connections", wrapper.ListConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/connections", wrapper.CreateConnection)
@@ -30754,6 +30902,95 @@ func (response GetSignInOptions429ApplicationProblemPlusJSONResponse) VisitGetSi
 	return err
 }
 
+type ListSnoozePresetsRequestObject struct {
+	Params ListSnoozePresetsParams
+}
+
+type ListSnoozePresetsResponseObject interface {
+	VisitListSnoozePresetsResponse(w http.ResponseWriter) error
+}
+
+type ListSnoozePresets200JSONResponse SnoozePresetList
+
+func (response ListSnoozePresets200JSONResponse) VisitListSnoozePresetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSnoozePresets401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListSnoozePresets401ApplicationProblemPlusJSONResponse) VisitListSnoozePresetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSnoozePresets403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListSnoozePresets403ApplicationProblemPlusJSONResponse) VisitListSnoozePresetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSnoozePresets422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ListSnoozePresets422ApplicationProblemPlusJSONResponse) VisitListSnoozePresetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSnoozePresets429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListSnoozePresets429ApplicationProblemPlusJSONResponse) VisitListSnoozePresetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListStoredSnapshotsRequestObject struct {
 	Params ListStoredSnapshotsParams
 }
@@ -32982,6 +33219,9 @@ type StrictServerInterface interface {
 	// GetSignInOptions Read sign-in options
 	// (GET /sign-in-options)
 	GetSignInOptions(ctx context.Context, request GetSignInOptionsRequestObject) (GetSignInOptionsResponseObject, error)
+	// ListSnoozePresets List the ends of the Snooze presets
+	// (GET /snooze-presets)
+	ListSnoozePresets(ctx context.Context, request ListSnoozePresetsRequestObject) (ListSnoozePresetsResponseObject, error)
 	// ListStoredSnapshots List Stored Snapshots
 	// (GET /stored-snapshots)
 	ListStoredSnapshots(ctx context.Context, request ListStoredSnapshotsRequestObject) (ListStoredSnapshotsResponseObject, error)
@@ -36943,6 +37183,32 @@ func (sh *strictHandler) GetSignInOptions(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetSignInOptionsResponseObject); ok {
 		if err := validResponse.VisitGetSignInOptionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSnoozePresets operation middleware
+func (sh *strictHandler) ListSnoozePresets(w http.ResponseWriter, r *http.Request, params ListSnoozePresetsParams) {
+	var request ListSnoozePresetsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSnoozePresets(ctx, request.(ListSnoozePresetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSnoozePresets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSnoozePresetsResponseObject); ok {
+		if err := validResponse.VisitListSnoozePresetsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
