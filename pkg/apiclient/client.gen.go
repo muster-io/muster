@@ -3689,7 +3689,7 @@ type AlertmanagerRouteList struct {
 	Items []AlertmanagerRoute `json:"items"`
 }
 
-// AlertmanagerWebhook Alertmanager webhook payload (version 4), a Snapshot, as Muster expects to read it during processing. It documents the payload only: the ingestion endpoints do not validate against it and store the body as received, so a payload that differs in details, or is not JSON at all, is a processing error of that Snapshot, never a rejected request.
+// AlertmanagerWebhook Alertmanager webhook payload, a Snapshot, as Muster expects to read it during processing: the payload of Alertmanager (version 4), and the payload of the webhook contact point of Grafana Alerting (version `"1"`), whose built-in Alertmanager sends the same format with additions. Fields this schema does not name are ignored, Grafana's `title`, `message`, `state` and `appVersion` and its per-alert fields included. It documents the payload only: the ingestion endpoints do not validate against it and store the body as received, so a payload that differs in details, or is not JSON at all, is a processing error of that Snapshot, never a rejected request.
 type AlertmanagerWebhook struct {
 	Alerts []AlertmanagerAlert `json:"alerts"`
 
@@ -3704,13 +3704,18 @@ type AlertmanagerWebhook struct {
 	// GroupLabels Label names and values.
 	GroupLabels *Labels `json:"groupLabels,omitempty"`
 
-	// NotificationReason Present in newer Alertmanager versions; one value marks a repeat.
-	NotificationReason *string    `json:"notification_reason,omitempty"`
-	Receiver           *string    `json:"receiver,omitempty"`
-	Status             AlertState `json:"status"`
+	// NotificationReason Present in newer Alertmanager versions; one value marks a repeat. Grafana does not send it, and its repeats are learned from identical Snapshots.
+	NotificationReason *string `json:"notification_reason,omitempty"`
 
-	// TruncatedAlerts Number of alerts Alertmanager left out because of `max_alerts`.
-	TruncatedAlerts      *int                   `json:"truncatedAlerts,omitempty"`
+	// OrgId The id of the Grafana organisation. Only Grafana's webhook contact point sends it, and a Snapshot whose `orgId` is present and not null is a Snapshot from Grafana. Grafana computes `status` from the alerts it lists, so a truncated Snapshot from Grafana with `status: resolved` resolves only the Alerts it lists as resolved, and the Alerts it leaves out stay firing; an untruncated one, like Alertmanager's, resolves its whole Alertmanager group.
+	OrgId    *int       `json:"orgId,omitempty"`
+	Receiver *string    `json:"receiver,omitempty"`
+	Status   AlertState `json:"status"`
+
+	// TruncatedAlerts Number of alerts left out because of Alertmanager's `max_alerts`, or because of Max alerts of Grafana's webhook contact point.
+	TruncatedAlerts *int `json:"truncatedAlerts,omitempty"`
+
+	// Version `"4"` from Alertmanager, `"1"` from Grafana's webhook contact point. Not read.
 	Version              *string                `json:"version,omitempty"`
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
@@ -8547,6 +8552,14 @@ func (a *AlertmanagerWebhook) UnmarshalJSON(b []byte) error {
 		delete(object, "notification_reason")
 	}
 
+	if raw, found := object["orgId"]; found {
+		err = json.Unmarshal(raw, &a.OrgId)
+		if err != nil {
+			return fmt.Errorf("error reading 'orgId': %w", err)
+		}
+		delete(object, "orgId")
+	}
+
 	if raw, found := object["receiver"]; found {
 		err = json.Unmarshal(raw, &a.Receiver)
 		if err != nil {
@@ -8642,6 +8655,13 @@ func (a AlertmanagerWebhook) MarshalJSON() ([]byte, error) {
 		object["notification_reason"], err = json.Marshal(a.NotificationReason)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'notification_reason': %w", err)
+		}
+	}
+
+	if a.OrgId != nil {
+		object["orgId"], err = json.Marshal(a.OrgId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'orgId': %w", err)
 		}
 	}
 
