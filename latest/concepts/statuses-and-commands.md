@@ -92,7 +92,8 @@ Details:
   preset](#snooze-presets). The API makes you say which: a request names exactly one of `until`, `no_end` and
   `preset`. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
-  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).
+  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
+  two Snooze presets; see [In messengers](#in-messengers).
 - **Unresolve** is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
   already resolved.
@@ -135,7 +136,9 @@ Snooze ends like any other: if Alerts still fire, the Alert Group is Firing agai
 
 **Time zone.** The preset counts in the time zone that the request names in `time_zone`. Without one, it counts in the
 profile time zone of the user who snoozes, also through a Personal access token, and otherwise in the Organization's
-time zone (`organization.time_zone`). A Service account has no profile, so it always gets the Organization's.
+time zone (`organization.time_zone`). A Service account has no profile, so it always gets the Organization's. A press on
+a button in a messenger and a Text command carry no time zone, so they count in the profile time zone of the linked user
+who pressed or wrote, and otherwise in the Organization's.
 
 **Settings.** Two Organization settings define the presets, as the fields `workday_start` and `week_start` of the
 organization in the API:
@@ -157,6 +160,22 @@ A `time_zone` without `preset` is refused with `422` `unsupported`, and a time z
 `GET /api/v1/snooze-presets`, with an optional `time_zone`, answers the end that each preset would set now and the time
 zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
 preset and the time zone beside the end. See the [API reference](../reference/api.md).
+
+#### In messengers
+
+On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
+two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until Monday 09:00", or «До завтра 09:00» and
+«До понедельника 09:00» on a Route in Russian. The time is `organization.workday_start` and the day
+`organization.week_start`, so with the week starting on Sunday the second button reads "Until Sunday 09:00". A snoozed
+Alert Group offers no Snooze button, and a Route without Snooze durations offers no preset either, because an empty
+`route.snooze_durations` means no Snooze from messengers. Telegram shows the presets on a row of their own under the
+durations, and a bridge with a limit on buttons drops them first; see
+[Bridge](../messengers/bridge.md#what-muster-posts).
+
+The labels are part of the message. After a change of `organization.workday_start` or `organization.week_start`, each
+Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
+the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+are [Text commands](#text-commands).
 
 ### Who may
 
@@ -200,7 +219,11 @@ The buttons of a Root message depend on the status of its Alert Group:
 - **Unack** gives it back. The Alert Group becomes Firing again with no Owner, and the ack timeout starts over.
 - **Resolve** closes the Alert Group by hand. If Alerts still fire, the message shows "⚠ N alerts still firing in
   Alertmanager", and after the Grace period the Alerts that still fire start a new Alert Group.
-- **Snooze** sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for each. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says so.
+- **Snooze** sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for
+  each, then the two [Snooze presets](#in-messengers) "Until tomorrow 09:00" and "Until Monday 09:00", which end at the
+  next start of the working day, or at its start on the first day of the week, in your profile time zone, or else the
+  Organization's. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says
+  so.
 - **Unsnooze** ends the Snooze early. The Alert Group becomes Firing again.
 - On a **Reminder**, **Still on it** tells Muster you are still handling the Alert Group, and **Unack** gives it up.
 - A **Storm summary** and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
@@ -227,16 +250,24 @@ A reply is a Text command when its whole text, trimmed, in any case and with an 
 | `still on it` | `ещё работаю` (also `еще работаю`) | Still on it |
 
 The `<duration>` is one of the Route's Snooze durations, written in minutes, hours or days: `30m`, `4h` or `1d`, and
-`30м`, `4ч` or `1д` in Russian. Every word works whatever the Route's language is. The writer needs an Account link, and
-the same permissions as for a button.
+`30м`, `4ч` or `1д` in Russian. It can also name a [Snooze preset](#snooze-presets): `tomorrow` (`завтра`) for the next
+start of the working day, or the first day of the week (`organization.week_start`), such as `monday` (`понедельник`),
+for the start of the working day on that day. So `snooze tomorrow`, `/Snooze Tomorrow` and `отложить понедельник` (with
+the week starting on Monday) all work. A day is written as it stands alone: `понедельник`, `вторник`, `среда`,
+`четверг`, `пятница`, `суббота`, `воскресенье`. Every word works whatever the Route's language is. The writer needs an
+Account link, and the same permissions as for a button.
 
 Muster answers a Text command in the Thread, for example "Done: Acknowledged #42", or with the reason it refused. A
-duration that is not one of the Route's is answered "Snooze for one of: …". **Any other text is ignored and never
-answered**, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts on
-the Alert Group like any other, also when the message is past its [edit window](../messengers/bridge.md#edit-windows).
-A Text command older than an hour (`bridge.event_max_age`) is dropped. If the bridge forwards only the messages that
-mention its bot, the line says "mentioning the bot", and the command must mention it. See [Write a
-bridge](../messengers/write-a-bridge.md#events) for how a bridge reports a Thread message.
+duration that is not one of the Route's, or a day other than the first day of the week, is answered with what the Route
+offers: "Snooze for one of: 1h, 4h, 24h, tomorrow, monday". The sentence and the durations are in the writer's profile
+language, and the two preset words in the Route's language. A Route without Snooze durations takes no preset either, and
+answers "This Alert Group's Route has no Snooze durations; nothing was changed." **Any other text is ignored and never
+answered**, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts
+on the Alert Group like any other, also when the message is past its
+[edit window](../messengers/bridge.md#edit-windows). A Text command older than an hour (`bridge.event_max_age`) is
+dropped. If the bridge forwards only the messages that mention its bot, the line says "mentioning the bot", and the
+command must mention it. See [Write a bridge](../messengers/write-a-bridge.md#events) for how a bridge reports a Thread
+message.
 
 ## Ack timeouts, Reminders and auto-unacknowledge
 

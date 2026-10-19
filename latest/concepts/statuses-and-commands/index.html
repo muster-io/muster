@@ -1381,6 +1381,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Snooze presets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-messengers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In messengers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2671,6 +2688,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Snooze presets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-messengers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In messengers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2971,7 +3005,8 @@ message or a Thread reply.</p>
   preset</a>. The API makes you say which: a request names exactly one of <code>until</code>, <code>no_end</code> and
   <code>preset</code>. A Snooze with no end asks you to confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's <strong>Snooze durations</strong> as separate buttons or a menu (<code>route.snooze_durations</code>: 1 hour,
-  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route).</li>
+  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
+  two Snooze presets; see <a href="#in-messengers">In messengers</a>.</li>
 <li><strong>Unresolve</strong> is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
   already resolved.</li>
@@ -3026,7 +3061,9 @@ end when the command runs:</p>
 Snooze ends like any other: if Alerts still fire, the Alert Group is Firing again without an Owner, with a Loud message.</p>
 <p><strong>Time zone.</strong> The preset counts in the time zone that the request names in <code>time_zone</code>. Without one, it counts in the
 profile time zone of the user who snoozes, also through a Personal access token, and otherwise in the Organization's
-time zone (<code>organization.time_zone</code>). A Service account has no profile, so it always gets the Organization's.</p>
+time zone (<code>organization.time_zone</code>). A Service account has no profile, so it always gets the Organization's. A press on
+a button in a messenger and a Text command carry no time zone, so they count in the profile time zone of the linked user
+who pressed or wrote, and otherwise in the Organization's.</p>
 <p><strong>Settings.</strong> Two Organization settings define the presets, as the fields <code>workday_start</code> and <code>week_start</code> of the
 organization in the API:</p>
 <table>
@@ -3059,6 +3096,19 @@ optional <code>time_zone</code>:</p>
 <code>GET /api/v1/snooze-presets</code>, with an optional <code>time_zone</code>, answers the end that each preset would set now and the time
 zone it used; it needs the Permission to snooze and changes nothing. The Audit log entry of a preset Snooze names the
 preset and the time zone beside the end. See the <a href="../../reference/api/">API reference</a>.</p>
+<h4 id="in-messengers">In messengers<a class="headerlink" href="#in-messengers" title="Permanent link">&para;</a></h4>
+<p>On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
+two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until Monday 09:00", or «До завтра 09:00» and
+«До понедельника 09:00» on a Route in Russian. The time is <code>organization.workday_start</code> and the day
+<code>organization.week_start</code>, so with the week starting on Sunday the second button reads "Until Sunday 09:00". A snoozed
+Alert Group offers no Snooze button, and a Route without Snooze durations offers no preset either, because an empty
+<code>route.snooze_durations</code> means no Snooze from messengers. Telegram shows the presets on a row of their own under the
+durations, and a bridge with a limit on buttons drops them first; see
+<a href="../../messengers/bridge/#what-muster-posts">Bridge</a>.</p>
+<p>The labels are part of the message. After a change of <code>organization.workday_start</code> or <code>organization.week_start</code>, each
+Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
+the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+are <a href="#text-commands">Text commands</a>.</p>
 <h3 id="who-may">Who may<a class="headerlink" href="#who-may" title="Permanent link">&para;</a></h3>
 <p>A <strong>Responder</strong> or an <strong>Admin</strong> may acknowledge, resolve, snooze and add Notes. A <strong>Viewer</strong> may read and may not act:
 the command is refused. A <strong>Service account</strong> may run the commands its Role allows, except Acknowledge and Still on it,
@@ -3146,7 +3196,11 @@ privately how to link it.</p>
 <li><strong>Unack</strong> gives it back. The Alert Group becomes Firing again with no Owner, and the ack timeout starts over.</li>
 <li><strong>Resolve</strong> closes the Alert Group by hand. If Alerts still fire, the message shows "⚠ N alerts still firing in
   Alertmanager", and after the Grace period the Alerts that still fire start a new Alert Group.</li>
-<li><strong>Snooze</strong> sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for each. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says so.</li>
+<li><strong>Snooze</strong> sets it aside. It offers the Route's Snooze durations, such as 1 hour, 4 hours and 24 hours, one choice for
+  each, then the two <a href="#in-messengers">Snooze presets</a> "Until tomorrow 09:00" and "Until Monday 09:00", which end at the
+  next start of the working day, or at its start on the first day of the week, in your profile time zone, or else the
+  Organization's. When the time is up and Alerts still fire, the Alert Group comes back Firing and a Loud message says
+  so.</li>
 <li><strong>Unsnooze</strong> ends the Snooze early. The Alert Group becomes Firing again.</li>
 <li>On a <strong>Reminder</strong>, <strong>Still on it</strong> tells Muster you are still handling the Alert Group, and <strong>Unack</strong> gives it up.</li>
 <li>A <strong>Storm summary</strong> and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
@@ -3201,15 +3255,23 @@ that is not resolved then ends with a line such as "Reply in the Thread: ack · 
 </tbody>
 </table>
 <p>The <code>&lt;duration&gt;</code> is one of the Route's Snooze durations, written in minutes, hours or days: <code>30m</code>, <code>4h</code> or <code>1d</code>, and
-<code>30м</code>, <code>4ч</code> or <code>1д</code> in Russian. Every word works whatever the Route's language is. The writer needs an Account link, and
-the same permissions as for a button.</p>
+<code>30м</code>, <code>4ч</code> or <code>1д</code> in Russian. It can also name a <a href="#snooze-presets">Snooze preset</a>: <code>tomorrow</code> (<code>завтра</code>) for the next
+start of the working day, or the first day of the week (<code>organization.week_start</code>), such as <code>monday</code> (<code>понедельник</code>),
+for the start of the working day on that day. So <code>snooze tomorrow</code>, <code>/Snooze Tomorrow</code> and <code>отложить понедельник</code> (with
+the week starting on Monday) all work. A day is written as it stands alone: <code>понедельник</code>, <code>вторник</code>, <code>среда</code>,
+<code>четверг</code>, <code>пятница</code>, <code>суббота</code>, <code>воскресенье</code>. Every word works whatever the Route's language is. The writer needs an
+Account link, and the same permissions as for a button.</p>
 <p>Muster answers a Text command in the Thread, for example "Done: Acknowledged #42", or with the reason it refused. A
-duration that is not one of the Route's is answered "Snooze for one of: …". <strong>Any other text is ignored and never
-answered</strong>, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts on
-the Alert Group like any other, also when the message is past its <a href="../../messengers/bridge/#edit-windows">edit window</a>.
-A Text command older than an hour (<code>bridge.event_max_age</code>) is dropped. If the bridge forwards only the messages that
-mention its bot, the line says "mentioning the bot", and the command must mention it. See <a href="../../messengers/write-a-bridge/#events">Write a
-bridge</a> for how a bridge reports a Thread message.</p>
+duration that is not one of the Route's, or a day other than the first day of the week, is answered with what the Route
+offers: "Snooze for one of: 1h, 4h, 24h, tomorrow, monday". The sentence and the durations are in the writer's profile
+language, and the two preset words in the Route's language. A Route without Snooze durations takes no preset either, and
+answers "This Alert Group's Route has no Snooze durations; nothing was changed." <strong>Any other text is ignored and never
+answered</strong>, so people can talk in the Thread. The Thread of an older Root message works too: a Text command there acts
+on the Alert Group like any other, also when the message is past its
+<a href="../../messengers/bridge/#edit-windows">edit window</a>. A Text command older than an hour (<code>bridge.event_max_age</code>) is
+dropped. If the bridge forwards only the messages that mention its bot, the line says "mentioning the bot", and the
+command must mention it. See <a href="../../messengers/write-a-bridge/#events">Write a bridge</a> for how a bridge reports a Thread
+message.</p>
 <h2 id="ack-timeouts-reminders-and-auto-unacknowledge">Ack timeouts, Reminders and auto-unacknowledge<a class="headerlink" href="#ack-timeouts-reminders-and-auto-unacknowledge" title="Permanent link">&para;</a></h2>
 <p>Three timers make sure nobody forgets: one for an Alert Group nobody has taken, one for an Alert Group somebody took and
 then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the On-call profile turns
