@@ -41,6 +41,13 @@
 4. [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Muster reads what Alertmanager sends.
 5. Finished when, after Alertmanager is reloaded, the Integration page shows the time of the last Snapshot ([Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#create-a-token-and-paste-the-snippet)) and the Heartbeat is live ([Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#turn-it-on)).
 
+### Connect Grafana
+
+1. [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md), both ways: directly, from Grafana's built-in Alertmanager through a webhook contact point, with one Integration per Grafana cluster and organization, its token, the contact point and the notification policy ([Connect Grafana directly](https://muster-io.github.io/muster/latest/integrations/grafana.md#connect-grafana-directly)); or through an external Alertmanager, then [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) ([Connect Grafana through an external Alertmanager](https://muster-io.github.io/muster/latest/integrations/grafana.md#connect-grafana-through-an-external-alertmanager)).
+2. [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md): its setup is for Alertmanager, so it serves Grafana through an external Alertmanager. For the direct way, the same setup through a webhook contact point has not been verified with Grafana, and without a Heartbeat Muster never resolves an Alert as Stale ([Heartbeat](https://muster-io.github.io/muster/latest/integrations/grafana.md#heartbeat)).
+3. [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Muster reads what Grafana's built-in Alertmanager or an external one sends, and the [Limits](https://muster-io.github.io/muster/latest/integrations/grafana.md#limits) of Grafana's way.
+4. Finished when, after an alert fires in Grafana, the Integration page shows the time of the last Snapshot ([Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#send-the-alerts-with-a-notification-policy)).
+
 ### Automate through the API
 
 1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.
@@ -58,11 +65,11 @@
 - [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md): The Helm chart runs Muster on Kubernetes 1.30 or newer.
 - [The database](https://muster-io.github.io/muster/latest/install/database.md): Muster keeps everything in PostgreSQL 14 or newer, and nothing else stateful: no Redis and no queue.
 
-### Alertmanager
+### Integrations
 
 - [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): Muster receives alerts from Alertmanager through an Alertmanager receiver with a webhook.
+- [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md): Grafana Alerting reaches Muster in one of two ways: directly, from Grafana's built-in Alertmanager through a webhook contact point, or through an external Alertmanager that Grafana forwards its alerts to.
 - [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md): A **Heartbeat** proves, for one Integration, that the path from your cluster to Muster works: Prometheus evaluates rules, Alertmanager sends notifications, and the network carries them to Muster.
-- [Grafana Alerting](https://muster-io.github.io/muster/latest/integrations/grafana.md): Muster takes its alerts from an Alertmanager.
 
 ### Messengers
 
@@ -123,7 +130,7 @@
 - [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md): A template failed to render.
 - [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md): A replica's clock differs from the database clock by more than 2 seconds.
 - [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md): A burst of failed sign-ins: more than 20 for one method within 10 minutes.
-- [MusterSnapshotTruncated](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md): Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the `max_alerts` limit of its webhook receiver.
+- [MusterSnapshotTruncated](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md): Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the `max_alerts` limit of its webhook receiver, or, for Grafana, the Max alerts limit of its webhook contact point.
 - [MusterOIDCSecretExpiring](https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md): The OIDC client secret expires soon: the date entered as **Client secret expires on** in the OIDC settings is within `oidc.secret_expiry_lead` (14 days).
 
 ### Reference
@@ -139,4 +146,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 548661 bytes, about 137165 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 565298 bytes, about 141324 tokens.

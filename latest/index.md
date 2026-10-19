@@ -34,8 +34,9 @@ of each Alert Group there up to date until the Alert Group is resolved.
   in about five minutes.
 - [Install](install/helm.md): run Muster in production with [Helm](install/helm.md) and an external
   [PostgreSQL](install/database.md).
-- [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, watch the path from it with a
-  [Heartbeat](integrations/heartbeat.md), and send [Grafana Alerting](integrations/grafana.md) through it.
+- [Integrations](integrations/alertmanager.md): connect the Alertmanager of a cluster, connect
+  [Grafana Alerting](integrations/grafana.md) directly or through an Alertmanager, and watch the path from Alertmanager
+  with a [Heartbeat](integrations/heartbeat.md).
 - [Messengers](messengers/index.md): see what each Destination type can do, connect [Mattermost](messengers/mattermost.md) and
   [Telegram](messengers/telegram.md), reach any other messenger through a [Bridge](messengers/bridge.md) (and
   [write one](messengers/write-a-bridge.md)), [link your messenger accounts](messengers/account-links.md), and set a

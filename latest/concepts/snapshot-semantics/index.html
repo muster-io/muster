@@ -396,7 +396,7 @@
   <span class="md-ellipsis">
     
   
-  Alertmanager
+  Integrations
 
     
   </span>
@@ -412,7 +412,7 @@
               <span class="md-nav__icon md-icon"></span>
               
   
-  Alertmanager
+  Integrations
 
             </label>
             <ul class="md-nav__list" data-md-scrollfix>
@@ -451,14 +451,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../integrations/heartbeat/" class="md-nav__link">
+      <a href="../../integrations/grafana/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-  Heartbeat
+  Connect Grafana
 
     
   </span>
@@ -478,14 +478,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../integrations/grafana/" class="md-nav__link">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-  Grafana Alerting
+  Heartbeat
 
     
   </span>
@@ -2687,16 +2687,18 @@
 <h1 id="snapshot-semantics">Snapshot semantics<a class="headerlink" href="#snapshot-semantics" title="Permanent link">&para;</a></h1>
 <p>Alertmanager does not tell Muster "this alert started" and "this alert stopped" as separate events. It sends a
 <strong>Snapshot</strong>: the full state of one Alertmanager group at the moment of the notification, listing every alert it holds.
+Grafana's built-in Alertmanager sends Snapshots too, through a webhook contact point.
 Muster works out what changed by comparing Snapshots. This page explains the rules, and why an alert can be <strong>Gone</strong> or
 <strong>Stale</strong> without anybody sending a "resolved".</p>
 <p>You only need this page to understand why Muster resolved something, or why it did not. The settings that matter are on
 <a href="../../integrations/alertmanager/">Connect Alertmanager</a>, in particular its
-<a href="../../integrations/alertmanager/#repeat-intervals">Repeat intervals</a>.</p>
+<a href="../../integrations/alertmanager/#repeat-intervals">Repeat intervals</a>, and on
+<a href="../../integrations/grafana/">Connect Grafana</a>.</p>
 <h2 id="from-a-snapshot-to-a-message">From a Snapshot to a message<a class="headerlink" href="#from-a-snapshot-to-a-message" title="Permanent link">&para;</a></h2>
 <p>Receiving is store-first. Muster checks the Integration token and the size, stores the Snapshot exactly as received, and
 answers <code>202</code>. A worker then processes it, on any replica, and everything that follows is a chain of small steps:</p>
 <pre class="mermaid"><code>flowchart TD
-  am["Alertmanager"] -- "Snapshot" --&gt; ingest["Ingest"]
+  am["Alertmanager or Grafana"] -- "Snapshot" --&gt; ingest["Ingest"]
   ingest --&gt; stored[("Stored Snapshot")]
   stored --&gt; processing["Processing"]
   processing -- "Alert changes" --&gt; routing["Routing"]
@@ -2738,10 +2740,18 @@ that Alertmanager resolved it, in the latest Alert Group where that fingerprint 
 <ul>
 <li>A <code>resolved</code> for an Alert that is already resolved, or for an earlier firing of it, changes nothing. Prometheus re-sends
   a resolved alert for about 15 minutes, so the same <code>resolved</code> arrives several times.</li>
+<li>A <code>resolved</code> with an older <code>startsAt</code> than the Alert's current one resolves the current firing when its <code>endsAt</code> is
+  later than the current <code>startsAt</code>: the two firings overlap. The replicas of a Grafana HA pair evaluate the rules each
+  on its own, so their copies of one alert can carry different <code>startsAt</code>, and the resolve of either replica ends the
+  Alert. Without an <code>endsAt</code>, or with one not later than the current <code>startsAt</code>, it is a resolve of an earlier firing.
+  Alertmanager merges overlapping firings of one alert, so with one rule evaluator a resolve it sends of an earlier
+  firing ends before the next one starts. With an HA pair of rule evaluators, such as two Prometheus replicas, it can
+  send one that ends later, and Muster resolves the Alert, as it would with the <code>startsAt</code> that Alertmanager merged.</li>
 <li>A <code>resolved</code> for a fingerprint that fires nowhere is dropped, and counted.</li>
 <li>A Snapshot whose status is <code>resolved</code>, sent when all the alerts of its group resolved, resolves <strong>every Alert of that
   group</strong> that still fires, also the ones it does not list. After a restart of both Alertmanagers of a pair, such a
-  Snapshot can list only some of them and the others are never sent.</li>
+  Snapshot can list only some of them and the others are never sent. A truncated Snapshot from Grafana is the
+  exception; see <a href="#truncation">Truncation</a>.</li>
 </ul>
 <h2 id="gone">Gone<a class="headerlink" href="#gone" title="Permanent link">&para;</a></h2>
 <p>Sometimes Alertmanager stops listing an alert without saying that it resolved. The rule evaluator may have stopped, an
@@ -2788,14 +2798,14 @@ it for too long:</p>
 <code>processing.stale_after_factor</code> (3) times the repeat interval that Muster has learned for the group's Alertmanager
 route.</p>
 </blockquote>
-<p>Muster learns the interval from the gaps between Snapshots whose <code>notification_reason</code> is <code>repeat interval elapsed</code>, and
-uses the median of the last 9 gaps. Until it has learned an interval, <code>stale_after</code> is
-<code>processing.stale_after_unlearned</code>, 25 hours. Alertmanager sends a repeat on the first <code>group_interval</code> tick after
-<code>repeat_interval</code> has elapsed, so the gaps are about <code>repeat_interval</code> + <code>group_interval</code>. With a 10-minute
-<code>repeat_interval</code> and Alertmanager's default <code>group_interval</code> of 5 minutes, Muster learns an interval of about 15
-minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily interval it takes more than three
-days, which is why the Integration page warns about an interval longer than <code>processing.long_repeat_warning</code> (1 hour).
-See <a href="../../integrations/alertmanager/#repeat-intervals">Repeat intervals</a>.</p>
+<p>Muster learns the interval from the gaps between Snapshots whose <code>notification_reason</code> is <code>repeat interval elapsed</code> or,
+from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps.
+Until it has learned an interval, <code>stale_after</code> is <code>processing.stale_after_unlearned</code>, 25 hours. Alertmanager sends a
+repeat on the first <code>group_interval</code> tick after <code>repeat_interval</code> has elapsed, so the gaps are about <code>repeat_interval</code> +
+<code>group_interval</code>. With a 10-minute <code>repeat_interval</code> and Alertmanager's default <code>group_interval</code> of 5 minutes, Muster
+learns an interval of about 15 minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily
+interval it takes more than three days, which is why the Integration page warns about an interval longer than
+<code>processing.long_repeat_warning</code> (1 hour). See <a href="../../integrations/alertmanager/#repeat-intervals">Repeat intervals</a>.</p>
 <p>Gone and Stale both resolve the Alert with the reason "Alertmanager no longer reports this alert — it resolved without
 notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed". If a silenced alert's mute
 ends within about 14 minutes, Alertmanager still reports it as resolved, so it resolves normally; after that it only
@@ -2817,16 +2827,21 @@ signal that proves the path works.</p>
 minutes. If the last Heartbeat signal also came at T, the Heartbeat was lost at T+5 minutes, and the signal returned at
 T+10 minutes, the Alert goes Stale at T+25 minutes: the 10 minutes from the last signal until its return did not count.</p>
 <h2 id="truncation">Truncation<a class="headerlink" href="#truncation" title="Permanent link">&para;</a></h2>
-<p>An Alertmanager webhook configuration with <code>max_alerts</code> above 0 keeps only the first alerts of a group in each
-notification, and counts the rest in <code>truncatedAlerts</code>. A truncated Snapshot lists only part of the group, so it can
-never be evidence that an Alert is missing.</p>
+<p>An Alertmanager webhook configuration with <code>max_alerts</code> above 0, like Grafana's webhook contact point with Max alerts
+above 0, keeps only the first alerts of a group in each notification, and counts the rest in <code>truncatedAlerts</code>. A
+truncated Snapshot lists only part of the group, so it can never be evidence that an Alert is missing.</p>
 <ul>
 <li>Muster does <strong>not</strong> count a truncated Snapshot as absence. While Snapshots of the group keep arriving truncated, the
   unlisted Alerts stay alive, which can keep an Alert open that has resolved in reality.</li>
 <li>Muster raises the Internal alert <code>MusterSnapshotTruncated</code> for the Integration while any group is truncated, and
   resolves it when none is left. The Integration page shows a warning too.</li>
-<li>The fix is <code>max_alerts: 0</code> on the Alertmanager receiver. See <a href="../../integrations/alertmanager/#send-every-alert-of-the-group">Send every alert of the
-  group</a> and the
+<li>Grafana computes the status of a Snapshot from the alerts it lists, not from the whole group, so a truncated
+  Snapshot from Grafana can say <code>resolved</code> while alerts it left out still fire. Muster recognises a Snapshot from
+  Grafana by its top-level <code>orgId</code>, which Alertmanager never sends. A truncated one with <code>status: resolved</code> resolves
+  only the Alerts it lists as resolved, never its whole group.</li>
+<li>The fix is <code>max_alerts: 0</code> on the Alertmanager receiver, or Max alerts 0, the default, on Grafana's webhook contact
+  point. See <a href="../../integrations/alertmanager/#send-every-alert-of-the-group">Send every alert of the group</a>,
+  <a href="../../integrations/grafana/#create-a-webhook-contact-point">Connect Grafana</a> and the
   <a href="../../operations/runbooks/MusterSnapshotTruncated/">runbook</a>.</li>
 </ul>
 <h2 id="continuation">Continuation<a class="headerlink" href="#continuation" title="Permanent link">&para;</a></h2>

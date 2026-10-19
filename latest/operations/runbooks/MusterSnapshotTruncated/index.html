@@ -396,7 +396,7 @@
   <span class="md-ellipsis">
     
   
-  Alertmanager
+  Integrations
 
     
   </span>
@@ -412,7 +412,7 @@
               <span class="md-nav__icon md-icon"></span>
               
   
-  Alertmanager
+  Integrations
 
             </label>
             <ul class="md-nav__list" data-md-scrollfix>
@@ -451,14 +451,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../integrations/heartbeat/" class="md-nav__link">
+      <a href="../../../integrations/grafana/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-  Heartbeat
+  Connect Grafana
 
     
   </span>
@@ -478,14 +478,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../integrations/grafana/" class="md-nav__link">
+      <a href="../../../integrations/heartbeat/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-  Grafana Alerting
+  Heartbeat
 
     
   </span>
@@ -2579,8 +2579,8 @@
 <h1 id="mustersnapshottruncated">MusterSnapshotTruncated<a class="headerlink" href="#mustersnapshottruncated" title="Permanent link">&para;</a></h1>
 <h2 id="meaning">Meaning<a class="headerlink" href="#meaning" title="Permanent link">&para;</a></h2>
 <p>Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the <code>max_alerts</code>
-limit of its webhook receiver. Muster treats each Snapshot as the whole Alertmanager group, so a Truncated Snapshot
-hides Alerts from it.</p>
+limit of its webhook receiver, or, for Grafana, the Max alerts limit of its webhook contact point. Muster treats each
+Snapshot as the whole Alertmanager group, so a Truncated Snapshot hides Alerts from it.</p>
 <p>It is an <strong>Internal alert</strong> only, severity <code>warning</code>, raised by Muster as an Alert of the built-in "Muster"
 Integration when the first Alertmanager group (<code>groupKey</code>) of the Integration arrives truncated. Its labels are
 <code>integration</code> (the Integration's id) and <code>integration_name</code>. It is resolved when no group of the Integration is
@@ -2590,6 +2590,10 @@ nothing for as long as it takes an Alert to go Stale.</p>
 <ul>
 <li>The Alerts that Alertmanager left out do not reach their Alert Groups: Muster may show fewer Alerts than fire, miss
   an Alert Group entirely, or keep an Alert open that Alertmanager no longer lists.</li>
+<li>For Grafana, when a whole group resolves, its last Snapshot lists only the first alerts, up to Max alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again. The Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live Heartbeat; the Heartbeat through Grafana has not been verified (see
+  <a href="../../../integrations/grafana/#heartbeat">Connect Grafana</a>).</li>
 <li>Everything else of the Integration keeps working.</li>
 </ul>
 <h2 id="diagnosis">Diagnosis<a class="headerlink" href="#diagnosis" title="Permanent link">&para;</a></h2>
@@ -2603,13 +2607,21 @@ nothing for as long as it takes an Alert to go Stale.</p>
 <li>Open a recent Stored Snapshot of the Integration (<code>/integrations/&lt;id&gt;/snapshots/&lt;id&gt;</code>): a Truncated Snapshot has
    <code>truncatedAlerts</code> above 0.</li>
 <li>In the Alertmanager configuration, find the <code>webhook_configs</code> entry of the receiver that sends to Muster and its
-   <code>max_alerts</code>.</li>
+   <code>max_alerts</code>. For Grafana, open the webhook contact point that sends to Muster and check its Max alerts (<code>maxAlerts</code>
+   in a provisioning file).</li>
 </ol>
 <h2 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Set <code>max_alerts: 0</code> on the Alertmanager receiver that sends to Muster, so that every Alert of the group is sent,
   and reload Alertmanager; see <a href="../../../integrations/alertmanager/">Connect Alertmanager</a>.</li>
-<li>The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification.</li>
+<li>For Grafana, set Max alerts to 0, the default, on the webhook contact point that sends to Muster; see
+  <a href="../../../integrations/grafana/#create-a-webhook-contact-point">Connect Grafana</a>. Max alerts 0 does not end the Alerts
+  that a wholly resolved group of Grafana's left firing: they go Stale while the Heartbeat is live, or end once the
+  group fires again and sends untruncated Snapshots. Resolving their Alert Group by hand does not end them either:
+  Alerts still firing when its Grace period ends start a new Alert Group.</li>
+<li>The alert resolves once each truncated group has sent an untruncated Snapshot, at its next notification. A group of
+  Grafana's that resolved wholly sends none until one of its alerts fires again, so its truncation ends as
+  <a href="#meaning">Meaning</a> says.</li>
 </ul>
 
 

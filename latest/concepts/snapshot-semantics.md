@@ -2,12 +2,14 @@
 
 Alertmanager does not tell Muster "this alert started" and "this alert stopped" as separate events. It sends a
 **Snapshot**: the full state of one Alertmanager group at the moment of the notification, listing every alert it holds.
+Grafana's built-in Alertmanager sends Snapshots too, through a webhook contact point.
 Muster works out what changed by comparing Snapshots. This page explains the rules, and why an alert can be **Gone** or
 **Stale** without anybody sending a "resolved".
 
 You only need this page to understand why Muster resolved something, or why it did not. The settings that matter are on
 [Connect Alertmanager](../integrations/alertmanager.md), in particular its
-[Repeat intervals](../integrations/alertmanager.md#repeat-intervals).
+[Repeat intervals](../integrations/alertmanager.md#repeat-intervals), and on
+[Connect Grafana](../integrations/grafana.md).
 
 ## From a Snapshot to a message
 
@@ -16,7 +18,7 @@ answers `202`. A worker then processes it, on any replica, and everything that f
 
 ```mermaid
 flowchart TD
-  am["Alertmanager"] -- "Snapshot" --> ingest["Ingest"]
+  am["Alertmanager or Grafana"] -- "Snapshot" --> ingest["Ingest"]
   ingest --> stored[("Stored Snapshot")]
   stored --> processing["Processing"]
   processing -- "Alert changes" --> routing["Routing"]
@@ -63,10 +65,18 @@ that Alertmanager resolved it, in the latest Alert Group where that fingerprint 
 
 - A `resolved` for an Alert that is already resolved, or for an earlier firing of it, changes nothing. Prometheus re-sends
   a resolved alert for about 15 minutes, so the same `resolved` arrives several times.
+- A `resolved` with an older `startsAt` than the Alert's current one resolves the current firing when its `endsAt` is
+  later than the current `startsAt`: the two firings overlap. The replicas of a Grafana HA pair evaluate the rules each
+  on its own, so their copies of one alert can carry different `startsAt`, and the resolve of either replica ends the
+  Alert. Without an `endsAt`, or with one not later than the current `startsAt`, it is a resolve of an earlier firing.
+  Alertmanager merges overlapping firings of one alert, so with one rule evaluator a resolve it sends of an earlier
+  firing ends before the next one starts. With an HA pair of rule evaluators, such as two Prometheus replicas, it can
+  send one that ends later, and Muster resolves the Alert, as it would with the `startsAt` that Alertmanager merged.
 - A `resolved` for a fingerprint that fires nowhere is dropped, and counted.
 - A Snapshot whose status is `resolved`, sent when all the alerts of its group resolved, resolves **every Alert of that
   group** that still fires, also the ones it does not list. After a restart of both Alertmanagers of a pair, such a
-  Snapshot can list only some of them and the others are never sent.
+  Snapshot can list only some of them and the others are never sent. A truncated Snapshot from Grafana is the
+  exception; see [Truncation](#truncation).
 
 ## Gone
 
@@ -101,14 +111,14 @@ it for too long:
 > `processing.stale_after_factor` (3) times the repeat interval that Muster has learned for the group's Alertmanager
 > route.
 
-Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed`, and
-uses the median of the last 9 gaps. Until it has learned an interval, `stale_after` is
-`processing.stale_after_unlearned`, 25 hours. Alertmanager sends a repeat on the first `group_interval` tick after
-`repeat_interval` has elapsed, so the gaps are about `repeat_interval` + `group_interval`. With a 10-minute
-`repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster learns an interval of about 15
-minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily interval it takes more than three
-days, which is why the Integration page warns about an interval longer than `processing.long_repeat_warning` (1 hour).
-See [Repeat intervals](../integrations/alertmanager.md#repeat-intervals).
+Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed` or,
+from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps.
+Until it has learned an interval, `stale_after` is `processing.stale_after_unlearned`, 25 hours. Alertmanager sends a
+repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are about `repeat_interval` +
+`group_interval`. With a 10-minute `repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster
+learns an interval of about 15 minutes, and a silenced group's Alerts go Stale after about 45 minutes. With a daily
+interval it takes more than three days, which is why the Integration page warns about an interval longer than
+`processing.long_repeat_warning` (1 hour). See [Repeat intervals](../integrations/alertmanager.md#repeat-intervals).
 
 Gone and Stale both resolve the Alert with the reason "Alertmanager no longer reports this alert — it resolved without
 notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed". If a silenced alert's mute
@@ -135,16 +145,21 @@ T+10 minutes, the Alert goes Stale at T+25 minutes: the 10 minutes from the last
 
 ## Truncation
 
-An Alertmanager webhook configuration with `max_alerts` above 0 keeps only the first alerts of a group in each
-notification, and counts the rest in `truncatedAlerts`. A truncated Snapshot lists only part of the group, so it can
-never be evidence that an Alert is missing.
+An Alertmanager webhook configuration with `max_alerts` above 0, like Grafana's webhook contact point with Max alerts
+above 0, keeps only the first alerts of a group in each notification, and counts the rest in `truncatedAlerts`. A
+truncated Snapshot lists only part of the group, so it can never be evidence that an Alert is missing.
 
 - Muster does **not** count a truncated Snapshot as absence. While Snapshots of the group keep arriving truncated, the
   unlisted Alerts stay alive, which can keep an Alert open that has resolved in reality.
 - Muster raises the Internal alert `MusterSnapshotTruncated` for the Integration while any group is truncated, and
   resolves it when none is left. The Integration page shows a warning too.
-- The fix is `max_alerts: 0` on the Alertmanager receiver. See [Send every alert of the
-  group](../integrations/alertmanager.md#send-every-alert-of-the-group) and the
+- Grafana computes the status of a Snapshot from the alerts it lists, not from the whole group, so a truncated
+  Snapshot from Grafana can say `resolved` while alerts it left out still fire. Muster recognises a Snapshot from
+  Grafana by its top-level `orgId`, which Alertmanager never sends. A truncated one with `status: resolved` resolves
+  only the Alerts it lists as resolved, never its whole group.
+- The fix is `max_alerts: 0` on the Alertmanager receiver, or Max alerts 0, the default, on Grafana's webhook contact
+  point. See [Send every alert of the group](../integrations/alertmanager.md#send-every-alert-of-the-group),
+  [Connect Grafana](../integrations/grafana.md#create-a-webhook-contact-point) and the
   [runbook](../operations/runbooks/MusterSnapshotTruncated.md).
 
 ## Continuation

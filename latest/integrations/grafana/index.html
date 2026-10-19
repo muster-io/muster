@@ -14,10 +14,10 @@
       
       
       
-        <link rel="prev" href="../heartbeat/">
+        <link rel="prev" href="../alertmanager/">
       
       
-        <link rel="next" href="../../messengers/">
+        <link rel="next" href="../heartbeat/">
       
       
         
@@ -28,7 +28,7 @@
     
     
       
-        <title>Grafana Alerting - Muster</title>
+        <title>Connect Grafana - Muster</title>
       
     
     
@@ -102,7 +102,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Grafana Alerting
+              Connect Grafana
             
           </span>
         </div>
@@ -398,7 +398,7 @@
   <span class="md-ellipsis">
     
   
-  Alertmanager
+  Integrations
 
     
   </span>
@@ -414,7 +414,7 @@
               <span class="md-nav__icon md-icon"></span>
               
   
-  Alertmanager
+  Integrations
 
             </label>
             <ul class="md-nav__list" data-md-scrollfix>
@@ -450,33 +450,6 @@
                   
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../heartbeat/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Heartbeat
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-                
-              
-                
-                  
-  
-  
     
   
   
@@ -496,7 +469,7 @@
   <span class="md-ellipsis">
     
   
-  Grafana Alerting
+  Connect Grafana
 
     
   </span>
@@ -513,7 +486,7 @@
   <span class="md-ellipsis">
     
   
-  Grafana Alerting
+  Connect Grafana
 
     
   </span>
@@ -539,17 +512,156 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-through-an-alertmanager" class="md-nav__link">
+  <a href="#connect-grafana-directly" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Why through an Alertmanager
+        Connect Grafana directly
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connect Grafana directly">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-integration-per-grafana-cluster-and-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        One Integration per Grafana cluster and organization
       </span>
     </span>
   </a>
   
 </li>
+        
+          <li class="md-nav__item">
+  <a href="#create-the-integration-and-a-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Integration and a token
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-a-webhook-contact-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create a webhook contact point
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#send-the-alerts-with-a-notification-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Send the alerts with a notification policy
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repeat-intervals" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Repeat intervals
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#do-not-merge-rules-into-one-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Do not merge rules into one group
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#simplified-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Simplified routing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-grafana-sends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Grafana sends
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-pairs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        HA pairs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Heartbeat
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
+  <a href="#connect-grafana-through-an-external-alertmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Connect Grafana through an external Alertmanager
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connect Grafana through an external Alertmanager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#send-grafanas-alerts-to-the-alertmanager" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -557,6 +669,11 @@
       </span>
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -575,6 +692,33 @@
   
 </nav>
       
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2500,17 +2644,156 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-through-an-alertmanager" class="md-nav__link">
+  <a href="#connect-grafana-directly" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Why through an Alertmanager
+        Connect Grafana directly
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connect Grafana directly">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-integration-per-grafana-cluster-and-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        One Integration per Grafana cluster and organization
       </span>
     </span>
   </a>
   
 </li>
+        
+          <li class="md-nav__item">
+  <a href="#create-the-integration-and-a-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Integration and a token
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-a-webhook-contact-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create a webhook contact point
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#send-the-alerts-with-a-notification-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Send the alerts with a notification policy
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repeat-intervals" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Repeat intervals
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#do-not-merge-rules-into-one-group" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Do not merge rules into one group
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#simplified-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Simplified routing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-grafana-sends" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Grafana sends
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ha-pairs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        HA pairs
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Heartbeat
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
+  <a href="#connect-grafana-through-an-external-alertmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Connect Grafana through an external Alertmanager
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connect Grafana through an external Alertmanager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#send-grafanas-alerts-to-the-alertmanager" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2518,6 +2801,11 @@
       </span>
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2552,27 +2840,186 @@
   
 
 
-<h1 id="grafana-alerting">Grafana Alerting<a class="headerlink" href="#grafana-alerting" title="Permanent link">&para;</a></h1>
-<p>Muster takes its alerts from an Alertmanager. Grafana-managed alert rules reach Muster the same way as Prometheus rules
-do: Grafana forwards its alerts to an external Alertmanager, and that Alertmanager has the Muster receiver from
-<a href="../alertmanager/">Connect Alertmanager</a>.</p>
+<h1 id="connect-grafana">Connect Grafana<a class="headerlink" href="#connect-grafana" title="Permanent link">&para;</a></h1>
+<p>Grafana Alerting reaches Muster in one of two ways: directly, from Grafana's built-in Alertmanager through a webhook
+contact point, or through an external Alertmanager that Grafana forwards its alerts to. Both carry Grafana-managed
+alert rules.</p>
 <pre class="mermaid"><code>flowchart LR
-  rules["Grafana alert rules"] -- "alerts" --&gt; am["External Alertmanager"]
+  rules["Grafana alert rules"] --&gt; builtin["Grafana's built-in Alertmanager"]
+  builtin -- "Snapshots, webhook contact point" --&gt; direct["Muster Integration for Grafana"]
+  rules -. "alerts" .-&gt; am["External Alertmanager"]
   prom["Prometheus rules"] -- "alerts" --&gt; am
-  am -- "Snapshots" --&gt; integration["Muster Integration"]
-  integration --&gt; groups["Alert Groups"]</code></pre>
-<p>One Alertmanager can serve Grafana and Prometheus together, with one Integration in Muster for the whole Alertmanager
+  am -- "Snapshots" --&gt; shared["Muster Integration for the Alertmanager"]</code></pre>
+<ul>
+<li><strong>Directly</strong> needs nothing between Grafana and Muster. Grafana's built-in Alertmanager sends Alertmanager's webhook
+  format with a few fields of its own, and Muster reads each notification as a <strong>Snapshot</strong>, as from any Alertmanager.</li>
+<li><strong>Through an external Alertmanager</strong> suits you when you already run an Alertmanager for Prometheus rules and want one
+  Integration in Muster for both.</li>
+</ul>
+<p>In the examples, <code>MUSTER_INGEST_URL</code> is <code>https://ingest.muster.example.org</code>. Muster was tested with Grafana OSS 13.2.4,
+as a single instance and as an HA pair.</p>
+<h2 id="connect-grafana-directly">Connect Grafana directly<a class="headerlink" href="#connect-grafana-directly" title="Permanent link">&para;</a></h2>
+<p>The steps, in this order: create an Integration and its token in Muster, create a webhook contact point in Grafana, and
+send the alerts to it with a notification policy.</p>
+<h3 id="one-integration-per-grafana-cluster-and-organization">One Integration per Grafana cluster and organization<a class="headerlink" href="#one-integration-per-grafana-cluster-and-organization" title="Permanent link">&para;</a></h3>
+<p>Create one <strong>Integration</strong> for each Grafana cluster, and for each Grafana organization in it, that sends to Muster.</p>
+<ul>
+<li>An HA pair — two or more Grafana replicas that share a database and gossip with each other — is <strong>one</strong> cluster and
+  gets <strong>one</strong> Integration. See <a href="#ha-pairs">HA pairs</a>.</li>
+<li>Each Grafana organization gets an Integration of its own. The <code>groupKey</code> of a Snapshot names the notification policy
+  and the group, not the organization, so two organizations with the same notification policies send the same
+  <code>groupKey</code>s, and one Integration would take their Snapshots for one Alertmanager group.</li>
+<li>Give the Integration <a href="../alertmanager/#static-labels">Static labels</a> for what the rules do not say, such as
+  <code>cluster=prod-eu</code>.</li>
+</ul>
+<h3 id="create-the-integration-and-a-token">Create the Integration and a token<a class="headerlink" href="#create-the-integration-and-a-token" title="Permanent link">&para;</a></h3>
+<p>In <strong>Integrations</strong>, create the Integration, then <strong>Create token</strong>. Muster shows the token <strong>once</strong>, with a snippet for
+Alertmanager; Grafana needs only the token (<code>mstr_int_…</code>), the <code>credentials</code> of that snippet. Copy it before you close
+the dialog.</p>
+<h3 id="create-a-webhook-contact-point">Create a webhook contact point<a class="headerlink" href="#create-a-webhook-contact-point" title="Permanent link">&para;</a></h3>
+<p>In Grafana, open <strong>Alerting</strong> → <strong>Contact points</strong> → <strong>Add contact point</strong> and choose the integration <strong>Webhook</strong>:</p>
+<ol>
+<li><strong>URL</strong>: the Integration's ingest URL, <code>MUSTER_INGEST_URL</code> followed by <code>/api/v1/ingest</code>:
+   <code>https://ingest.muster.example.org/api/v1/ingest</code>.</li>
+<li><strong>HTTP Method</strong>: <code>POST</code>.</li>
+<li><strong>Authorization header</strong>: the scheme <code>Bearer</code>, and the Integration token as its credentials.</li>
+<li><strong>Max alerts</strong>: <code>0</code>, the default, which sends every alert of the group. Muster treats each Snapshot as the whole
+   Alertmanager group; see <a href="#limits">Limits</a>.</li>
+<li><strong>Disable resolved message</strong>: off, the default. Resolves close Alerts in Muster at once.</li>
+<li>No custom payload: Muster reads the payload that Grafana sends by default, and a custom one replaces it.</li>
+</ol>
+<p>Check these names against the version of Grafana that you run, because the places of the settings in the interface
+change between versions. The same contact point in a provisioning file, together with the notification policy of the
+next step:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+
+<span class="nt">contactPoints</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">orgId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+<span class="w">    </span><span class="nt">receivers</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+<span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">webhook</span>
+<span class="w">        </span><span class="nt">disableResolveMessage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">        </span><span class="nt">settings</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://ingest.muster.example.org/api/v1/ingest</span>
+<span class="w">          </span><span class="nt">httpMethod</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">POST</span>
+<span class="w">          </span><span class="nt">authorization_scheme</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Bearer</span>
+<span class="w">          </span><span class="nt">authorization_credentials</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MUSTER_TOKEN}</span>
+
+<span class="nt">policies</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">orgId</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">    </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+<span class="w">    </span><span class="nt">group_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">grafana_folder</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">alertname</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">repeat_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10m</span>
+</code></pre></div>
+<p>Grafana replaces <code>${MUSTER_TOKEN}</code> with the variable of its environment when it reads the file, so the token stays out
+of the file. The file leaves out Max alerts (<code>maxAlerts</code>), so it is 0. Grafana does not let you edit resources
+provisioned from files in its interface, this contact point and the notification policy tree included: change the
+file, then restart Grafana or reload the provisioned files through its Admin API.</p>
+<h3 id="send-the-alerts-with-a-notification-policy">Send the alerts with a notification policy<a class="headerlink" href="#send-the-alerts-with-a-notification-policy" title="Permanent link">&para;</a></h3>
+<p>In <strong>Alerting</strong> → <strong>Notification policies</strong>, send the alerts to the contact point:</p>
+<ul>
+<li>Keep Grafana's default grouping, <code>group_by: [grafana_folder, alertname]</code>, and let Muster make Alert Groups with its
+  <a href="../../concepts/routes-and-group-keys/">Routes and Group keys</a>. See
+  <a href="#do-not-merge-rules-into-one-group">Do not merge rules into one group</a>.</li>
+<li>Set <code>repeat_interval</code> between <strong>5 and 15 minutes</strong> (10 minutes in the example). See
+  <a href="#repeat-intervals">Repeat intervals</a>.</li>
+<li>The example makes Muster the contact point of the default policy, which takes every alert. A provisioned <code>policies</code>
+  entry is the whole notification policy tree of the organization and replaces the one set in the user interface. If
+  Grafana also notifies other contact points, add Muster instead as the first nested policy, without matchers, with
+  <code>continue: true</code> and its own <code>repeat_interval</code>, and keep a last nested policy for your default contact point, as for
+  the <a href="../alertmanager/#create-a-token-and-paste-the-snippet">Alertmanager route</a>.</li>
+<li>Grafana's built-in Alertmanager sends the notifications, so keep it receiving Grafana-managed alerts, the default in
+  <strong>Alerting</strong> → <strong>Settings</strong>.</li>
+</ul>
+<p>On its first start, Grafana applies provisioned policies within about a minute. Grafana sends the first Snapshot when
+an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received.</p>
+<h3 id="repeat-intervals">Repeat intervals<a class="headerlink" href="#repeat-intervals" title="Permanent link">&para;</a></h3>
+<p>Repeats are how Muster learns when an alert is <strong>Gone</strong> or <strong>Stale</strong>, as with Alertmanager; see
+<a href="../alertmanager/#repeat-intervals">Repeat intervals</a>. Grafana sends no <code>notification_reason</code>, so Muster recognises a
+repeat as a Snapshot identical to the one before it and learns the interval from those.</p>
+<p>Grafana sends a repeat on the first <code>group_interval</code> tick after <code>repeat_interval</code> has elapsed. With 10 minutes and
+Grafana's default <code>group_interval</code> of 5 minutes, Muster learns an interval of about 15 minutes; with Grafana's default
+<code>repeat_interval</code> of 4 hours, an Alert of a silent group would go Stale only after more than 12 hours. Control the noise
+in Muster, not with a long interval: Muster sends one message per Alert Group and edits it, so a repeat changes nothing
+that people see.</p>
+<h3 id="do-not-merge-rules-into-one-group">Do not merge rules into one group<a class="headerlink" href="#do-not-merge-rules-into-one-group" title="Permanent link">&para;</a></h3>
+<p>Keep each Grafana notification group to the alerts of one rule, as the default grouping by <code>grafana_folder</code> and
+<code>alertname</code> does, and do not group many rules together, for example by a label that they share.</p>
+<p>After a restart, Grafana knows the alerts of a rule again only once it has evaluated the rule. A group of rules with
+different evaluation intervals then sends Snapshots without the slower rules' alerts until their first evaluation: in
+a test, the alert of a rule evaluated every 8 minutes was missing from its group's Snapshots for about 7 minutes. Muster
+can take such an alert for Gone, and its return for a new firing, which is Loud. Grafana has no setting like
+Alertmanager's <a href="../alertmanager/#start-delay">start delay</a>. The alerts of one rule all return with its first evaluation,
+and Muster's Routes put them into Alert Groups as they would any other alerts.</p>
+<h3 id="simplified-routing">Simplified routing<a class="headerlink" href="#simplified-routing" title="Permanent link">&para;</a></h3>
+<p>A contact point chosen in the rule itself (simplified routing) puts the label <code>__grafana_route_settings_hash__</code>, a hash
+of the rule's notification settings, into the route path of the <code>groupKey</code>. Editing those settings starts a new
+<code>groupKey</code>, and the old one falls silent, as when the matchers of an Alertmanager route change: an Alert that the new
+<code>groupKey</code> lists stays firing, and one that only the old <code>groupKey</code> listed resolves only by going Stale, which needs a
+live <a href="#heartbeat">Heartbeat</a>. Notification policies avoid this.</p>
+<h3 id="what-grafana-sends">What Grafana sends<a class="headerlink" href="#what-grafana-sends" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Every end of an alert is an explicit resolve</strong>: a value back under the threshold, a series that is missing for two
+  evaluations, a paused rule and a deleted rule. Muster resolves the Alert at once, with the reason <code>resolved</code>. Grafana
+  gives the resolve the annotation <code>grafana_state_reason</code> (<code>MissingSeries</code>, <code>Paused</code> or <code>RuleDeleted</code>); Muster takes
+  annotations from firing alerts only, so that reason shows in the Stored Snapshot, not on the Alert.</li>
+<li><strong>NoData and Error are alerts of their own.</strong> A rule whose query returns no data, with the no-data state No Data,
+  resolves its alert and fires an alert <code>DatasourceNoData</code> in a group of its own, with the label <code>rulename</code> (the rule's
+  title), <code>datasource_uid</code> and <code>ref_id</code> beside the rule's labels. When data returns, the rule's alert fires again as a
+  new firing and <code>DatasourceNoData</code> resolves. The error state Error gives an alert <code>DatasourceError</code> with the label
+  <code>rulename</code> the same way, as Grafana documents it; it has not been tested with Muster. A Route can match both by
+  <code>alertname</code>.</li>
+<li><strong>Links.</strong> The <strong>Source</strong> link of an Alert Group opens the rule's page in Grafana, the alert's <code>generatorURL</code>:
+  <code>&lt;root_url&gt;/alerting/grafana/&lt;rule uid&gt;/view?orgId=1</code>. Set Grafana's <code>root_url</code> to the address people open. The
+  built-in Link rule Explore builds its link from the Prometheus query of a <code>generatorURL</code>, which Grafana's does not
+  have, so it makes no link for Grafana's alerts.</li>
+</ul>
+<h3 id="ha-pairs">HA pairs<a class="headerlink" href="#ha-pairs" title="Permanent link">&para;</a></h3>
+<p>An HA pair needs nothing more than its one Integration and one contact point. Normally one replica sends; when both do,
+Muster folds their copies together within the Integration's duplicate window.</p>
+<p>The replicas evaluate the rules each on its own, so their copies of one alert can carry different <code>startsAt</code>. Muster
+takes the resolve of either replica: a resolve whose firing overlaps the current one resolves it (see
+<a href="../../concepts/snapshot-semantics/#resolved">Resolved</a>). Such copies can also make Muster record a Quiet Continuation
+for an Alert once. Grafana's <code>ha_single_node_evaluation</code>, which makes one replica evaluate the rules for both, has not
+been tested with Muster.</p>
+<h3 id="heartbeat">Heartbeat<a class="headerlink" href="#heartbeat" title="Permanent link">&para;</a></h3>
+<p>The <a href="../heartbeat/">Heartbeat</a> page's setup is for Alertmanager. The same idea in Grafana — an always-firing rule with a
+notification policy of its own, a <code>repeat_interval</code> of about one minute, and a second webhook contact point at the
+Integration's Heartbeat URL, <code>https://ingest.muster.example.org/api/v1/heartbeat</code>, with resolved messages disabled —
+<strong>has not been verified with Grafana</strong>.</p>
+<p>Without a Heartbeat, Muster never resolves an Alert as Stale: an Alert whose Grafana group stops sending altogether
+stays firing in Muster. Gone still works. A cron job that requests the Heartbeat URL keeps the Heartbeat live too, but
+it proves only the network: when Grafana itself stops, its groups fall silent and their Alerts go Stale.</p>
+<h3 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Truncation.</strong> With Max alerts above 0, a Snapshot lists only part of its group. Muster keeps the unlisted Alerts
+  alive and raises the Internal alert <code>MusterSnapshotTruncated</code>
+  (<a href="../../operations/runbooks/MusterSnapshotTruncated/">runbook</a>). Grafana computes the status of a Snapshot from the
+  alerts it lists, so a truncated Snapshot can say <code>resolved</code> while alerts it left out still fire; Muster recognises a
+  Snapshot from Grafana by its top-level <code>orgId</code>, and a truncated <code>status: resolved</code> from Grafana resolves only the
+  Alerts it lists as resolved. When a whole group resolves, its last Snapshot too lists only the first alerts, and
+  Grafana sends nothing more for the group until one of its alerts fires again: the Alerts it left out stay firing in
+  Muster until they go Stale, which needs a live <a href="#heartbeat">Heartbeat</a>. Set Max alerts to 0; for the Alerts already
+  left firing, see the <a href="../../operations/runbooks/MusterSnapshotTruncated/#fix">runbook</a>.</li>
+<li><strong>The Integration page speaks of Alertmanager</strong>, the part that Grafana's built-in one plays. Its Alertmanager routes
+  are Grafana's notification policies; its warning about a long repeat interval shows an Alertmanager route, where for
+  Grafana you set the <code>repeat_interval</code> of the policy; its truncation warning names <code>max_alerts</code>, which is Max alerts
+  in Grafana.</li>
+<li><a href="../alertmanager/#what-muster-answers">What Muster answers</a>, <a href="../alertmanager/#token-rotation">Token rotation</a> and
+  <a href="../alertmanager/#behind-a-reverse-proxy">Behind a reverse proxy</a> apply to Grafana as they are.</li>
+<li><strong>Not tested with Muster</strong>: Grafana's retries of a webhook after an error or a timeout; Grafana's silences and mute
+  timings; several Grafana organizations on one Integration; a custom payload; HMAC signing (Muster checks the
+  Integration token only); <code>ha_single_node_evaluation</code>; <code>DatasourceError</code>; the Heartbeat through Grafana.</li>
+</ul>
+<h2 id="connect-grafana-through-an-external-alertmanager">Connect Grafana through an external Alertmanager<a class="headerlink" href="#connect-grafana-through-an-external-alertmanager" title="Permanent link">&para;</a></h2>
+<p>Grafana-managed alert rules can also reach Muster the same way as Prometheus rules do: Grafana forwards its alerts to
+an external Alertmanager, and that Alertmanager has the Muster receiver from <a href="../alertmanager/">Connect Alertmanager</a>.
+One Alertmanager can serve Grafana and Prometheus together, with one Integration in Muster for the whole Alertmanager
 cluster.</p>
-<h2 id="why-through-an-alertmanager">Why through an Alertmanager<a class="headerlink" href="#why-through-an-alertmanager" title="Permanent link">&para;</a></h2>
-<p>Grafana can also send alerts to a webhook from its own built-in Alertmanager, with a webhook contact point. Muster does
-not take that route in this release. What Muster does with a Snapshot rests on the behaviour of Alertmanager that has
-been verified against Alertmanager itself: the <code>groupKey</code> that names the route and the group, the whole state of an
-Alertmanager group in every Snapshot (<code>max_alerts: 0</code>), and the repeats at the <code>repeat_interval</code> of the route, from
-which Muster learns when an alert is Gone or Stale (see <a href="../alertmanager/#repeat-intervals">Repeat intervals</a>). The
-payload of Grafana's webhook contact point looks similar, but Muster has not verified how its grouping and repeats
-behave, so it does not treat it as a source. A generic inbound webhook, for senders that are not an Alertmanager, is
-planned for a later layer of Muster. Until then, use an Alertmanager between Grafana and Muster.</p>
-<h2 id="send-grafanas-alerts-to-the-alertmanager">Send Grafana's alerts to the Alertmanager<a class="headerlink" href="#send-grafanas-alerts-to-the-alertmanager" title="Permanent link">&para;</a></h2>
+<p>Prefer this way when you already run an Alertmanager for Prometheus rules and want one Integration for both: the
+Heartbeat route of the <a href="../heartbeat/">Heartbeat</a> page then watches the path of Grafana's alerts too.</p>
+<h3 id="send-grafanas-alerts-to-the-alertmanager">Send Grafana's alerts to the Alertmanager<a class="headerlink" href="#send-grafanas-alerts-to-the-alertmanager" title="Permanent link">&para;</a></h3>
 <p>In Grafana, two settings are needed, and both must be on.</p>
 <ol>
 <li>Add the Alertmanager as a data source: <strong>Connections</strong> → <strong>Data sources</strong> → <strong>Alertmanager</strong>. Set the
@@ -2607,13 +3054,16 @@ the route into its configuration, and keep the catch-all child route last.</p>
 <li>Set <code>severity</code> on your rules: it is part of the default Group key, and Routes can match it.</li>
 <li><code>alertname</code> is also part of the default Group key, so rules of different names make different Alert Groups.</li>
 <li>Grafana rules have no <code>cluster</code> label of their own: add it to the Integration as a
-  <a href="../alertmanager/#static-labels">Static label</a>, or give Grafana's alerts an Integration of their own.</li>
+  <a href="../alertmanager/#static-labels">Static label</a>. Through an Alertmanager shared with Prometheus, you can instead give
+  Grafana's alerts an Integration of their own.</li>
 <li>A rule on a query that returns one series per pod or instance makes one alert per series, with those labels. Keep
   <a href="../alertmanager/#instance-labels-in-informational-alerts">Instance labels out of informational alerts</a>; a Grafana
   rule can reduce the series to one with an aggregation.</li>
+<li>Directly from Grafana, an Alert's fingerprint is the one in the body, which also covers the rule's hidden uid, so two
+  rules with the same labels make two Alerts.</li>
 </ul>
 <p>Muster shows the labels of each alert on the page of its Alert Group. If a label you expected is missing, open the
-Stored Snapshot on the Integration page, which shows the request as the Alertmanager sent it.</p>
+Stored Snapshot on the Integration page, which shows the request as Grafana or the Alertmanager sent it.</p>
 
 
 
