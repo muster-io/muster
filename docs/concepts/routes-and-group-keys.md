@@ -124,8 +124,8 @@ namespace or the service.
 ### Preview before you save
 
 The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
-default, at most the retention of Stored Snapshots) and shows how many Alert Groups the current and the proposed key
-would produce, with the 5 largest as examples. It covers the Alerts that the Route would take at its place in the
+default, at most the retention of Stored Snapshots; `routing.group_key_preview_period`) and shows how many Alert Groups
+the current and the proposed key would produce, with the 5 largest as examples (`routing.group_key_preview_examples`). It covers the Alerts that the Route would take at its place in the
 current order, each Alert once, and it works for a Route you are still creating. Use it before every change of a key.
 
 ### Do not put Instance labels in the key

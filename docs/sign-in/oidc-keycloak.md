@@ -95,6 +95,9 @@ Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oi
 | Skip TOTP when the IdP asserted MFA | off by default; on skips Muster's own TOTP step when the ID token's `amr` claim says that Keycloak used multi-factor authentication. Keycloak sends `amr` only when the client has an *Authentication Method Reference (AMR)* mapper |
 | Proxy | the HTTP, HTTPS or SOCKS5 proxy through which Muster reaches Keycloak, if it needs one |
 
+The settings behind the last rows are `oidc.unmatched_role` (none: sign-in is refused), `oidc.sync_role` (on) and
+`oidc.skip_totp_with_idp_mfa` (off).
+
 Then press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.

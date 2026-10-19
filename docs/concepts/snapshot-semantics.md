@@ -112,7 +112,7 @@ it for too long:
 > route.
 
 Muster learns the interval from the gaps between Snapshots whose `notification_reason` is `repeat interval elapsed` or,
-from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps.
+from senders without that field such as Grafana, between identical Snapshots, and uses the median of the last 9 gaps (`processing.repeat_samples`).
 Until it has learned an interval, `stale_after` is `processing.stale_after_unlearned`, 25 hours. Alertmanager sends a
 repeat on the first `group_interval` tick after `repeat_interval` has elapsed, so the gaps are about `repeat_interval` +
 `group_interval`. With a 10-minute `repeat_interval` and Alertmanager's default `group_interval` of 5 minutes, Muster
