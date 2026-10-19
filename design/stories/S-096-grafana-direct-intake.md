@@ -46,7 +46,7 @@ acceptance:
   - "[C-06.FR-4, C-06.FR-8, C-06.FR-21] Live, a single Grafana OSS 13.2.4 sends to `muster dev` through a webhook contact point with an Integration token: after a new group, an added alert, one resolved alert, all resolved and a paused rule, the Integration's firing Alerts (`listIntegrationAlerts`) equal the active alerts of Grafana's own Alertmanager each time, no Stored Snapshot failed, and the route learns a repeat interval; Grafana's truncated `status: resolved` body sent with and without `orgId` leaves 5 and 0 of 10 Alerts firing."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
-issue: null
+issue: 304
 ---
 
 # S-096. Snapshots directly from Grafana Alerting's webhook contact point (BE)
