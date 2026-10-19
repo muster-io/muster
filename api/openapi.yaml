@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: Muster API
-  version: 0.1.0 # x-release-please-version
+  version: 0.1.0
   summary: Muster L1 API
   description: |-
     Spec-first contract of Muster L1: alert grouping and on-call after Alertmanager.
