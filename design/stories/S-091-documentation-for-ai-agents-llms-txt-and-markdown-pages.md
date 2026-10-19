@@ -29,7 +29,7 @@ acceptance:
   - "[C-21.FR-8] The home page points AI agents to `llms.txt`."
 verify: "make ci docs-check"
 operator_attention: false
-issue: null
+issue: 287
 ---
 
 # S-091. Documentation for AI agents: llms.txt, the full text and a Markdown version of every page
