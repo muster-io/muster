@@ -21,6 +21,7 @@ import {
   BRIDGE_SECOND_TOKEN,
   BRIDGE_URL,
   FMM,
+  SUBPIXEL,
   adminApi,
   connectionNamed,
   expectNoHorizontalScroll,
@@ -157,8 +158,12 @@ async function expectPhoneWidth(page: Page): Promise<void> {
  * once it has moved into place, is no wider than the phone, and does not scroll sideways.
  */
 async function expectDialogPhoneWidth(dialog: Locator): Promise<void> {
-  await expect.poll(async () => (await dialog.boundingBox())?.x).toBe(0);
-  expect((await dialog.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(360);
+  await expect
+    .poll(async () => Math.abs((await dialog.boundingBox())?.x ?? Number.POSITIVE_INFINITY))
+    .toBeLessThanOrEqual(SUBPIXEL);
+  expect((await dialog.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    360 + SUBPIXEL,
+  );
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 }
 

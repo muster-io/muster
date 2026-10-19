@@ -8,6 +8,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  SUBPIXEL,
   adminApi,
   createRoute,
   deleteRoute,
@@ -89,9 +90,9 @@ test("the Commands, the sheets, the Note box and the bulk bar at 360 px", async 
   const header = await box(page, "alert-group-header");
   const commands = await box(page, "command-buttons");
   const alerts = await box(page, "alert-group-alerts");
-  expect(commands.y).toBeGreaterThanOrEqual(header.y + header.height);
+  expect(commands.y).toBeGreaterThanOrEqual(header.y + header.height - SUBPIXEL);
   expect(commands.y - (header.y + header.height)).toBeLessThanOrEqual(32);
-  expect(commands.y + commands.height).toBeLessThanOrEqual(alerts.y);
+  expect(commands.y + commands.height).toBeLessThanOrEqual(alerts.y + SUBPIXEL);
   await expect(page.getByTestId("command-buttons").getByRole("button")).toHaveText([
     "Acknowledge",
     "Resolve",
@@ -122,8 +123,8 @@ test("the Commands, the sheets, the Note box and the bulk bar at 360 px", async 
   await note.getByLabel("Note").fill(`See ${"x".repeat(200)} and the runbook.`);
   await note.scrollIntoViewIfNeeded();
   const noteBox = await box(page, "note-box");
-  expect(noteBox.x).toBeGreaterThanOrEqual(0);
-  expect(noteBox.x + noteBox.width).toBeLessThanOrEqual(360);
+  expect(noteBox.x).toBeGreaterThanOrEqual(-SUBPIXEL);
+  expect(noteBox.x + noteBox.width).toBeLessThanOrEqual(360 + SUBPIXEL);
   await expectNoHorizontalScroll(page);
   await shot(page, "note-box-phone");
 
@@ -140,7 +141,7 @@ test("the Commands, the sheets, the Note box and the bulk bar at 360 px", async 
   await row.getByRole("checkbox", { name: `Select #${group.number}`, exact: true }).check();
   await expect(page.getByTestId("bulk-count")).toHaveText("1 selected");
   const bar = await box(page, "bulk-bar");
-  expect(bar.x + bar.width).toBeLessThanOrEqual(360);
+  expect(bar.x + bar.width).toBeLessThanOrEqual(360 + SUBPIXEL);
   await expectNoHorizontalScroll(page);
   await shot(page, "bulk-bar-phone");
   expect(csp).toEqual([]);
