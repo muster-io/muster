@@ -76,9 +76,16 @@ Signing secret of an outgoing webhook Destination does not change (Muster only r
 
 ## If something goes wrong
 
-| Symptom | Cause | What to do |
-|---|---|---|
-| `Replicas {names} do not hold key {id} yet.` | a live replica has not restarted with the new key | finish the rollout, or wait until the record of a gone replica expires |
-| `key {id} is not in the master keys of this process` | you ran the command without the new key in `MUSTER_SECRET_KEYS` | give the command the same environment as the server |
-| a replica stops with "master key does not match the database" | it lacks the active key | add the key back to its environment |
-| exit code 2 | `--activate` or `--actor` is missing | add the flag |
+`Replicas {names} do not hold key {id} yet.`
+:   cause: a live replica has not restarted with the new key · what to do: finish the rollout, or wait until the record
+    of a gone replica expires
+
+`key {id} is not in the master keys of this process`
+:   cause: you ran the command without the new key in `MUSTER_SECRET_KEYS` · what to do: give the command the same
+    environment as the server
+
+A replica stops with "master key does not match the database"
+:   cause: it lacks the active key · what to do: add the key back to its environment
+
+Exit code 2
+:   cause: `--activate` or `--actor` is missing · what to do: add the flag

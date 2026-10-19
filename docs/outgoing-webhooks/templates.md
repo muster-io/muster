@@ -58,18 +58,38 @@ requests go through Muster's outbound address policy and the Destination's proxy
 
 ## What the templates read
 
-| Field | Value |
-|---|---|
-| `.AlertGroup` | `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`, `Owner`; absent (nil) for a Storm summary |
-| `.Alerts` | the Alerts, as in Alertmanager: `Status`, `Labels`, `Annotations`, `StartsAt`, `EndsAt`, `GeneratorURL`, `Fingerprint`; with `.Alerts.Firing` and `.Alerts.Resolved` |
-| `.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL` | as in Alertmanager templates |
-| `.Storm` | for a Storm summary only: `Route`, `AlertGroupCount`, `UrgentCount`, `Final` (the Storm ended) and `URL` (the Route's Alert Groups in Muster) |
-| `.Response` | the values the extraction rules found, by name |
-| `.Event` | the lifecycle event a Thread reply carries, such as `alerts_added`; empty otherwise |
-| `.Notify` | `true` when the message is Loud |
-| `.Mentions` | the Mention targets of a Loud message (see below) |
-| `.Secrets` | the Destination's Secrets, by name |
-| `.Final` | in the final edit only: "No longer updated here; current state in Muster: {link}" |
+`.AlertGroup`
+:   `Number`, `Title`, `Summary`, `Status`, `Route`, `SeverityLevel`, `Urgent`, `StartedAt`, `URL`, `ReopenCount`,
+    `Owner`; absent (nil) for a Storm summary.
+
+`.Alerts`
+:   The Alerts, as in Alertmanager: `Status`, `Labels`, `Annotations`, `StartsAt`, `EndsAt`, `GeneratorURL`,
+    `Fingerprint`; with `.Alerts.Firing` and `.Alerts.Resolved`.
+
+`.Status`, `.GroupLabels`, `.CommonLabels`, `.CommonAnnotations`, `.ExternalURL`
+:   As in Alertmanager templates.
+
+`.Storm`
+:   For a Storm summary only: `Route`, `AlertGroupCount`, `UrgentCount`, `Final` (the Storm ended) and `URL` (the
+    Route's Alert Groups in Muster).
+
+`.Response`
+:   The values the extraction rules found, by name.
+
+`.Event`
+:   The lifecycle event a Thread reply carries, such as `alerts_added`; empty otherwise.
+
+`.Notify`
+:   `true` when the message is Loud.
+
+`.Mentions`
+:   The Mention targets of a Loud message (see below).
+
+`.Secrets`
+:   The Destination's Secrets, by name.
+
+`.Final`
+:   In the final edit only: "No longer updated here; current state in Muster: {link}".
 
 Alert data reach the templates **as received**, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with `toJson` (or `js` inside a string), so that a label with a quote or a line break cannot

@@ -70,16 +70,29 @@ proxy:
 
 A failed step names its cause with a code:
 
-| Code | Cause |
-|---|---|
-| `token_invalid` | The bridge refused the token. |
-| `protocol_version_unknown` | The bridge speaks a protocol version that this Muster does not speak. |
-| `protocol_mismatch` | The answer does not match the protocol, or is larger than 64 KiB. |
-| `event_delivery_not_offered` | The bridge does not offer the Connection's event delivery mode. |
-| `proxy_refused` | The Connection's proxy refused its credentials (`407`). |
-| `timeout`, `connect_failed`, `dns_failed`, `tls_failed` | Muster got no answer from the bridge. |
-| `blocked` | The outbound address policy does not allow the bridge's address. |
-| `request_failed` | The bridge answered with another error; the message names its class and the bridge's text. |
+`token_invalid`
+:   The bridge refused the token.
+
+`protocol_version_unknown`
+:   The bridge speaks a protocol version that this Muster does not speak.
+
+`protocol_mismatch`
+:   The answer does not match the protocol, or is larger than 64 KiB.
+
+`event_delivery_not_offered`
+:   The bridge does not offer the Connection's event delivery mode.
+
+`proxy_refused`
+:   The Connection's proxy refused its credentials (`407`).
+
+`timeout`, `connect_failed`, `dns_failed`, `tls_failed`
+:   Muster got no answer from the bridge.
+
+`blocked`
+:   The outbound address policy does not allow the bridge's address.
+
+`request_failed`
+:   The bridge answered with another error; the message names its class and the bridge's text.
 
 ## Check before saving
 

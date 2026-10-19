@@ -37,11 +37,14 @@ A Matcher is a condition on one label, written as in Alertmanager: `=`, `!=`, `=
 RE2 regular expression. The Matchers of a Route are all required: they combine with AND. The Route editor builds them
 from fields; the API takes the same structure; an invalid expression is refused with a pointer to the field.
 
-| Matchers | Takes |
-|---|---|
-| `team="payments"` and `severity="critical"` | Alerts of the payments team that are critical |
-| `namespace=~"prod-.*"` | Alerts in any namespace that starts with `prod-` |
-| `alertname!="Watchdog"` | everything except the Watchdog |
+`team="payments"` and `severity="critical"`
+:   Takes Alerts of the payments team that are critical.
+
+`namespace=~"prod-.*"`
+:   Takes Alerts in any namespace that starts with `prod-`.
+
+`alertname!="Watchdog"`
+:   Takes everything except the Watchdog.
 
 A missing label counts as an empty value. So `team!="payments"` also matches an Alert that has no `team` label.
 
@@ -62,13 +65,20 @@ you reload.
 When you create a Route, you choose a **Route profile**. A profile only fills in the settings; it is not stored, and you
 can change every field afterwards. There are two:
 
-| Setting | On-call | Informational |
-|---|---|---|
-| Ack timeout (`route.ack_timeout`) | on; first notice after 15 minutes | off |
-| Reminders (`route.reminders`) | on; first after 4 hours | off |
-| Snooze durations (`route.snooze_durations`) | 1 h, 4 h, 24 h | 1 d, 3 d, 7 d |
-| Group key (`route.group_key`) | `alertname`, `severity`, `cluster` | the same |
-| Reopen window and Grace period | 15 minutes each | the same |
+Ack timeout (`route.ack_timeout`)
+:   On-call: on; first notice after 15 minutes · Informational: off
+
+Reminders (`route.reminders`)
+:   On-call: on; first after 4 hours · Informational: off
+
+Snooze durations (`route.snooze_durations`)
+:   On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
+
+Group key (`route.group_key`)
+:   On-call: `alertname`, `severity`, `cluster` · Informational: the same
+
+Reopen window and Grace period
+:   On-call: 15 minutes each · Informational: the same
 
 Choose **Informational** for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
 notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and

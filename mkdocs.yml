@@ -63,6 +63,8 @@ markdown_extensions:
   - admonition
   - tables
   - attr_list
+  # A table whose names do not fit a column becomes a definition list: the name as the term, its description below.
+  - def_list
   - toc:
       permalink: true
   - pymdownx.details

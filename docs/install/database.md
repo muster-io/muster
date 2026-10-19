@@ -11,10 +11,12 @@ creates it. Neither the Helm chart nor the compose example backs up the database
 Give the database to Muster in one of two forms. The settings are in the
 [environment reference](../reference/environment.md).
 
-| Form | Variables |
-|---|---|
-| a URL | `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require` |
-| fields | `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`, `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`) |
+A URL
+:   `MUSTER_DATABASE_URL`, such as `postgres://muster:<password>@db.example.org:5432/muster?sslmode=require`
+
+Fields
+:   `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_PORT` (default `5432`), `MUSTER_DATABASE_NAME`, `MUSTER_DATABASE_USER`,
+    `MUSTER_DATABASE_PASSWORD` or `MUSTER_DATABASE_PASSWORD_FILE`, `MUSTER_DATABASE_SSLMODE` (default `prefer`)
 
 When both forms are set, the URL wins and Muster logs a warning that names both. Muster always writes the port and
 `sslmode` into the connection and takes the password only from it, so `PGPORT`, `PGSSLMODE`, `PGPASSWORD` and
@@ -131,10 +133,12 @@ stops with an error that names `MUSTER_DATABASE_SESSION_URL`.
 So when the main connection goes through PgBouncer in transaction mode, give Muster a session connection that reaches
 PostgreSQL directly or through a pooler in session mode:
 
-| Setting | Meaning |
-|---|---|
-| `MUSTER_DATABASE_SESSION_URL` | a whole URL for the session connection |
-| `MUSTER_DATABASE_SESSION_HOST`, `MUSTER_DATABASE_SESSION_PORT` | only the host and the port; the user, password, database and `sslmode` are those of the main connection |
+`MUSTER_DATABASE_SESSION_URL`
+:   A whole URL for the session connection.
+
+`MUSTER_DATABASE_SESSION_HOST`
+`MUSTER_DATABASE_SESSION_PORT`
+:   Only the host and the port; the user, password, database and `sslmode` are those of the main connection.
 
 In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
 use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the
@@ -159,14 +163,23 @@ PgBouncer is optional. Most installations connect straight to PostgreSQL, and th
 
 `MUSTER_DATABASE_SSLMODE` (or `sslmode` in the URL) takes the values of PostgreSQL's client library:
 
-| Value | Encrypts | Checks the server |
-|---|---|---|
-| `disable` | never | nothing |
-| `allow` | only when the server insists | nothing |
-| `prefer` (default) | when the server offers TLS, else falls back to plain text | nothing |
-| `require` | always | nothing: protects against listening in, not against an impostor |
-| `verify-ca` | always | the certificate chain against a trusted CA |
-| `verify-full` | always | the chain, and that the certificate names the host you connect to |
+`disable`
+:   encrypts: never · checks the server: nothing
+
+`allow`
+:   encrypts: only when the server insists · checks the server: nothing
+
+`prefer` (default)
+:   encrypts: when the server offers TLS, else falls back to plain text · checks the server: nothing
+
+`require`
+:   encrypts: always · checks the server: nothing: protects against listening in, not against an impostor
+
+`verify-ca`
+:   encrypts: always · checks the server: the certificate chain against a trusted CA
+
+`verify-full`
+:   encrypts: always · checks the server: the chain, and that the certificate names the host you connect to
 
 `prefer` makes a fresh installation work, but it also connects without encryption to a server that has none. Muster tells
 you: `muster doctor` reports each connection as encrypted or not, and a start with an unencrypted connection logs a

@@ -30,19 +30,42 @@ so that a person can say "I have this one". The two often look alike, but you ca
 
 ## What an Alert Group has
 
-| Attribute | Meaning |
-|---|---|
-| Number, `#N` | Assigned per Organization, without gaps, when the Alert Group is created. It is what people say aloud: "I took #412". |
-| Status | `firing`, `acknowledged`, `snoozed` or `resolved`. See [Statuses and commands](statuses-and-commands.md). |
-| Owner | The user who acknowledged it. Only a user can be an Owner; a Service account cannot. |
-| Title | The `alertname` that its Alerts share. When Alerts with different `alertname` values join it, the Group key values instead, such as `cluster=prod, namespace=payments`. It is set when the Alert Group is created and changes at most once, at that switch. |
-| Summary | The `summary` annotation of the first of its Alerts that has one. It is set once. |
-| Route | The [Route](routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers. |
-| Severity level | The highest Severity level of its firing Alerts: critical, warning or info. |
-| Urgent | Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as Urgent (`organization.critical_is_urgent`, on by default). |
-| Reopen count | How many times Muster reopened it. |
-| Alerts | One entry per fingerprint, firing first, resolved ones struck through with their reason. |
-| Timeline | The ordered record of everything that happened to it. |
+Number, `#N`
+:   Assigned per Organization, without gaps, when the Alert Group is created. It is what people say aloud: "I took
+    #412".
+
+Status
+:   `firing`, `acknowledged`, `snoozed` or `resolved`. See [Statuses and commands](statuses-and-commands.md).
+
+Owner
+:   The user who acknowledged it. Only a user can be an Owner; a Service account cannot.
+
+Title
+:   The `alertname` that its Alerts share. When Alerts with different `alertname` values join it, the Group key values
+    instead, such as `cluster=prod, namespace=payments`. It is set when the Alert Group is created and changes at most
+    once, at that switch.
+
+Summary
+:   The `summary` annotation of the first of its Alerts that has one. It is set once.
+
+Route
+:   The [Route](routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers.
+
+Severity level
+:   The highest Severity level of its firing Alerts: critical, warning or info.
+
+Urgent
+:   Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as
+    Urgent (`organization.critical_is_urgent`, on by default).
+
+Reopen count
+:   How many times Muster reopened it.
+
+Alerts
+:   One entry per fingerprint, firing first, resolved ones struck through with their reason.
+
+Timeline
+:   The ordered record of everything that happened to it.
 
 The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
@@ -159,10 +182,15 @@ Alerts resolve or a person resolves it.
 
 ## How long Alert Groups are kept
 
-| What | Kept for |
-|---|---|
-| Alerts in Alert Groups, Timeline entries, delivery events | `retention.alert_details`, 90 days |
-| The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes | `retention.alert_group_summaries`, 2 years |
+`retention.alert_details`
+:   kept for: 90 days
+
+    Alerts in Alert Groups, Timeline entries, delivery events.
+
+`retention.alert_group_summaries`
+:   kept for: 2 years
+
+    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes.
 
 After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
 summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime

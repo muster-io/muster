@@ -35,12 +35,17 @@ stopped Muster is noticed."
 
 ## What Muster sends
 
-| Setting | Value |
-|---|---|
-| interval | 1 minute (`outgoing_heartbeat.interval`) |
-| method | `GET` (`outgoing_heartbeat.method`) |
-| timeout | 10 seconds for one request (`outgoing_heartbeat.timeout`) |
-| retry | none: a failure is counted and logged, and the next tick is the retry |
+Interval
+:   1 minute (`outgoing_heartbeat.interval`)
+
+Method
+:   `GET` (`outgoing_heartbeat.method`)
+
+Timeout
+:   10 seconds for one request (`outgoing_heartbeat.timeout`)
+
+Retry
+:   None: a failure is counted and logged, and the next tick is the retry.
 
 Only the **Leader** sends it, so it stops when no replica leads, and it stops when Muster is down. Both are what you want
 a dead man's switch to see. See [High availability](high-availability.md#the-leader). The call goes through the

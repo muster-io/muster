@@ -21,11 +21,17 @@ probe of a Broken Destination.
 **Requests that reach Muster** on the ingest listener, each with the answer Muster gave, refused ones included — a bad
 signature, a wrong secret token, a Connection in the other event delivery mode:
 
-| Operation | Path | What it is |
-|---|---|---|
-| `press` | `/api/v1/callbacks/mattermost/{connection_id}` | a button press in Mattermost |
-| `update` | `/api/v1/callbacks/telegram/{connection_id}` | a Telegram update in the webhook mode |
-| `push` | `/api/v1/callbacks/bridge/{connection_id}` | an event a bridge pushes |
+`press`
+`/api/v1/callbacks/mattermost/{connection_id}`
+:   A button press in Mattermost.
+
+`update`
+`/api/v1/callbacks/telegram/{connection_id}`
+:   A Telegram update in the webhook mode.
+
+`push`
+`/api/v1/callbacks/bridge/{connection_id}`
+:   An event a bridge pushes.
 
 A record holds:
 
@@ -56,11 +62,15 @@ A record holds:
 
 The bounds are built in; nothing configures them.
 
-| Setting | Value |
-|---|---|
-| `request_log.max_records` | the newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of new Connections in an Organization |
-| `request_log.max_age` | 7 days on the business clock |
-| `request_log.body_max` | 16 KB (16,384 bytes) of each request or answer body |
+`request_log.max_records`
+:   The newest 500 records of each Connection, of each outgoing webhook Destination, and of the checks before saving of
+    new Connections in an Organization.
+
+`request_log.max_age`
+:   7 days on the business clock.
+
+`request_log.body_max`
+:   16 KB (16,384 bytes) of each request or answer body.
 
 - A record past either bound is neither listed nor shown, even before it is deleted. The Leader deletes such records
   every minute (the task `request_log_pruning`).
@@ -97,12 +107,17 @@ Headers and bodies are untrusted text. The record view shows them as plain text 
 
 ## Who may read it
 
-| To | Needs |
-|---|---|
-| list the records of a Connection, or of a check run | `connections:read` |
-| list the records of a Destination | `destinations:read` |
-| open a record of a Connection, or of a check before saving | `connections:read` |
-| open a record of an outgoing webhook Destination | `destinations:read` |
+To list the records of a Connection, or of a check run
+:   needs: `connections:read`
+
+To list the records of a Destination
+:   needs: `destinations:read`
+
+To open a record of a Connection, or of a check before saving
+:   needs: `connections:read`
+
+To open a record of an outgoing webhook Destination
+:   needs: `destinations:read`
 
 A messenger Destination's requests are its Connection's: its list shows the records of its Connection that concern
 it, and opening one of them needs `connections:read`. The built-in Roles — Admin, Responder and Viewer — hold both
