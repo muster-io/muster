@@ -648,9 +648,47 @@ and people answer with Text commands in Threads.
    Muster User whose account is linked to the person who pressed, so link an account first: copy the token from your
    profile, pick the person under "You are", open their direct chat with the bot under "Direct", and send the token.
 
+**Next to the Quick start:** run the example as one more service of the compose project, so that Muster reaches it by
+name and nothing on the host's loopback is involved.
+
+1. In the directory of the [Quick start](../quick-start.md), where `docker-compose.yml` and `.env` are, add a token to
+   `.env` and write a file `compose.override.yaml` next to them, which Docker Compose merges into the project by itself.
+   `docker compose up -d --wait` then starts the example, and leaves Muster running if it already runs:
+
+    ```sh
+    echo "EXAMPLE_BRIDGE_TOKEN=$(openssl rand -hex 16)" >> .env
+    cat >compose.override.yaml <<'EOF'
+    services:
+      example-bridge:
+        image: ghcr.io/muster-io/muster-example-bridge:edge
+        environment:
+          BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}
+        ports:
+          - "127.0.0.1:8095:8095"
+        restart: unless-stopped
+    EOF
+    docker compose up -d --wait
+    ```
+
+    The example's page is published on the loopback of the host only, at `http://127.0.0.1:8095/`, because it has no
+    authentication (see the warning above). On a VM, reach it with an SSH tunnel, `ssh -L 8095:localhost:8095 <vm>`.
+    The whole port is published, so `/v1/` is reachable on the host's loopback too, and it needs the token. Muster
+    reaches
+    the example inside the compose network.
+2. Create a Bridge Connection with the base URL `http://example-bridge:8095`, the token from `.env`
+   (`grep EXAMPLE_BRIDGE_TOKEN .env`) and the event delivery **Polling**. The Organization's outbound address policy
+   is **Standard**, which allows the private address that the name resolves to; only loopback is blocked.
+3. Then do the check of step 3 above, which shows "Messenger: Example chat", and steps 4 and 5: a Destination for the
+   channel `alerts`, and an account link to press buttons. Do not create the loopback Connection of step 3.
+
+To remove the example and keep Muster and its data, run `docker compose rm -sf example-bridge` and delete
+`compose.override.yaml`. Do not run `docker compose down -v` for this: it deletes Muster's database too.
+
 For **Push**, choose a push secret (see [Push](#push)), enter it in the Connection, and restart the example with
 `BRIDGE_PUSH_URL` set to the callback address that the Connection shows, and the secret in `BRIDGE_PUSH_SECRET` or in
-the file of `-push-secret-file`.
+the file of `-push-secret-file`. With the compose service, set `BRIDGE_PUSH_URL` in the override's `environment` to the
+callback address with the service name of Muster, `http://muster:8080/api/v1/callbacks/bridge/<id>`, not `localhost`:
+the example reaches Muster inside the compose network.
 
 ## The protocol without a library
 
@@ -1168,7 +1206,7 @@ only the bridge knows what its messenger's codes mean. Muster acts on the class:
 :   The messenger or the bridge throttles; send `Retry-After` in seconds.
 
     Muster waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; not counted
-    as a failure; a wait longer than 15 minutes, or none given, is treated as `transient`.
+    as a failure; a wait longer than 15 minutes (`bridge.retry_after_max`), or none given, is treated as `transient`.
 
 `gone`
 :   The message no longer exists: deleted, or its Thread is gone.
@@ -1411,7 +1449,7 @@ Authorization: Bearer <token>
 
 - Return the events after `cursor`, oldest first, at once when there are any. Without `cursor`, return all of them.
   When there are none, hold the request open until one arrives or until `wait` seconds have passed, and then return an
-  empty list. `wait` is 0 to 60, 25 by default. Muster waits for your answer up to `wait` plus 15 seconds.
+  empty list. `wait` is 0 to 60, 25 by default (`bridge.poll_wait` is the 25 that Muster sends). Muster waits for your answer up to `wait` plus 15 seconds.
 - `next_cursor` is opaque to Muster. Muster handles the batch and sends the `next_cursor` with its next call; only
   then may you forget the events before that cursor. Keep events that Muster has not passed for at least 24 hours.
 - A cursor that you do not know is `invalid`; Muster then polls again without one. Return only the events of the

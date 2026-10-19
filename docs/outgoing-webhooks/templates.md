@@ -5,6 +5,9 @@ API, the way Muster keeps a message in Mattermost or Telegram: a **create** requ
 edits it to the current state, and optional **open thread** and **reply in thread** requests carry the follow-ups.
 You write each request as Go templates; Muster sends them, signed, and reads the values it needs from the answers.
 
+The messages that Muster keeps in a messenger are customised with templates written the same way: see
+[Messages and templates](../configure/messages-and-templates.md).
+
 For an ordered stream of every lifecycle event instead, use the [events mode](events.md); the mode `both` sends both.
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the chat's API is

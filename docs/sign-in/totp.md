@@ -8,7 +8,7 @@ see [Closed networks](closed-networks.md).
 ## Enrol
 
 People enrol from their **profile**: they scan a QR code with the authenticator app and confirm with the first code.
-Enrolment gives the person **10 recovery codes**, each of ten characters and usable once. They are shown **once**:
+Enrolment gives the person **10 recovery codes** (`auth.totp_recovery_codes`), each of ten characters and usable once. They are shown **once**:
 save them somewhere safe. In the profile a person can generate new recovery codes, which replace the unused ones, and
 remove TOTP. Removing it needs the current password (a local user) or a current code or recovery code.
 

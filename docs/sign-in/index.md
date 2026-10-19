@@ -29,21 +29,29 @@ Every signed-in person also manages their own profile: password, TOTP, Account l
 
 ## Ways to sign in
 
-- **Local users.** An Admin creates a user with a login, and Muster returns a single-use link, valid for 24 hours, where
-  the person sets a password. Muster sends no email; the Admin hands the link over. The first Admin comes from
+- **Local users.** An Admin creates a user with a login, and Muster returns a single-use link, valid for 24 hours
+  (`auth.password_setup_link_ttl`), where the person sets a password of at least 12 characters
+  (`auth.password_min_length`). Muster sends no email; the Admin hands the link over. The first Admin comes from
   `MUSTER_BOOTSTRAP_ADMIN_EMAIL` and its password at the first start, as the [Quick start](../quick-start.md) shows.
 - **OpenID Connect.** People sign in at your identity provider, and a mapping from the groups in their token to Roles
   decides what they may do. [Sign-in with Keycloak](oidc-keycloak.md) is a complete walkthrough.
 - **TOTP.** A second step with a one-time code from an authenticator app, for local and OIDC users alike; the
   Organization can require it. See [TOTP](totp.md).
 - **Personal access tokens.** A person creates them in the profile for scripts. A token acts as its User, with at most
-  that User's Permissions, and can be narrowed to fewer. It can expire, and the Audit log names the token with the
-  person.
+  that User's Permissions, and can be narrowed to fewer. It can expire (`token.expiry`; a token has no expiry unless
+  you set one, and the page warns about that), and the Audit log names the token with the person. The API limits each
+  token (`api.rate_limit`). See [API tokens and automation](../configure/api-tokens.md).
 - **Service accounts.** An identity that is not a person, for automation such as a pipeline. It has a Role and any number
   of tokens, cannot sign in to the web UI, and cannot become the Owner of an Alert Group.
 
 Operations that change one's own account, such as the password, TOTP, tokens and Account links, need the web session; a
 token is refused there.
+
+A web session ends after 12 hours without a request (`auth.session_idle_timeout`), or 7 days after sign-in
+(`auth.session_lifetime`). Both are built in. A session of an OIDC user whose identity provider granted no offline token
+ends 12 hours after sign-in (`auth.oidc_fallback_session_lifetime`), and a background re-check asks the identity provider
+about every OIDC user who has an offline token and a live session or a usable Personal access token, every 15 minutes
+(`auth.oidc_recheck_interval`).
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](closed-networks.md).
 

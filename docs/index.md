@@ -33,7 +33,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Quick start](quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
   in about five minutes.
 - [Install](install/helm.md): run Muster in production with [Helm](install/helm.md) and an external
-  [PostgreSQL](install/database.md).
+  [PostgreSQL](install/database.md), and read the [requirements and tested versions](install/versions.md) and how
+  to verify a release.
 - [Integrations](integrations/alertmanager.md): connect the Alertmanager of a cluster, connect
   [Grafana Alerting](integrations/grafana.md) directly or through an Alertmanager, and watch the path from Alertmanager
   with a [Heartbeat](integrations/heartbeat.md).
@@ -45,6 +46,9 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](outgoing-webhooks/templates.md); [recipes](outgoing-webhooks/recipes.md) for a phone call, a status page,
   a second chat and an issue tracker.
+- [Configure](configure/messages-and-templates.md): change what [messages and templates](configure/messages-and-templates.md)
+  say, add links with Lookup tables and Link rules, set the [Organization](configure/organization.md), and automate
+  with [API tokens](configure/api-tokens.md).
 - [Sign-in](sign-in/index.md): Roles and ways to sign in; [OpenID Connect with Keycloak](sign-in/oidc-keycloak.md),
   [TOTP](sign-in/totp.md), and [closed networks](sign-in/closed-networks.md).
 - [Concepts](concepts/alert-groups.md): what an [Alert Group](concepts/alert-groups.md) is, how
