@@ -53,7 +53,7 @@ without it. The Secret holds, under the key names that the values `masterKeysKey
 `database-password`
 :   the default of `database.passwordKey`
 
-    Holds the password of the database user.
+    Holds the password of the database user, unless `database.existingSecret` names another Secret for it.
 
 `bootstrap-password`
 :   no default; set `bootstrapAdmin.passwordKey`
@@ -70,8 +70,21 @@ kubectl -n muster create secret generic muster \
 
 The pods mount the Secret as files and read the values through `MUSTER_SECRET_KEYS_FILE`,
 `MUSTER_DATABASE_PASSWORD_FILE` and `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`, so no secret appears in the pod's
-environment, except the whole database URL when you name its key in `database.urlKey`. The chart reads **one** Secret,
-so the database password goes into it as well, even when another operator, such as CloudNativePG, keeps its own copy.
+environment, except the whole database URL when you name its key in `database.urlKey`.
+
+When another operator keeps the database credentials in a Secret of its own, name that Secret in
+`database.existingSecret` instead of copying the password: `database.passwordKey` and `database.urlKey` then name keys
+of that Secret, and the master keys and the password of the first Admin stay in `existingSecret`. For the Secret
+`muster-db-app` that CloudNativePG generates:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+[The database](database.md#cloudnativepg) shows the form with `sslmode`.
 
 !!! warning "Keep a copy of the master key"
     Muster refuses to start on a database without the key that wrote it, and a restored database is useless without it.

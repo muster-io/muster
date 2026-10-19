@@ -57,7 +57,9 @@ Take a backup before every [upgrade](upgrades.md), and test a restore before you
     pg_restore --clean --if-exists --no-owner --dbname="$MUSTER_DATABASE_URL" muster-2026-10-19.dump
     ```
 
-    A CloudNativePG or managed restore creates a new cluster from the backup; point `database.host` at it.
+    A CloudNativePG or managed restore creates a new cluster from the backup; point `database.host` at it. When the
+    chart reads the database from the Secret that CloudNativePG generates, point `database.existingSecret` at the new
+    cluster's `-app` Secret too: it holds a new password and, in its `uri`, the new host.
 3. Put the **same master keys** back into `MUSTER_SECRET_KEYS`. The key that was active when the backup was taken must be
    in the list. Keys are identified by their material, so any copy of the same key works.
 4. Start Muster, in the version that wrote the backup or in a newer one that the [upgrade rules](upgrades.md#the-rules)

@@ -71,6 +71,14 @@ The Secret with the master keys, the database password and the bootstrap Admin p
 {{- end }}
 
 {{/*
+The Secret with the database password or URL: database.existingSecret, such as the app Secret of CloudNativePG, or
+else existingSecret.
+*/}}
+{{- define "muster.databaseSecret" -}}
+{{- .Values.database.existingSecret | default (include "muster.existingSecret" .) }}
+{{- end }}
+
+{{/*
 Return the appropriate image repository and tag
 */}}
 {{- define "muster.image" -}}
