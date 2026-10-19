@@ -299,7 +299,7 @@ without it. The Secret holds, under the key names that the values `masterKeysKey
 `database-password`
 :   the default of `database.passwordKey`
 
-    Holds the password of the database user.
+    Holds the password of the database user, unless `database.existingSecret` names another Secret for it.
 
 `bootstrap-password`
 :   no default; set `bootstrapAdmin.passwordKey`
@@ -316,8 +316,21 @@ kubectl -n muster create secret generic muster \
 
 The pods mount the Secret as files and read the values through `MUSTER_SECRET_KEYS_FILE`,
 `MUSTER_DATABASE_PASSWORD_FILE` and `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`, so no secret appears in the pod's
-environment, except the whole database URL when you name its key in `database.urlKey`. The chart reads **one** Secret,
-so the database password goes into it as well, even when another operator, such as CloudNativePG, keeps its own copy.
+environment, except the whole database URL when you name its key in `database.urlKey`.
+
+When another operator keeps the database credentials in a Secret of its own, name that Secret in
+`database.existingSecret` instead of copying the password: `database.passwordKey` and `database.urlKey` then name keys
+of that Secret, and the master keys and the password of the first Admin stay in `existingSecret`. For the Secret
+`muster-db-app` that CloudNativePG generates:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+[The database](https://muster-io.github.io/muster/latest/install/database.md#cloudnativepg) shows the form with `sslmode`.
 
 !!! warning "Keep a copy of the master key"
     Muster refuses to start on a database without the key that wrote it, and a restored database is useless without it.
@@ -513,19 +526,9 @@ Muster applies its migrations at the first start: the compose example sets `MUST
 ## CloudNativePG
 
 [CloudNativePG](https://cloudnative-pg.io) runs PostgreSQL clusters on Kubernetes. A `Cluster` for Muster creates the
-database and the user from a Secret that you provide, so that the same password goes into the Secret of Muster:
+database and its owner:
 
 ```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: muster-db-credentials
-  namespace: muster
-type: kubernetes.io/basic-auth
-stringData:
-  username: muster
-  password: "<the database password>"
----
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -539,30 +542,40 @@ spec:
     initdb:
       database: muster
       owner: muster
-      secret:
-        name: muster-db-credentials
 ```
 
 CloudNativePG serves the primary at the Service `muster-db-rw` (and the replicas read-only at `muster-db-ro`) and enables
-TLS on its own. Point the chart at it:
+TLS on its own. It generates the password and keeps it in the Secret `muster-db-app`, with the keys `username`,
+`password`, `host`, `port`, `dbname` and `uri` among others. The chart reads the database from that Secret when you name
+it in `database.existingSecret`; the Secret `muster` of [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md#create-the-secret) then holds only
+the master keys and the password of the first Admin:
 
 ```yaml
 existingSecret: muster
 database:
+  existingSecret: muster-db-app
+  urlKey: uri
+```
+
+The `uri` key holds a URL such as `postgresql://muster:<password>@muster-db-rw.muster:5432/muster`. It names no
+`sslmode`, so Muster connects with its default, `prefer`, which uses the TLS of CloudNativePG but does not insist on
+it. To require TLS, give the connection as fields and take only the password from the Secret, which also keeps the
+password out of the pod's environment:
+
+```yaml
+existingSecret: muster
+database:
+  existingSecret: muster-db-app
   host: muster-db-rw.muster.svc
   name: muster
   user: muster
   sslmode: require
+  passwordKey: password
 ```
 
-The `muster` Secret holds the same password under `database-password`, as [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md#create-the-secret)
-describes. The chart reads one Secret, so it cannot read the Secret `muster-db-app` that CloudNativePG generates when you
-give it no credentials; copy the `password` key of that Secret into your own when you prefer to let CloudNativePG
-generate it:
-
-```sh
-kubectl -n muster get secret muster-db-app -o jsonpath='{.data.password}' | base64 -d
-```
+When you give the `Cluster` a Secret of your own under `bootstrap.initdb.secret`, CloudNativePG generates no
+`muster-db-app`, and your Secret holds no `uri`: use the fields form above, with your Secret in `database.existingSecret`
+and `passwordKey: password`.
 
 Add an `spec.backup` section to the `Cluster` (see the CloudNativePG documentation) and test a restore, together with the
 master key, before you rely on it.
@@ -6717,7 +6730,9 @@ Take a backup before every [upgrade](https://muster-io.github.io/muster/latest/o
     pg_restore --clean --if-exists --no-owner --dbname="$MUSTER_DATABASE_URL" muster-2026-10-19.dump
     ```
 
-    A CloudNativePG or managed restore creates a new cluster from the backup; point `database.host` at it.
+    A CloudNativePG or managed restore creates a new cluster from the backup; point `database.host` at it. When the
+    chart reads the database from the Secret that CloudNativePG generates, point `database.existingSecret` at the new
+    cluster's `-app` Secret too: it holds a new password and, in its `uri`, the new host.
 3. Put the **same master keys** back into `MUSTER_SECRET_KEYS`. The key that was active when the backup was taken must be
    in the list. Keys are identified by their material, so any copy of the same key works.
 4. Start Muster, in the version that wrote the backup or in a newer one that the [upgrade rules](https://muster-io.github.io/muster/latest/operations/upgrades.md#the-rules)
@@ -9679,7 +9694,7 @@ The number of Muster replicas; one of them is the Leader at a time.
 
 string · default: `""`
 
-The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys.
+The Secret that holds the master keys and, under the keys named below, the password of the bootstrap Admin and the database password or URL unless database.existingSecret names another Secret. Required: the chart never generates the master keys.
 
 ### `masterKeysKey`
 
@@ -9723,17 +9738,23 @@ string · default: `""`
 
 The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.
 
+### `database.existingSecret`
+
+string · default: `""`
+
+The Secret that holds the database password or URL under passwordKey or urlKey, such as the app Secret that CloudNativePG generates; empty uses existingSecret.
+
 ### `database.passwordKey`
 
 string · default: `database-password`
 
-The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set.
+The key that holds the database password (MUSTER_DATABASE_PASSWORD_FILE), in database.existingSecret or, when that is empty, in existingSecret; ignored when urlKey is set.
 
 ### `database.urlKey`
 
 string · default: `""`
 
-The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above.
+The key that holds the whole connection as a URL (MUSTER_DATABASE_URL), in database.existingSecret or, when that is empty, in existingSecret; used instead of the fields above.
 
 ### `database.sessionHost`
 

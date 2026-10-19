@@ -2635,18 +2635,8 @@ indexes and partitions itself:</p>
 <code>muster migrate</code> in an init container.</p>
 <h2 id="cloudnativepg">CloudNativePG<a class="headerlink" href="#cloudnativepg" title="Permanent link">&para;</a></h2>
 <p><a href="https://cloudnative-pg.io">CloudNativePG</a> runs PostgreSQL clusters on Kubernetes. A <code>Cluster</code> for Muster creates the
-database and the user from a Secret that you provide, so that the same password goes into the Secret of Muster:</p>
-<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
-<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Secret</span>
-<span class="nt">metadata</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-credentials</span>
-<span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
-<span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubernetes.io/basic-auth</span>
-<span class="nt">stringData</span><span class="p">:</span>
-<span class="w">  </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
-<span class="w">  </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="s">"&lt;the</span><span class="nv"> </span><span class="s">database</span><span class="nv"> </span><span class="s">password&gt;"</span>
-<span class="nn">---</span>
-<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgresql.cnpg.io/v1</span>
+database and its owner:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">postgresql.cnpg.io/v1</span>
 <span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cluster</span>
 <span class="nt">metadata</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db</span>
@@ -2659,24 +2649,33 @@ database and the user from a Secret that you provide, so that the same password 
 <span class="w">    </span><span class="nt">initdb</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
 <span class="w">      </span><span class="nt">owner</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
-<span class="w">      </span><span class="nt">secret</span><span class="p">:</span>
-<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-credentials</span>
 </code></pre></div>
 <p>CloudNativePG serves the primary at the Service <code>muster-db-rw</code> (and the replicas read-only at <code>muster-db-ro</code>) and enables
-TLS on its own. Point the chart at it:</p>
+TLS on its own. It generates the password and keeps it in the Secret <code>muster-db-app</code>, with the keys <code>username</code>,
+<code>password</code>, <code>host</code>, <code>port</code>, <code>dbname</code> and <code>uri</code> among others. The chart reads the database from that Secret when you name
+it in <code>database.existingSecret</code>; the Secret <code>muster</code> of <a href="../helm/#create-the-secret">Install with Helm</a> then holds only
+the master keys and the password of the first Admin:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
 <span class="nt">database</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-app</span>
+<span class="w">  </span><span class="nt">urlKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uri</span>
+</code></pre></div>
+<p>The <code>uri</code> key holds a URL such as <code>postgresql://muster:&lt;password&gt;@muster-db-rw.muster:5432/muster</code>. It names no
+<code>sslmode</code>, so Muster connects with its default, <code>prefer</code>, which uses the TLS of CloudNativePG but does not insist on
+it. To require TLS, give the connection as fields and take only the password from the Secret, which also keeps the
+password out of the pod's environment:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+<span class="nt">database</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-app</span>
 <span class="w">  </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-rw.muster.svc</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
 <span class="w">  </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
 <span class="w">  </span><span class="nt">sslmode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">require</span>
+<span class="w">  </span><span class="nt">passwordKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">password</span>
 </code></pre></div>
-<p>The <code>muster</code> Secret holds the same password under <code>database-password</code>, as <a href="../helm/#create-the-secret">Install with Helm</a>
-describes. The chart reads one Secret, so it cannot read the Secret <code>muster-db-app</code> that CloudNativePG generates when you
-give it no credentials; copy the <code>password</code> key of that Secret into your own when you prefer to let CloudNativePG
-generate it:</p>
-<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>-n<span class="w"> </span>muster<span class="w"> </span>get<span class="w"> </span>secret<span class="w"> </span>muster-db-app<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.data.password}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>base64<span class="w"> </span>-d
-</code></pre></div>
+<p>When you give the <code>Cluster</code> a Secret of your own under <code>bootstrap.initdb.secret</code>, CloudNativePG generates no
+<code>muster-db-app</code>, and your Secret holds no <code>uri</code>: use the fields form above, with your Secret in <code>database.existingSecret</code>
+and <code>passwordKey: password</code>.</p>
 <p>Add an <code>spec.backup</code> section to the <code>Cluster</code> (see the CloudNativePG documentation) and test a restore, together with the
 master key, before you rely on it.</p>
 <h2 id="managed-postgresql">Managed PostgreSQL<a class="headerlink" href="#managed-postgresql" title="Permanent link">&para;</a></h2>

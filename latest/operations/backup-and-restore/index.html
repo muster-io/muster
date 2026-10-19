@@ -2623,7 +2623,9 @@ key to restore.</p>
 <p>Restore the database into an empty database. For a dump:</p>
 <div class="highlight"><pre><span></span><code>pg_restore<span class="w"> </span>--clean<span class="w"> </span>--if-exists<span class="w"> </span>--no-owner<span class="w"> </span>--dbname<span class="o">=</span><span class="s2">"</span><span class="nv">$MUSTER_DATABASE_URL</span><span class="s2">"</span><span class="w"> </span>muster-2026-10-19.dump
 </code></pre></div>
-<p>A CloudNativePG or managed restore creates a new cluster from the backup; point <code>database.host</code> at it.
+<p>A CloudNativePG or managed restore creates a new cluster from the backup; point <code>database.host</code> at it. When the
+chart reads the database from the Secret that CloudNativePG generates, point <code>database.existingSecret</code> at the new
+cluster's <code>-app</code> Secret too: it holds a new password and, in its <code>uri</code>, the new host.
 3. Put the <strong>same master keys</strong> back into <code>MUSTER_SECRET_KEYS</code>. The key that was active when the backup was taken must be
    in the list. Keys are identified by their material, so any copy of the same key works.
 4. Start Muster, in the version that wrote the backup or in a newer one that the <a href="../upgrades/#the-rules">upgrade rules</a>

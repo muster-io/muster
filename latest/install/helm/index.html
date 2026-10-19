@@ -2705,7 +2705,7 @@ without it. The Secret holds, under the key names that the values <code>masterKe
 <dt><code>database-password</code></dt>
 <dd>
 <p>the default of <code>database.passwordKey</code></p>
-<p>Holds the password of the database user.</p>
+<p>Holds the password of the database user, unless <code>database.existingSecret</code> names another Secret for it.</p>
 </dd>
 <dt><code>bootstrap-password</code></dt>
 <dd>
@@ -2721,8 +2721,17 @@ kubectl<span class="w"> </span>-n<span class="w"> </span>muster<span class="w"> 
 </code></pre></div>
 <p>The pods mount the Secret as files and read the values through <code>MUSTER_SECRET_KEYS_FILE</code>,
 <code>MUSTER_DATABASE_PASSWORD_FILE</code> and <code>MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE</code>, so no secret appears in the pod's
-environment, except the whole database URL when you name its key in <code>database.urlKey</code>. The chart reads <strong>one</strong> Secret,
-so the database password goes into it as well, even when another operator, such as CloudNativePG, keeps its own copy.</p>
+environment, except the whole database URL when you name its key in <code>database.urlKey</code>.</p>
+<p>When another operator keeps the database credentials in a Secret of its own, name that Secret in
+<code>database.existingSecret</code> instead of copying the password: <code>database.passwordKey</code> and <code>database.urlKey</code> then name keys
+of that Secret, and the master keys and the password of the first Admin stay in <code>existingSecret</code>. For the Secret
+<code>muster-db-app</code> that CloudNativePG generates:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+<span class="nt">database</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-db-app</span>
+<span class="w">  </span><span class="nt">urlKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uri</span>
+</code></pre></div>
+<p><a href="../database/#cloudnativepg">The database</a> shows the form with <code>sslmode</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Keep a copy of the master key</p>
 <p>Muster refuses to start on a database without the key that wrote it, and a restored database is useless without it.

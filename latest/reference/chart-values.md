@@ -64,7 +64,7 @@ The number of Muster replicas; one of them is the Leader at a time.
 
 string · default: `""`
 
-The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys.
+The Secret that holds the master keys and, under the keys named below, the password of the bootstrap Admin and the database password or URL unless database.existingSecret names another Secret. Required: the chart never generates the master keys.
 
 ### `masterKeysKey`
 
@@ -108,17 +108,23 @@ string · default: `""`
 
 The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.
 
+### `database.existingSecret`
+
+string · default: `""`
+
+The Secret that holds the database password or URL under passwordKey or urlKey, such as the app Secret that CloudNativePG generates; empty uses existingSecret.
+
 ### `database.passwordKey`
 
 string · default: `database-password`
 
-The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set.
+The key that holds the database password (MUSTER_DATABASE_PASSWORD_FILE), in database.existingSecret or, when that is empty, in existingSecret; ignored when urlKey is set.
 
 ### `database.urlKey`
 
 string · default: `""`
 
-The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above.
+The key that holds the whole connection as a URL (MUSTER_DATABASE_URL), in database.existingSecret or, when that is empty, in existingSecret; used instead of the fields above.
 
 ### `database.sessionHost`
 

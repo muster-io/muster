@@ -2543,6 +2543,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#databaseexistingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#databasepasswordkey" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4282,6 +4293,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#databaseexistingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#databasepasswordkey" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5777,7 +5799,7 @@
 <p>The number of Muster replicas; one of them is the Leader at a time.</p>
 <h3 id="existingsecret"><code>existingSecret</code><a class="headerlink" href="#existingsecret" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>""</code></p>
-<p>The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys.</p>
+<p>The Secret that holds the master keys and, under the keys named below, the password of the bootstrap Admin and the database password or URL unless database.existingSecret names another Secret. Required: the chart never generates the master keys.</p>
 <h3 id="masterkeyskey"><code>masterKeysKey</code><a class="headerlink" href="#masterkeyskey" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>secret-keys</code></p>
 <p>The key of existingSecret that holds the master keys, one per line (MUSTER_SECRET_KEYS_FILE).</p>
@@ -5799,12 +5821,15 @@
 <h3 id="databasesslmode"><code>database.sslmode</code><a class="headerlink" href="#databasesslmode" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>""</code></p>
 <p>The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.</p>
+<h3 id="databaseexistingsecret"><code>database.existingSecret</code><a class="headerlink" href="#databaseexistingsecret" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The Secret that holds the database password or URL under passwordKey or urlKey, such as the app Secret that CloudNativePG generates; empty uses existingSecret.</p>
 <h3 id="databasepasswordkey"><code>database.passwordKey</code><a class="headerlink" href="#databasepasswordkey" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>database-password</code></p>
-<p>The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set.</p>
+<p>The key that holds the database password (MUSTER_DATABASE_PASSWORD_FILE), in database.existingSecret or, when that is empty, in existingSecret; ignored when urlKey is set.</p>
 <h3 id="databaseurlkey"><code>database.urlKey</code><a class="headerlink" href="#databaseurlkey" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>""</code></p>
-<p>The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above.</p>
+<p>The key that holds the whole connection as a URL (MUSTER_DATABASE_URL), in database.existingSecret or, when that is empty, in existingSecret; used instead of the fields above.</p>
 <h3 id="databasesessionhost"><code>database.sessionHost</code><a class="headerlink" href="#databasesessionhost" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>""</code></p>
 <p>The host of the session connection, for a pooler in transaction mode (MUSTER_DATABASE_SESSION_HOST).</p>
