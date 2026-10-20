@@ -585,7 +585,9 @@ func TestCheckConnectionDraftAPI(t *testing.T) {
 	}{
 		"reader":          {connectionsReader, http.MethodPost, body, http.StatusForbidden},
 		"no server_url":   {connectionsWriter, http.MethodPost, `{"type":"mattermost"}`, http.StatusBadRequest},
-		"unknown type":    {connectionsWriter, http.MethodPost, `{"type":"slack","server_url":"x"}`, 400},
+		"unknown type":    {connectionsWriter, http.MethodPost, `{"type":"smoke","server_url":"x"}`, 400},
+		"no event mode":   {connectionsWriter, http.MethodPost, `{"type":"slack","bot_token":"xoxb-1"}`, 400},
+		"bad event mode":  {connectionsWriter, http.MethodPost, `{"type":"slack","event_mode":"smoke"}`, 400},
 		"malformed id":    {connectionsWriter, http.MethodPost, strings.Replace(body, connectionID, "checks", 1), 400},
 		"bad update mode": {connectionsWriter, http.MethodPost, `{"type":"telegram","bot_api_base_url":"x"}`, 400},
 		"no body":         {connectionsWriter, http.MethodPost, "", http.StatusBadRequest},
@@ -901,7 +903,9 @@ const (
 // callback_url and what its last check learned, null before one; the type filter selects it; its check answers the
 // steps token, scopes without latency, and app_token, with the new codes, and slack with the workspace, the bot and
 // the app, null without the step app_token, and null for the other types; a refusal of the service is 422 at its
-// pointer; its channel list is 409; a Slack draft matches no member of ConnectionDraft and is 400.
+// pointer; its channel list is 409; checkConnectionDraft takes a Slack draft — its event mode, the bot token and the
+// app-level token typed, the proxy and the Connection it edits reach the service and no answer — and answers its
+// steps, the dry probe's not_slack among them, and slack with what it found.
 func TestSlackConnectionAPI(t *testing.T) {
 	x, fc := newConnectionsAPI(t)
 	body := `{"type":"slack","name":"sl","event_mode":"socket","bot_token":"` + slackBotToken + `","app_token":"` +
@@ -1066,11 +1070,56 @@ func TestSlackConnectionAPI(t *testing.T) {
 	}
 	fc.err = nil
 	n := len(fc.drafts)
-	draft := `{"type":"slack","event_mode":"socket","bot_token":"` + slackBotToken + `","proxy":{"enabled":false}}`
-	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", draft); a.status !=
-		http.StatusBadRequest || len(fc.drafts) != n {
-		t.Errorf("a Slack draft = %d %s", a.status, a.body)
+	fc.check = connections.CheckResult{OK: true, BotName: bot, Steps: []connections.Step{
+		{Name: connections.StepToken, OK: true, Latency: 9 * time.Millisecond, Via: "proxy"},
+		{Name: connections.StepScopes, OK: true, Via: "proxy"},
+		{Name: connections.StepAppToken, OK: true, Latency: 12 * time.Millisecond, Via: "proxy"}},
+		Slack: &connections.SlackIdentity{TeamID: team, TeamName: teamName, BotUserID: botUser, AppID: app}}
+	draft := `{"type":"slack","event_mode":"socket","bot_token":"` + slackBotToken + `","app_token":"` + slackAppToken +
+		`","proxy":{"enabled":true,"type":"http","address":"127.0.0.1:18091"},"connection_id":"CNAAAAAAAAAAS1"}`
+	a = x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", draft)
+	noToken(t, a)
+	res = gen.ConnectionCheckResult{}
+	decodeInto(t, a, &res)
+	if info, err := res.Slack.Get(); a.status != http.StatusOK || !res.Ok || err != nil || info.TeamName != teamName ||
+		info.AppId.MustGet() != app || len(res.Steps) != 3 || *res.Steps[2].Via != "proxy" ||
+		len(fc.drafts) != n+1 {
+		t.Fatalf("a Slack draft = %d %s", a.status, a.body)
 	}
+	for _, v := range []string{slackBotToken, slackAppToken} {
+		if strings.Contains(string(a.body), v) {
+			t.Errorf("the answer carries a token: %s", a.body)
+		}
+	}
+	if d := fc.drafts[n]; d.Type != connections.TypeSlack || d.EventMode != connections.EventModeSocket ||
+		d.BotToken != keyring.Replace(slackBotToken) || d.AppToken != keyring.Replace(slackAppToken) ||
+		d.Proxy == nil || !d.Proxy.Enabled || *d.Proxy.Address != "127.0.0.1:18091" || d.ConnectionID == nil ||
+		*d.ConnectionID != "CNAAAAAAAAAAS1" || d.ServerURL != "" {
+		t.Errorf("the Slack draft %+v", d)
+	}
+	fc.check = connections.CheckResult{Steps: []connections.Step{
+		{Name: "dry_probe", Latency: 3 * time.Millisecond, Via: "proxy",
+			Message: "The address answered 200 with text/html, not as Slack's Web API.", Code: "not_slack"},
+		{Name: connections.StepToken, Skipped: true, Via: "proxy"},
+		{Name: connections.StepScopes, Skipped: true, Via: "proxy"}}}
+	a = x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", `{"type":"slack","event_mode":"http"}`)
+	res = gen.ConnectionCheckResult{}
+	decodeInto(t, a, &res)
+	if d := fc.drafts[n+1]; a.status != http.StatusOK || res.Ok || !res.Slack.IsNull() ||
+		res.Steps[0].Name != gen.ConnectionCheckStepNameDryProbe ||
+		res.Steps[0].Code.MustGet() != gen.NullableConnectionCheckCodeNotSlack || res.Steps[0].LatencyMs.MustGet() != 3 ||
+		!*res.Steps[2].Skipped || !res.Steps[2].LatencyMs.IsNull() || d.EventMode != connections.EventModeHTTP ||
+		d.BotToken.Given || d.AppToken.Given || d.Proxy != nil || d.ConnectionID != nil {
+		t.Errorf("a Slack draft without tokens = %d %s, %+v", a.status, a.body, d)
+	}
+	fc.err = &connections.FieldError{Pointer: "/app_token", Code: connections.CodeInvalidFormat,
+		Detail: "The app-level token does not start with xapp-."}
+	a = x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", draft)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
+		errs[0]["pointer"] != "/app_token" || errs[0]["code"] != "invalid_format" {
+		t.Errorf("a refused Slack draft = %d %s", a.status, a.body)
+	}
+	fc.err = nil
 }
 
 // TestListSlackChannelsAPI covers C-24.FR-3 on the API: listConnectionChannels of a Slack Connection answers

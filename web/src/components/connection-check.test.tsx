@@ -59,6 +59,11 @@ const NEW_DRAFTS: Record<ConnectionDraft["type"], ConnectionDraft> = {
     event_delivery: "poll",
     proxy: { enabled: false, type: "http", username: null },
   },
+  slack: {
+    type: "slack",
+    event_mode: "socket",
+    proxy: { enabled: false, type: "http", username: null },
+  },
 };
 
 /** The steps of each type after its dry probe, which only a token runs. */

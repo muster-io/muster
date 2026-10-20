@@ -19,6 +19,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
@@ -40,6 +41,11 @@ type draftResult struct {
 			Name string `json:"name"`
 		} `json:"messenger"`
 	} `json:"info"`
+	Slack *struct {
+		TeamName  string `json:"team_name"`
+		BotUserID string `json:"bot_user_id"`
+	} `json:"slack"`
+	Run string `json:"request_log_run"`
 }
 
 // String is r as JSON for a failure message, without any token.
@@ -154,7 +160,8 @@ func carries(r fakeserver.Request, token string) bool {
 // knownTokens are the bot tokens of the test, the longer before the tokens they start with.
 var knownTokens = []string{devmode.MattermostSecondBotToken, devmode.ConnectionBotToken,
 	devmode.TelegramSecondBotToken, devmode.TelegramConnectionBotToken, devmode.BridgeSecondBotToken,
-	devmode.BridgeConnectionBotToken, draftTGToken}
+	devmode.BridgeConnectionBotToken, draftTGToken, devmode.SlackSecondBotToken, devmode.SlackSecondAppToken,
+	fakeslack.SecondSigningSecret, devmode.SlackConnectionBotToken, devmode.SlackConnectionAppToken}
 
 // redacted is s with every known token replaced, for a failure message.
 func redacted(s string) string {
@@ -177,8 +184,9 @@ func described(reqs []fakeserver.Request) []string {
 // with further fake Telegram and bridge servers in the test process as other addresses: drafts of new Connections of
 // each type store nothing (C-13.FR-14); a draft of a saved Connection with a changed address or proxy and no token makes
 // only the dry probe of its type, without a token (C-13.FR-2, C-13.AC-17, C-14.AC-6, C-14.AC-20, C-22.FR-2,
-// C-22.AC-26); a typed token goes to the draft's address; the stored token goes only to the saved address through the
-// saved proxy (C-22.FR-1); a draft leaves the saved Connection as it was; and the refusals of a draft.
+// C-22.AC-26, C-24.FR-2, C-24.AC-2); a typed token goes to the draft's address; the stored token goes only to the saved
+// address through the saved proxy (C-22.FR-1); a draft leaves the saved Connection as it was; its requests are
+// recorded as draft_check; and the refusals of a draft.
 func TestConnectionDrafts(t *testing.T) {
 	h := Start(t, DevProcess)
 	admin := newTG(t, h)
@@ -204,6 +212,16 @@ func TestConnectionDrafts(t *testing.T) {
 		e.wantSteps(t, `{"type":"mattermost","server_url":"`+h.Fakes.MattermostSecond+`"}`, "dry_probe:ok token:skip")
 		e.wantSteps(t, `{"type":"bridge","base_url":"`+h.Fakes.Bridge+`","event_delivery":"poll"}`,
 			"dry_probe:ok info:skip event_delivery:skip")
+		r = e.wantSteps(t, `{"type":"slack","event_mode":"socket","bot_token":"`+devmode.SlackSecondBotToken+
+			`","app_token":"`+devmode.SlackSecondAppToken+`","proxy":{"enabled":false}}`,
+			"token:ok scopes:ok app_token:ok")
+		b := fakeslack.Apps()[1]
+		if !r.OK || r.BotName == nil || *r.BotName != b.BotName || r.Slack == nil || r.Slack.TeamName != b.TeamName ||
+			r.Slack.BotUserID != b.BotUserID {
+			t.Fatalf("Slack draft = %+v", r)
+		}
+		e.wantSteps(t, `{"type":"slack","event_mode":"http","bot_token":"`+devmode.SlackSecondBotToken+`"}`,
+			"token:ok scopes:ok")
 		if c, a := e.counts(t); c != conns || a != entries {
 			t.Fatalf("after the drafts %d Connections and %d Audit log entries, before %d and %d", c, a, conns, entries)
 		}
@@ -451,6 +469,135 @@ func TestConnectionDrafts(t *testing.T) {
 		}
 	})
 
+	t.Run("slack", func(t *testing.T) {
+		fs := h.Fakes.Slack
+		created := e.api(t).json(http.MethodPost, "/api/v1/connections", `{"type":"slack","name":"draft-sl",
+			"event_mode":"http","bot_token":"`+devmode.SlackSecondBotToken+`","app_token":"`+
+			devmode.SlackSecondAppToken+`","slack_signing_secret":"`+fakeslack.SecondSigningSecret+`",
+			"proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}`, http.StatusCreated)
+		id := created["id"].(string)
+		before := e.stored(t, id)
+		body := func(mode, extra string) string {
+			return `{"type":"slack","connection_id":"` + id + `","event_mode":"` + mode + `"` + extra + `}`
+		}
+		proxy := `,"proxy":{"enabled":true,"type":"http","address":"` + devmode.HTTPProxyAddr + `"}`
+		bot := `,"bot_token":"` + devmode.SlackSecondBotToken + `"`
+		app := `,"app_token":"` + devmode.SlackSecondAppToken + `"`
+		// authTests are the requests to auth.test since the fake was reset; "Dev Slack" may reconnect its socket
+		// meanwhile, with apps.connections.open alone.
+		authTests := func() []fakeserver.Request {
+			return slices.DeleteFunc(fakeRequests(t, fs), func(q fakeserver.Request) bool {
+				return q.Path != "/api/auth.test"
+			})
+		}
+		// carrying are the requests since the fake was reset that carry token.
+		carrying := func(token string) []fakeserver.Request {
+			return slices.DeleteFunc(fakeRequests(t, fs), func(q fakeserver.Request) bool { return !carries(q, token) })
+		}
+		viaAll := func(r draftResult, via string) bool {
+			return !slices.ContainsFunc(r.Steps, func(s checkStep) bool { return s.Via != via })
+		}
+
+		// Only the proxy changed, no token: the dry probe through the proxy, without Authorization.
+		resetFake(t, fs)
+		resetProxy(t)
+		r := e.wantSteps(t, body("socket", proxy), "dry_probe:ok token:skip scopes:skip app_token:skip")
+		if !r.OK || !viaAll(r, "proxy") || r.Slack != nil {
+			t.Fatalf("changed proxy = %+v", r)
+		}
+		if got := described(authTests()); !slices.Equal(got, []string{"POST /api/auth.test auth=false"}) {
+			t.Fatalf("requests of the dry probe %v", got)
+		}
+		if got := proxyTargets(t); len(got) == 0 || slices.ContainsFunc(got, func(s string) bool {
+			return s != devmode.SlackAddr
+		}) {
+			t.Fatalf("targets of the proxy %v", got)
+		}
+		// The proxy connected only to the fake, so every request through it is among the fake's: none, on any path,
+		// carries a stored token.
+		for _, token := range []string{devmode.SlackSecondBotToken, devmode.SlackSecondAppToken} {
+			if got := carrying(token); len(got) != 0 {
+				t.Fatalf("a stored token reached the fake through the dry probe: %v", described(got))
+			}
+		}
+
+		// The tokens typed again: the steps through the new proxy with them.
+		resetProxy(t)
+		r = e.wantSteps(t, body("socket", proxy+bot+app), "token:ok scopes:ok app_token:ok")
+		if !viaAll(r, "proxy") || r.BotName == nil || *r.BotName != fakeslack.Apps()[1].BotName {
+			t.Fatalf("typed tokens = %+v", r)
+		}
+		if got := proxyTargets(t); len(got) == 0 {
+			t.Fatal("the typed tokens did not go through the proxy")
+		}
+
+		// The bot token typed alone through the new proxy: the stored app-level token stays.
+		resetFake(t, fs)
+		e.wantSteps(t, body("socket", proxy+bot), "token:ok scopes:ok app_token:skip")
+		if got := carrying(devmode.SlackSecondAppToken); len(got) != 0 {
+			t.Fatalf("the stored app-level token went through a new proxy: %v", described(got))
+		}
+		if got := carrying(devmode.SlackSecondBotToken); len(got) != 1 {
+			t.Fatalf("requests of the typed bot token %v", described(got))
+		}
+
+		// The saved route: the stored tokens, in either mode.
+		e.wantSteps(t, body("socket", ""), "token:ok scopes:ok app_token:ok")
+		e.wantSteps(t, body("http", ""), "token:ok scopes:ok")
+
+		// Answers to the dry probe that are not Slack's not_authed, and a token Slack refuses.
+		for _, c := range []struct{ fault, steps, code string }{
+			{`{"path":"/api/auth.test","status":200,"content_type":"text/html","body":"<html></html>","times":1}`,
+				"dry_probe:fail token:skip scopes:skip", "not_slack"},
+			{`{"path":"/api/auth.test","status":200,"body":"{\"ok\":true}","times":1}`,
+				"dry_probe:fail token:skip scopes:skip", "not_slack"},
+			{`{"path":"/api/auth.test","status":503,"body":"{\"ok\":false,\"error\":\"not_authed\"}","times":1}`,
+				"dry_probe:fail token:skip scopes:skip", "unexpected_status"},
+		} {
+			if a := call(t, http.MethodPost, fs+"/_fake/faults", c.fault); a.status != http.StatusNoContent {
+				t.Fatalf("POST /_fake/faults = %d %s", a.status, a.body)
+			}
+			if r := e.wantSteps(t, body("http", proxy), c.steps); r.Steps[0].Code != c.code {
+				t.Fatalf("fault %s = %+v", c.fault, r)
+			}
+		}
+		if a := call(t, http.MethodPost, fs+"/_fake/faults", `{"path":"/api/auth.test","status":200,`+
+			`"body":"{\"ok\":false,\"error\":\"invalid_auth\"}","times":1}`); a.status != http.StatusNoContent {
+			t.Fatalf("POST /_fake/faults = %d %s", a.status, a.body)
+		}
+		if r := e.wantSteps(t, body("socket", bot+app), "token:fail scopes:skip app_token:skip"); r.Steps[0].Code !=
+			"token_invalid" {
+			t.Fatalf("a refused token = %+v", r)
+		}
+
+		// The records of a draft: draft_check in its run, under the Connection it names, and without an owner.
+		for _, c := range []struct{ body, owner string }{
+			{body("socket", bot+app), id},
+			{`{"type":"slack","event_mode":"socket"` + bot + app + `}`, "<nil>"},
+		} {
+			r, a := e.draft(t, c.body)
+			if a.status != http.StatusOK || !strings.HasPrefix(r.Run, "CR") {
+				t.Fatalf("draft = %d %s", a.status, redacted(string(a.body)))
+			}
+			var items []any
+			eventually(t, "the records of a Slack draft", func() bool {
+				items = e.api(t).json(http.MethodGet, "/api/v1/request-log?run="+r.Run, "",
+					http.StatusOK)["items"].([]any)
+				return len(items) >= 4
+			})
+			for _, it := range items {
+				rec := it.(map[string]any)
+				if rec["check"] != "draft_check" || rec["check_run"] != r.Run || fmt.Sprint(rec["connection_id"]) !=
+					c.owner {
+					t.Errorf("a record of the draft %v", redacted(fmt.Sprint(rec)))
+				}
+			}
+		}
+		if after := e.stored(t, id); after != before {
+			t.Fatalf("the drafts changed the saved Connection: %s, before %s", after, before)
+		}
+	})
+
 	t.Run("refusals", func(t *testing.T) {
 		mm := e.id(t, "mattermost", devmode.ConnectionName)
 		for _, c := range []struct{ body, pointer, code string }{
@@ -459,12 +606,15 @@ func TestConnectionDrafts(t *testing.T) {
 			{`{"type":"telegram","connection_id":"` + mm + `","bot_api_base_url":"` + h.Fakes.Telegram +
 				`","update_mode":"long_polling"}`, "/connection_id", "unknown_id"},
 			{`{"type":"mattermost","server_url":"ftp://x"}`, "/server_url", "invalid_format"},
+			{`{"type":"slack","event_mode":"socket","bot_token":"` + devmode.SlackSecondAppToken + `"}`, "/bot_token",
+				"invalid_format"},
+			{`{"type":"slack","event_mode":"socket","connection_id":"` + mm + `"}`, "/connection_id", "unknown_id"},
 		} {
 			_, a := e.draft(t, c.body)
 			if pointer, code := firstError(t, a); a.status != http.StatusUnprocessableEntity || pointer != c.pointer ||
 				code != c.code {
-				t.Errorf("draft %s = %d %s, want 422 %s at %s", c.body, a.status, redacted(string(a.body)), c.code,
-					c.pointer)
+				t.Errorf("draft %s = %d %s, want 422 %s at %s", redacted(c.body), a.status, redacted(string(a.body)),
+					c.code, c.pointer)
 			}
 		}
 		session := newAgent(t, e.base)

@@ -6,13 +6,17 @@ package slack
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
+	"mime"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The steps of the connection check of a Slack Connection (C-24.FR-2).
@@ -311,4 +315,105 @@ func timed(ctx context.Context, run Runner, realClock clock.Clock, f func(ctx co
 		return r.Outcome()
 	})
 	return latency, err
+}
+
+// The step of the dry probe of a Slack Connection (C-24.FR-2) and the messages of what answered it.
+const (
+	StepDryProbe = "dry_probe"
+
+	messageNotSlack     = "The address answered %d with %s, not as Slack's Web API."
+	messageNotNotAuthed = "The address answered 200 with JSON that is not Slack's not_authed answer."
+	messageOtherStatus  = "Slack answered %d instead of 200 with not_authed."
+	noContentType       = "no content type"
+)
+
+// The codes of the dry probe that reached no Slack Web API (ConnectionCheckStep.code); a probe without an answer has
+// the code of delivery.FailureCode.
+const (
+	CodeNotSlack         = "not_slack"
+	CodeUnexpectedStatus = "unexpected_status"
+)
+
+// Probe is the result of a dry probe: whether it passed, its latency on the real clock, and when it failed what
+// answered, in English, with its code, which clients translate.
+type Probe struct {
+	OK      bool
+	Latency time.Duration
+	Message string
+	Code    string
+}
+
+// RunDryProbe makes the dry probe of c through run (C-24.FR-2): `POST <base>auth.test` without any token, which Slack
+// answers 200 with `{"ok":false,"error":"not_authed"}` (F-070), timed on the real clock, on a client that may have no
+// token and sends none. It passes on that answer and otherwise names what answered: not_slack for an answer that is
+// not that JSON, unexpected_status for JSON with another status, and the code of delivery.FailureCode with the text of
+// delivery.FailureMessage without an answer, without Slack's name through a proxy, whose own name is the one that did
+// not resolve. A RetryAfter is handed to run as Transient: a request without a token says nothing of the bot's budget,
+// so it never holds the Connection's limiter. Its error is the runner's own.
+func RunDryProbe(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (Probe, error) {
+	var r Result
+	var answer outbound.Result
+	var latency time.Duration
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		start := realClock.Now()
+		r, answer = c.dryProbe(ctx, call.Class)
+		latency = realClock.Now().Sub(start)
+		o := r.Outcome()
+		if o.Kind == delivery.OutcomeRetryAfter {
+			o.Kind, o.Scope, o.RetryAfter = delivery.OutcomeTransient, "", 0
+		}
+		return o
+	}); err != nil {
+		return Probe{}, err
+	}
+	address := c.Base()
+	if c.Via() == ViaProxy {
+		address = ""
+	}
+	p := c.probeVerdict(r, answer, address)
+	p.Latency = latency
+	return p, nil
+}
+
+// dryProbe is `POST <base>auth.test` in class without the Authorization header and without a body, named auth.test in
+// the Request log: the Result and the answer as outbound read it.
+func (c *Client) dryProbe(ctx context.Context, class outbound.Class) (Result, outbound.Result) {
+	oc, err := c.client(class)
+	if err != nil {
+		return unknown(err.Error()), outbound.Result{}
+	}
+	a := &answerClass{}
+	h := http.Header{"Accept": {"application/json"}, "Content-Type": {"application/x-www-form-urlencoded"}}
+	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodPost, URL: c.path + "auth.test", Header: h,
+		Mapping: a.mapping, ClassifyBody: a.body, Operation: "auth.test"})
+	return c.resultOf("auth.test", res, err), res
+}
+
+// probeVerdict says whether the answer to the dry probe of the Web API at address, empty through a proxy, is Slack's,
+// in the order of C-24.FR-2: no answer — a proxy that refused its credentials included — has the code of
+// delivery.FailureCode, with the text of delivery.FailureMessage or the error's own; then an answer that is not a JSON
+// object is not_slack with its status and media type, a 200 whose JSON is `ok: false` with the error not_authed
+// passes and any other 200 is not_slack, and JSON with another status is unexpected_status.
+func (c *Client) probeVerdict(r Result, answer outbound.Result, address string) Probe {
+	if r.Status == 0 {
+		code, message := failure(r, address)
+		return Probe{Message: message, Code: code}
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(answer.Body, &object) != nil || object == nil {
+		mediaType, _, err := mime.ParseMediaType(answer.Header.Get("Content-Type"))
+		if err != nil {
+			mediaType = ""
+		}
+		return Probe{Message: fmt.Sprintf(messageNotSlack, r.Status, cmp.Or(c.mask(mediaType), noContentType)),
+			Code: CodeNotSlack}
+	}
+	env, ok := answerOf(answer.Body)
+	switch {
+	case r.Status == http.StatusOK && ok && !*env.OK && env.Error == "not_authed":
+		return Probe{OK: true}
+	case r.Status == http.StatusOK:
+		return Probe{Message: messageNotNotAuthed, Code: CodeNotSlack}
+	}
+	return Probe{Message: fmt.Sprintf(messageOtherStatus, r.Status), Code: CodeUnexpectedStatus}
 }

@@ -22,6 +22,7 @@ import type { ConnectionPath } from './connectionPath';
 import type { NullableConnectionCheckCode } from './nullableConnectionCheckCode';
 
 export interface ConnectionCheckStep {
+  /** The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`. */
   name: ConnectionCheckStepName;
   ok: boolean;
   skipped?: boolean;

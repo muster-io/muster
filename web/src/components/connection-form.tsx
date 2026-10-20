@@ -91,6 +91,9 @@ export const DEFAULT_MATTERMOST_LIMITER = { limit: 5, per_seconds: 1 } as const;
 /** The limiter of a new Telegram Connection: connection.telegram.limiter, 15 messages per second. */
 export const DEFAULT_TELEGRAM_LIMITER = { limit: 15, per_seconds: 1 } as const;
 
+/** Slack's Web API, the fixed address of every Slack Connection (C-24.FR-1). */
+const SLACK_API_URL = "https://slack.com/api/";
+
 /** The limiter of a new Slack Connection: connection.slack.limiter, 50 requests per minute. */
 export const DEFAULT_SLACK_LIMITER = { limit: 50, per_seconds: 60 } as const;
 
@@ -231,13 +234,15 @@ export function connectionDraft(
   }
 }
 
-/** The address a draft calls: the server URL, the Bot API base URL or the base URL of its type. */
+/** The address a draft calls: the server URL, the Bot API base URL or the base URL of its type, Slack's for Slack. */
 export function draftAddress(draft: ConnectionDraft): string {
   switch (draft.type) {
     case "telegram":
       return draft.bot_api_base_url;
     case "bridge":
       return draft.base_url;
+    case "slack":
+      return SLACK_API_URL;
     default:
       return draft.server_url;
   }

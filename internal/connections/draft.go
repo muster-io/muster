@@ -17,14 +17,15 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 )
 
 // Draft is a Connection as its form holds it before it is saved (C-13.FR-14): its type and address — the server URL
 // of a Mattermost one, the Bot API base URL and update mode of a Telegram one, the base URL and event delivery mode of
-// a Bridge —, the bot token typed in the form, Keep when none is, its proxy, nil for no proxy on a new Connection and
-// for the saved one on a saved Connection, and ConnectionID, the public_id of the saved Connection the form edits, nil
-// for a new one.
+// a Bridge, the event mode of a Slack one, whose address is Slack's —, the bot token typed in the form, Keep when none
+// is, and for Slack the app-level token, its proxy, nil for no proxy on a new Connection and for the saved one on a
+// saved Connection, and ConnectionID, the public_id of the saved Connection the form edits, nil for a new one.
 type Draft struct {
 	Type          string
 	ServerURL     string
@@ -32,29 +33,35 @@ type Draft struct {
 	UpdateMode    string
 	BridgeBaseURL string
 	EventDelivery string
+	EventMode     string
 	BotToken      keyring.SecretInput
+	AppToken      keyring.SecretInput
 	Proxy         *proxyconf.Input
 	ConnectionID  *string
 }
 
 // draftRoute is where and how the check of a draft calls: its address as a save normalizes it, its proxy and the
 // proxy's password, the bot token, empty when only the dry probe may run, what limits its requests and whose Request
-// log they go to.
+// log they go to; for Slack the app-level token, empty when the step app_token is skipped, and slackBase, where muster
+// dev sends the requests instead of Slack, empty for Slack.
 type draftRoute struct {
-	in       Input
-	proxy    proxyconf.Config
-	password logging.Secret
-	token    logging.Secret
-	subject  delivery.Subject
-	owner    outbound.Owner
+	in        Input
+	proxy     proxyconf.Config
+	password  logging.Secret
+	token     logging.Secret
+	appToken  logging.Secret
+	slackBase string
+	subject   delivery.Subject
+	owner     outbound.Owner
 }
 
 // CheckDraft runs the check of a draft Connection d on the interactive path without saving it (C-13.FR-14), with the
 // steps and the codes of Check. It validates d as a save would — the address of its type, the connection_id, the proxy
 // — and then decides the token: a bot token typed in d goes to the address of d; without one, the stored token of the
 // Connection d edits is used only when d's address, normalized as a save normalizes it, and d's proxy route are the
-// saved ones; otherwise only the dry probe of the type runs and the other steps are skipped. A stored proxy password is
-// used only with the saved route and no password in d. The clients are built for the check and never kept; their
+// saved ones; otherwise only the dry probe of the type runs and the other steps are skipped. The address of a Slack
+// draft is Slack's, so only its proxy can differ; its app-level token follows slackDraftRoute. A stored proxy password
+// is used only with the saved route and no password in d. The clients are built for the check and never kept; their
 // requests, the dry probe's included, are recorded as draft_check under the Connection the draft names, or without an
 // owner, under one check run that the result names (C-23.FR-1, FR-5). A draft of a saved Connection takes its limiter
 // tokens from that Connection, one of a new Connection takes none; no limiter token within the budget is a
@@ -71,6 +78,8 @@ func (s *Service) CheckDraft(ctx context.Context, d Draft) (CheckResult, error) 
 		res, err = s.checkTelegramDraft(ctx, r)
 	case TypeBridge:
 		res, err = s.checkBridgeDraft(ctx, r)
+	case TypeSlack:
+		res, err = s.checkSlackDraft(ctx, r)
 	default:
 		res, err = s.checkMattermostDraft(ctx, r)
 	}
@@ -81,14 +90,15 @@ func (s *Service) CheckDraft(ctx context.Context, d Draft) (CheckResult, error) 
 	return res, nil
 }
 
-// draftRoute validates d in the order of a save — the type and the address, the bot token, the connection_id, the
-// proxy and its password — and applies the token rule of C-13.FR-14; a secret is opened only when the rule uses it.
+// draftRoute validates d in the order of a save — the type and the address, the bot token and for Slack the app-level
+// token, the connection_id, the proxy and its password — and applies the token rule of C-13.FR-14; a secret is opened
+// only when the rule uses it.
 func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 	in := Input{Type: d.Type, ServerURL: d.ServerURL, BotAPIBaseURL: d.BotAPIBaseURL, UpdateMode: d.UpdateMode,
-		BridgeBaseURL: d.BridgeBaseURL, EventDelivery: d.EventDelivery}
-	if in.Type != TypeMattermost && in.Type != TypeTelegram && in.Type != TypeBridge {
+		BridgeBaseURL: d.BridgeBaseURL, EventDelivery: d.EventDelivery, EventMode: d.EventMode}
+	if in.Type != TypeMattermost && in.Type != TypeTelegram && in.Type != TypeBridge && in.Type != TypeSlack {
 		return draftRoute{}, &FieldError{Pointer: "/type", Code: CodeInvalidFormat,
-			Detail: "The type is not mattermost, telegram or bridge."}
+			Detail: "The type is not mattermost, telegram, bridge or slack."}
 	}
 	if err := checkAddress(&in); err != nil {
 		return draftRoute{}, err
@@ -99,6 +109,11 @@ func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 			Detail: "The bot token cannot be null; omit it to use the stored one."}
 	case d.BotToken.Given && d.BotToken.Value == "":
 		return draftRoute{}, &FieldError{Pointer: "/bot_token", Code: CodeTooShort, Detail: "The bot token is empty."}
+	}
+	if in.Type == TypeSlack {
+		if err := checkSlackDraftTokens(d); err != nil {
+			return draftRoute{}, err
+		}
 	}
 	var row *dbgen.GetConnectionRow
 	var saved proxyconf.Config
@@ -148,12 +163,78 @@ func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 			return draftRoute{}, fmt.Errorf("open the bot token of the connection %s: %w", row.PublicID, err)
 		}
 	}
+	if in.Type == TypeSlack {
+		if err := s.slackDraftRoute(d, row, same, &out); err != nil {
+			return draftRoute{}, err
+		}
+	}
 	if row != nil {
 		id := row.ID
 		out.subject = delivery.Subject{Connection: &id}
 		out.owner = outbound.Owner{Connection: row.ID, PublicID: row.PublicID}
 	}
 	return out, nil
+}
+
+// checkSlackDraftTokens validates the tokens typed in the Slack draft d as a save does (C-24.FR-1): the bot token
+// starts with xoxb- and the app-level token, which is not null and not empty, with xapp-. A draft may leave out either
+// token, so the mode's secret is not required.
+func checkSlackDraftTokens(d Draft) error {
+	switch {
+	case d.AppToken.Null:
+		return &FieldError{Pointer: "/app_token", Code: CodeRequired,
+			Detail: "The app-level token cannot be null; omit it to use the stored one."}
+	case d.AppToken.Given && d.AppToken.Value == "":
+		return &FieldError{Pointer: "/app_token", Code: CodeTooShort, Detail: "The app-level token is empty."}
+	}
+	// Without an event mode checkSlackSecrets checks the prefixes alone.
+	return checkSlackSecrets(Input{BotToken: d.BotToken, AppToken: d.AppToken}, nil)
+}
+
+// slackDraftRoute decides the app-level token of the Slack draft d and where muster dev sends its requests, once the
+// bot token is decided (C-13.FR-14, C-24.FR-2). The bot token decides: without one only the dry probe runs, and no
+// app-level token goes anywhere. With one, an app-level token typed in d is used; without one, in socket mode, the
+// stored app-level token of the Connection row is used only on the saved proxy route (same) and, under muster dev,
+// only when the bot token is routed where the stored one is; otherwise the step app_token is skipped. Under muster dev
+// the route of the bot token that is sent decides slackBase, and for the dry probe of a saved Connection the route of
+// its stored bot token, which is opened for that alone and never sent; the dry probe of a new Connection goes to Slack.
+func (s *Service) slackDraftRoute(d Draft, row *dbgen.GetConnectionRow, same bool, out *draftRoute) error {
+	savedBase := func() (string, error) {
+		if row == nil || s.cfg.SlackRoute == nil {
+			return "", nil
+		}
+		stored, err := s.cfg.Keyring.OpenSecret(fieldBotToken, storedToken(*row))
+		if err != nil {
+			return "", fmt.Errorf("open the bot token of the connection %s: %w", row.PublicID, err)
+		}
+		return s.cfg.SlackRoute(stored), nil
+	}
+	if out.token == "" {
+		base, err := savedBase()
+		out.slackBase = base
+		return err
+	}
+	if s.cfg.SlackRoute != nil {
+		out.slackBase = s.cfg.SlackRoute(out.token)
+	}
+	switch {
+	case d.AppToken.Given:
+		out.appToken = d.AppToken.Value
+	case same && out.in.EventMode == EventModeSocket && storedSlackAppToken(*row).Set():
+		// Without a typed bot token the stored one is sent, which is routed where it is stored.
+		if d.BotToken.Given {
+			base, err := savedBase()
+			if err != nil || base != out.slackBase {
+				return err
+			}
+		}
+		app, err := s.cfg.Keyring.OpenSecret(fieldSlackAppToken, storedSlackAppToken(*row))
+		if err != nil {
+			return fmt.Errorf("open the app-level token of the connection %s: %w", row.PublicID, err)
+		}
+		out.appToken = app
+	}
+	return nil
 }
 
 // sameRoute reports whether the proxies a and b send a request the same way: both disabled, whatever type and address
@@ -165,13 +246,16 @@ func sameRoute(a, b proxyconf.Config) bool {
 	return a.Type == b.Type && a.Address == b.Address
 }
 
-// addressOf is where the Connection of in calls: its server URL, Bot API base URL or base URL.
+// addressOf is where the Connection of in calls: its server URL, Bot API base URL or base URL; Slack's, which is
+// fixed, for a Slack Connection.
 func addressOf(in Input) string {
 	switch in.Type {
 	case TypeTelegram:
 		return in.BotAPIBaseURL
 	case TypeBridge:
 		return in.BridgeBaseURL
+	case TypeSlack:
+		return slack.BaseURL
 	}
 	return in.ServerURL
 }
@@ -183,6 +267,8 @@ func savedAddress(r dbgen.GetConnectionRow) string {
 		return r.TelegramBotApiBaseUrl.String
 	case TypeBridge:
 		return r.BridgeBaseUrl.String
+	case TypeSlack:
+		return slack.BaseURL
 	}
 	return r.MattermostServerUrl.String
 }
@@ -281,4 +367,44 @@ func (s *Service) checkBridgeDraft(ctx context.Context, r draftRoute) (CheckResu
 		return CheckResult{}, err
 	}
 	return bridgeResult(info, res, latency, c.Via(), r.in.EventDelivery), nil
+}
+
+// checkSlackDraft checks a Slack draft (C-24.FR-2) with a client built for the check, whose requests go to Slack, or
+// where muster dev routes r.slackBase: with a bot token the steps of slack.RunCheck in the draft's event mode — token,
+// scopes and, in socket mode, app_token, skipped without an app-level token —, whose findings are returned and never
+// stored; without one the dry probe, and the other steps skipped.
+func (s *Service) checkSlackDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
+	base := r.slackBase
+	c, err := slack.NewClient(slack.Network(s.cfg.Network), slack.Settings{BotToken: r.token, AppToken: r.appToken,
+		Proxy: r.proxy.Outbound(r.password), Owner: r.owner, Route: func(logging.Secret) string { return base }})
+	if err != nil {
+		return CheckResult{}, err
+	}
+	run := draftRunner(s.cfg.Interactive, r.subject)
+	socket := r.in.EventMode == EventModeSocket
+	if r.token == "" {
+		p, err := slack.RunDryProbe(ctx, c, run, s.cfg.Clocks.Real)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		steps := []Step{{Name: slack.StepDryProbe, OK: p.OK, Latency: p.Latency, Via: c.Via(), Message: p.Message,
+			Code: p.Code}, {Name: StepToken, Skipped: true, Via: c.Via()}, {Name: StepScopes, Skipped: true,
+			Via: c.Via()}}
+		if socket {
+			steps = append(steps, Step{Name: StepAppToken, Skipped: true, Via: c.Via()})
+		}
+		return CheckResult{OK: p.OK, Steps: steps}, nil
+	}
+	mode := r.in.EventMode
+	if socket && r.appToken == "" {
+		mode = EventModeHTTP
+	}
+	res, err := slack.RunCheck(ctx, c, run, s.cfg.Clocks.Real, mode)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	if socket && r.appToken == "" {
+		res.Steps = append(res.Steps, slack.Step{Name: StepAppToken, Skipped: true, Via: c.Via()})
+	}
+	return slackResultOf(res), nil
 }
