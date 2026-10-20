@@ -128,8 +128,10 @@ issue: 310
   for the read): `ListSocketConnections`; `RecordSocketHello` writes `slack_socket_hello_at` and
   `slack_socket_other_connections` for the version the socket read, not a change of the configuration; the read of a
   Slack Connection returns `socket` (`hello_at`, `other_connections`), null in `http` mode and before the first
-  `hello`; the check's warning and the doctor's WARN line read it. A save of the Connection forgets
-  `slack_socket_hello_at` and `slack_socket_other_connections`: its socket starts again and counts at its next `hello`.
+  `hello`; the check's warning and the doctor's WARN line read it. A save that changes the Connection forgets
+  `slack_socket_hello_at` and `slack_socket_other_connections`: its socket starts again and counts at its next `hello`;
+  a save without changes is not a change (`connections.Update` returns before writing) and keeps the socket and its
+  count.
 - **Spec** (`api/openapi.yaml`): `SlackConnection.socket` (`hello_at`, `other_connections`), read-only;
   `ConnectionCheckResult.warnings` gains `another_client_connected`, described, and `connection-check.tsx` shows its
   text from reference.md in English and Russian, since its switch over the warnings must name every value.
@@ -243,7 +245,7 @@ curl -s "${H[@]}" -X POST $API/connections/$L/checks | jq -c '{ok, warnings}'   
 FIRE live3 LiveSocket t1; LG=$(AG 'pod%3D%22t1%22')
 # the operator presses Ack on the message in #alerts
 until curl -s -b jar $API/alert-groups/$LG | jq -e '.status == "acknowledged"' > /dev/null; do sleep 2; done
-curl -s -b jar "$API/alert-groups/$LG/timeline" | jq -r '[.items[] | select(.kind == "acknowledged")][0] | "\(.transport) \(.actor.login)"'   # slack alice
+curl -s -b jar "$API/alert-groups/$LG/timeline" | jq -r '[.items[] | select(.kind == "status" and .event == "acknowledged")][0] | "\(.actor.transport) \(.actor.name)"'   # slack alice
 ```
 
 At the end the Alert Group is resolved, its messages are deleted with the bot token, the link row is removed and the

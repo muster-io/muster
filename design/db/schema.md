@@ -744,7 +744,8 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   change of the configuration; a new bot token forgets it. `slack_socket_hello_at` and `slack_socket_other_connections`
   hold what the last Socket Mode `hello` counted — its time on the business clock and the connections it counted beyond
   those the Leader holds — written by the Leader from S-101 for the version its socket read, not a change of the
-  configuration; a save of the Connection forgets both, since its socket starts again and counts at its next `hello`.
+  configuration; a save that changes the Connection forgets both, since its socket starts again and counts at its next
+  `hello`; a save without changes writes nothing and keeps them.
   `UNIQUE (id, type)` is the target of type-checked foreign keys. A Connection cannot be deleted while a Destination
   that is not deleted uses it; deleting it abandons the final edits still pending for its deleted Destinations, whose
   deliveries end as `not_delivered`.
