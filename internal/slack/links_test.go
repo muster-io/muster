@@ -161,13 +161,16 @@ func TestEmailHandle(t *testing.T) {
 // name the call and no text of Slack's.
 func TestFindUserByEmail(t *testing.T) {
 	e := newLinkEnv(t)
-	for h, want := range map[string]accountlinks.SlackAccount{
-		"Alice@Example.ORG":   {ID: fakeslack.UserAlice, Name: "alice", DisplayName: "Alice Smith"},
-		" bob@example.org ":   {ID: fakeslack.UserBob, Name: "bob", DisplayName: "Bob Jones"},
-		"CAROL@example.org\t": {ID: fakeslack.UserCarol, Name: "carol", DisplayName: "Carol"},
+	for _, c := range []struct {
+		handle string
+		want   accountlinks.SlackAccount
+	}{
+		{"Alice@Example.ORG", accountlinks.SlackAccount{ID: fakeslack.UserAlice, Name: "alice", DisplayName: "Alice Smith"}},
+		{" bob@example.org ", accountlinks.SlackAccount{ID: fakeslack.UserBob, Name: "bob", DisplayName: "Bob Jones"}},
+		{"CAROL@example.org\t", accountlinks.SlackAccount{ID: fakeslack.UserCarol, Name: "carol", DisplayName: "Carol"}},
 	} {
-		if got, err := e.find(t, h); err != nil || got != want {
-			t.Errorf("FindUser(%q) = %+v, %v", h, got, err)
+		if got, err := e.find(t, c.handle); err != nil || got != c.want {
+			t.Errorf("FindUser(%q) = %+v, %v", c.handle, got, err)
 		}
 	}
 	reqs := e.requests("users.lookupByEmail")
@@ -242,13 +245,16 @@ func TestFindUserByName(t *testing.T) {
 			t.Errorf("page %d: %s", i+1, r.Body)
 		}
 	}
-	for h, want := range map[string]accountlinks.SlackAccount{
-		"alice smith": {ID: fakeslack.UserAlice, Name: "alice", DisplayName: "Alice Smith"},
-		" @carol ":    {ID: fakeslack.UserCarol, Name: "carol", DisplayName: "Carol"},
-		"Sam.Two":     {ID: fakeslack.UserSam2, Name: "sam.two", DisplayName: "sam"},
+	for _, c := range []struct {
+		handle string
+		want   accountlinks.SlackAccount
+	}{
+		{"alice smith", accountlinks.SlackAccount{ID: fakeslack.UserAlice, Name: "alice", DisplayName: "Alice Smith"}},
+		{" @carol ", accountlinks.SlackAccount{ID: fakeslack.UserCarol, Name: "carol", DisplayName: "Carol"}},
+		{"Sam.Two", accountlinks.SlackAccount{ID: fakeslack.UserSam2, Name: "sam.two", DisplayName: "sam"}},
 	} {
-		if got, err := e.find(t, h); err != nil || got != want {
-			t.Errorf("FindUser(%q) = %+v, %v", h, got, err)
+		if got, err := e.find(t, c.handle); err != nil || got != c.want {
+			t.Errorf("FindUser(%q) = %+v, %v", c.handle, got, err)
 		}
 	}
 	e.f.ResetRequests()
