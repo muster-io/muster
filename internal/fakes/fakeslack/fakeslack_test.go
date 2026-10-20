@@ -5,17 +5,24 @@ package fakeslack_test
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
@@ -285,7 +292,7 @@ func TestConfig(t *testing.T) {
 		`"C0FAKEOTHER":{"name":"other","member":false,"archived":false,"private":false}}`
 	if got := do(t, req); got.raw != `{"scopes":{"a":"`+fakeslack.DefaultScopes+`","b":"`+fakeslack.DefaultScopes+
 		`"},"revoked":[],"user_tokens":[],"app_of":{},"channels":{"a":`+channels+`,"b":`+channels+
-		`},"page_size":0}`+"\n" {
+		`},"page_size":0,"request_url":{}}`+"\n" {
 		t.Fatalf("default config %s", got.raw)
 	}
 	five := "chat:write,channels:read,groups:read,im:write,users:read"
@@ -1139,9 +1146,10 @@ func TestGetPermalink(t *testing.T) {
 	slackError(t, link(alerts, root), "message_not_found")
 }
 
-// TestPostEphemeral covers F-092: an ephemeral message to a user in a channel with the bot is answered with a new
-// message_ts and kept nowhere; without a user it is user_not_in_channel, without the bot not_in_channel; its content is
-// checked as a post's.
+// TestPostEphemeral covers F-092: an ephemeral message to one of the fake's people in a channel with the bot is
+// answered with a new message_ts, kept in /_fake/ephemeral — with its Thread, null without one — and never among the
+// channel's messages; without a user, or to anyone else, it is user_not_in_channel, without the bot not_in_channel;
+// its content is checked as a post's.
 func TestPostEphemeral(t *testing.T) {
 	f := start(t)
 	eph := func(args map[string]any) answer {
@@ -1154,6 +1162,21 @@ func TestPostEphemeral(t *testing.T) {
 	}
 	if got := f.Messages("", ""); len(got) != 0 {
 		t.Errorf("kept %+v", got)
+	}
+	for _, user := range []string{fakeslack.UserAlice, fakeslack.UserBob, fakeslack.UserCarol, fakeslack.UserDora} {
+		ok(t, chat(t, f, "chat.postEphemeral", botB, map[string]any{"channel": alerts, "user": user, "text": "hi",
+			"thread_ts": "1.000001"}))
+	}
+	slackError(t, eph(map[string]any{"user": "U0STRANGER", "text": "x"}), "user_not_in_channel")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/_fake/ephemeral", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := do(t, req)
+	if !strings.HasPrefix(got.raw, `[{"app":"b","channel":"C0FAKEALERTS","user":"U0MUSTERUSR1","thread_ts":null,`+
+		`"text":"This is a test message; nothing was changed","ts":"1.000001"},{"app":"b","channel":"C0FAKEALERTS",`+
+		`"user":"U0FAKEALICE","thread_ts":"1.000001","text":"hi","ts":"1.000002"}`) || len(f.Ephemerals()) != 5 {
+		t.Errorf("ephemeral %s", got.raw)
 	}
 	slackError(t, eph(map[string]any{"text": "x"}), "user_not_in_channel")
 	slackError(t, eph(map[string]any{"user": fakeslack.UserID}), "no_text")
@@ -1204,5 +1227,322 @@ func TestMessagesAndDeleteEndpoints(t *testing.T) {
 	}
 	if a := del(`{"chan":1}`); a.status != http.StatusBadRequest {
 		t.Errorf("bad body = %d %s", a.status, a.raw)
+	}
+}
+
+// received is a request the stand-in app got from /_fake/press.
+type received struct {
+	header http.Header
+	path   string
+	body   string
+}
+
+// receiver is a stand-in for Muster's callback: it keeps each request and answers status with body.
+type receiver struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	got    []received
+	status int
+	answer string
+}
+
+func newReceiver(t *testing.T) *receiver {
+	t.Helper()
+	rc := &receiver{status: http.StatusOK}
+	rc.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		rc.mu.Lock()
+		rc.got = append(rc.got, received{header: r.Header.Clone(), path: r.URL.Path, body: string(b)})
+		status, answer := rc.status, rc.answer
+		rc.mu.Unlock()
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, answer)
+	}))
+	t.Cleanup(rc.srv.Close)
+	return rc
+}
+
+// last is the last request the stand-in got, and its payload.
+func (rc *receiver) last(t *testing.T) (received, map[string]any) {
+	t.Helper()
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if len(rc.got) == 0 {
+		t.Fatal("the app got no press")
+	}
+	r := rc.got[len(rc.got)-1]
+	form, err := url.ParseQuery(r.body)
+	var p map[string]any
+	if err != nil || json.Unmarshal([]byte(form.Get("payload")), &p) != nil {
+		t.Fatalf("not a form with a JSON payload: %s", r.body)
+	}
+	return r, p
+}
+
+// control sends a request to a control endpoint of the fake.
+func control(t *testing.T, f *fakeslack.Fake, method, path, body string) answer {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, f.URL()+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return do(t, req)
+}
+
+// option is an option of the Snooze menu.
+func option(text, value string) map[string]any {
+	return map[string]any{"text": map[string]any{"type": "plain_text", "text": text}, "value": value}
+}
+
+// pressable posts, to the channel alerts of app b, a Root message whose attachment carries Ack, Resolve and the
+// Snooze menu with value prefix, and a Reminder in its Thread with "Still on it" and Unack; it returns their ts.
+func pressable(t *testing.T, f *fakeslack.Fake, prefix string) (root, reminder string) {
+	t.Helper()
+	snooze := map[string]any{"type": "static_select", "action_id": "snooze",
+		"placeholder": map[string]any{"type": "plain_text", "text": "Snooze…"},
+		"options":     []any{option("1h", prefix+"1H"), option("4h", prefix+"4H")}}
+	root = ok(t, post(t, f, map[string]any{"text": "🔴 #1 DiskFull", "attachments": []any{map[string]any{
+		"color": "#d32f2f", "blocks": []any{textBlock("muster_heading", "#1 DiskFull"),
+			actionsOf("muster_actions", buttonOf("ack", "Ack", prefix+"ACK"), buttonOf("resolve", "Resolve",
+				prefix+"RES"), snooze)}}}}))
+	reminder = ok(t, post(t, f, map[string]any{"text": "Reminder", "thread_ts": root, "blocks": []any{
+		textBlock("muster_text", "Reminder"), actionsOf("muster_actions", buttonOf("still_on_it", "Still on it",
+			prefix+"STILL"), buttonOf("unack", "Unack", prefix+"UNACK"))}}))
+	return root, reminder
+}
+
+// TestPress covers /_fake/press (F-093, F-104): the press of a button of a Root message, an option of its Snooze menu
+// and a button of a Reminder in its Thread, as one of the people, goes to the app's request_url as Slack sends it — a
+// form whose payload is the block_actions payload built from the stored message with the app's verification token and
+// a response_url on the fake, signed with the app's Slack signing secret at the current time — and Muster's status and
+// body come back; a wrong signature, a timestamp offset, another message's value and a value sent as it is go as they
+// are; an unknown message is 404, an app without a request_url 409, an action the message lacks 422, a request it
+// cannot read 400 and an app that does not answer 502.
+func TestPress(t *testing.T) {
+	f := start(t)
+	rc := newReceiver(t)
+	root, reminder := pressable(t, f, "V")
+	second, _ := pressable(t, f, "W")
+	putConfig(t, f, `{"request_url":{"b":"`+rc.srv.URL+`/api/v1/callbacks/slack/CN1"}}`)
+	press := func(body string) answer { return control(t, f, http.MethodPost, "/_fake/press", body) }
+	b := fakeslack.Apps()[1]
+
+	before := time.Now().Unix()
+	if a := press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`); a.status !=
+		http.StatusOK || a.raw != `{"status":200,"body":""}`+"\n" {
+		t.Fatalf("press = %d %s", a.status, a.raw)
+	}
+	r, p := rc.last(t)
+	ts, _ := strconv.ParseInt(r.header.Get("X-Slack-Request-Timestamp"), 10, 64)
+	mac := hmac.New(sha256.New, []byte(fakeslack.SecondSigningSecret))
+	mac.Write([]byte("v0:" + r.header.Get("X-Slack-Request-Timestamp") + ":" + r.body))
+	if r.path != "/api/v1/callbacks/slack/CN1" || r.header.Get("Content-Type") != "application/x-www-form-urlencoded" ||
+		r.header.Get("X-Slack-Signature") != "v0="+hex.EncodeToString(mac.Sum(nil)) || ts < before ||
+		ts > time.Now().Unix() || !strings.HasPrefix(r.body, "payload=") {
+		t.Errorf("request %s %v %s", r.path, r.header, r.body)
+	}
+	container, _ := p["container"].(map[string]any)
+	actions, _ := p["actions"].([]any)
+	action, _ := actions[0].(map[string]any)
+	user, _ := p["user"].(map[string]any)
+	message, _ := p["message"].(map[string]any)
+	responseURL, _ := p["response_url"].(string)
+	if p["type"] != "block_actions" || p["token"] != fakeslack.SecondVerificationToken || p["api_app_id"] != b.AppID ||
+		p["team"].(map[string]any)["id"] != b.TeamID || user["id"] != fakeslack.UserAlice || user["name"] != "alice" ||
+		container["type"] != "message_attachment" || container["message_ts"] != root ||
+		container["channel_id"] != fakeslack.ChannelAlerts || container["thread_ts"] != nil ||
+		p["channel"].(map[string]any)["name"] != "alerts" || message["ts"] != root || message["attachments"] == nil ||
+		!regexp.MustCompile(`^`+regexp.QuoteMeta(f.URL())+`/actions/T0MUSTERDEVB/[0-9]+/[0-9a-f]{24}$`).
+			MatchString(responseURL) || len(actions) != 1 || action["action_id"] != "ack" ||
+		action["block_id"] != "muster_actions" || action["type"] != "button" || action["value"] != "VACK" {
+		t.Errorf("payload %v", p)
+	}
+
+	press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"snooze","option":1,"user":"U0FAKEBOB"}`)
+	_, p = rc.last(t)
+	action = p["actions"].([]any)[0].(map[string]any)
+	if action["type"] != "static_select" || action["selected_option"].(map[string]any)["value"] != "V4H" ||
+		action["value"] != nil || p["user"].(map[string]any)["name"] != "bob" {
+		t.Errorf("snooze payload %v", p)
+	}
+	press(`{"app":"b","channel":"C0FAKEALERTS","ts":"` + reminder + `","action":"still_on_it","user":"U0FAKEDORA",` +
+		`"transport":"http"}`)
+	_, p = rc.last(t)
+	container = p["container"].(map[string]any)
+	if container["type"] != "message" || container["message_ts"] != reminder || container["thread_ts"] != root ||
+		p["actions"].([]any)[0].(map[string]any)["value"] != "VSTILL" {
+		t.Errorf("reminder payload %v", p)
+	}
+	press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"resolve","user":"U0FAKECAROL","signature":"wrong",` +
+		`"timestamp_offset_seconds":-360,"value_of_ts":"` + second + `"}`)
+	r, p = rc.last(t)
+	ts, _ = strconv.ParseInt(r.header.Get("X-Slack-Request-Timestamp"), 10, 64)
+	if r.header.Get("X-Slack-Signature") != "wrong" || ts > time.Now().Unix()-359 || ts < before-361 ||
+		p["actions"].([]any)[0].(map[string]any)["value"] != "WRES" {
+		t.Errorf("negative press %v %v", r.header, p)
+	}
+	rc.mu.Lock()
+	rc.status, rc.answer = http.StatusUnauthorized, `{"status":401}`
+	rc.mu.Unlock()
+	if a := press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","value":"AAAA"}`); a.raw !=
+		`{"status":401,"body":"{\"status\":401}"}`+"\n" {
+		t.Errorf("refused press %s", a.raw)
+	}
+	if _, p = rc.last(t); p["actions"].([]any)[0].(map[string]any)["value"] != "AAAA" {
+		t.Errorf("value %v", p)
+	}
+
+	ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": alerts, "text": "app a"}))
+	appA := f.Messages("a", alerts)[0].TS
+	for _, c := range []struct {
+		body   string
+		status int
+	}{
+		{`{"channel":"C0FAKEALERTS","ts":"9.999999","action":"ack","user":"U0FAKEALICE"}`, http.StatusNotFound},
+		{`{"channel":"C0FAKEOTHER","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`, http.StatusNotFound},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","value_of_ts":"9.1"}`,
+			http.StatusNotFound},
+		{`{"app":"a","channel":"C0FAKEALERTS","ts":"` + appA + `","action":"ack","user":"U0FAKEALICE"}`,
+			http.StatusConflict},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"unsnooze","user":"U0FAKEALICE"}`,
+			http.StatusUnprocessableEntity},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"snooze","option":2,"user":"U0FAKEALICE"}`,
+			http.StatusUnprocessableEntity},
+		{`{"channel":"C0FAKEALERTS","ts":"` + reminder + `","action":"ack","user":"U0FAKEALICE"}`,
+			http.StatusUnprocessableEntity},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","transport":"socket"}`,
+			http.StatusBadRequest},
+		{`{"app":"c","channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`,
+			http.StatusBadRequest},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack"}`, http.StatusBadRequest},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","other":1}`,
+			http.StatusBadRequest},
+	} {
+		if a := press(c.body); a.status != c.status {
+			t.Errorf("%s = %d %s, want %d", c.body, a.status, a.raw, c.status)
+		}
+	}
+	putConfig(t, f, `{"request_url":{"b":"http://127.0.0.1:1/cb"}}`)
+	if a := press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`); a.status !=
+		http.StatusBadGateway {
+		t.Errorf("an app that does not answer = %d %s", a.status, a.raw)
+	}
+	if got := fakeslack.Sign("8f742231b10e8888abcd99yyyzzz85a5", "1531420618", []byte(
+		"token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow&channel_id=G8PSS9T3V&"+
+			"channel_name=foobar&user_id=U2CERLKJA&user_name=roadrunner&command=%2Fwebhook-collect&text=&"+
+			"response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2FT1DC2JH3J%2F397700885554%2F96rGlfmibIGlgcZRskXaIFfN&"+
+			"trigger_id=398738663015.47445629121.803a0bc887a14d10d2c447fce8b6703c")); got !=
+		"v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503" {
+		t.Errorf("Slack's example vector signs as %s", got)
+	}
+}
+
+// TestResponseURL covers the response_url of a press (F-093): an answer is taken, recorded in /_fake/requests, listed
+// in /_fake/responses with null for what it did not send, and faultable; it takes five answers, then expired_url; an
+// unknown one is expired_url, a body that is not a JSON object invalid_payload, and another method is refused.
+func TestResponseURL(t *testing.T) {
+	f := start(t)
+	rc := newReceiver(t)
+	root, _ := pressable(t, f, "V")
+	putConfig(t, f, `{"request_url":{"b":"`+rc.srv.URL+`/cb"}}`)
+	control(t, f, http.MethodPost, "/_fake/press", `{"channel":"C0FAKEALERTS","ts":"`+root+`","action":"resolve",`+
+		`"user":"U0FAKECAROL"}`)
+	_, p := rc.last(t)
+	target := p["response_url"].(string)
+	path := strings.TrimPrefix(target, f.URL())
+	answerTo := func(u, body string) answer {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, u, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		return do(t, req)
+	}
+	muster := `{"response_type":"ephemeral","replace_original":false,"text":"Your Slack account is not linked"}`
+	if a := answerTo(target, muster); a.status != http.StatusOK || a.body["ok"] != true {
+		t.Fatalf("answer = %d %s", a.status, a.raw)
+	}
+	if a := control(t, f, http.MethodGet, "/_fake/responses", ""); a.raw != `[{"app":"b","channel":"C0FAKEALERTS",`+
+		`"user":"U0FAKECAROL","response_type":"ephemeral","replace_original":false,"delete_original":null,`+
+		`"text":"Your Slack account is not linked","thread_ts":null}]`+"\n" {
+		t.Errorf("responses %s", a.raw)
+	}
+	var recorded []fakeserver.Request
+	for _, r := range f.Requests() {
+		if r.Path == path {
+			recorded = append(recorded, r)
+		}
+	}
+	if len(recorded) != 1 || recorded[0].Body != muster || recorded[0].Status != http.StatusOK {
+		t.Errorf("recorded %+v", recorded)
+	}
+	if err := f.SetFault(fakeserver.Fault{Path: "/actions/*/*/*", Status: http.StatusInternalServerError,
+		Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if a := answerTo(target, muster); a.status != http.StatusInternalServerError {
+		t.Errorf("faulted answer = %d %s", a.status, a.raw)
+	}
+	if a := answerTo(target, `not json`); a.status != http.StatusBadRequest || a.body["error"] != "invalid_payload" {
+		t.Errorf("not JSON = %d %s", a.status, a.raw)
+	}
+	if a := answerTo(target, `["x"]`); a.status != http.StatusBadRequest || a.body["error"] != "invalid_payload" {
+		t.Errorf("not an object = %d %s", a.status, a.raw)
+	}
+	for i := 2; i <= 5; i++ {
+		if a := answerTo(target, `{"text":"again","replace_original":true}`); a.status != http.StatusOK {
+			t.Fatalf("answer %d = %d %s", i, a.status, a.raw)
+		}
+	}
+	if a := answerTo(target, muster); a.status != http.StatusNotFound || a.body["error"] != "expired_url" {
+		t.Errorf("a sixth answer = %d %s", a.status, a.raw)
+	}
+	if got := f.Responses(); len(got) != 5 || got[4].ResponseType != nil || got[4].ReplaceOriginal == nil ||
+		!*got[4].ReplaceOriginal {
+		t.Errorf("responses %+v", got)
+	}
+	if a := answerTo(f.URL()+"/actions/T0MUSTERDEVB/99/00", muster); a.status != http.StatusNotFound ||
+		a.body["error"] != "expired_url" {
+		t.Errorf("unknown = %d %s", a.status, a.raw)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := do(t, req); a.status != http.StatusMethodNotAllowed {
+		t.Errorf("GET = %d %s", a.status, a.raw)
+	}
+}
+
+// TestRequestURLConfig covers request_url in /_fake/config: set app by app, kept beside the other app's, removed by
+// null; an unknown app or an address that is not an absolute http or https URL is refused, changing nothing.
+func TestRequestURLConfig(t *testing.T) {
+	f := start(t)
+	putConfig(t, f, `{"request_url":{"b":"http://localhost:8081/api/v1/callbacks/slack/CN1"}}`)
+	putConfig(t, f, `{"request_url":{"a":"https://muster.example.org/api/v1/callbacks/slack/CN2"}}`)
+	if got := f.Config().RequestURL; !reflect.DeepEqual(got, map[string]string{
+		"a": "https://muster.example.org/api/v1/callbacks/slack/CN2",
+		"b": "http://localhost:8081/api/v1/callbacks/slack/CN1"}) {
+		t.Fatalf("request_url %v", got)
+	}
+	if a := putConfig(t, f, `{"request_url":{"b":null}}`); a.status != http.StatusOK ||
+		!strings.Contains(a.raw, `"request_url":{"a":"https://muster.example.org/api/v1/callbacks/slack/CN2"}`) {
+		t.Fatalf("removed = %d %s", a.status, a.raw)
+	}
+	for _, body := range []string{`{"request_url":{"c":"http://x/cb"}}`, `{"request_url":{"a":"/cb"}}`,
+		`{"request_url":{"a":"ftp://x/cb"}}`, `{"request_url":{"a":"http://"}}`, `{"request_url":{"a":1}}`} {
+		if a := putConfig(t, f, body); a.status != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, a.status, a.raw)
+		}
+	}
+	if got := f.Config().RequestURL; len(got) != 1 {
+		t.Errorf("a refused patch changed request_url: %v", got)
+	}
+	if err := f.SetConfig(fakeslack.Config{RequestURL: map[string]string{"b": "::"}}); err == nil {
+		t.Error("SetConfig took a request_url that is no URL")
+	}
+	if err := f.SetConfig(fakeslack.Config{}); err != nil || len(f.Config().RequestURL) != 0 {
+		t.Errorf("SetConfig without request_url: %v %v", err, f.Config().RequestURL)
 	}
 }

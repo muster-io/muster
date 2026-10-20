@@ -771,8 +771,10 @@ func (f *Fake) deleteMessage(w http.ResponseWriter, c caller, cfg Config, scopes
 	writeOK(w, map[string]any{"channel": id, "ts": ts})
 }
 
-// postEphemeral answers chat.postEphemeral (F-092) with a new `message_ts`, and keeps nothing: a channel the bot is a
-// member of, a user — user_not_in_channel without one — and a text, blocks or attachments that pass the checks.
+// postEphemeral answers chat.postEphemeral (F-092) with a new `message_ts` and keeps what it showed for
+// GET /_fake/ephemeral, never among the channel's messages: a channel the bot is a member of, a user who is one of the
+// fake's people — user_not_in_channel for anyone else — in the Thread of `thread_ts` when it is sent, and a text, blocks
+// or attachments that pass the checks.
 func (f *Fake) postEphemeral(w http.ResponseWriter, c caller, cfg Config, scopes string, a chatArgs) {
 	if !chatCaller(w, c, scopes) {
 		return
@@ -782,7 +784,8 @@ func (f *Fake) postEphemeral(w http.ResponseWriter, c caller, cfg Config, scopes
 	if !ok || !postable(w, ch) {
 		return
 	}
-	if user, _ := a.text("user"); user == "" {
+	user, _ := a.text("user")
+	if !member(user) {
 		writeError(w, "user_not_in_channel")
 		return
 	}
@@ -795,8 +798,14 @@ func (f *Fake) postEphemeral(w http.ResponseWriter, c caller, cfg Config, scopes
 		writeError(w, "no_text")
 		return
 	}
+	var thread *string
+	if ts, ok := a.text("thread_ts"); ok && ts != "" {
+		thread = &ts
+	}
 	f.mu.Lock()
 	_, ts := f.nextTS()
+	f.ephemeral = append(f.ephemeral, Ephemeral{App: c.app.Key, Channel: id, User: user, ThreadTS: thread,
+		Text: deref(con.text), TS: ts})
 	f.mu.Unlock()
 	writeOK(w, map[string]any{"message_ts": ts})
 }

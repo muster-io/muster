@@ -219,8 +219,11 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under
   `muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
   `/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's, the app of each
-  token, the channels of each app, merged by id, and a page size for `conversations.list`; both apps have the channel
-  `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other", without it.
+  token, the channels of each app, merged by id, a page size for `conversations.list` and the `request_url` of each
+  app; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other", without it, and
+  the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in every channel with the bot.
+  `POST /_fake/press` presses a button of a message as one of them and sends the app's `request_url` the press signed
+  with its Slack signing secret; `/_fake/ephemeral` and `/_fake/responses` list what Muster answered.
 - Development defaults: the bootstrap Admin `admin@example.org` with the password `muster-dev-password`, and a fixed,
   published master key that the server refuses outside development mode. A `MUSTER_*` variable that is set, even
   empty, replaces its default; the database default also yields to any field of the main connection, and the key and
