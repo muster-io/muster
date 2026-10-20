@@ -28,7 +28,7 @@ const (
 	CodeBotNotInChannel = "bot_not_in_channel"
 )
 
-// The messages of the item channel that failed, in English (reference.md).
+// The messages of the item channel that failed, in English; the one of bot_not_in_channel is that of reference.md.
 const (
 	MessageChannelNotFound  = "The channel was not found, or the bot cannot see it."
 	MessageChannelArchived  = "The channel is archived."
@@ -60,7 +60,6 @@ type Channel struct {
 	IsMember   bool   `json:"is_member"`
 	IsArchived bool   `json:"is_archived"`
 	IsPrivate  bool   `json:"is_private"`
-	IsChannel  bool   `json:"is_channel"`
 }
 
 // masked is ch with its id and name masked.

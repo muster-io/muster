@@ -269,8 +269,8 @@ func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 
 // checkResultOf is the API form of the result of a Connection check, of a saved Connection or of a draft: the steps,
 // without latency those that made no call (connections.Step.Called), with the scopes a missing_scope names (D396), the
-// bot's name, a Telegram bot's webhook and
-// pending updates, a Bridge's info, what a Slack check found, null otherwise, and the check run of its requests.
+// bot's name, a Telegram bot's webhook and pending updates, a Bridge's info, what a Slack check found, null otherwise,
+// and the check run of its requests.
 func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	out := gen.ConnectionCheckResult{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
 		Warnings: make([]gen.ConnectionCheckResultWarnings, 0, len(res.Warnings))}

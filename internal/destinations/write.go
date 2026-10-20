@@ -785,10 +785,9 @@ func created(d Destination, err error) (Destination, error) {
 }
 
 // Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3,
-// C-24.FR-3); a non-nil
-// version must be its current one (If-Match). Saving runs the Destination check as Create does, limited by the
-// Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14). An update that
-// changes nothing writes nothing.
+// C-24.FR-3); a non-nil version must be its current one (If-Match). Saving runs the Destination check as Create does,
+// limited by the Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14).
+// An update that changes nothing writes nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
 	before, err := s.Get(ctx, publicID)
