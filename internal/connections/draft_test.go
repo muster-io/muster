@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -29,6 +31,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -48,7 +51,9 @@ type recorder interface {
 // that no failure message carries a token.
 var tokenNames = strings.NewReplacer(fakemattermost.SecondBotToken, "<mm-second>", botToken, "<mm-stored>",
 	otherToken, "<mm-typed>", faketelegram.SecondBotToken, "<tg-second>", tgToken, "<tg-stored>", tgOtherToken,
-	"<tg-typed>", fakebridge.SecondToken, "<br-second>", fakebridge.Token, "<br-stored>")
+	"<tg-typed>", fakebridge.SecondToken, "<br-second>", fakebridge.Token, "<br-stored>", fakeslack.SecondBotToken,
+	"<sl-bot-b>", fakeslack.SecondAppToken, "<sl-app-b>", fakeslack.BotToken, "<sl-bot>", fakeslack.AppToken,
+	"<sl-app>", unpublishedBot, "<sl-bot-x>", unpublishedApp, "<sl-app-x>")
 
 // calls is what r was asked, one "METHOD path Authorization" per request, its tokens named.
 func calls(r recorder) []string {
@@ -607,7 +612,7 @@ func TestCheckDraftRefusals(t *testing.T) {
 			UpdateMode: "smoke"}, "/update_mode", connections.CodeInvalidFormat},
 		{"event delivery", connections.Draft{Type: connections.TypeBridge, BridgeBaseURL: e.br.URL(),
 			EventDelivery: "smoke"}, "/event_delivery", connections.CodeInvalidFormat},
-		{"type", connections.Draft{Type: "slack"}, "/type", connections.CodeInvalidFormat},
+		{"type", connections.Draft{Type: "smoke"}, "/type", connections.CodeInvalidFormat},
 		{"empty token", connections.Draft{Type: connections.TypeMattermost, ServerURL: e.fake.URL(),
 			BotToken: keyring.Replace("")}, "/bot_token", connections.CodeTooShort},
 		{"null token", connections.Draft{Type: connections.TypeMattermost, ServerURL: e.fake.URL(),
@@ -795,4 +800,361 @@ func TestCheckRuns(t *testing.T) {
 	if got := rec.take(); len(got) != 0 {
 		t.Errorf("a refused draft recorded %+v", got)
 	}
+}
+
+// The tokens of a Slack Connection that muster dev does not route to the fake Slack server: its requests go to Slack.
+const (
+	unpublishedBot = "xoxb-draft-unpublished-bot"
+	unpublishedApp = "xapp-draft-unpublished-app"
+)
+
+// noDNS resolves no name and records the names it is asked for, so that no request reaches Slack.
+type noDNS struct {
+	mu    sync.Mutex
+	hosts []string
+}
+
+func (r *noDNS) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts = append(r.hosts, host)
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+func (r *noDNS) take() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.hosts
+	r.hosts = nil
+	return out
+}
+
+// slackDraftService is a Service over the store, keyring and interactive path of e with the route of muster dev —
+// the fake Slack server f for its published bot tokens, Slack for any other —, a resolver that resolves no name and a
+// Request log that records into a capture.
+func slackDraftService(t *testing.T, e *env, f *fakeslack.Fake) (*connections.Service, *capture, *noDNS) {
+	t.Helper()
+	logger := logging.New(e.log, logging.LevelInfo)
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, dns := &capture{}, &noDNS{}
+	clocks := clock.Clocks{Business: e.business, Real: &ticking{at: t0, step: 7 * time.Millisecond}}
+	return connections.New(connections.Config{OrgID: 1, Store: e.store, Keyring: e.keys,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
+		Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+			Resolver: dns, Recorder: rec},
+		Interactive: e.path, Log: logger,
+		SlackRoute: func(token logging.Secret) string {
+			if fakeslack.PublishedBotToken(string(token)) {
+				return f.URL() + "/api/"
+			}
+			return ""
+		}}), rec, dns
+}
+
+// slDraft is a Slack draft in mode for the Connection id, empty for a new one, with the tokens typed when set and the
+// proxy p, nil for the saved one.
+func slDraft(mode, id string, bot, app logging.Secret, p *proxyconf.Input) connections.Draft {
+	d := of(connections.Draft{Type: connections.TypeSlack, EventMode: mode, Proxy: p}, id, bot)
+	if app != "" {
+		d.AppToken = keyring.Replace(app)
+	}
+	return d
+}
+
+// TestCheckSlackDraft is the rule of C-13.FR-14 for Slack (C-24.FR-2), whose address is fixed, one case per rule,
+// told apart by what the fake Slack server and the proxy recorded: typed tokens go to Slack through the draft's proxy
+// with the steps of the saved check; without a typed bot token the stored one goes only through the saved proxy
+// route, and otherwise only the dry probe runs, without any token, through the draft's proxy, the other steps skipped;
+// the app-level token typed is used, the stored one only on the saved route with a bot token muster dev routes where
+// it routes the stored one, and otherwise the step app_token is skipped. Under muster dev the bot token that is sent
+// decides the address, and the stored one that of the dry probe of a saved Connection; the dry probe of a new one
+// goes to Slack. Each request is recorded as draft_check, under the Connection a draft names.
+func TestCheckSlackDraft(t *testing.T) {
+	e, f := newSlackEnv(t)
+	svc, rec, dns := slackDraftService(t, e, f)
+	p := startProxy(t, fakeproxy.Options{})
+	viaProxy := &proxyconf.Input{Enabled: true, Type: new("http"), Address: new(p.Addr())}
+	off := &proxyconf.Input{Enabled: false}
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	httpIn := slackInput("sl-http", connections.EventModeHTTP)
+	httpIn.AppToken = keyring.Replace(fakeslack.AppToken)
+	slHTTP := e.createSlack(t, httpIn)
+	proxiedIn := slackInput("sl-proxied", connections.EventModeSocket)
+	proxiedIn.Proxy = *viaProxy
+	slProxied := e.createSlack(t, proxiedIn)
+	realIn := slackInput("sl-real", connections.EventModeSocket)
+	realIn.BotToken, realIn.AppToken = keyring.Replace(unpublishedBot), keyring.Replace(unpublishedApp)
+	slReal := e.createSlack(t, realIn)
+	realProxiedIn := realIn
+	realProxiedIn.Name, realProxiedIn.Proxy = "sl-real-proxied", *viaProxy
+	slRealProxied := e.createSlack(t, realProxiedIn)
+	const (
+		full      = "token:ok scopes:ok app_token:ok"
+		probe     = "dry_probe:ok token:skip scopes:skip app_token:skip"
+		authTest  = "POST /api/auth.test"
+		open      = "POST /api/apps.connections.open"
+		botsInfo  = "POST /api/bots.info"
+		bearer    = " Bearer "
+		dnsFailed = "dns_failed"
+	)
+	fullCalls := func(bot, app string) []string {
+		return []string{authTest + bearer + bot, open + bearer + app, authTest + bearer + app, botsInfo + bearer + bot}
+	}
+	for _, tc := range []struct {
+		name    string
+		draft   connections.Draft
+		steps   string
+		calls   []string
+		via     string
+		slack   bool
+		resolve []string
+		owner   int64
+	}{
+		{name: "new, typed tokens", draft: slDraft("socket", "", fakeslack.SecondBotToken, fakeslack.SecondAppToken,
+			nil), steps: full, calls: fullCalls("<sl-bot-b>", "<sl-app-b>"), via: "direct", slack: true},
+		{name: "new, typed tokens through a proxy", draft: slDraft("socket", "", fakeslack.SecondBotToken,
+			fakeslack.SecondAppToken, viaProxy), steps: full, calls: fullCalls("<sl-bot-b>", "<sl-app-b>"),
+			via: "proxy", slack: true},
+		{name: "new, http mode", draft: slDraft("http", "", fakeslack.SecondBotToken, "", nil),
+			steps: "token:ok scopes:ok", calls: []string{authTest + bearer + "<sl-bot-b>"}, via: "direct", slack: true},
+		{name: "new, no app-level token", draft: slDraft("socket", "", fakeslack.SecondBotToken, "", nil),
+			steps: "token:ok scopes:ok app_token:skip", calls: []string{authTest + bearer + "<sl-bot-b>"},
+			via: "direct", slack: true},
+		{name: "new, no token: the dry probe at Slack", draft: slDraft("socket", "", "", fakeslack.SecondAppToken, nil),
+			steps: "dry_probe:" + dnsFailed + " token:skip scopes:skip app_token:skip", calls: []string{},
+			via: "direct", resolve: []string{"slack.com"}},
+		{name: "new, a token muster dev does not route goes to Slack", draft: slDraft("socket", "", unpublishedBot,
+			unpublishedApp, nil), steps: "token:" + dnsFailed + " scopes:skip app_token:skip", calls: []string{},
+			via: "direct", resolve: []string{"slack.com"}},
+		{name: "saved, stored tokens on the saved route", draft: slDraft("socket", sl.PublicID, "", "", nil),
+			steps: full, calls: fullCalls("<sl-bot>", "<sl-app>"), via: "direct", slack: true, owner: sl.ID},
+		{name: "saved, two disabled proxies are one route", draft: slDraft("socket", sl.PublicID, "", "",
+			&proxyconf.Input{Enabled: false, Type: new("socks5"), Address: new("127.0.0.1:1")}), steps: full,
+			calls: fullCalls("<sl-bot>", "<sl-app>"), via: "direct", slack: true, owner: sl.ID},
+		{name: "saved, only the proxy changed: the dry probe", draft: slDraft("socket", sl.PublicID, "", "", viaProxy),
+			steps: probe, calls: []string{authTest}, via: "proxy", owner: sl.ID},
+		{name: "saved, only the proxy changed, http mode", draft: slDraft("http", sl.PublicID, "", "", viaProxy),
+			steps: "dry_probe:ok token:skip scopes:skip", calls: []string{authTest}, via: "proxy", owner: sl.ID},
+		{name: "saved, only the proxy changed, an app-level token typed: the dry probe",
+			draft: slDraft("socket", sl.PublicID, "", fakeslack.SecondAppToken, viaProxy), steps: probe,
+			calls: []string{authTest}, via: "proxy", owner: sl.ID},
+		{name: "saved, the tokens typed again through the new proxy", draft: slDraft("socket", sl.PublicID,
+			fakeslack.SecondBotToken, fakeslack.SecondAppToken, viaProxy), steps: full,
+			calls: fullCalls("<sl-bot-b>", "<sl-app-b>"), via: "proxy", slack: true, owner: sl.ID},
+		{name: "saved, the bot token typed through the new proxy: no stored app-level token",
+			draft: slDraft("socket", sl.PublicID, fakeslack.SecondBotToken, "", viaProxy),
+			steps: "token:ok scopes:ok app_token:skip", calls: []string{authTest + bearer + "<sl-bot-b>"}, via: "proxy",
+			slack: true, owner: sl.ID},
+		{name: "saved, the bot token typed on the saved route: the stored app-level token",
+			draft: slDraft("socket", sl.PublicID, fakeslack.SecondBotToken, "", nil),
+			steps: "token:ok scopes:ok app_token:app_mismatch", calls: []string{authTest + bearer + "<sl-bot-b>",
+				open + bearer + "<sl-app>", authTest + bearer + "<sl-app>", botsInfo + bearer + "<sl-bot-b>"},
+			via: "direct", slack: true, owner: sl.ID},
+		{name: "saved, the app-level token typed on the saved route: the stored bot token",
+			draft: slDraft("socket", sl.PublicID, "", fakeslack.SecondAppToken, nil),
+			steps: "token:ok scopes:ok app_token:app_mismatch", calls: []string{authTest + bearer + "<sl-bot>",
+				open + bearer + "<sl-app-b>", authTest + bearer + "<sl-app-b>", botsInfo + bearer + "<sl-bot>"},
+			via: "direct", slack: true, owner: sl.ID},
+		{name: "saved in http mode, a socket draft: the stored app-level token",
+			draft: slDraft("socket", slHTTP.PublicID, "", "", nil), steps: full,
+			calls: fullCalls("<sl-bot>", "<sl-app>"), via: "direct", slack: true, owner: slHTTP.ID},
+		{name: "saved behind a proxy, the proxy turned off: the dry probe directly",
+			draft: slDraft("socket", slProxied.PublicID, "", "", off), steps: probe, calls: []string{authTest},
+			via: "direct", owner: slProxied.ID},
+		{name: "saved behind a proxy, the stored tokens through it", draft: slDraft("socket", slProxied.PublicID, "",
+			"", nil), steps: full, calls: fullCalls("<sl-bot>", "<sl-app>"), via: "proxy", slack: true,
+			owner: slProxied.ID},
+		{name: "saved at Slack, the proxy turned off: the dry probe at Slack",
+			draft: slDraft("socket", slRealProxied.PublicID, "", "", off),
+			steps: "dry_probe:" + dnsFailed + " token:skip scopes:skip app_token:skip", calls: []string{},
+			via: "direct", resolve: []string{"slack.com"}, owner: slRealProxied.ID},
+		{name: "saved at Slack, a bot token routed to the fake: no stored app-level token",
+			draft: slDraft("socket", slReal.PublicID, fakeslack.SecondBotToken, "", nil),
+			steps: "token:ok scopes:ok app_token:skip", calls: []string{authTest + bearer + "<sl-bot-b>"},
+			via: "direct", slack: true, owner: slReal.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.ResetRequests()
+			rec.take()
+			dns.take()
+			targets := len(p.Targets())
+			res, err := svc.CheckDraft(t.Context(), tc.draft)
+			if err != nil || stepsOf(res) != tc.steps {
+				t.Fatalf("steps %q, %v; want %q", stepsOf(res), err, tc.steps)
+			}
+			if got := calls(f); !slices.Equal(got, tc.calls) {
+				t.Errorf("the fake got %q, want %q", got, tc.calls)
+			}
+			if got := dns.take(); !slices.Equal(got, tc.resolve) {
+				t.Errorf("resolved %q, want %q", got, tc.resolve)
+			}
+			for _, v := range vias(res) {
+				if v != tc.via {
+					t.Errorf("paths %v, want %s", vias(res), tc.via)
+				}
+			}
+			if got := p.Targets()[targets:]; tc.via == "proxy" && (len(got) == 0 || slices.ContainsFunc(got,
+				func(s string) bool { return "http://"+s != f.URL() })) || tc.via == "direct" && len(got) != 0 {
+				t.Errorf("the proxy connected to %v", got)
+			}
+			failed := slices.ContainsFunc(strings.Fields(tc.steps), func(s string) bool {
+				return !strings.HasSuffix(s, ":ok") && !strings.HasSuffix(s, ":skip")
+			})
+			if res.OK == failed || (res.Slack != nil) != tc.slack || tc.slack && (res.BotName == "" ||
+				res.Slack.TeamID == "" || res.Slack.BotUserID == "") {
+				t.Errorf("ok %v, slack %+v, bot %q", res.OK, res.Slack, res.BotName)
+			}
+			for _, r := range rec.take() {
+				if r.Links != (outbound.Links{Check: "draft_check", Run: res.Run}) || r.Owner.Connection != tc.owner ||
+					r.Owner.Draft != (tc.owner == 0) {
+					t.Errorf("a record of %+v, links %+v", r.Owner, r.Links)
+				}
+			}
+		})
+	}
+	res, err := svc.CheckDraft(t.Context(), slDraft("socket", "", fakeslack.SecondBotToken,
+		fakeslack.SecondAppToken, nil))
+	b := fakeslack.Apps()[1]
+	if err != nil || res.BotName != b.BotName || *res.Slack != (connections.SlackIdentity{TeamID: b.TeamID,
+		TeamName: "Fake workspace B", BotUserID: b.BotUserID, AppID: b.AppID}) || res.Warnings != nil {
+		t.Errorf("what a draft found = %+v %+v, %v", res.BotName, res.Slack, err)
+	}
+	for _, r := range f.Requests() {
+		if r.Path == "/link/" {
+			t.Errorf("a draft opened a socket")
+		}
+	}
+}
+
+// TestCheckSlackDraftStoresNothing is C-13.FR-14 and C-24.FR-2 for Slack: drafts of a new Slack Connection and of a
+// saved one pass and write nothing — no Connection, no bot, workspace or app, no hint, no Audit log entry, no log line
+// —; the saved Connection keeps its row; a draft of a saved Connection takes its limiter tokens from it, one of a new
+// Connection none.
+func TestCheckSlackDraftStoresNothing(t *testing.T) {
+	e, f := newSlackEnv(t)
+	svc, _, _ := slackDraftService(t, e, f)
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	rows := map[int64]dbgen.GetConnectionRow{}
+	for id, r := range e.store.rows {
+		rows[id] = r.row
+	}
+	e.path.subjects = nil
+	audits, hints, ids, updates, logged := len(e.store.audit), len(e.store.hints), len(e.store.slackIDs),
+		len(e.store.updates), e.log.Len()
+	for _, d := range []connections.Draft{slDraft("socket", "", fakeslack.SecondBotToken, fakeslack.SecondAppToken,
+		nil), slDraft("http", "", fakeslack.SecondBotToken, "", nil)} {
+		if res, err := svc.CheckDraft(t.Context(), d); err != nil || !res.OK || res.Slack == nil {
+			t.Fatalf("new %s = %q, %v", d.EventMode, stepsOf(res), err)
+		}
+	}
+	for _, s := range e.path.subjects {
+		if !s.NoLimiter || s.Connection != nil || s.Destination != nil {
+			t.Errorf("a draft of a new Connection is limited by %+v", s)
+		}
+	}
+	e.path.subjects = nil
+	if res, err := svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, "", "", nil)); err != nil || !res.OK {
+		t.Fatalf("saved = %q, %v", stepsOf(res), err)
+	}
+	if len(e.path.subjects) != 4 || slices.ContainsFunc(e.path.subjects, func(s delivery.Subject) bool {
+		return s.NoLimiter || s.Connection == nil || *s.Connection != sl.ID
+	}) {
+		t.Errorf("a draft of a saved Connection is limited by %+v", e.path.subjects)
+	}
+	if len(e.store.rows) != len(rows) || len(e.store.audit) != audits || len(e.store.hints) != hints ||
+		len(e.store.slackIDs) != ids || len(e.store.updates) != updates {
+		t.Errorf("a draft wrote: %d rows, %d audit, %d hints, %d identities, %d updates", len(e.store.rows)-len(rows),
+			len(e.store.audit)-audits, len(e.store.hints)-hints, len(e.store.slackIDs)-ids,
+			len(e.store.updates)-updates)
+	}
+	for id, r := range rows {
+		if !reflect.DeepEqual(e.store.rows[id].row, r) {
+			t.Errorf("the saved Connection %s changed", r.PublicID)
+		}
+	}
+	if e.log.Len() != logged {
+		t.Errorf("a draft logged: %s", tokenNames.Replace(e.log.String()[logged:]))
+	}
+}
+
+// TestCheckSlackDraftRefusals is what a save of a Slack Connection would refuse, refused before any request: an event
+// mode that is not socket or http, a bot token without xoxb-, an app-level token without xapp-, empty or null, and a
+// connection_id of another type; and the failures of a stored secret that cannot be read, as errors that carry no
+// token. A Slack draft needs no token, so the secret of its mode is not required.
+func TestCheckSlackDraftRefusals(t *testing.T) {
+	e, f := newSlackEnv(t)
+	svc, _, _ := slackDraftService(t, e, f)
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	mm := e.create(t, "mm")
+	f.ResetRequests()
+	for _, tc := range []struct {
+		name          string
+		draft         connections.Draft
+		pointer, code string
+	}{
+		{"event mode", slDraft("smoke", "", fakeslack.BotToken, "", nil), "/event_mode", connections.CodeInvalidFormat},
+		{"no event mode", slDraft("", sl.PublicID, "", "", nil), "/event_mode", connections.CodeInvalidFormat},
+		{"bot token", slDraft("socket", "", fakeslack.AppToken, "", nil), "/bot_token", connections.CodeInvalidFormat},
+		{"app-level token", slDraft("socket", "", fakeslack.BotToken, fakeslack.SecondBotToken, nil), "/app_token",
+			connections.CodeInvalidFormat},
+		{"empty bot token", connections.Draft{Type: connections.TypeSlack, EventMode: "socket",
+			BotToken: keyring.Replace("")}, "/bot_token", connections.CodeTooShort},
+		{"empty app-level token", connections.Draft{Type: connections.TypeSlack, EventMode: "socket",
+			AppToken: keyring.Replace("")}, "/app_token", connections.CodeTooShort},
+		{"null app-level token", connections.Draft{Type: connections.TypeSlack, EventMode: "socket",
+			AppToken: keyring.Clear}, "/app_token", connections.CodeRequired},
+		{"a mattermost id", slDraft("socket", mm.PublicID, "", "", nil), "/connection_id", connections.CodeUnknownID},
+		{"a slack id as mattermost", of(mmDraft(e.fake.URL()), sl.PublicID, ""), "/connection_id",
+			connections.CodeUnknownID},
+		{"proxy", slDraft("socket", sl.PublicID, "", "", &proxyconf.Input{Enabled: true, Type: new("http")}),
+			"/proxy/address", connections.CodeRequired},
+	} {
+		_, err := svc.CheckDraft(t.Context(), tc.draft)
+		if fe := fieldError(err); fe == nil || fe.Pointer != tc.pointer || fe.Code != tc.code {
+			t.Errorf("%s = %v", tc.name, err)
+		}
+	}
+	if n := len(f.Requests()); n != 0 {
+		t.Errorf("a refused draft made %d requests", n)
+	}
+	row := &e.store.rows[sl.ID].row
+	keep := *row
+	row.SlackAppTokenCiphertext = []byte("garbage")
+	if _, err := svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, "", "", nil)); err == nil ||
+		strings.Contains(err.Error(), fakeslack.AppToken) {
+		t.Errorf("an unreadable app-level token = %s", tokenNames.Replace(fmt.Sprint(err)))
+	}
+	if res, err := svc.CheckDraft(t.Context(), slDraft("http", sl.PublicID, "", "", nil)); err != nil || !res.OK {
+		t.Errorf("http mode opened the unreadable app-level token: %q, %v", stepsOf(res), err)
+	}
+	*row = keep
+	row.BotTokenCiphertext = []byte("garbage")
+	for _, d := range []connections.Draft{slDraft("socket", sl.PublicID, "", "", nil), slDraft("socket", sl.PublicID,
+		"", "", &proxyconf.Input{Enabled: true, Type: new("http"), Address: new("127.0.0.1:1")}),
+		slDraft("socket", sl.PublicID, fakeslack.SecondBotToken, "", nil)} {
+		if _, err := svc.CheckDraft(t.Context(), d); err == nil || strings.Contains(err.Error(), fakeslack.BotToken) {
+			t.Errorf("an unreadable bot token under muster dev = %s", tokenNames.Replace(fmt.Sprint(err)))
+		}
+	}
+	if res, err := svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, fakeslack.SecondBotToken,
+		fakeslack.SecondAppToken, &proxyconf.Input{Enabled: true, Type: new("http"), Address: new("127.0.0.1:1")})); err != nil || res.OK {
+		t.Errorf("typed tokens opened the unreadable one: %q, %v", stepsOf(res), err)
+	}
+	*row = keep
+	row.Proxy = []byte(`{"enabled":true,"type":"ftp","address":"127.0.0.1:1"}`)
+	if _, err := svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, "", "", nil)); err == nil {
+		t.Error("a proxy the client refuses")
+	}
+	*row = keep
+	e.path.limited = true
+	for _, d := range []connections.Draft{slDraft("socket", sl.PublicID, "", "", &proxyconf.Input{Enabled: true,
+		Type: new("http"), Address: new("127.0.0.1:1")}), slDraft("socket", "", fakeslack.SecondBotToken, "", nil)} {
+		if _, err := svc.CheckDraft(t.Context(), d); !isLimited(err) {
+			t.Errorf("a limited draft = %v", err)
+		}
+	}
+	e.path.limited = false
 }

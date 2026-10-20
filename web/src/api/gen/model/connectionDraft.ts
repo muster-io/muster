@@ -19,9 +19,10 @@
  */
 import type { BridgeConnectionDraft } from './bridgeConnectionDraft';
 import type { MattermostConnectionDraft } from './mattermostConnectionDraft';
+import type { SlackConnectionDraft } from './slackConnectionDraft';
 import type { TelegramConnectionDraft } from './telegramConnectionDraft';
 
 /**
  * A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.
  */
-export type ConnectionDraft = MattermostConnectionDraft | TelegramConnectionDraft | BridgeConnectionDraft;
+export type ConnectionDraft = MattermostConnectionDraft | TelegramConnectionDraft | BridgeConnectionDraft | SlackConnectionDraft;

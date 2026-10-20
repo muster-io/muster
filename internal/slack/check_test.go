@@ -499,3 +499,171 @@ func TestCheckAppTokenOpen(t *testing.T) {
 		t.Fatalf("a check opened a socket: %+v", st)
 	}
 }
+
+// probeFault scripts the next answer of the fake to auth.test.
+func probeFault(t *testing.T, f *fakeslack.Fake, fault fakeserver.Fault) {
+	t.Helper()
+	fault.Path, fault.Times = "/api/auth.test", 1
+	if err := f.SetFault(fault); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDryProbe covers C-24.FR-2 and C-13.FR-14: the dry probe is `POST <base>auth.test` without Authorization, also
+// on a client that holds both tokens, recorded as auth.test, and passes on Slack's 200 answer ok:false with not_authed;
+// any other answer is not_slack — not JSON, with its status and media type, or other JSON with 200 — and JSON with
+// another status unexpected_status; a 429 reaches the runner as Transient, never holding the Connection's limiter.
+func TestDryProbe(t *testing.T) {
+	f := startFake(t)
+	rec := &records{}
+	n := network(t, nil)
+	n.Recorder = rec
+	for _, s := range []Settings{{Owner: outbound.Owner{Draft: true}}, {BotToken: fakeslack.BotToken,
+		AppToken: fakeslack.AppToken, Route: devRoute(f), Owner: outbound.Owner{Draft: true}}} {
+		if s.BotToken == "" {
+			s.Route = to(f.URL() + "/api/")
+		}
+		f.ResetRequests()
+		c := newClient(t, n, s)
+		p, err := RunDryProbe(t.Context(), c, direct, tick())
+		if err != nil || p != (Probe{OK: true, Latency: time.Millisecond}) {
+			t.Fatalf("dry probe = %+v, %v", p, err)
+		}
+		reqs := f.Requests()
+		if len(reqs) != 1 || reqs[0].Method != http.MethodPost || reqs[0].Path != "/api/auth.test" ||
+			len(reqs[0].Headers["Authorization"]) != 0 || reqs[0].Body != "" {
+			t.Fatalf("requests %+v", reqs)
+		}
+	}
+	if got := rec.got(); len(got) != 2 || got[0].Operation != "auth.test" {
+		t.Fatalf("records %+v", got)
+	}
+	c := newClient(t, network(t, nil), Settings{Route: to(f.URL() + "/api/")})
+	for _, tc := range []struct {
+		fault         fakeserver.Fault
+		code, message string
+	}{
+		{fakeserver.Fault{Status: http.StatusOK, ContentType: "text/html; charset=utf-8", Body: "<html></html>"},
+			CodeNotSlack, "The address answered 200 with text/html, not as Slack's Web API."},
+		{fakeserver.Fault{Status: http.StatusOK, ContentType: "", Body: "plain"}, CodeNotSlack,
+			"The address answered 200 with text/plain, not as Slack's Web API."},
+		{fakeserver.Fault{Status: http.StatusOK, Body: `[{"ok":false,"error":"not_authed"}]`}, CodeNotSlack,
+			"The address answered 200 with application/json, not as Slack's Web API."},
+		{fakeserver.Fault{Status: http.StatusOK, Body: `{"ok":true}`}, CodeNotSlack, messageNotNotAuthed},
+		{fakeserver.Fault{Status: http.StatusOK, Body: `{"status":"OK"}`}, CodeNotSlack, messageNotNotAuthed},
+		{fakeserver.Fault{Status: http.StatusOK, Body: `{"ok":false,"error":"invalid_auth"}`}, CodeNotSlack,
+			messageNotNotAuthed},
+		{fakeserver.Fault{Status: http.StatusInternalServerError, ContentType: "text/html", Body: "<html>down</html>"},
+			CodeNotSlack, "The address answered 500 with text/html, not as Slack's Web API."},
+		{fakeserver.Fault{Status: http.StatusNotFound, ContentType: "x/y; bad=", Body: "nope"}, CodeNotSlack,
+			"The address answered 404 with no content type, not as Slack's Web API."},
+		{fakeserver.Fault{Status: http.StatusServiceUnavailable, Body: `{"ok":false,"error":"not_authed"}`},
+			CodeUnexpectedStatus, "Slack answered 503 instead of 200 with not_authed."},
+		{fakeserver.Fault{Status: http.StatusUnauthorized, Body: `{"ok":false,"error":"not_authed"}`},
+			CodeUnexpectedStatus, "Slack answered 401 instead of 200 with not_authed."},
+	} {
+		probeFault(t, f, tc.fault)
+		p, err := RunDryProbe(t.Context(), c, direct, tick())
+		if err != nil || p.OK || p.Code != tc.code || p.Message != tc.message || p.Latency != time.Millisecond {
+			t.Errorf("%d %s = %+v, %v", tc.fault.Status, tc.fault.Body, p, err)
+		}
+	}
+	probeFault(t, f, fakeserver.Fault{Status: http.StatusTooManyRequests, RetryAfterSeconds: 30,
+		Body: `{"ok":false,"error":"ratelimited"}`})
+	r := &recording{}
+	p, err := RunDryProbe(t.Context(), c, r.run, tick())
+	if err != nil || p.Code != CodeUnexpectedStatus || len(r.outcomes) != 1 ||
+		r.outcomes[0].Kind != delivery.OutcomeTransient || r.outcomes[0].RetryAfter != 0 || r.outcomes[0].Scope != "" {
+		t.Fatalf("429 = %+v, %+v, %v", p, r.outcomes, err)
+	}
+	if p, err := RunDryProbe(t.Context(), c, Direct(delivery.Call{Class: "nope"}), tick()); err != nil ||
+		p.Code != delivery.CodeRequestFailed || !strings.Contains(p.Message, "no nope class") {
+		t.Fatalf("a class the client lacks = %+v, %v", p, err)
+	}
+	limited := &delivery.LimitedError{RetryAfter: time.Second}
+	if _, err := RunDryProbe(t.Context(), c, func(context.Context, func(context.Context, delivery.Call) delivery.Outcome) (
+		delivery.Outcome, error) {
+		return delivery.Outcome{}, limited
+	}, tick()); !errors.Is(err, limited) {
+		t.Fatalf("runner error = %v", err)
+	}
+}
+
+// TestDryProbeWithoutAnswer covers C-24.FR-2: a dry probe without an answer has the code of what failed and the text
+// of delivery.FailureMessage — Slack's name directly, none through a proxy — or the error's own.
+func TestDryProbeWithoutAnswer(t *testing.T) {
+	n := network(t, nil)
+	res := &resolver{}
+	n.Resolver = res
+	p, err := RunDryProbe(t.Context(), newClient(t, n, Settings{}), direct, tick())
+	if err != nil || p.OK || p.Code != delivery.CodeDNSFailed || p.Message != "DNS lookup failed: slack.com" ||
+		!slices.Equal(res.got(), []string{"slack.com"}) {
+		t.Fatalf("dns = %+v, %v, %v", p, err, res.got())
+	}
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := "http://" + ln.Addr().String() + "/api/"
+	_ = ln.Close()
+	if p, _ := RunDryProbe(t.Context(), newClient(t, network(t, nil), Settings{Route: to(closed)}), direct,
+		tick()); p.Code != delivery.CodeConnectFailed || p.Message == "" {
+		t.Fatalf("connect = %+v", p)
+	}
+	f := startFake(t)
+	expired, cancel := context.WithTimeout(t.Context(), 0)
+	defer cancel()
+	if p, _ := RunDryProbe(expired, newClient(t, network(t, nil), Settings{Route: to(f.URL() + "/api/")}), direct,
+		tick()); p.Code != delivery.CodeTimeout || p.Message != "No answer within 10 s" {
+		t.Fatalf("timeout = %+v", p)
+	}
+	strict, err := outbound.ParsePolicy("standard", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := network(t, nil)
+	blocked.Policy = outbound.StaticPolicy(strict)
+	if p, _ := RunDryProbe(t.Context(), newClient(t, blocked, Settings{Route: to(f.URL() + "/api/")}), direct,
+		tick()); p.Code != delivery.CodeBlocked || !strings.Contains(p.Message, "blocked") {
+		t.Fatalf("blocked = %+v", p)
+	}
+	viaProxy := network(t, nil)
+	viaProxy.Resolver = &resolver{}
+	if p, _ := RunDryProbe(t.Context(), newClient(t, viaProxy, Settings{Proxy: &outbound.Proxy{
+		Type: outbound.ProxyHTTP, Address: "proxy.invalid:3128"}}), direct, tick()); p.Code != delivery.CodeDNSFailed ||
+		!strings.Contains(p.Message, "lookup proxy.invalid") || strings.Contains(p.Message, "DNS lookup failed") {
+		t.Fatalf("dns through a proxy = %+v", p)
+	}
+}
+
+// TestDryProbeThroughProxy covers C-24.FR-2 and C-13.FR-14: the dry probe of a client with a proxy reaches the fake
+// only through it, without Authorization, and passes; a proxy that refuses the credentials is proxy_refused and
+// nothing reaches the fake.
+func TestDryProbeThroughProxy(t *testing.T) {
+	f := startFake(t)
+	proxy, err := fakeproxy.Start(t.Context(), fakeproxy.HTTP, "127.0.0.1:0",
+		fakeproxy.Options{Username: "u", Password: "proxy-pw-right"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Close() })
+	for _, tc := range []struct{ password, code string }{{"proxy-pw-right", ""},
+		{"proxy-pw-wrong", delivery.CodeProxyRefused}} {
+		f.ResetRequests()
+		c := newClient(t, network(t, nil), Settings{BotToken: fakeslack.BotToken, Route: devRoute(f),
+			Proxy: &outbound.Proxy{Type: outbound.ProxyHTTP, Address: proxy.Addr(), Username: "u",
+				Password: logging.Secret(tc.password)}})
+		p, err := RunDryProbe(t.Context(), c, direct, tick())
+		if err != nil || p.OK != (tc.code == "") || p.Code != tc.code || c.Via() != ViaProxy {
+			t.Fatalf("%s: %+v, %v", tc.password, p, err)
+		}
+		reqs := f.Requests()
+		if tc.code == "" && (len(reqs) != 1 || len(reqs[0].Headers["Authorization"]) != 0 ||
+			len(proxy.Connections()) == 0) {
+			t.Fatalf("through the proxy: %+v, %+v", reqs, proxy.Connections())
+		}
+		if tc.code != "" && (len(reqs) != 0 || p.Message != MessageProxyRefused) {
+			t.Fatalf("a refused proxy passed %d requests: %+v", len(reqs), p)
+		}
+	}
+}

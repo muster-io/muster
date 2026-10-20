@@ -2399,6 +2399,21 @@ func (e SlackConnectionBaseType) Valid() bool {
 	}
 }
 
+// Defines values for SlackConnectionDraftType.
+const (
+	SlackConnectionDraftTypeSlack SlackConnectionDraftType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackConnectionDraftType enum.
+func (e SlackConnectionDraftType) Valid() bool {
+	switch e {
+	case SlackConnectionDraftTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SlackConnectionInputType.
 const (
 	SlackConnectionInputTypeSlack SlackConnectionInputType = "slack"
@@ -4419,7 +4434,7 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON `{"ok":false, "error":"not_authed"}`; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`, Slack `POST https://slack.com/api/auth.test`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost or Slack) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 
 	// LatencyMs How long the step's request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.
@@ -4429,16 +4444,18 @@ type ConnectionCheckStep struct {
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 
 	// MissingScopes Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.
-	MissingScopes *[]string               `json:"missing_scopes,omitempty"`
-	Name          ConnectionCheckStepName `json:"name"`
-	Ok            bool                    `json:"ok"`
-	Skipped       *bool                   `json:"skipped,omitempty"`
+	MissingScopes *[]string `json:"missing_scopes,omitempty"`
+
+	// Name The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
+	Name    ConnectionCheckStepName `json:"name"`
+	Ok      bool                    `json:"ok"`
+	Skipped *bool                   `json:"skipped,omitempty"`
 
 	// Via How the request travelled.
 	Via *ConnectionPath `json:"via,omitempty"`
 }
 
-// ConnectionCheckStepName defines model for ConnectionCheckStep.Name.
+// ConnectionCheckStepName The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
 type ConnectionCheckStepName string
 
 // ConnectionDraft A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.
@@ -5432,7 +5449,7 @@ type NullableAlertGroupStatus string
 // NullableCheckKind The check or test a request belongs to, null for any other request.
 type NullableCheckKind string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON `{"ok":false, "error":"not_authed"}`; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`, Slack `POST https://slack.com/api/auth.test`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost or Slack) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token, `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists, `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in, `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and `request_failed` for any other error of Slack's, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
@@ -6660,6 +6677,28 @@ type SlackConnectionBase struct {
 
 // SlackConnectionBaseType defines model for SlackConnectionBase.Type.
 type SlackConnectionBaseType string
+
+// SlackConnectionDraft A Slack Connection as its form holds it, for `checkConnectionDraft`; Slack's address is fixed, so only the proxy can differ from the saved Connection, and the Slack signing secret is not checked.
+type SlackConnectionDraft struct {
+	// AppToken An app-level token (`xapp-…`) typed in the form, for the step `app_token` in `socket` mode, sent to Slack through the draft's proxy. Omit it to use the stored one of `connection_id`, which goes to Slack only through its saved proxy; without either the step is skipped.
+	AppToken *string `json:"app_token,omitempty"`
+
+	// BotToken A bot token (`xoxb-…`) typed in the form, sent to Slack through the draft's proxy. Omit it to use the stored token of `connection_id`, which goes to Slack only through its saved proxy; without either only the dry probe runs.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// ConnectionId The saved Slack Connection that the form edits; omit it for a new one. An omitted `proxy` is its saved proxy, and no proxy without it.
+	ConnectionId *PublicId `json:"connection_id,omitempty"`
+
+	// EventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
+	EventMode SlackEventMode `json:"event_mode"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy *ProxyConfigInput        `json:"proxy,omitempty"`
+	Type  SlackConnectionDraftType `json:"type"`
+}
+
+// SlackConnectionDraftType defines model for SlackConnectionDraft.Type.
+type SlackConnectionDraftType string
 
 // SlackConnectionInput defines model for SlackConnectionInput.
 type SlackConnectionInput struct {
@@ -9854,6 +9893,40 @@ func (t *ConnectionDraft) MergeBridgeConnectionDraft(v BridgeConnectionDraft) er
 	return err
 }
 
+// AsSlackConnectionDraft returns the union data inside the ConnectionDraft as a SlackConnectionDraft
+func (t ConnectionDraft) AsSlackConnectionDraft() (SlackConnectionDraft, error) {
+	var body SlackConnectionDraft
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackConnectionDraft overwrites any union data inside the ConnectionDraft as the provided SlackConnectionDraft
+func (t *ConnectionDraft) FromSlackConnectionDraft(v SlackConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	t.union = b
+	return err
+}
+
+// MergeSlackConnectionDraft performs a merge with any union data inside the ConnectionDraft, using the provided SlackConnectionDraft
+func (t *ConnectionDraft) MergeSlackConnectionDraft(v SlackConnectionDraft) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t ConnectionDraft) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -9872,6 +9945,8 @@ func (t ConnectionDraft) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeConnectionDraft()
 	case "mattermost":
 		return t.AsMattermostConnectionDraft()
+	case "slack":
+		return t.AsSlackConnectionDraft()
 	case "telegram":
 		return t.AsTelegramConnectionDraft()
 	default:

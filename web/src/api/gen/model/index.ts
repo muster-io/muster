@@ -401,6 +401,8 @@ export * from './slackCheckInfo';
 export * from './slackConnection';
 export * from './slackConnectionBase';
 export * from './slackConnectionBaseType';
+export * from './slackConnectionDraft';
+export * from './slackConnectionDraftType';
 export * from './slackConnectionInput';
 export * from './slackConnectionInputType';
 export * from './slackConnectionType';

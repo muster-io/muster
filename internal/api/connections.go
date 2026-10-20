@@ -216,13 +216,13 @@ func (s *Server) CheckConnectionDraft(ctx context.Context, req gen.CheckConnecti
 	return gen.CheckConnectionDraft200JSONResponse(checkResultOf(res)), nil
 }
 
-// connectionDraftOf is the Draft of a draft's body, Mattermost, Telegram or Bridge: a bot token is the one typed in
-// the form, an omitted proxy the rule of the draft's Connection.
+// connectionDraftOf is the Draft of a draft's body, Mattermost, Telegram, Bridge or Slack: a bot token, and a Slack
+// app-level token, is the one typed in the form, an omitted proxy the rule of the draft's Connection.
 func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return connections.Draft{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
-			"The type is not mattermost, telegram or bridge.")
+			"The type is not mattermost, telegram, bridge or slack.")
 	}
 	var d connections.Draft
 	var token *string
@@ -254,6 +254,17 @@ func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 		d = connections.Draft{Type: kind, BridgeBaseURL: b.BaseUrl, EventDelivery: string(b.EventDelivery),
 			ConnectionID: b.ConnectionId}
 		token, p = b.BotToken, b.Proxy
+	case connections.TypeSlack:
+		sl, err := body.AsSlackConnectionDraft()
+		if err != nil {
+			return connections.Draft{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+				"The body is not a Slack Connection.")
+		}
+		d = connections.Draft{Type: kind, EventMode: string(sl.EventMode), ConnectionID: sl.ConnectionId}
+		if sl.AppToken != nil {
+			d.AppToken = keyring.Replace(logging.Secret(*sl.AppToken))
+		}
+		token, p = sl.BotToken, sl.Proxy
 	default:
 		return connections.Draft{Type: kind}, nil
 	}

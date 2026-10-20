@@ -4263,13 +4263,17 @@ paths:
       - Connections
       summary: Check a Connection before saving it
       description: 'Checks a draft of a Connection of any type, as its form holds it — the address, the bot token typed in
-        the form, the proxy and, for a Bridge, the event delivery mode — with the steps and step codes of `checkConnection`,
-        and stores nothing: no Connection, no bot name, no `info`, no Audit log entry. Which token goes where: a `bot_token`
-        in the draft is sent to the address in the draft; without one, the stored token of `connection_id` is sent only
-        when the draft''s address, normalized as a save normalizes it, and its proxy are the saved ones; otherwise only
-        the dry probe of the type runs, without any token, and the other steps are reported skipped — Mattermost `GET
-        <server_url>/api/v4/system/ping`, Telegram `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`.
-        A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no
+        the form, the proxy and, for a Bridge, the event delivery mode, for Slack the event mode and the app-level token
+        — with the steps and step codes of `checkConnection`, and stores nothing: no Connection, no bot name, no `info`,
+        no workspace or app, no Audit log entry. Which token goes where: a `bot_token` in the draft is sent to the address
+        in the draft; without one, the stored token of `connection_id` is sent only when the draft''s address, normalized
+        as a save normalizes it, and its proxy are the saved ones; otherwise only the dry probe of the type runs, without
+        any token, and the other steps are reported skipped — Mattermost `GET <server_url>/api/v4/system/ping`, Telegram
+        `GET <bot_api_base_url>/bot0:x/getMe`, a Bridge `GET <base_url>/v1/info`, Slack `POST
+        https://slack.com/api/auth.test` without `Authorization`. Slack''s address is fixed, so only the proxy of a Slack
+        draft can differ from the saved one; its step `app_token`, in `socket` mode, runs only with a bot token, and with
+        an `app_token` in the draft or the stored one of `connection_id` on the saved proxy, and is reported skipped
+        otherwise. A stored proxy password is used only with the saved proxy type and address. A `connection_id` that names no
         Connection, a deleted one or one of another type answers `422` `unknown_id` at `/connection_id`; an address or a
         proxy that a save would refuse answers `422` at its pointer. Runs on the interactive path: a draft with a
         `connection_id` takes its limiter token from that Connection, and when none is free within
@@ -12818,6 +12822,40 @@ components:
           $ref: '#/components/schemas/PublicId'
           description: The saved Bridge Connection that the form edits; omit it for a new one. An omitted `proxy` is its
             saved proxy, and no proxy without it.
+    SlackConnectionDraft:
+      type: object
+      description: A Slack Connection as its form holds it, for `checkConnectionDraft`; Slack's address is fixed, so only
+        the proxy can differ from the saved Connection, and the Slack signing secret is not checked.
+      required:
+      - type
+      - event_mode
+      properties:
+        type:
+          type: string
+          enum:
+          - slack
+        event_mode:
+          $ref: '#/components/schemas/SlackEventMode'
+        bot_token:
+          type: string
+          format: password
+          writeOnly: true
+          description: A bot token (`xoxb-…`) typed in the form, sent to Slack through the draft's proxy. Omit it to use
+            the stored token of `connection_id`, which goes to Slack only through its saved proxy; without either only
+            the dry probe runs.
+        app_token:
+          type: string
+          format: password
+          writeOnly: true
+          description: An app-level token (`xapp-…`) typed in the form, for the step `app_token` in `socket` mode, sent
+            to Slack through the draft's proxy. Omit it to use the stored one of `connection_id`, which goes to Slack only
+            through its saved proxy; without either the step is skipped.
+        proxy:
+          $ref: '#/components/schemas/ProxyConfigInput'
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+          description: The saved Slack Connection that the form edits; omit it for a new one. An omitted `proxy` is its
+            saved proxy, and no proxy without it.
     ConnectionDraft:
       description: A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the
         variant.
@@ -12825,12 +12863,14 @@ components:
       - $ref: '#/components/schemas/MattermostConnectionDraft'
       - $ref: '#/components/schemas/TelegramConnectionDraft'
       - $ref: '#/components/schemas/BridgeConnectionDraft'
+      - $ref: '#/components/schemas/SlackConnectionDraft'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostConnectionDraft'
           telegram: '#/components/schemas/TelegramConnectionDraft'
           bridge: '#/components/schemas/BridgeConnectionDraft'
+          slack: '#/components/schemas/SlackConnectionDraft'
     ConnectionCheckRequest:
       type: object
       properties:
@@ -12849,6 +12889,11 @@ components:
       properties:
         name:
           type: string
+          description: 'The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`,
+            `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a
+            draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft
+            that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on
+            a `200` JSON answer `ok: false` with the `error` `not_authed`.'
           enum:
           - token
           - dry_probe
@@ -12898,14 +12943,15 @@ components:
         `app_token`), `wrong_token_type` — the bot token is not a bot''s: Slack answered `not_allowed_token_type`, or
         `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which
         `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token
-        (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack''s JSON; for the dry
-        probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET
-        <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a
+        (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack''s JSON `{"ok":false,
+        "error":"not_authed"}`; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`,
+        Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`, Slack `POST
+        https://slack.com/api/auth.test`), `not_bot_api` — the address answered, but not as a
         Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200`
         JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge
         protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is
         wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge,
-        `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol
+        `200` from Mattermost or Slack) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol
         version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the
         protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` —
         the bridge does not offer the Connection''s event delivery mode; for any step, `dns_failed` — the host name does

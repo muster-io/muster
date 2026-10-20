@@ -8,6 +8,7 @@ depends_on: [S-101]
 covers: [C-24.FR-2, C-24.AC-2, C-13.FR-14]
 files_touched:
   - api/openapi.yaml
+  - internal/api/connections.go
   - internal/connections/draft.go
   - internal/connections/draft_test.go
   - internal/slack/check.go
@@ -15,6 +16,7 @@ files_touched:
   - internal/api/connections_test.go
   - internal/archlint/secretleak.go
   - test/e2e/connection_drafts_test.go
+  - web/src/components/connection-check.test.tsx
   - web/src/components/connection-form.tsx
 acceptance:
   - "[C-24.FR-2, C-24.AC-2, C-13.FR-14] `checkConnectionDraft` takes a Slack draft — the event mode, the bot token and the app-level token typed in the form, the proxy, and for a saved Connection its id — and runs the steps of the saved check with the typed tokens; it stores nothing — no Connection, no bot, workspace or app — and writes no Audit log entry: after a passing draft check of a new Slack Connection, `listConnections` lists what it listed before (`draft_test.go`, `test/e2e/connection_drafts_test.go`)."
@@ -46,15 +48,27 @@ issue: 314
   `dry_probe` for Slack, and `NullableConnectionCheckCode` the code `not_slack` that S-097 added.
 - **Operation**: `checkConnectionDraft` (`POST /connections/checks`, `connections:write`, interactive) for the type;
   the `400` of S-097 for a Slack draft, a request matching no member of `ConnectionDraft`, is gone.
+- **Operation handler** (`internal/api/connections.go`): `connectionDraftOf` turns a `SlackConnectionDraft` into the
+  service's draft — the event mode, the bot token and the app-level token typed, the proxy, the `connection_id`.
 - **Draft check** (`internal/connections/draft.go`): a Slack draft's route — the address is Slack's, so only the proxy
   can differ from the saved Connection; a token typed in the draft goes with the draft's proxy; a stored token only
   when the draft's proxy equals the saved one; otherwise only the dry probe. The steps are those of `checkConnection`
-  (S-097, S-101) and the kind `draft_check` in the Request log, as S-087 built for the other types.
+  (S-097, S-101) and the kind `draft_check` in the Request log, as S-087 built for the other types. The bot token
+  decides, as for the other types; C-13.FR-14 says nothing more of the app-level token, so: in `socket` mode a typed
+  app-level token is used, the stored one only with the stored or a typed bot token on the saved proxy route, and
+  otherwise the step `app_token` is reported skipped; without a bot token only the dry probe runs and no app-level token
+  goes anywhere. A draft validates the event mode and the `xoxb-`/`xapp-` prefixes of the tokens typed as a save does,
+  but needs neither token. Under `muster dev` (`devmode.SlackRoute`) the bot token that is sent decides the address;
+  the dry probe of a saved Connection goes where its stored bot token is routed — the stored token only names the
+  address and is never sent —, and that of a new Connection to Slack; a stored app-level token goes only with a bot
+  token routed where the stored one is.
 - **Dry probe** (`internal/slack/check.go`): `auth.test` without `Authorization` through the given proxy, in the
   interactive class; `not_slack` for an answer that is not Slack's `{"ok":false,"error":"not_authed"}` JSON,
   `unexpected_status` for a JSON answer with another status, and the network codes of the other steps.
-- **SPA type check** (`web/src/components/connection-form.tsx`): the new member of `ConnectionDraft` gets a `slack`
-  branch in the switches the type check names, building no draft until S-103 adds the Slack form.
+- **SPA type check** (`web/src/components/connection-form.tsx`, `web/src/components/connection-check.test.tsx`): the
+  new member of `ConnectionDraft` gets a `slack` branch in the switches the type check names — `draftAddress` answers
+  Slack's fixed address —, building no draft until S-103 adds the Slack form; the component test's drafts by type,
+  a `Record` over every type, gain a Slack draft.
 - **Fake Slack server**: `auth.test` without a token already answers `not_authed` (S-097).
 - **Secrets** (lint 5): the probe `slack_connections` gains a draft check whose request fails.
 
@@ -82,8 +96,9 @@ echo $(( $(curl -s -b jar $API/connections | jq '.items | length') - N0 ))      
 # a saved Connection with only the proxy changed: the dry probe alone, without a token
 curl -s -X DELETE $FS/requests; curl -s -X DELETE $FP/requests
 curl -s "${H[@]}" $API/connections/checks -d "{\"type\":\"slack\",\"event_mode\":\"socket\",\"connection_id\":\"$C\",
-  \"proxy\":{\"enabled\":true,\"type\":\"http\",\"address\":\"127.0.0.1:18091\"}}" | jq -c '{ok, s: [.steps[] | {name, via}]}'
-# {"ok":true,"s":[{"name":"dry_probe","via":"proxy"}]}
+  \"proxy\":{\"enabled\":true,\"type\":\"http\",\"address\":\"127.0.0.1:18091\"}}" |
+  jq -c '{ok, s: [.steps[] | select(.skipped | not) | {name, via}], skipped: [.steps[] | select(.skipped) | .name]}'
+# {"ok":true,"s":[{"name":"dry_probe","via":"proxy"}],"skipped":["token","scopes","app_token"]}
 curl -s $FS/requests | jq '[.[] | select((.headers.Authorization // []) | length > 0)] | length'   # 0
 # the same with the token typed again: the steps run through the new proxy
 curl -s "${H[@]}" $API/connections/checks -d "{\"type\":\"slack\",\"event_mode\":\"socket\",\"connection_id\":\"$C\",
