@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -161,5 +162,133 @@ func TestTextOf(t *testing.T) {
 	}
 	if got := sanitize("fine ✓"); got != "fine ✓" {
 		t.Errorf("sanitize changed valid text: %q", got)
+	}
+}
+
+// slackPayload is a block_actions payload as Slack sends it (F-093): the verification token, the response_url, the
+// signed action id of the pressed button and those of the message's buttons and Snooze menu.
+func slackPayload(t *testing.T, responseURL string, values ...string) string {
+	t.Helper()
+	elements := []any{}
+	for _, v := range values {
+		elements = append(elements, map[string]any{"type": "button", "action_id": "ack", "value": v})
+	}
+	elements = append(elements, map[string]any{"type": "static_select", "action_id": "snooze",
+		"options": []any{map[string]any{"text": map[string]any{"type": "plain_text", "text": "4h"}, "value": values[0]}}})
+	b, err := json.Marshal(map[string]any{"type": "block_actions", "token": "Vt0kenOfTheApp99",
+		"api_app_id": "A0MUSTERDEVB", "user": map[string]any{"id": "U0FAKEALICE", "name": "alice"},
+		"container": map[string]any{"type": "message_attachment", "message_ts": "1.000001", "channel_id": "C0FAKEALERTS"},
+		"message": map[string]any{"attachments": []any{map[string]any{"blocks": []any{map[string]any{"type": "actions",
+			"block_id": "muster_actions", "elements": elements}}}}},
+		"response_url": responseURL,
+		"actions": []any{map[string]any{"action_id": "snooze", "block_id": "muster_actions", "type": "static_select",
+			"selected_option": map[string]any{"value": values[0]}}, map[string]any{"action_id": "ack", "value": values[0]}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestMaskSlack covers C-24.FR-14 and C-23.FR-3 for Slack: a value of X-Slack-Signature wherever it stands; the
+// response_url — on hooks.slack.com or on the fake server's address — plain, with JSON-escaped slashes and
+// percent-encoded, and as the value of the member response_url in JSON and in the form a press arrives in, as it
+// arrived and with Slack's escaped slashes; the payload's verification token; and the signed action ids of the form,
+// whose `%22` the form joins to them, are [redacted], and the form stays a form with a JSON payload. What only
+// resembles them is kept.
+func TestMaskSlack(t *testing.T) {
+	ack, resolve := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge), signed(t, buttons.SubjectRoot,
+		buttons.CommandResolve)
+	sig := strings.Repeat("0a1B", 16)
+	hooks := "https://hooks.slack.com/actions/T0123ABCD/4567890123/aBcDeF0123456789xyz"
+	fake := "http://127.0.0.1:18097/actions/T0MUSTERDEVB/7/0123456789abcdef01234567"
+	slackEscaped := func(s string) string { return strings.ReplaceAll(s, "/", `\/`) }
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a signature in text", "got v0=" + sig + ", refused", "got [redacted], refused"},
+		{"a signature percent-encoded", "sig=v0%3D" + sig + "&x=1", "sig=[redacted]&x=1"},
+		{"63 hex digits", "v0=" + sig[:63], "v0=" + sig[:63]},
+		{"a response_url in text", "posted to " + hooks + " at once", "posted to [redacted] at once"},
+		{"a response_url in another case", "HTTPS://Hooks.Slack.com/actions/T0/1/abc", "[redacted]"},
+		{"a response_url with escaped slashes", `see ` + slackEscaped(hooks) + ` now`, `see [redacted] now`},
+		{"a response_url percent-encoded", "u=" + url.QueryEscape(hooks) + "&v=1", "u=[redacted]&v=1"},
+		{"a response_url percent-encoded in lower case", "u=https%3a%2f%2fhooks.slack.com%2factions%2fT0%2f1%2fabc",
+			"u=[redacted]"},
+		{"a response_url escaped, then percent-encoded", url.QueryEscape(slackEscaped(hooks)), "[redacted]"},
+		{"an incoming webhook", "https://hooks.slack.com/services/T0/B0/xyz", "[redacted]"},
+		{"the fake's address", "posted to " + fake, "posted to http://127.0.0.1:18097[redacted]"},
+		{"the fake's address percent-encoded", url.QueryEscape(fake), "http%3A%2F%2F127.0.0.1%3A18097[redacted]"},
+		{"a response_url member in JSON", `{"response_url":"` + slackEscaped(fake) + `","n":1}`,
+			`{"response_url":"[redacted]","n":1}`},
+		{"a response_url member of another address", `{"response_url" : "ftp:\/\/x\"y", "n":1}`,
+			`{"response_url" : "[redacted]", "n":1}`},
+		{"a response_url member in a form", "payload=%7B%22response_url%22%3A%22ftp%3A%2F%2Fx%5C%22y%22%2C%22n%22%3A1%7D",
+			"payload=%7B%22response_url%22%3A%22[redacted]%22%2C%22n%22%3A1%7D"},
+		{"the token of a Slack payload", `{"token":"Vt0ken","api_app_id":"A0"}`, `{"token":"[redacted]","api_app_id":"A0"}`},
+		{"a token of something else", `{"token":"keep","type":"other"}`, `{"token":"keep","type":"other"}`},
+		{"the outbound URL of an answer", "http://127.0.0.1:18097[redacted]", "http://127.0.0.1:18097[redacted]"},
+		{"Slack's Web API", "https://slack.com/api/chat.postEphemeral", "https://slack.com/api/chat.postEphemeral"},
+		{"actions without an address", "/actions/x and hooks.slack.com", "/actions/x and hooks.slack.com"},
+		{"a GitHub Actions link is kept", "see https://github.com/o/r/actions/runs/12345/job/678 for the run",
+			"see https://github.com/o/r/actions/runs/12345/job/678 for the run"},
+		{"a GitHub Actions log link is kept", "https://github.com/o/r/actions/runs/99/logs",
+			"https://github.com/o/r/actions/runs/99/logs"},
+		{"a GitHub Actions link percent-encoded is kept",
+			url.QueryEscape("https://github.com/o/r/actions/runs/12345/job/678"),
+			url.QueryEscape("https://github.com/o/r/actions/runs/12345/job/678")},
+		{"a GitHub Actions link with escaped slashes is kept",
+			`{"u":"https:\/\/github.com\/o\/r\/actions\/runs\/7\/job\/8"}`,
+			`{"u":"https:\/\/github.com\/o\/r\/actions\/runs\/7\/job\/8"}`},
+		{"actions in capitals are no response_url", "http://127.0.0.1:18097/ACTIONS/T0MUSTERDEVB/7/0123456789abcdef",
+			"http://127.0.0.1:18097/ACTIONS/T0MUSTERDEVB/7/0123456789abcdef"},
+		{"the fake's address of the app a", "http://127.0.0.1:18097/actions/T0MUSTERDEVA/3/0123456789abcdef01234567",
+			"http://127.0.0.1:18097[redacted]"},
+		{"an Enterprise Grid team", "http://127.0.0.1:18097/actions/E0ENTERPRISE/3/abc",
+			"http://127.0.0.1:18097[redacted]"},
+		{"a signed action id after a percent-encoded character", "%41" + ack + "%22", "%41[redacted]%22"},
+		{"a run after a percent sign that is no escape", "%zz" + ack, "%zz" + ack},
+	}
+	for _, tt := range tests {
+		if got := maskShape(tt.in); got != tt.want {
+			t.Errorf("%s:\n got %s\nwant %s", tt.name, got, tt.want)
+		}
+	}
+
+	for _, address := range []string{hooks, fake} {
+		payload := slackPayload(t, address, ack, resolve)
+		for _, form := range []string{"payload=" + url.QueryEscape(payload),
+			"payload=" + url.QueryEscape(slackEscaped(payload)), payload} {
+			got := maskShape(form)
+			for _, secret := range []string{ack, resolve, "Vt0kenOfTheApp99", address, url.QueryEscape(address),
+				slackEscaped(address), url.QueryEscape(slackEscaped(address)), "/actions/", "actions%2F", `actions\/`} {
+				if strings.Contains(got, secret) {
+					t.Errorf("%q is left in %s", secret, got)
+				}
+			}
+			p := got
+			if rest, ok := strings.CutPrefix(got, "payload="); ok {
+				v, err := url.ParseQuery(got)
+				if err != nil {
+					t.Fatalf("the masked form is no form: %v", err)
+				}
+				p = v.Get("payload")
+				if rest == "" || p == "" {
+					t.Fatalf("no payload in %s", got)
+				}
+			}
+			var m map[string]any
+			if err := json.Unmarshal([]byte(p), &m); err != nil {
+				t.Fatalf("the masked payload is no JSON: %v: %s", err, p)
+			}
+			if m["type"] != "block_actions" || m["token"] != redacted || m["response_url"] != redacted ||
+				m["user"].(map[string]any)["id"] != "U0FAKEALICE" {
+				t.Errorf("masked payload %v", m)
+			}
+			if n := strings.Count(p, redacted); n != 7 {
+				t.Errorf("%d values masked in %s, want 7", n, p)
+			}
+		}
 	}
 }

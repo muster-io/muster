@@ -35,7 +35,9 @@
   [`0016_slack_connections`](../../internal/db/migrations/0016_slack_connections.up.sql)
   (Slack Connections, S-097) and
   [`0017_slack_destinations`](../../internal/db/migrations/0017_slack_destinations.up.sql)
-  (Slack Destinations, S-098), in
+  (Slack Destinations, S-098) and
+  [`0018_slack_presses_and_links`](../../internal/db/migrations/0018_slack_presses_and_links.up.sql)
+  (the Transport `slack` and Slack Account links and requests, S-100), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -232,7 +234,7 @@ erDiagram
     account_links {
         bigint id PK
         bigint user_id FK
-        text messenger "telegram mattermost bridge"
+        text messenger "telegram mattermost bridge slack"
         bigint connection_id FK
         text identity_space "generated: telegram, or messenger:connection_id"
         text external_id "UK with identity_space"
@@ -240,7 +242,7 @@ erDiagram
     }
     account_link_requests {
         bigint id PK
-        text messenger "telegram mattermost bridge"
+        text messenger "telegram mattermost bridge slack"
         text method "token code; required for bridge"
         bytea secret_hash "token or code"
         bigint attempts
@@ -768,19 +770,20 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   is checked to be a template identifier.
 - **`account_links`** — the identity space is a stored generated column: `'telegram'` for every Telegram link,
   `'<messenger>:<connection_id>'` for the others — `'mattermost:<connection_id>'` for a Mattermost link,
-  `'bridge:<connection_id>'` for a Bridge one (migration 0011, C-22.FR-15). Two unique constraints carry the rules of
+  `'bridge:<connection_id>'` for a Bridge one (migration 0011, C-22.FR-15), and `'slack:<connection_id>'` for a Slack
+  one (migration 0018, C-24.FR-12), with the expression of 0011 unchanged. Two unique constraints carry the rules of
   ADR-0013: `account_links_account_key` `(org_id, identity_space, external_id)` — one messenger account belongs to one
   User — and `account_links_user_space_key` `(org_id, user_id, identity_space)` — one account per space per User; a
   new link replaces the old one in one transaction (delete, insert, Audit log). The composite foreign key
   `(connection_id, messenger)` makes a Telegram link name a Telegram Connection, a Mattermost one a Mattermost
-  Connection and a Bridge one a Bridge Connection. `display_name` (nullable) is the account's name as a bridge
-  reported it, which Bridge links store for Mentions and the footer. A generated column cannot change its expression
-  before PostgreSQL 17, so migration 0011 adds the new column, drops the two unique constraints and the old column,
-  renames the new one and adds the constraints again under their old names, under one exclusive lock of the small
-  table; the values of Mattermost and Telegram links do not change, so an earlier binary reads and writes the column and
-  catches the unique violations by name as before. Its down migration deletes the Bridge links and swaps the column
-  back the same way. S-076 writes `display_name` for every Bridge link, and the footer names a User linked through a
-  Bridge by it, else by the link's `username` (C-22.FR-16).
+  Connection, a Bridge one a Bridge Connection and a Slack one a Slack Connection. `display_name` (nullable) is the
+  account's name as a bridge reported it, which Bridge links store for Mentions and the footer. A generated column
+  cannot change its expression before PostgreSQL 17, so migration 0011 adds the new column, drops the two unique
+  constraints and the old column, renames the new one and adds the constraints again under their old names, under one
+  exclusive lock of the small table; the values of Mattermost and Telegram links do not change, so an earlier binary
+  reads and writes the column and catches the unique violations by name as before. Its down migration deletes the Bridge
+  links and swaps the column back the same way. S-076 writes `display_name` for every Bridge link, and the footer names
+  a User linked through a Bridge by it, else by the link's `username` (C-22.FR-16).
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
@@ -795,9 +798,13 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   without it. `account_link_requests_bridge_target_idx` backs the per-target limit of
   `account_link.bridge_code_requests`, as `account_link_requests_target_idx` backs Mattermost's; the per-User count
   uses `account_link_requests_user_idx`. The composite foreign key `(connection_id, messenger)` binds a Bridge request
-  to a Bridge Connection. A request is deleted by `short_lived_pruning` `account_link.request_prune_after` past its
-  `expires_at`, consumed and voided ones included, whatever its messenger, which keeps the hour the limits count; the
-  batched delete scans the small table without an index of its own.
+  to a Bridge Connection. A Slack request (migration 0018, C-24.FR-12) is a hashed code sent by direct message with its
+  target account and `attempts` (`account_link.slack_code`), as a Mattermost one is:
+  `account_link_requests_slack_target_check` requires its `target_external_id`, the partial index
+  `account_link_requests_slack_target_idx` backs the per-target limit of `account_link.slack_code_requests`, and the
+  composite foreign key binds it to a Slack Connection. A request is deleted by `short_lived_pruning`
+  `account_link.request_prune_after` past its `expires_at`, consumed and voided ones included, whatever its messenger,
+  which keeps the hour the limits count; the batched delete scans the small table without an index of its own.
 
 ### 4.6 Integrations and ingestion
 
@@ -1022,13 +1029,14 @@ are not copied: they are the identity of the Alert and stay on `alerts`.
 `event`, `event_seq` (position among the Alert Group's lifecycle events, the webhook `sequence`), `loudness` and
 symbolic `mentions`; and system entries without a lifecycle event (`muster_unavailable`, `fallback_template_used`,
 `template_value_missing`). The actor (`user`, `service_account` or `system` with `transport = 'system'`), the token used
-and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`, `system`) are recorded; the Transport CHECK
-is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the lifecycle event tables: every event has its Timeline kind
-(`x-event-kinds` of the API specification), a lifecycle event always carries loudness and a sequence number, an entry
-without an event is a `system` entry, `moved_to_default_route` is both, and `mentions` only uses the eight symbolic
-names. Delivery events are not stored here; the Timeline endpoint merges `delivery_events` by time as the kind
-`delivery` ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One
-index, `(org_id, alert_group_id, at, id)`, serves the Timeline (both directions, kind filter).
+and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`, `system`) are recorded; the
+Transport CHECK is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the
+lifecycle event tables: every event has its Timeline kind (`x-event-kinds` of the API specification), a lifecycle
+event always carries loudness and a sequence number, an entry without an event is a `system` entry,
+`moved_to_default_route` is both, and `mentions` only uses the eight symbolic names. Delivery events are not stored
+here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
+([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
+`(org_id, alert_group_id, at, id)`, serves the Timeline (both directions, kind filter).
 
 **`notes`** — the Notes: text a User or a Service account adds from the UI or the API, with its author, the token used,
 the Transport and the `event_seq` of the `note_added` lifecycle event it records (always Quiet, without Mentions).
@@ -1238,14 +1246,17 @@ Serves C-03.FR-14–15, C-04.FR-6, C-10.FR-12, C-18.FR-9, C-20.FR-8.
 **`audit_log`** (partitioned by month on `at`) — every configuration change with a before/after `diff` (Secrets appear
 only as `secret_changed`), security events and every command of people and automation: actor (`user`,
 `service_account`, `system`, `bootstrap`, or `cli` with the `--actor` name), the token used (`api_token_id`,
-`token_name`), the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`, `system`), a stable `action`
-(`<resource>.<verb>`, checked by pattern), the resource and `details`. Users are referenced by id and shown by their
-current name, so pseudonymization never rewrites a row. Migration 0011 adds `bridge` to the Transport CHECKs of
+`token_name`), the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`, `system`), a stable
+`action` (`<resource>.<verb>`, checked by pattern), the resource and `details`. Users are referenced by id and shown by
+their current name, so pseudonymization never rewrites a row. Migration 0011 adds `bridge` to the Transport CHECKs of
 `audit_log` and `timeline_entries`: each new CHECK (`..._transport_v2_check`) is added to the partitioned parent
 `NOT VALID`, which adds it to every partition, validated in a second transaction, which recurses to every partition
 on PostgreSQL 14 and 17 alike, and the old one is dropped in a third. Its down migration never deletes or rewrites a
 row with the Transport `bridge` — the Audit log is append-only and the Timeline is history: it restores the old CHECKs
-`NOT VALID`, which hold every new row, and validates them only when no such row exists.
+`NOT VALID`, which hold every new row, and validates them only when no such row exists. Migration 0018 adds `slack`
+the same way, `..._transport_v3_check` replacing `..._transport_v2_check`; its down migration keeps the rows with the
+Transport `slack`, as 0011's keeps those with `bridge`, and restores the `_v2` CHECKs under their names, which 0011's
+own down migration drops.
 
 **Append-only** is enforced by triggers, not by privileges: a `BEFORE UPDATE OR DELETE` row trigger and a
 `BEFORE TRUNCATE` statement trigger raise `insufficient_privilege`. Row triggers on a partitioned table are cloned to

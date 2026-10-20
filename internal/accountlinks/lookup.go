@@ -34,6 +34,11 @@ func SpaceBridge(connectionID int64) string {
 	return "bridge:" + strconv.FormatInt(connectionID, 10)
 }
 
+// SpaceSlack is the identity space of the accounts of the Slack Connection connectionID (C-24.FR-12).
+func SpaceSlack(connectionID int64) string {
+	return "slack:" + strconv.FormatInt(connectionID, 10)
+}
+
 // User is the User an account is linked to: its id and public_id, login, display name, Role and status, and the
 // language of its profile, empty when it has none.
 type User struct {

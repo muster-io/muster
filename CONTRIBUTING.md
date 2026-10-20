@@ -73,9 +73,15 @@ app-level token `xapp-muster-dev-slack-token`, which the demo Connection "Dev Sl
 their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under
 `muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
 `/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's, the app of each
-token, the channels of each app, merged by id, and a page size for `conversations.list`; both apps have the channel
-`C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other", without it. Muster itself joins them with the
-runtime, which a later story adds: from the runtime on,
+token, the channels of each app, merged by id, a page size for `conversations.list` and the `request_url` of each
+app, its Interactivity Request URL; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and
+`C0FAKEOTHER` "other", without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in
+every channel with the bot. `POST /_fake/press` presses a button or a Snooze option of a message as one of them, as
+Slack would, and sends the press to the app's `request_url`, signed with its Slack signing secret, answering Muster's
+status; a wrong signature, a timestamp offset or another message's value make the negative cases. Muster's private
+answers show at `/_fake/ephemeral` (`chat.postEphemeral`) and `/_fake/responses` (the press's `response_url`, which
+the fake serves at `/actions/…`, so that faults reach it). Muster itself joins them with the runtime, which a later
+story adds: from the runtime on,
 `muster dev` also listens on `:8080` (app), `:8081` (ingest) and `:8082` (internal) and connects to the development
 database, and `muster dev --replica` runs an additional replica on `:9080`, `:9081` and `:9082`, without fake servers,
 against the same database; until then the replica only prints that it started and waits. Every `MUSTER_*` variable

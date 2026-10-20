@@ -245,7 +245,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_alert_groups_resolved_total` | counter | `route`, `by` (`user`, `system`) | C-09 |
 | `muster_alert_group_time_to_resolve_seconds` | histogram | `route` | C-09 |
 | `muster_alert_group_time_to_ack_seconds` | histogram | `route` | C-10 |
-| `muster_commands_total` | counter | `command` (`acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it`), `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `system`), `outcome` (`done`, `unchanged`, `refused`, `skipped`, `failed`) | C-10 |
+| `muster_commands_total` | counter | `command` (`acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it`), `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `system`), `outcome` (`done`, `unchanged`, `refused`, `skipped`, `failed`) | C-10 |
 | `muster_delivery_attempts_total` | counter | `destination`; `kind` (`publication`, `update`, `thread_reply`, `storm_summary`, `final_edit`, `webhook_event`); `outcome` (`delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error`) | C-11 |
 | `muster_delivery_latency_seconds` | histogram | `destination` | C-11 |
 | `muster_delivery_queue` | gauge (Leader) | `destination` | C-11 |

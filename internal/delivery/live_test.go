@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
@@ -970,6 +971,8 @@ func TestLive(t *testing.T) {
 			{"edit_window_starts", l.editWindowStarts},
 			// S-099.
 			{"slack_adapter", l.slackAdapter},
+			// S-100.
+			{"slack_press_binding", l.slackPressBinding},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -4172,4 +4175,143 @@ func (l *live) slackAdapter(t *testing.T) {
 		"reply under the new root; bot removed → broken (%s); not_in_channel → broken, probe conversations.info in "+
 		"the delivery class (+%.0f ok) → healthy, MusterDestinationBroken resolved; 429 Retry-After 1 → both "+
 		"Destinations waited %v and %v", note, "not_in_channel", probes, at[1].Sub(start), at[2].Sub(start))
+}
+
+// slackPressBinding is C-24.FR-10, FR-13 and C-17.FR-6 on PostgreSQL: a press on a message of a Slack Connection is
+// bound by its channel and ts — a ts is unique within its channel only — to the Root message of an Alert Group's
+// delivery to a Slack Destination of the Connection on that channel, or to a sent Reminder there with the ts of the
+// Root message it replies to; the same ts in another channel or of another Connection, another Organization, a deleted
+// Destination, a Reminder not sent and a Thread reply that is no Reminder are not bound. The Destination of a test
+// message is read by its public_id and channel.
+func (l *live) slackPressBinding(t *testing.T) {
+	ctx := t.Context()
+	l.fresh(t, 1000, 1)
+	l.fire(t, "spb", "SlackPress/a")
+	gid := l.group(t, "SlackPress")
+	var group int64
+	if err := l.d.Pool.QueryRow(ctx, `SELECT id FROM alert_groups WHERE public_id = $1`, gid).Scan(&group); err != nil {
+		t.Fatal(err)
+	}
+	conns := map[string]int64{}
+	for _, publicID := range []string{"CNAAAAAAAAAAP1", "CNAAAAAAAAAAP2"} {
+		var id int64
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_signing_secret_ciphertext,
+			slack_signing_secret_key_id, slack_signing_secret_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at) VALUES ($1, $2, 'slack', $2, 'http', '\x00', 'k1', $3, '\x00', 'k1', $3, 1000, 1, $3, $3)
+			RETURNING id`, l.orgID, publicID, t0).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		conns[publicID] = id
+	}
+	conn, other := conns["CNAAAAAAAAAAP1"], conns["CNAAAAAAAAAAP2"]
+	// The Root message 1.000001 in the channel alerts of the Connection, a message with the same ts in the channel other
+	// of the same Connection and in the channel alerts of another Connection; the Reminder 1.000003 and a Thread reply
+	// 1.000002 that is no Reminder.
+	dests := map[string]int64{}
+	deliveries := map[string]int64{}
+	for _, d := range []struct {
+		publicID, channel string
+		conn              int64
+	}{{"DSAAAAAAAAAAP1", fakeslack.ChannelAlerts, conn}, {"DSAAAAAAAAAAP2", fakeslack.ChannelOther, conn},
+		{"DSAAAAAAAAAAP3", fakeslack.ChannelAlerts, other}} {
+		var id, del int64
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+			slack_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			VALUES ($1, $2, 'slack', $2, $3, $4, '{}', 1000, 1, 'healthy', $5, $5) RETURNING id`, l.orgID, d.publicID,
+			d.conn, d.channel, t0).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO deliveries (org_id, destination_id, alert_group_id, state,
+			message_id, next_attempt_at, created_at, updated_at) VALUES ($1, $2, $3, 'delivered', '1.000001', $4, $4, $4)
+			RETURNING id`, l.orgID, id, group, t0).Scan(&del); err != nil {
+			t.Fatal(err)
+		}
+		dests[d.publicID], deliveries[d.publicID] = id, del
+	}
+	dest := dests["DSAAAAAAAAAAP1"]
+	for ts, event := range map[string]string{"1.000002": "alerts_added", "1.000003": "reminder"} {
+		l.exec(t, `INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs,
+			loudness, state, next_attempt_at, message_id, button_key_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, '{90}', 'loud', 'sent', $6, $7, 'k-0001', $6)`, l.orgID,
+			deliveries["DSAAAAAAAAAAP1"], group, dest, event, t0, ts)
+	}
+	for _, c := range []struct {
+		ts   string
+		kind buttons.Subject
+		root string
+	}{{"1.000001", buttons.SubjectRoot, ""}, {"1.000003", buttons.SubjectReply, "1.000001"}} {
+		b, err := l.svc.SlackPressBinding(ctx, conn, fakeslack.ChannelAlerts, c.ts)
+		if err != nil || b.Kind != c.kind || b.GroupPublicID != gid || b.AlertGroup != group ||
+			b.Destination.ID != dest || b.Destination.PublicID != "DSAAAAAAAAAAP1" ||
+			b.Destination.Type != delivery.TypeSlack || b.Destination.Connection == nil ||
+			*b.Destination.Connection != conn || b.RootTS != c.root {
+			t.Fatalf("SlackPressBinding(%s) = %+v, %v", c.ts, b, err)
+		}
+	}
+	if b, err := l.svc.SlackPressBinding(ctx, conn, fakeslack.ChannelOther, "1.000001"); err != nil ||
+		b.Destination.ID != dests["DSAAAAAAAAAAP2"] {
+		t.Fatalf("the same ts in the channel other = %+v, %v", b, err)
+	}
+	if b, err := l.svc.SlackPressBinding(ctx, other, fakeslack.ChannelAlerts, "1.000001"); err != nil ||
+		b.Destination.ID != dests["DSAAAAAAAAAAP3"] {
+		t.Fatalf("the same ts of another connection = %+v, %v", b, err)
+	}
+	for _, c := range []struct {
+		conn        int64
+		channel, ts string
+	}{{conn, fakeslack.ChannelAlerts, "1.000002"}, {conn, fakeslack.ChannelOther, "1.000003"},
+		{other, fakeslack.ChannelAlerts, "1.000003"}, {conn, fakeslack.ChannelAlerts, "9.000009"},
+		{l.conn, fakeslack.ChannelAlerts, "1.000001"}} {
+		if _, err := l.svc.SlackPressBinding(ctx, c.conn, c.channel, c.ts); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("SlackPressBinding(%d, %s, %s) = %v", c.conn, c.channel, c.ts, err)
+		}
+	}
+	q := deliverydb.New(l.d.Pool)
+	if _, err := q.GetSlackRootBinding(ctx, deliverydb.GetSlackRootBindingParams{OrgID: l.orgID + 1,
+		ConnectionID: pgtype.Int8{Int64: conn, Valid: true}, ChannelID: fakeslack.ChannelAlerts,
+		MessageID: "1.000001"}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("the root binding of another organization: %v", err)
+	}
+	if _, err := q.GetSlackReminderBinding(ctx, deliverydb.GetSlackReminderBindingParams{OrgID: l.orgID + 1,
+		ConnectionID: pgtype.Int8{Int64: conn, Valid: true}, ChannelID: fakeslack.ChannelAlerts,
+		MessageID: "1.000003"}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("the reminder binding of another organization: %v", err)
+	}
+	if _, err := q.GetSlackTestDestination(ctx, deliverydb.GetSlackTestDestinationParams{OrgID: l.orgID + 1,
+		ConnectionID: pgtype.Int8{Int64: conn, Valid: true}, PublicID: "DSAAAAAAAAAAP1",
+		ChannelID: fakeslack.ChannelAlerts}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("the test destination of another organization: %v", err)
+	}
+	d, ok, err := l.svc.SlackTestDestination(ctx, conn, "DSAAAAAAAAAAP1", fakeslack.ChannelAlerts)
+	if err != nil || !ok || d.ID != dest || d.Type != delivery.TypeSlack {
+		t.Fatalf("SlackTestDestination = %+v, %v, %v", d, ok, err)
+	}
+	for _, c := range []struct {
+		conn              int64
+		publicID, channel string
+	}{{conn, "DSAAAAAAAAAAP1", fakeslack.ChannelOther}, {other, "DSAAAAAAAAAAP1", fakeslack.ChannelAlerts},
+		{conn, "DSAAAAAAAAAAP3", fakeslack.ChannelAlerts}} {
+		if _, ok, err := l.svc.SlackTestDestination(ctx, c.conn, c.publicID, c.channel); ok || err != nil {
+			t.Errorf("SlackTestDestination(%+v) = %v, %v", c, ok, err)
+		}
+	}
+	l.exec(t, `UPDATE thread_replies SET state = 'pending' WHERE destination_id = $1 AND event = 'reminder'`, dest)
+	if _, err := l.svc.SlackPressBinding(ctx, conn, fakeslack.ChannelAlerts, "1.000003"); !errors.Is(err,
+		delivery.ErrNotBound) {
+		t.Errorf("a Reminder not sent = %v", err)
+	}
+	l.exec(t, `UPDATE thread_replies SET state = 'sent' WHERE destination_id = $1 AND event = 'reminder'`, dest)
+	l.exec(t, `UPDATE destinations SET deleted_at = $1 WHERE id = $2`, t0, dest)
+	for _, ts := range []string{"1.000001", "1.000003"} {
+		if _, err := l.svc.SlackPressBinding(ctx, conn, fakeslack.ChannelAlerts, ts); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("%s of a deleted destination = %v", ts, err)
+		}
+	}
+	if _, ok, err := l.svc.SlackTestDestination(ctx, conn, "DSAAAAAAAAAAP1", fakeslack.ChannelAlerts); ok || err != nil {
+		t.Errorf("the test destination when deleted = %v, %v", ok, err)
+	}
+	t.Logf("slack: root 1.000001 and reminder 1.000003 of %s bound in %s by channel and ts; the same ts in %s and of "+
+		"another connection bound to their own destinations", gid, fakeslack.ChannelAlerts, fakeslack.ChannelOther)
 }

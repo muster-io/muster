@@ -572,10 +572,11 @@ func TestBridgePressBindingPrefersTheCurrentRootMessage(t *testing.T) {
 	}
 }
 
-// readsSince are the reads of a Bridge binding made since before, in the order the bindings make them.
+// readsSince are the reads of a Bridge or Slack binding made since before, in the order the bindings make them.
 func readsSince(before, now map[string]int) []string {
 	var out []string
-	for _, q := range []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding"} {
+	for _, q := range []string{"GetBridgeRootBinding", "GetBridgeSupersededBinding", "GetBridgeReminderBinding",
+		"GetSlackRootBinding", "GetSlackReminderBinding"} {
 		if now[q] != before[q] {
 			out = append(out, q)
 		}
@@ -886,5 +887,212 @@ func TestRootDeletedOtherMessages(t *testing.T) {
 		delete(e.db.fail, q)
 		*d = before
 		e.db.events = nil
+	}
+}
+
+// slackDest is the Slack Destination id of the Connection conn on the channel channel, not deleted; nil otherwise.
+func (f *fakeDB) slackDest(id, conn int64, channel string) *fakeDest {
+	ds := f.dests[id]
+	if ds == nil || ds.typ != delivery.TypeSlack || ds.deleted || ds.connection == nil || *ds.connection != conn ||
+		ds.channel != channel {
+		return nil
+	}
+	return ds
+}
+
+func (f *fakeDB) GetSlackRootBinding(_ context.Context, arg dbgen.GetSlackRootBindingParams) (
+	dbgen.GetSlackRootBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetSlackRootBinding"); err != nil {
+		return dbgen.GetSlackRootBindingRow{}, err
+	}
+	for _, d := range f.deliveries {
+		ds, g := f.slackDest(d.dest, arg.ConnectionID.Int64, arg.ChannelID), f.groups[d.group]
+		if ds == nil || g == nil || d.messageID == nil || *d.messageID != arg.MessageID {
+			continue
+		}
+		r := f.routes[g.route]
+		return dbgen.GetSlackRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID,
+			SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
+	}
+	return dbgen.GetSlackRootBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetSlackReminderBinding(_ context.Context, arg dbgen.GetSlackReminderBindingParams) (
+	dbgen.GetSlackReminderBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetSlackReminderBinding"); err != nil {
+		return dbgen.GetSlackReminderBindingRow{}, err
+	}
+	for _, r := range f.replies {
+		ds, g := f.slackDest(r.dest, arg.ConnectionID.Int64, arg.ChannelID), f.groups[r.group]
+		if ds == nil || g == nil || r.event != "reminder" || r.state != "sent" || r.messageID == nil ||
+			*r.messageID != arg.MessageID {
+			continue
+		}
+		root := ""
+		for _, d := range f.deliveries {
+			if d.id == r.delivery && d.messageID != nil {
+				root = *d.messageID
+			}
+		}
+		rt := f.routes[g.route]
+		return dbgen.GetSlackReminderBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID,
+			SnoozeDurationsSeconds: slices.Clone(rt.snooze), RootMessageID: root}, nil
+	}
+	return dbgen.GetSlackReminderBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetSlackTestDestination(_ context.Context, arg dbgen.GetSlackTestDestinationParams) (
+	dbgen.GetSlackTestDestinationRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetSlackTestDestination"); err != nil {
+		return dbgen.GetSlackTestDestinationRow{}, err
+	}
+	for _, id := range slices.Sorted(maps.Keys(f.dests)) {
+		if ds := f.slackDest(id, arg.ConnectionID.Int64, arg.ChannelID); ds != nil && ds.publicID == arg.PublicID {
+			return dbgen.GetSlackTestDestinationRow{ID: ds.id, PublicID: ds.publicID, Name: ds.name}, nil
+		}
+	}
+	return dbgen.GetSlackTestDestinationRow{}, pgx.ErrNoRows
+}
+
+// slacked is an env whose Destination destMM is a Slack Destination on the channel C0ALERTS, with the Root message 1.1
+// of Alert Group 21 and its sent Reminder 1.3, a Thread reply 1.2 that is no Reminder, and a Storm summary 1.4.
+func slacked(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	ds := e.db.dests[destMM]
+	ds.typ, ds.name, ds.channel = delivery.TypeSlack, "alerts", "C0ALERTS"
+	r := e.db.routes[routeID]
+	r.language, r.snooze = "ru", []int64{3600, 14400}
+	e.db.routes[routeID] = r
+	root, reply, reminder, summary := "1.1", "1.2", "1.3", "1.4"
+	e.db.deliveries = append(e.db.deliveries,
+		&fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered", messageID: &root,
+			publishedAt: at(business0)},
+		&fakeDelivery{id: 2, dest: destMM, storm: 9, state: "delivered", messageID: &summary,
+			publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies,
+		&fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM, event: "alerts_added", state: "sent",
+			messageID: &reply},
+		&fakeReply{id: 2, delivery: 1, group: groupID, dest: destMM, event: "reminder", state: "sent",
+			messageID: &reminder})
+	return e
+}
+
+// TestSlackPressBinding is the binding of C-24.FR-10: a press on a message of a Slack Connection is bound by its
+// channel and ts to the delivery of an Alert Group to a Slack Destination of the Connection on that channel whose Root
+// message it is, or to a sent Reminder there, with the Destination, the Alert Group, the Route's language and Snooze
+// durations and, for a Reminder, the Root message's ts; another channel, another Connection, another type, a deleted
+// Destination, a Thread reply that is not a sent Reminder, a Storm summary or an unknown ts is not bound, and a failed
+// read is an error that skips the later reads.
+func TestSlackPressBinding(t *testing.T) {
+	e := slacked(t)
+	conn := int64(connID)
+	want := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Name: "alerts", Type: delivery.TypeSlack,
+		Connection: &conn}
+	for _, tc := range []struct {
+		ts    string
+		kind  buttons.Subject
+		root  string
+		reads []string
+	}{
+		{"1.1", buttons.SubjectRoot, "", []string{"GetSlackRootBinding"}},
+		{"1.3", buttons.SubjectReply, "1.1", []string{"GetSlackRootBinding", "GetSlackReminderBinding"}},
+	} {
+		calls := maps.Clone(e.db.calls)
+		b, err := e.svc.SlackPressBinding(t.Context(), connID, "C0ALERTS", tc.ts)
+		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" || b.AlertGroup != groupID ||
+			b.Destination.ID != want.ID || b.Destination.PublicID != want.PublicID ||
+			b.Destination.Name != want.Name || b.Destination.Type != want.Type || b.Destination.Connection == nil ||
+			*b.Destination.Connection != conn || b.RootTS != tc.root ||
+			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400}) {
+			t.Errorf("SlackPressBinding(%s) = %+v, %v", tc.ts, b, err)
+		}
+		if got := readsSince(calls, e.db.calls); !slices.Equal(got, tc.reads) {
+			t.Errorf("SlackPressBinding(%s) read %v", tc.ts, got)
+		}
+	}
+	for _, c := range []struct {
+		conn        int64
+		channel, ts string
+	}{{connID, "C0ALERTS", "1.2"}, {connID, "C0ALERTS", "1.4"}, {connID, "C0ALERTS", "9.9"},
+		{connID, "C0OTHER", "1.1"}, {connID, "C0OTHER", "1.3"}, {connID + 1, "C0ALERTS", "1.1"},
+		{connID + 1, "C0ALERTS", "1.3"}} {
+		if _, err := e.svc.SlackPressBinding(t.Context(), c.conn, c.channel, c.ts); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("SlackPressBinding(%d, %s, %s) = %v, want ErrNotBound", c.conn, c.channel, c.ts, err)
+		}
+	}
+	e.db.replies[1].state = "pending"
+	if _, err := e.svc.SlackPressBinding(t.Context(), connID, "C0ALERTS", "1.3"); !errors.Is(err,
+		delivery.ErrNotBound) {
+		t.Errorf("an unsent Reminder = %v", err)
+	}
+	e.db.replies[1].state = "sent"
+	e.db.dests[destMM].typ = delivery.TypeMattermost
+	if _, err := e.svc.SlackPressBinding(t.Context(), connID, "C0ALERTS", "1.1"); !errors.Is(err,
+		delivery.ErrNotBound) {
+		t.Errorf("a Mattermost Destination = %v", err)
+	}
+	e.db.dests[destMM].typ = delivery.TypeSlack
+	e.db.dests[destMM].deleted = true
+	for _, ts := range []string{"1.1", "1.3"} {
+		if _, err := e.svc.SlackPressBinding(t.Context(), connID, "C0ALERTS", ts); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("%s of a deleted Destination = %v", ts, err)
+		}
+	}
+	e.db.dests[destMM].deleted = false
+	reads := []string{"GetSlackRootBinding", "GetSlackReminderBinding"}
+	for i, q := range reads {
+		e.db.fail[q] = errBoom
+		calls := maps.Clone(e.db.calls)
+		if _, err := e.svc.SlackPressBinding(t.Context(), connID, "C0ALERTS", "1.3"); !errors.Is(err, errBoom) ||
+			errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("a failed %s = %v", q, err)
+		}
+		for _, later := range reads[i+1:] {
+			if e.db.calls[later] != calls[later] {
+				t.Errorf("after a failed %s, %s was read", q, later)
+			}
+		}
+		delete(e.db.fail, q)
+	}
+}
+
+// TestSlackTestDestination: a press on a test message is answered only for a Slack Destination of the Connection, not
+// deleted, on the channel of the press, which the action id names.
+func TestSlackTestDestination(t *testing.T) {
+	e := slacked(t)
+	d, ok, err := e.svc.SlackTestDestination(t.Context(), connID, "DSAAAAAAAAAA11", "C0ALERTS")
+	if err != nil || !ok || d.ID != destMM || d.PublicID != "DSAAAAAAAAAA11" || d.Name != "alerts" ||
+		d.Type != delivery.TypeSlack || d.Connection == nil || *d.Connection != connID {
+		t.Fatalf("SlackTestDestination = %+v, %v, %v", d, ok, err)
+	}
+	for _, c := range []struct {
+		conn              int64
+		publicID, channel string
+	}{{connID, "DSAAAAAAAAAA11", "C0OTHER"}, {connID, "DSAAAAAAAAAA12", "C0ALERTS"},
+		{connID + 1, "DSAAAAAAAAAA11", "C0ALERTS"}} {
+		if _, ok, err := e.svc.SlackTestDestination(t.Context(), c.conn, c.publicID, c.channel); ok || err != nil {
+			t.Errorf("SlackTestDestination(%+v) = %v, %v", c, ok, err)
+		}
+	}
+	e.db.dests[destMM].deleted = true
+	if _, ok, err := e.svc.SlackTestDestination(t.Context(), connID, "DSAAAAAAAAAA11", "C0ALERTS"); ok || err != nil {
+		t.Errorf("a deleted Destination = %v, %v", ok, err)
+	}
+	e.db.dests[destMM].deleted = false
+	e.db.fail["GetSlackTestDestination"] = errBoom
+	if _, ok, err := e.svc.SlackTestDestination(t.Context(), connID, "DSAAAAAAAAAA11", "C0ALERTS"); ok ||
+		!errors.Is(err, errBoom) {
+		t.Errorf("a failed read = %v, %v", ok, err)
 	}
 }

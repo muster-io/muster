@@ -25,4 +25,5 @@ export const Messenger = {
   telegram: 'telegram',
   mattermost: 'mattermost',
   bridge: 'bridge',
+  slack: 'slack',
 } as const;

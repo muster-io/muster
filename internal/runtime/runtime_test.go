@@ -62,6 +62,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/timers"
@@ -1912,5 +1913,79 @@ func TestRerenderAfterSwitchRetriesOnce(t *testing.T) {
 				t.Errorf("err %v, %d switches, renders %v", err, switches, renders)
 			}
 		})
+	}
+}
+
+// drainLinks are the Account links of drained Slack presses: each lookup tells entered, then fails once release is
+// closed — never when it is nil — or its context ends.
+type drainLinks struct {
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (l drainLinks) Lookup(ctx context.Context, _, _ string) (accountlinks.User, error) {
+	l.entered <- struct{}{}
+	select {
+	case <-l.release:
+		return accountlinks.User{}, errors.New("released")
+	case <-ctx.Done():
+		return accountlinks.User{}, ctx.Err()
+	}
+}
+
+// failingPath fails every answer to a press.
+type failingPath struct{}
+
+func (failingPath) Do(context.Context, delivery.Subject, delivery.Op) (delivery.Outcome, error) {
+	return delivery.Outcome{}, errors.New("no answers here")
+}
+
+// TestDrainSlackPresses is C-02.FR-16 for the Slack presses answered 200: the shutdown waits, within its grace period,
+// for the presses in flight to end and leaves their context alone; when the grace period ends first, it ends their
+// context with errGraceEnded, so that they end as failed and unanswered before the pool closes, and reports that the
+// grace was exceeded.
+func TestDrainSlackPresses(t *testing.T) {
+	var out syncBuffer
+	log := logging.New(&out, logging.LevelInfo)
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	presses := &slack.Presses{Links: drainLinks{entered: entered, release: release}, Path: failingPath{}, Log: log}
+	conn := slack.Conn{ID: 1, PublicID: "CNAAAAAAAAAAA1", Mode: slack.EventModeHTTP}
+	payload := []byte(`{"type":"block_actions","user":{"id":"U1"},"container":{"channel_id":"C1",` +
+		`"message_ts":"1.000001"},"actions":[{"value":"v"}]}`)
+	base, end := context.WithCancelCause(t.Context())
+	defer end(nil)
+	if !drainSlackPresses(t.Context(), presses, end) {
+		t.Fatal("nothing in flight was not drained")
+	}
+	presses.Go(base, conn, payload)
+	<-entered
+	drained := make(chan bool, 1)
+	go func() { drained <- drainSlackPresses(t.Context(), presses, end) }()
+	close(release)
+	if !<-drained || base.Err() != nil {
+		t.Fatal("a press that ended within the grace period was not drained, or its context ended")
+	}
+
+	stuck := &slack.Presses{Links: drainLinks{entered: entered}, Path: failingPath{}, Log: log}
+	stuck.Go(base, conn, payload)
+	<-entered
+	grace, over := context.WithCancel(t.Context())
+	over()
+	if drainSlackPresses(grace, stuck, end) {
+		t.Fatal("a press still running at the end of the grace period was drained")
+	}
+	if !errors.Is(context.Cause(base), errGraceEnded) {
+		t.Errorf("the presses' context ended with %v", context.Cause(base))
+	}
+	var lines []map[string]any
+	for _, l := range out.events(t) {
+		if l["event"] == "slack_press" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) != 2 || lines[0]["outcome"] != "failed" || lines[1]["outcome"] != "failed" ||
+		lines[1]["answer"] != nil || !strings.Contains(fmt.Sprint(lines[1]["error"]), context.Canceled.Error()) ||
+		strings.Contains(fmt.Sprint(lines[1]["error"]), "no answers here") {
+		t.Errorf("slack_press lines %v", lines)
 	}
 }

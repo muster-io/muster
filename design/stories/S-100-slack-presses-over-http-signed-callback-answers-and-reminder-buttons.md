@@ -23,11 +23,12 @@ files_touched:
   - internal/slack/client.go
   - internal/connections/slack.go
   - internal/connections/slack_test.go
-  - internal/connections/query.sql
   - internal/accountlinks/lookup.go
-  - internal/accountlinks/query.sql
   - internal/delivery/presses.go
   - internal/delivery/presses_test.go
+  - internal/delivery/query.sql
+  - internal/delivery/delivery.go
+  - internal/delivery/live_test.go
   - internal/delivery/interactive.go
   - internal/audit/audit.go
   - internal/metrics/catalogue.go
@@ -38,26 +39,30 @@ files_touched:
   - internal/requestlog/inbound_test.go
   - internal/requestlog/mask.go
   - internal/requestlog/mask_test.go
+  - internal/outbound/record.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/fakes/fakeslack/presses.go
   - internal/fakes/fakeslack/fakeslack.go
+  - internal/fakes/fakeslack/messages.go
   - internal/fakes/fakeslack/fakeslack_test.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - test/e2e/slack_test.go
   - web/src/routes/admin.audit-log.tsx
   - web/src/components/account-links-table.tsx
-  - web/src/locales/en.json
-  - web/src/locales/ru.json
+  - AGENTS.md
+  - CONTRIBUTING.md
+  - design/stories/S-020-snapshot-processing-and-alerts-view.md
 acceptance:
-  - "[C-24.FR-9, C-24.AC-11] `slackInteraction` at `MUSTER_INGEST_URL/api/v1/callbacks/slack/{connection_id}` verifies `X-Slack-Signature` — `v0=` and the hex HMAC-SHA256 of `v0:<timestamp>:<raw body>` with the Connection's Slack signing secret, in constant time — and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from the real clock; a correct request is answered `200` with an empty body before its press is handled (the answer's time is under 100 ms while the Command takes longer, `callback_test.go`); a wrong signature, a timestamp 6 minutes old, an unknown Connection, a deleted one and a Connection in `socket` mode are each answered `401`, change nothing and log `slack_press_rejected` with the reason; a body without `payload` is answered `400`; Slack's example vector of F-104 passes the verification (`callback_test.go`)."
+  - "[C-24.FR-9, C-24.AC-11] `slackInteraction` at `MUSTER_INGEST_URL/api/v1/callbacks/slack/{connection_id}` verifies `X-Slack-Signature` — `v0=` and the hex HMAC-SHA256 of `v0:<timestamp>:<raw body>` with the Connection's Slack signing secret, in constant time — and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from the real clock; a correct request is answered `200` with an empty body before its press is handled (the answer's time is under 100 ms while the Command takes longer, `callback_test.go`); a wrong signature, a timestamp 6 minutes old or 6 minutes ahead, an unknown Connection, a deleted one and a Connection in `socket` mode are each answered the same `401`, change nothing and log `slack_press_rejected` with the reason; a body without a `payload` that is a JSON object, or over 1 MiB, is answered `400` and logs it too; Slack's example vector of F-104 passes the verification (`callback_test.go`)."
   - "[C-24.FR-10, C-24.AC-12, C-18.FR-8] A `block_actions` press from an account linked to a Responder (the link row set up directly; S-102 makes links) runs its Command with the Transport `slack`, recorded in the Timeline and the Audit log, and is not answered; the option \"4h\" of the Snooze menu snoozes for 4 hours and the option of the `tomorrow` preset until the end of C-10.FR-17 in the User's profile time zone; a press whose `value` is tampered with, or whose `container.message_ts` or `container.channel_id` is not the message the value was issued for, changes nothing and is answered \"This button could not be verified; nothing was changed.\"; a press from an account without a link changes nothing and is answered \"Your Slack account is not linked to Muster. Link it in your profile: {link}\"; a Viewer's and a disabled User's press get their refusals; another `type` of interaction is answered `200` and ignored; each press logs `slack_press` with its outcome."
-  - "[C-24.FR-5, C-24.FR-10] A press of \"Still on it\" on a Reminder answers it and one of \"Unack\" unacknowledges the Alert Group; a press on a Reminder whose button was signed by a key no longer in the Keyring is answered that the button has expired, as in Mattermost and Telegram; a replica handles at most `slack.parallel_presses` presses at a time and the others wait, already answered `200` (`presses_test.go`)."
+  - "[C-24.FR-5, C-24.FR-10] A press of \"Still on it\" on a Reminder answers it, which changes no message, so the person is told \"Done: Still on it\" in the Thread, as C-17 says, and one of \"Unack\" unacknowledges the Alert Group; a press on a Reminder whose button was signed by a key no longer in the Keyring is answered that the button has expired, as in Mattermost and Telegram; a replica handles at most `slack.parallel_presses` presses at a time and the others wait, already answered `200` (`presses_test.go`)."
   - "[C-24.FR-11, C-24.AC-13] A refusal reaches the person through `chat.postEphemeral` with the press's channel and `user`, without `thread_ts` for a press on a Root message and with the Root message's `ts` for a press on a Reminder, through the interactive path within `delivery.interactive_budget`; with the fake failing `chat.postEphemeral` (`user_not_in_channel`), the same text is posted to the press's `response_url` with `response_type` `ephemeral` and `replace_original` `false`; a `response_url` that is not `https` on `hooks.slack.com` is never called outside `muster dev`; no request carries `replace_original` `true`; answers are in the linked User's profile language and in English without a link (`answers_test.go`, a Russian-speaking User)."
   - "[C-24.FR-13, C-24.AC-16] A press on a test message is answered \"This is a test message; nothing was changed\" and changes nothing."
-  - "[C-24.FR-14, C-24.AC-17, C-23.FR-1, C-23.FR-2, C-23.FR-3] The Request log of the Connection records each request to the callback as `inbound` with the operation `interactive` and Muster's answer, refused ones included, and each answer as `chat.postEphemeral` or `response_url`; the value of `X-Slack-Signature`, the `response_url` — in the form body as it arrived, encoded, and in the request to it — and the signed action ids are `[redacted]` (`mask_test.go`, `inbound_test.go`)."
+  - "[C-24.FR-14, C-24.AC-17, C-23.FR-1, C-23.FR-2, C-23.FR-3] The Request log of the Connection records each request to the callback as `inbound` with the operation `interactive` and Muster's answer, refused ones included, and each answer as `chat.postEphemeral` or `response_url`; the inbound record names the Connection, and the records of the answers also the Destination and the Alert Group; the value of `X-Slack-Signature`, the `response_url` — in the form body as it arrived, encoded, and in the request to it — the payload's verification `token` and the signed action ids are `[redacted]` (`mask_test.go`, `inbound_test.go`, `answers_test.go`)."
   - "[C-24.FR-17, C-10.FR-3] `muster_commands_total` counts Commands with `transport=\"slack\"`, which the metric catalogue lists; `Transport` and `Messenger` in the API spec, `internal/audit` and the database accept `slack`; the log events `slack_press` and `slack_press_rejected` are in the registry and its reference page."
-  - "[C-24.AC-19] On the test workspace, with the Connection in `http` mode and the app's Interactivity Request URL set to a public address of the ingest listener of `muster dev`, a person's press of Ack on a Root message in `#alerts`, from a Slack account linked to a Responder, acknowledges the Alert Group as that User, and a press from an account without a link is answered privately with the \"not linked\" text."
+  - "[C-24.AC-19] On the test workspace, with the Connection in `http` mode and the app's Interactivity Request URL set to a public address of the ingest listener of a Muster installation (`muster dev` behind a tunnel, or an installed instance), a person's press of Ack on a Root message in `#alerts`, from a Slack account linked to a Responder, acknowledges the Alert Group as that User, and a press from an account without a link is answered privately with the \"not linked\" text."
 verify: "make ci test-integration e2e-go"
 operator_attention: true
 issue: 309
@@ -85,66 +90,104 @@ issue: 309
 ## Contracts
 
 - **Spec** (`api/openapi.yaml`): the operation `slackInteraction` (`POST /callbacks/slack/{connection_id}`,
-  `x-listener: ingest`, `x-permission: none`, `security: []`), its body `application/x-www-form-urlencoded` with
-  `payload`, the headers `X-Slack-Signature` and `X-Slack-Request-Timestamp`, the answers `200` (empty), `400` and
-  `401`, and the description of C-24.FR-9 — request validation does not answer here, the handler decides; `Transport`
-  and `Messenger` gain `slack`.
+  `x-listener: ingest`, `x-permission: none`, `security: []`), its body `application/x-www-form-urlencoded`
+  (`SlackInteractionForm`) with `payload`, the headers `X-Slack-Signature` and `X-Slack-Request-Timestamp`, the answers
+  `200` (empty), `400`, `401` and `500` (a failed read of the Connection), and the description of C-24.FR-9 — request validation does not answer here, the
+  handler decides; `Transport` and `Messenger` gain `slack`. Like the other callbacks it is mounted by
+  `runtime.Callbacks` on the ingest listener, not by the strict server.
 - **Schema** (migration `0018_slack_presses_and_links`, expand only, `schema.md`): `slack` in the transport CHECKs of
   `timeline_entries` and `audit_log` — added `NOT VALID` to the partitioned parents, validated in a second transaction
   and the old ones dropped in a third, as `0011` did — and in the messenger CHECKs of `account_links` and
   `account_link_requests`, whose identity space is already `<messenger>:<connection_id>`; a Slack request requires its
   `target_external_id`, as a Mattermost one does, and `account_link_requests_slack_target_idx` backs the per-target
-  limit of `account_link.slack_code_requests` for S-102. An earlier binary writes no Slack row.
+  limit of `account_link.slack_code_requests` for S-102. An earlier binary writes no Slack row. The down migration
+  deletes the Slack links and requests and keeps the Slack rows of the Timeline and the Audit log, whose old CHECKs it
+  then restores `NOT VALID`, as `0011`'s down does.
 - **Callback** (`internal/slack/callback.go`): the raw body read up to 1 MiB before the form is parsed, the signature
-  and the tolerance on the real clock (S-020's clock table), the Connection looked up by `public_id` together with its
-  mode and Slack signing secret; every refusal answers the same `401` and logs `slack_press_rejected` with the reason
-  (`bad_signature`, `stale`, `unknown_connection`, `wrong_mode`); a valid press is handed to `Presses` with a context of
-  the process, not of the request, and the `200` written at once. Mounted in `runtime.Callbacks` under the Request log's
-  inbound recorder with the operation `interactive`.
+  and the tolerance on the real clock (S-020's clock table), either way, the Connection looked up by `public_id`
+  together with its mode and Slack signing secret (`connections.Service.SlackPressConnection`, over the existing
+  `GetConnection` query); every refusal answers the same `401` and logs `slack_press_rejected` with the reason
+  (`bad_signature`, `stale`, `unknown_connection`, `wrong_mode`); a body over 1 MiB, or without a `payload` that is a
+  JSON object, answers `400` and logs `slack_press_rejected` with `too_large` or `no_payload`; a failed read of the
+  Connection answers `500`; a valid press is handed to `Presses` with a context of the process, not of the request, and
+  the `200` written at once; the press goes over through `Presses.Go`, and its context is one that the start of a
+  shutdown does not end, only the end of its grace period. Mounted in `runtime.Callbacks` under the Request log's
+  inbound recorder with the operation `interactive`. The inbound record names the Connection only — a known one,
+  refused requests included: the press is matched to its Destination and Alert Group after the answer, so those are
+  linked on the records of its answers.
 - **Presses** (`internal/slack/presses.go`): `Handle(ctx, conn, payload)` — the one path for both event modes —
   parses `block_actions`, takes the value of the first action (`value`, or `selected_option.value` for the menu),
-  verifies it with the key it names (`internal/buttons`), binds it to the Root message or Thread reply of a Destination
-  of this Connection with the press's `container.channel_id` and `container.message_ts` (`internal/delivery/presses.go`,
-  a lookup by channel and `ts`), maps `user.id` through `accountlinks.Lookup` for this Connection, and dispatches the
-  Command with the Transport `slack`, as the Mattermost callback does; a semaphore of `slack.parallel_presses` per
-  replica bounds the presses in flight.
+  verifies it with the key it names (`internal/buttons`), binds it to the Root message or the sent Reminder of a
+  Destination of this Connection with the press's `container.channel_id` and `container.message_ts`
+  (`internal/delivery/presses.go` over the queries `GetSlackRootBinding`, `GetSlackReminderBinding` and
+  `GetSlackTestDestination` in `internal/delivery/query.sql`, a lookup by channel and `ts`, since a `ts` is unique
+  within a channel only), which gives the kind of message and its Alert Group; the action id must name the same kind
+  and Alert Group, else the press is not verified, as for Bridge. It maps `user.id` through `accountlinks.Lookup` for
+  this Connection first, so that every answer has the person's language, and dispatches the Command with the Transport
+  `slack`, as the Mattermost callback does; a semaphore of `slack.parallel_presses` per replica bounds the presses in
+  flight, at most `slack.MaxWaitingPresses` (64) wait for a slot — one more is dropped, logged as `failed` with "too
+  many presses waiting" and not answered — and each press has `slack.PressDeadline` (30 s) for its wait and its
+  Command, while its answer keeps `delivery.interactive_budget`; a press whose deadline ends while it waits for a slot
+  is answered with the failure text in English, since the Account link that gives the language is read only in a slot.
+  `Go(ctx, conn, payload)` hands a press over in the background and `Wait(ctx)` waits for those in flight: `runtime`
+  drains them after the listeners and before the pool closes, within `process.shutdown_grace`, and at its end ends
+  their context, so that the rest end as `failed`, logged and not answered. "Still on it" changes no message, so it is
+  answered "Done: Still on it" in the Thread, as C-17 says; C-24.FR-10 says a successful press is not answered, and the
+  pull request proposes its wording to the maintainer, as it does for the two presses that fail unanswered (Notes).
 - **Answers** (`internal/slack/answers.go`): the texts of
   [reference.md](../prd/l1/reference.md#banners-warnings-and-notices) in the person's language, sent by
   `chat.postEphemeral` through `delivery.Interactive` on the Connection's limiter, and on any failure to the press's
-  `response_url` with `{"response_type":"ephemeral","replace_original":false,"text":…}` in the interactive class, only
-  to `https://hooks.slack.com/` — or to the fake server under `muster dev`; the `response_url` is registered as a secret
-  of that request.
-- **Request log** (`internal/requestlog`): the inbound operation `interactive`; masking by shape of
-  `X-Slack-Signature` values and of `response_url` addresses, plain and percent-encoded, beside the signed action ids
-  that are already masked; outbound answers recorded as `chat.postEphemeral` and `response_url`.
-- **Log events**: `slack_press` (info: the Connection, the Alert Group and the Command once verified, the outcome —
-  `done`, `unchanged`, `refused`, `forbidden`, `not_linked`, `disabled`, `not_verified`, `expired`, `test`, `ignored`,
-  `failed` — how it was answered, `ephemeral` or `response_url`, and the masked error) and `slack_press_rejected`
-  (warn: the Connection when known, the reason).
+  `response_url` with `{"response_type":"ephemeral","replace_original":false,"text":…}` on the interactive path in the
+  interactive class without a limiter (`response_url` is no Web API method), only to `https://hooks.slack.com/` — or,
+  under `muster dev`, to the fake server's address, and only for a Connection that `muster dev` routes to the fake (the
+  client's development Route); the `response_url` is registered as a secret of that request, and no error carries it.
+- **Request log** (`internal/requestlog`, `internal/outbound/record.go`): the inbound operation `interactive`;
+  `X-Slack-Signature` among the headers masked whatever they hold (`outbound.MaskedHeaders`), and its `v0=` values
+  masked by shape elsewhere; `response_url` masked by its host `hooks.slack.com` — plain, with JSON-escaped slashes and
+  percent-encoded — and as the value of the member `response_url` in JSON and in form-encoded JSON, which covers the
+  fake server's address too, as does its path `/actions/<team>/<n>/<token>` on any host, matched in its case and only
+  with a Slack team id (`T…` or `E…`), so that other `/actions/` links, such as GitHub Actions runs in an annotation,
+  are kept; the payload's legacy verification `token` masked as a member of a Slack payload; beside
+  the signed action ids that are already masked; outbound answers recorded as `chat.postEphemeral` and `response_url`.
+- **Log events**: `slack_press` (info, the fields `connection`, `group`, `command`, `outcome`, `answer` and `error`:
+  the Connection, the Alert Group and the Command once verified, the outcome — `done`, `unchanged`, `refused`,
+  `forbidden`, `not_linked`, `disabled`, `not_verified`, `expired`, `test`, `ignored`, `failed` — how it was answered,
+  `ephemeral` or `response_url`, and the masked error) and `slack_press_rejected` (warn: the Connection when known, the
+  reason — `bad_signature`, `stale`, `unknown_connection`, `wrong_mode`, `no_payload`, `too_large`).
 - **Metrics**: `slack` in the closed `transport` set of `muster_commands_total` (`internal/metrics/catalogue.go`) and
   in the metric catalogue of reference.md, which `make generate` checks against the registry (C-24.FR-17).
-- **Fake Slack server** (`internal/fakes/fakeslack/presses.go`): `/_fake/press` takes a channel, a message `ts`, an
-  action (`ack`, `unack`, `resolve`, `unsnooze`, `still_on_it`, or `snooze` with an option index), a user id and, for
-  the negative cases, a wrong signature, a timestamp offset or another message's `ts`; it builds the payload of F-093
-  from the stored message — `response_url` pointing at its own `/actions/<id>` — and, for an app whose `request_url` is
-  set in `/_fake/config`, posts it signed with the app's Slack signing secret, recording Muster's status;
-  `/_fake/ephemeral` and `/_fake/responses` list what Muster answered; users `U0FAKEALICE`, `U0FAKEBOB` and
-  `U0FAKECAROL` are members of both apps' channels; `/_fake/press` takes the app (`b` by default) and, with `transport`
-  `http`, posts to the app's `request_url` even while the app has a socket.
-- **SPA type check** (`admin.audit-log.tsx`, `account-links-table.tsx`, the locales): `Transport` and `Messenger`
-  gain `slack`, and the switches over them end in `unreachable`, so each gets a `slack` branch named "Slack" from a
-  locale key; the pages of Slack come with S-103.
+- **Fake Slack server** (`internal/fakes/fakeslack/presses.go`, `messages.go`): `/_fake/press` takes a channel, a
+  message `ts`, an action (`ack`, `unack`, `resolve`, `unsnooze`, `still_on_it`, or `snooze` with an option index), a
+  user id and, for the negative cases, a wrong signature, a timestamp offset, another message's `ts` (`value_of_ts`) or
+  a `value` sent verbatim; it builds the payload of F-093 from the stored message — `response_url` pointing at its own
+  `/actions/<team>/<n>/<hex>`, outside `/_fake/`, so that the requests to it are recorded in `/_fake/requests` and take
+  faults — and, for an app whose `request_url` is set in `/_fake/config` (merged per app, `null` removes it), posts it
+  signed with the app's Slack signing secret and answers `{"status","body"}` with Muster's answer; a message it does not
+  keep is `404`. `/_fake/press` takes the app (`b` by default) and a `transport`, which is `http` (the default) only
+  until S-101, and posts to the app's `request_url` even while the app has a socket. `chat.postEphemeral` answers
+  `user_not_in_channel` for a user who is not a member and keeps what it posts; `/_fake/ephemeral` and
+  `/_fake/responses` list what Muster answered, with `null` for a field Muster did not send. Users `U0FAKEALICE`,
+  `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are members of both apps' channels where the bot is a member.
+- **SPA type check** (`admin.audit-log.tsx`, `account-links-table.tsx`): `Transport` and `Messenger` gain `slack`, and
+  the switches over them end in `unreachable`, so each gets a `slack` branch named "Slack" — a literal, like
+  "Mattermost" and "Telegram" beside it, since a brand's name is the same in every language; the pages of Slack come
+  with S-103.
 - **Architecture** (`design/architecture.md`): the flow of a Slack press over HTTP beside those of Mattermost and
   Telegram.
+- **Clocks** (S-020's clock table): `X-Slack-Request-Timestamp` and `slack.request_tolerance` are on the real clock.
+- **Development docs** (`AGENTS.md`, `CONTRIBUTING.md`): the fake Slack server's `request_url`, `/_fake/press`,
+  `/_fake/ephemeral`, `/_fake/responses` and its users.
 - **Secrets** (lint 5): the probe `slack_presses` sends presses with a wrong signature and a failing answer and checks
   that the Slack signing secret and the `response_url` reach no log line.
 - **Defaults**: `slack.request_tolerance`, `slack.parallel_presses`, `delivery.interactive_budget`.
 
 ## Steps
 
-1. Add the migration and the enums. Check: `go test -tags integration ./internal/db/...`, `make generate-check`.
+1. Add the migration and the enums. Check: `go test -tags integration ./internal/db/...`, `make generate-check`,
+   `make lint` (the SPA's type check).
 2. Write the callback with the signature. Check: `callback_test.go` with F-104's vector, a wrong body, a stale and a
-   future timestamp, each refusal answered alike.
+   future timestamp, each refusal answered alike; `go vet -tags lint ./internal/archlint/ ./cmd/muster-archlint/`,
+   since `runtime.Callbacks` takes the callback.
 3. Write the presses and the answers on the shared path, with the binding by channel and `ts`. Check:
    `presses_test.go`, `answers_test.go`, `go test ./internal/delivery/...`.
 4. Mask and record, register the log events and the metric value, and extend the fake. Check: `mask_test.go`,
@@ -155,53 +198,91 @@ issue: 309
 ```sh
 make dev > dev.log 2>&1 &
 # as in S-099: the session, FAM, NOTIFY, ADV, AG, FIRE and the Route "sl" with the Destination "alerts" (D) of the
-# Connection "sl" (C); the Responder "alice" and the Viewer "vic", created with `createUser` as in S-011
+# Connection "sl" (C); the Responders "alice" and "dora" (DORA) and the Viewer "vic", created with `createUser` as in
+# S-011. The fake server's `ts` counter is shared by both apps, so every `ts` below is read, never written as a constant.
 API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake; ING=localhost:8081/api/v1
 ETAG() { curl -s -b jar $API/connections/$C | jq -r .etag; }
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"slack","name":"sl","event_mode":"http",
-  "slack_signing_secret":"muster-dev-slack-signing-secret-b","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}' > /dev/null
+  "slack_signing_secret":"muster-dev-slack-signing-secret-b","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}' | jq -c '{event_mode, callback_url}'
+# {"event_mode":"http","callback_url":"http://localhost:8081/api/v1/callbacks/slack/<C>"}
 curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$C\"}}" > /dev/null
 # Account links set up directly (S-102 makes them through the profile)
 LINK() { psql "$MUSTER_DATABASE_URL" -qc "INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id,
   external_id, username, display_name, created_at) SELECT 1, '$4', u.id, 'slack', c.id, '$2', '$3', u.name, now()
   FROM users u, connections c WHERE u.login = '$1' AND c.public_id = '${5:-$C}'"; }
-LINK alice U0FAKEALICE alice AK0000000000S1; LINK vic U0FAKEBOB bob AK0000000000S2
+LINK alice U0FAKEALICE alice AK0000000000S1; LINK vic U0FAKEBOB bob AK0000000000S2; LINK dora U0FAKEDORA dora AK0000000000S4
 PRESS() { curl -s -X POST $FS/press -d "$1" | jq -c '{status}'; }
 FIRE p1 DiskFull q1; G=$(AG 'pod%3D%22q1%22'); TS=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("DiskFull"))][0].ts')
 
 # C-24.FR-9, AC-11: a press over HTTP, answered at once, run as Alice
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"ack\",\"user\":\"U0FAKEALICE\"}"   # {"status":200}
 sleep 1; curl -s -b jar $API/alert-groups/$G | jq -c '{status, owner: .owner.login}'             # {"status":"acknowledged","owner":"alice"}
-curl -s -b jar "$API/alert-groups/$G/timeline" | jq -r '[.items[] | select(.kind == "acknowledged")][0].transport'   # slack
-curl -s localhost:8082/metrics | grep -c 'muster_commands_total{command="acknowledge",outcome="done",transport="slack"}'   # 1
-# refusals: a wrong signature, a stale timestamp, an unknown Connection, a Connection in socket mode
+curl -s -b jar "$API/alert-groups/$G/timeline" | jq -r '[.items[] | select(.kind == "status" and .event == "acknowledged")][0].actor.transport'   # slack
+curl -s -b jar "$API/audit-log?action=alert_group.acknowledged&limit=1" | jq -c '.items[0] | {transport, actor: .actor.name}'   # {"transport":"slack","actor":"alice"}
+curl -s localhost:8082/metrics | grep -c 'muster_commands_total{command="acknowledge",transport="slack",outcome="done"}'   # 1
+curl -s $FS/ephemeral | jq length                                                # 0: a press that ran is not answered
+# refusals: a wrong signature, a timestamp 6 minutes old and 6 minutes ahead, an unknown Connection, a Connection in socket mode
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"signature\":\"wrong\"}"   # {"status":401}
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"timestamp_offset_seconds\":-360}"   # {"status":401}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"timestamp_offset_seconds\":360}"   # {"status":401}
 curl -s -X POST $ING/callbacks/slack/CN0000000000ZZ -o /dev/null -w '%{http_code}\n'    # 401
 DS=$(curl -s -b jar $API/connections | jq -r '.items[] | select(.name == "Dev Slack") | .id')   # in socket mode
-curl -s -X PUT $FS/config -d "{\"request_url\":{\"a\":\"http://localhost:8081/api/v1/callbacks/slack/$DS\"}}" > /dev/null
-curl -s -X POST $FS/press -d '{"app":"a","channel":"C0FAKEALERTS","ts":"1.000001","action":"ack","user":"U0FAKEALICE","transport":"http"}' | jq -c '{status}'   # {"status":401}
-grep -c '"event":"slack_press_rejected"' dev.log                                  # 4 or more
+curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$DS\"}}" > /dev/null
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\"}"   # {"status":401}
+curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$C\"}}" > /dev/null
+# a body that is signed but has no payload
+B='foo=bar'; T=$(date +%s); SIG=v0=$(printf 'v0:%s:%s' "$T" "$B" | openssl dgst -sha256 -hmac muster-dev-slack-signing-secret-b | sed 's/^.* //')
+curl -s -X POST $ING/callbacks/slack/$C -H "X-Slack-Request-Timestamp: $T" -H "X-Slack-Signature: $SIG" -d "$B" -o /dev/null -w '%{http_code}\n'   # 400
+sleep 1; grep '"event":"slack_press_rejected"' dev.log | jq -r '.reason' | sort | uniq -c
+#   1 bad_signature
+#   1 no_payload
+#   2 stale
+#   1 unknown_connection
+#   1 wrong_mode
 curl -s -b jar $API/alert-groups/$G | jq -r .status                               # acknowledged
 
-# C-24.FR-10, FR-11, AC-12, AC-13: the menu, a Viewer, an unlinked account, a value of another message
+# C-24.FR-10, FR-11, AC-12, AC-13: the menu and the preset tomorrow, a Viewer, an unlinked account, a disabled User, a value of another message
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"snooze\",\"option\":1,\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
-curl -s -b jar $API/alert-groups/$G | jq -r '.status'                              # snoozed
+curl -s -b jar $API/alert-groups/$G | jq -c '{status, snooze_until}'               # {"status":"snoozed","snooze_until":"<4 hours from now>"}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"unsnooze\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G | jq -r .status                               # firing
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"snooze\",\"option\":3,\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G | jq -c '{status, snooze_until}'               # {"status":"snoozed","snooze_until":"<the next 09:00 UTC>"}
+curl -s -b jar "$API/audit-log?action=alert_group.snoozed&limit=1" | jq -c '.items[0] | {transport, actor: .actor.name, preset: .details.preset, time_zone: .details.time_zone}'
+# {"transport":"slack","actor":"alice","preset":"tomorrow","time_zone":"UTC"}
+FIRE p2 CpuHigh q2; T2=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("CpuHigh"))][0].ts')
+curl -s "${H[@]}" -X POST $API/users/$DORA/disable > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEBOB\"}" > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKECAROL\"}" > /dev/null
-PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"value_of_ts\":\"1.000001\"}" > /dev/null; sleep 1
-curl -s $FS/ephemeral | jq -r '.[-3:][] | "\(.user) \(.thread_ts // "-") \(.text)"'
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEDORA\"}" > /dev/null
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"value_of_ts\":\"$T2\"}" > /dev/null; sleep 1
+curl -s $FS/ephemeral | jq -r '.[-4:] | sort_by(.user)[] | "\(.user) \(.thread_ts // "-") \(.text)"'
+# U0FAKEALICE - This button could not be verified; nothing was changed.
 # U0FAKEBOB - You are not permitted to do this
 # U0FAKECAROL - Your Slack account is not linked to Muster. Link it in your profile: http://localhost:8080/profile
-# U0FAKEALICE - This button could not be verified; nothing was changed.
+# U0FAKEDORA - Your Muster account is disabled
 curl -s -b jar $API/alert-groups/$G | jq -r .status                               # snoozed
 curl -s -X POST $FS/faults -d '{"path":"/api/chat.postEphemeral","status":200,"content_type":"application/json","body":"{\"ok\":false,\"error\":\"user_not_in_channel\"}","times":1}' > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKECAROL\"}" > /dev/null; sleep 1
 curl -s $FS/responses | jq -c '.[-1] | {response_type, replace_original}'           # {"response_type":"ephemeral","replace_original":false}
 curl -s $FS/requests | jq '[.[] | select((.body // "") | contains("\"replace_original\":true"))] | length'   # 0
 
+# C-24.FR-5, FR-10: the Reminder's buttons, "Still on it" pressed by the Viewer and by Alice, then Unack
+FIRE p3 MemHigh q3; G3=$(AG 'pod%3D%22q3%22'); T3=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("MemHigh"))][0].ts')
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$T3\",\"action\":\"ack\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+ADV 600; sleep 2
+RT=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("MemHigh"))][0].replies[-1].ts')
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"still_on_it\",\"user\":\"U0FAKEBOB\"}" > /dev/null; sleep 1
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"still_on_it\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s $FS/ephemeral | jq -r --arg t "$T3" '.[-2:][] | "\(.user) \(.thread_ts == $t) \(.text)"'
+# U0FAKEBOB true You are not permitted to do this
+# U0FAKEALICE true Done: Still on it
+curl -s -b jar "$API/alert-groups/$G3/timeline?kind=timers" | jq -c '.items[0] | {event, transport: .actor.transport, name: .actor.name}'   # {"event":"reminder_answered","transport":"slack","name":"alice"}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"unack\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G3 | jq -r .status                              # firing
+
 # C-24.FR-13, AC-16: a press on a test message
-curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{}' > /dev/null
+curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' > /dev/null
 TT=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("Test message"))][-1].ts')
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TT\",\"action\":\"ack\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
 curl -s $FS/ephemeral | jq -r '.[-1].text'                                       # This is a test message; nothing was changed
@@ -210,31 +291,53 @@ curl -s $FS/ephemeral | jq -r '.[-1].text'                                      
 curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=1" | jq -c '.items[0] | {operation, status}'   # {"operation":"interactive","status":200}
 R=$(curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=1" | jq -r '.items[0].id')
 curl -s -b jar "$API/request-log/$R" | jq -c '.request_headers["X-Slack-Signature"]'   # ["[redacted]"]
-curl -s -b jar "$API/request-log?connection=$C&limit=50" | jq -r '.items[].id' | while read -r I; do curl -s -b jar "$API/request-log/$I"; done |
-  grep -c 'hooks.slack.com%2Factions\|/_fake/actions/\|muster-dev-slack-signing-secret'   # 0
+curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=200" | jq -c '{next_cursor, statuses: ([.items[].status] | group_by(.) | map({status: .[0], n: length})), linked: ([.items[] | select(.destination != null or .alert_group != null)] | length)}'
+# {"next_cursor":null,"statuses":[{"status":200,"n":14},{"status":400,"n":1},{"status":401,"n":3}],"linked":0}
+curl -s -b jar "$API/request-log?connection=$C&operation=response_url&limit=1" | jq -c '.items[0] | {status, url, linked: (.destination != null and .alert_group != null)}'
+# {"status":200,"url":"http://127.0.0.1:18097[redacted]","linked":true}
+for O in $C $DS; do curl -s -b jar "$API/request-log?connection=$O&limit=200" | jq -r '.items[].id'; done | while read -r I; do curl -s -b jar "$API/request-log/$I"; echo; done |
+  grep -c 'actions%2F\|/actions/\|actions\\/\|muster-dev-slack-signing-secret\|muster-dev-slack-verification-token\|v0=[0-9a-f]\{64\}'   # 0
+# C-24.FR-17: the log events, and no secret in the log
+grep '"event":"slack_press"' dev.log | jq -r '.outcome + " " + (.answer // "-")' | sort | uniq -c
+#   1 disabled ephemeral
+#   6 done -
+#   1 done ephemeral
+#   2 forbidden ephemeral
+#   1 not_linked ephemeral
+#   1 not_linked response_url
+#   1 not_verified ephemeral
+#   1 test ephemeral
+grep -c 'muster-dev-slack-signing-secret\|muster-dev-slack-verification-token\|/actions/\|actions%2F\|v0=[0-9a-f]\{64\}' dev.log   # 0
 ```
 
-Live, on the maintainer's test workspace, with `operator_attention` — Slack must reach the ingest listener, so the
-operator opens a tunnel to `localhost:8081` (any HTTPS tunnel), sets the app's Interactivity Request URL to
-`<tunnel>/api/v1/callbacks/slack/<L>` and turns Socket Mode off for this check, and on again afterwards:
+Live, on the maintainer's test workspace, with `operator_attention` — Slack must reach the ingest listener: a public
+address of the ingest listener of a Muster installation (`muster dev` behind any HTTPS tunnel, or an installed
+instance). Set the app's Interactivity Request URL to the Connection's `callback_url` and turn Socket Mode off for this
+check, and on again afterwards. For an installed instance, `API` is its API base and requests carry a Personal access
+token (`-H "Authorization: Bearer $PAT"`) instead of the cookie jar, and `LINK` runs against its database.
 
 ```sh
-# the Connection "test workspace" (L) and "live-alerts" (LD) as in S-099, switched to http with the real Slack signing secret
-curl -s "${H[@]}" -X PUT -H "If-Match: $(curl -s -b jar $API/connections/$L | jq -r .etag)" $API/connections/$L -d "$(jq -n \
-  --rawfile s ~/.config/muster-spike/slack-signing-secret '{type:"slack",name:"test workspace",event_mode:"http",
-  slack_signing_secret:($s|rtrimstr("\n")),proxy:{enabled:false},limiter:{limit:50,per_seconds:60}}')" > /dev/null
-# SLACK_PERSON: the operator's Slack user id, which the maintainer gives the lead (it stays out of the repository)
-LINK alice "$SLACK_PERSON" operator AK0000000000S3 $L    # the operator's Slack account, linked to alice
+# the Connection of the test workspace (L) and its Destination (LD) as in S-099, switched to http with the app's real
+# Slack signing secret, read from a file and never printed
+LC=$(curl -s -b jar $API/connections/$L)
+jq -n --argjson r "$LC" --rawfile s <file with the app's Slack signing secret> '{type: "slack", name: $r.name,
+  event_mode: "http", slack_signing_secret: ($s | rtrimstr("\n")), proxy: {enabled: false}, limiter: $r.limiter}' |
+  curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<< "$LC")" $API/connections/$L --data-binary @- | jq -c '{event_mode}'
+# {"event_mode":"http"}
+curl -s -b jar $API/connections/$L | jq -r .callback_url                         # the Request URL to set in the app
+# SLACK_PERSON: the maintainer's Slack user id, which the maintainer gives the lead (it stays out of the repository)
+LINK alice "$SLACK_PERSON" operator AK0000000000S3 $L    # the maintainer's Slack account, linked to a Responder
 FIRE live2 LiveHttp r1; LG=$(AG 'pod%3D%22r1%22')
-# the operator presses Ack on the message in #alerts
+# the maintainer presses Ack on the message in the channel of LD
 until curl -s -b jar $API/alert-groups/$LG | jq -e '.status == "acknowledged"' > /dev/null; do sleep 2; done
 curl -s -b jar $API/alert-groups/$LG | jq -c '{status, owner: .owner.login}'      # {"status":"acknowledged","owner":"alice"}
+curl -s -b jar "$API/alert-groups/$LG/timeline" | jq -r '[.items[] | select(.kind == "status" and .event == "acknowledged")][0] | "\(.actor.transport) \(.actor.name)"'   # slack <name>
 curl -s -b jar "$API/request-log?connection=$L&direction=inbound&limit=1" | jq -c '.items[0] | {operation, status}'   # {"operation":"interactive","status":200}
-# the link row removed, the operator presses Resolve and sees, only for them, the "not linked" text with the profile link
+# the link row removed, the maintainer presses Resolve and sees, only for them, the "not linked" text with the profile link
 ```
 
-At the end the Alert Group is resolved, the messages are deleted with the bot token, the link row is removed, and the
-operator sets the app back to Socket Mode.
+At the end the Alert Group is resolved, the messages are deleted with the bot token, the link row is removed, the
+Connection is switched back to `socket` with the same request, and the maintainer sets the app back to Socket Mode.
 
 ## Open questions
 
@@ -255,6 +358,47 @@ None.
   masked everywhere and called only on Slack's host.
 - The lookup of a press binds by channel and `ts`, the identity of a Slack message; a value issued for another message
   is refused like a bad signature, as in Mattermost (C-13.FR-4).
+- The inbound record of a press names only the Connection: the press is matched after the `200`, when the inbound
+  recorder has already written its record, so the Destination and the Alert Group are linked on the records of the
+  press's answers (`chat.postEphemeral`, `response_url`).
+- Every interaction payload carries Slack's legacy verification `token`, a deprecated credential that C-23.FR-3 does
+  not name; it is masked like `response_url`, and the pull request proposes naming it in C-23.FR-3 and C-24.FR-14.
+- `X-Slack-Signature` joins `outbound.MaskedHeaders`, so a header that holds no valid signature (`wrong`) is masked
+  too; masking by shape alone would keep it.
+- "Still on it" is answered "Done: Still on it" in the Thread, as the C-17 event table says for `reminder_answered`
+  and as Mattermost does, since no message changes; the pull request proposes to the maintainer that C-24.FR-10 read
+  "…is not answered: the edited Root message shows its result, except for 'Still on it', which changes no message and
+  is answered as C-17 says."
+- Until S-103 the Timeline shows the Transport `slack` through its default branch, as "via Muster".
+- The fake server's `ts` counter is shared by both apps and by ephemerals, so the Verification reads every `ts` it
+  presses and never writes one as a constant.
+- Each press has `slack.PressDeadline`, 30 s, for its wait for a slot and its Command — the time Mattermost waits for
+  the answer to a press (F-032), which bounds a Mattermost press the same way — so that a Command stuck on the
+  database, which sets no statement timeout, frees its slot instead of stopping every Slack press of the replica. The
+  answer keeps `delivery.interactive_budget` of its own, so the person still learns that the press failed: a press
+  whose deadline ends in its Command is answered with the failure text in the person's language, and one whose
+  deadline ends while it waits for a slot with the failure text in English, because the Account link that gives the
+  language is read only in a slot, behind the stalled ones. At most `slack.MaxWaitingPresses`, 64, presses wait for a
+  slot on a replica, and one more is dropped, logged as `failed` and not answered: a slot frees in the time of one
+  Command, so 64 are seconds of work and more than a team presses at once, while their payloads stay under 64 MiB
+  however often a captured signed request is replayed within `slack.request_tolerance`. Both are code constants, not
+  settings: the first follows Mattermost and the second only bounds abuse.
+- Answers run after the slot is released, outside the bound of `slack.parallel_presses`, so their number is not
+  capped; each is bounded by `delivery.interactive_budget` for each of its two ways and holds only its target — the
+  channel, the user, the Thread, the `response_url` and the text — not the payload, so what a press keeps while it is
+  answered stays small.
+- A graceful stop drains the presses that were answered `200`: after the listeners stop, `runtime` waits for them within
+  `process.shutdown_grace`, before the database pool closes, and at its end ends their context with "the grace period
+  of the shutdown ended", so that a press still waiting or running ends as `failed`, logged and not answered, instead
+  of hanging: nothing may reach Slack once that context has ended. `internal/runtime/runtime_test.go` joins
+  `files_touched` for the test of that drain.
+- Two presses fail without an answer: one dropped beyond `slack.MaxWaitingPresses`, and one still waiting or running
+  at the end of `process.shutdown_grace`. Both are logged `slack_press` with the outcome `failed` and their reason.
+  This deviates from C-24.FR-10, by which "the others wait, already confirmed" and a failure is answered; the pull
+  request proposes to the maintainer that C-24.FR-10 read "…the others wait, already confirmed, up to a bound; a press
+  beyond it, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer
+  and is logged." Likewise, the answer to a press whose deadline ends while it waits for a slot is in English even for
+  a linked User, where C-24.FR-11 names the profile language, and the pull request proposes adding that exception.
 
 ## Coverage
 

@@ -246,3 +246,81 @@ func (s *Service) bridgeRootBinding(ctx context.Context, connectionID int64, mes
 	}
 	return BridgeBinding{}, ErrNotBound
 }
+
+// slackPressQueries are the reads of what a press on a message of a Slack Connection is bound to.
+type slackPressQueries interface {
+	GetSlackRootBinding(ctx context.Context, arg dbgen.GetSlackRootBindingParams) (dbgen.GetSlackRootBindingRow,
+		error)
+	GetSlackReminderBinding(ctx context.Context, arg dbgen.GetSlackReminderBindingParams) (
+		dbgen.GetSlackReminderBindingRow, error)
+	GetSlackTestDestination(ctx context.Context, arg dbgen.GetSlackTestDestinationParams) (
+		dbgen.GetSlackTestDestinationRow, error)
+}
+
+// SlackBinding is what a press on a message of a Slack Connection is bound to (C-24.FR-10): the kind of the message —
+// a Root message, buttons.SubjectRoot, or a sent Reminder, buttons.SubjectReply — the Alert Group, by public_id and by
+// its internal id for the Request log, the Destination the message was delivered to, its Route's Snooze durations, and
+// for a Reminder the ts of the Root message it replies to, whose Thread the answers go to. It has no language: a Slack
+// press is answered in the profile language of the person who pressed (C-24.FR-11).
+type SlackBinding struct {
+	Kind          buttons.Subject
+	GroupPublicID string
+	AlertGroup    int64
+	Destination   Destination
+	SnoozeSeconds []int64
+	RootTS        string
+}
+
+// SlackPressBinding reads the binding of a press on the message ts of the channel channelID of the Slack Connection
+// connectionID (C-24.FR-10): the delivery of an Alert Group to a Slack Destination of the Connection, not deleted, on
+// that channel, whose Root message it is, else a sent Reminder of such a Destination whose message it is; ErrNotBound
+// when there is none, as for a message of another channel, a test message or a Storm summary. A ts names one message
+// within its channel only, so both are read.
+func (s *Service) SlackPressBinding(ctx context.Context, connectionID int64, channelID, ts string) (SlackBinding,
+	error) {
+	conn := pgtype.Int8{Int64: connectionID, Valid: true}
+	q := s.store.q()
+	dest := func(id int64, publicID, name string) Destination {
+		return Destination{ID: id, PublicID: publicID, Name: name, Type: TypeSlack, Connection: &connectionID}
+	}
+	r, err := q.GetSlackRootBinding(ctx, dbgen.GetSlackRootBindingParams{OrgID: s.orgID, ConnectionID: conn,
+		ChannelID: channelID, MessageID: ts})
+	switch {
+	case err == nil:
+		return SlackBinding{Kind: buttons.SubjectRoot, GroupPublicID: r.GroupPublicID, AlertGroup: r.AlertGroupID,
+			Destination:   dest(r.DestinationID, r.DestinationPublicID, r.DestinationName),
+			SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return SlackBinding{}, fmt.Errorf("read the binding of a press on a root message of the connection %d: %w",
+			connectionID, err)
+	}
+	p, err := q.GetSlackReminderBinding(ctx, dbgen.GetSlackReminderBindingParams{OrgID: s.orgID, ConnectionID: conn,
+		ChannelID: channelID, MessageID: ts})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return SlackBinding{}, ErrNotBound
+	case err != nil:
+		return SlackBinding{}, fmt.Errorf("read the binding of a press on a reminder of the connection %d: %w",
+			connectionID, err)
+	}
+	return SlackBinding{Kind: buttons.SubjectReply, GroupPublicID: p.GroupPublicID, AlertGroup: p.AlertGroupID,
+		Destination:   dest(p.DestinationID, p.DestinationPublicID, p.DestinationName),
+		SnoozeSeconds: p.SnoozeDurationsSeconds, RootTS: p.RootMessageID}, nil
+}
+
+// SlackTestDestination reads the Slack Destination publicID of the Connection connectionID, not deleted, whose channel
+// is channelID, and whether there is one: the Destination whose test message a person pressed (C-24.FR-13).
+func (s *Service) SlackTestDestination(ctx context.Context, connectionID int64, publicID, channelID string) (
+	Destination, bool, error) {
+	r, err := s.store.q().GetSlackTestDestination(ctx, dbgen.GetSlackTestDestinationParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, PublicID: publicID, ChannelID: channelID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Destination{}, false, nil
+	}
+	if err != nil {
+		return Destination{}, false, fmt.Errorf("read the destination %s of the connection %d: %w", publicID,
+			connectionID, err)
+	}
+	return Destination{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: TypeSlack, Connection: &connectionID},
+		true, nil
+}

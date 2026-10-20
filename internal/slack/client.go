@@ -6,8 +6,10 @@
 // the caller's client class (ADR-0015), JSON for the write methods and form-encoded for the others, with both tokens and
 // the Slack signing secret registered for redaction; the classification of every answer by Slack's `error`
 // (classify.go); the Connection check (check.go); the Destination check of a channel and the channel list
-// (channels.go); and delivery (adapter.go), whose messages are laid out in blocks (layout.go) and sent with the
-// unexported chat calls of this file. Later stories add presses, Socket Mode and Account links.
+// (channels.go); delivery (adapter.go), whose messages are laid out in blocks (layout.go) and sent with the
+// unexported chat calls of this file; and the presses of people (presses.go) — confirmed by the signed callback of
+// http mode (callback.go) — and their private answers (answers.go), with chat.postEphemeral or the press's
+// response_url. Later stories add Socket Mode and Account links.
 package slack
 
 import (
@@ -18,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -113,6 +116,9 @@ type Client struct {
 
 	mu      sync.Mutex
 	clients map[outbound.Class]*outbound.Client
+	// hooks is the outbound client of the answers to response_url, in the interactive class, without a base URL:
+	// built on its first answer.
+	hooks *outbound.Client
 }
 
 // errBaseURL is a Route answer that is not an absolute http or https URL without user information, query or fragment.
@@ -631,4 +637,171 @@ func (c *Client) scopes(header string) []string {
 		}
 	}
 	return out
+}
+
+// postEphemeral calls chat.postEphemeral with the bot token in class (F-092): text, shown only to user in channel, in
+// the Thread of threadTS when it is set.
+func (c *Client) postEphemeral(ctx context.Context, class outbound.Class, channel, user, threadTS, text string) Result {
+	args := Args{"channel": channel, "user": user, "text": text}
+	if threadTS != "" {
+		args["thread_ts"] = threadTS
+	}
+	return c.Call(ctx, class, "chat.postEphemeral", args)
+}
+
+// HooksHost is the only host a press's response_url is called on outside `muster dev` (C-24.FR-11).
+const HooksHost = "hooks.slack.com"
+
+// responseAnswer is the body of an answer to a press's response_url (F-093): ephemeral, and never replacing the
+// pressed message, which only the delivery worker edits (C-11.FR-2); replace_original is always sent.
+type responseAnswer struct {
+	ResponseType    string `json:"response_type"`
+	ReplaceOriginal bool   `json:"replace_original"`
+	Text            string `json:"text"`
+}
+
+// responseError is an error code an answer of response_url may carry, which a Result names; anything else in its body
+// is not shown.
+var responseError = regexp.MustCompile(`^[a-z_]{1,64}$`)
+
+// hooksPrefix starts every address a response_url is answered at outside `muster dev`: HooksHost, followed by the
+// checked path of the response_url.
+const hooksPrefix = "https://" + HooksHost + "/"
+
+// responsePath is the path of a press's response_url without its leading slash (F-093): actions/<team>/<n>/<token>,
+// with a Slack team id, T or E and capitals or digits, as the Request log masks it; nothing else, no percent-encoding.
+var responsePath = regexp.MustCompile(`^actions/[TE][A-Z0-9]+/[0-9]+/[A-Za-z0-9]+$`)
+
+// responseTarget is the address the client answers responseURL at when it may call it (C-24.FR-11), and its checked
+// path: responseURL is an https address on HooksHost, without a port, user information, query or fragment, whose path
+// is responsePath, answered at hooksPrefix and that path; or, for a client that `muster dev` routes to the fake Slack
+// server, an address on that server with such a path, answered at the server's configured origin and that path. The
+// address is built anew, never taken from responseURL. The host is compared in ASCII only: one with any other
+// character, such as the Kelvin sign that Unicode folds to a `k`, is refused.
+func (c *Client) responseTarget(responseURL string) (target, path string, ok bool) {
+	u, err := url.Parse(responseURL)
+	if err != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" ||
+		!ascii(u.Host) {
+		return "", "", false
+	}
+	path = strings.TrimPrefix(u.EscapedPath(), "/")
+	if !responsePath.MatchString(path) {
+		return "", "", false
+	}
+	host := strings.ToLower(u.Host)
+	if u.Scheme == "https" && host == HooksHost {
+		return hooksPrefix + path, path, true
+	}
+	if c.base != BaseURL && u.Scheme+"://"+host == strings.ToLower(c.origin) {
+		return c.origin + "/" + path, path, true
+	}
+	return "", "", false
+}
+
+// ascii reports whether s has only ASCII characters.
+func ascii(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// hooksClient is the outbound client of the answers to response_url: the interactive class through the Connection's
+// proxy, with the client's secrets, recorded in the Connection's Request log, without a base URL.
+func (c *Client) hooksClient() (*outbound.Client, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hooks != nil {
+		return c.hooks, nil
+	}
+	s, n := c.settings, c.network
+	oc, err := outbound.New(outbound.Config{Class: outbound.ClassInteractive, ConnectTimeout: connectTimeout,
+		Timeout: CallTimeout, Proxy: s.Proxy, Secrets: []logging.Secret{s.BotToken, s.AppToken, s.SigningSecret},
+		Policy: n.Policy, Logger: n.Log, Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes,
+		Recorder: n.Recorder, Owner: s.Owner})
+	if err != nil {
+		return nil, err
+	}
+	c.hooks = oc
+	return oc, nil
+}
+
+// respond posts text to a press's responseURL in class as an ephemeral answer that replaces nothing (C-24.FR-11),
+// named response_url in the Request log. A responseURL the client may not call is not called. The response_url lets
+// anyone who holds it post to the channel, so it is a secret of the request, masked in its record, and no Result
+// carries it: its error is built from the status, Slack's error code or what failed, never from outbound's text, which
+// shows the address.
+func (c *Client) respond(ctx context.Context, class outbound.Class, responseURL, text string) Result {
+	if class != outbound.ClassInteractive {
+		return unknown("a response_url is answered only in the interactive class")
+	}
+	target, path, ok := c.responseTarget(responseURL)
+	if !ok {
+		return unknown("the response_url is not Slack's")
+	}
+	oc, err := c.hooksClient()
+	if err != nil {
+		return unknown("response_url: the client could not be built")
+	}
+	body, _ := json.Marshal(responseAnswer{ResponseType: "ephemeral", ReplaceOriginal: false, Text: text}) // strings
+	ctx = outbound.WithSecrets(ctx, logging.Secret(responseURL), logging.Secret(target), logging.Secret("/"+path))
+	code := ""
+	refused := func(_ int, data []byte) (outbound.BodyError, bool) {
+		var env struct {
+			OK    *bool  `json:"ok"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(data, &env) == nil && env.OK != nil && !*env.OK {
+			code = env.Error
+		}
+		return outbound.BodyError{}, false
+	}
+	mapping := func(status int, d time.Duration, hasRetryAfter bool) outbound.Outcome {
+		if code != "" && status >= http.StatusOK && status < http.StatusMultipleChoices {
+			return outbound.OutcomeUnknown
+		}
+		return (&answerClass{}).mapping(status, d, hasRetryAfter)
+	}
+	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodPost, URL: target,
+		Header: http.Header{"Content-Type": {"application/json; charset=utf-8"}}, Body: body, Mapping: mapping,
+		ClassifyBody: refused, Operation: "response_url"})
+	return responded(res, err, code)
+}
+
+// responded is the Result of an answer to a response_url, whose answer reported the error code: its text names the
+// status and the code, or what failed when nothing answered.
+func responded(res outbound.Result, err error, code string) Result {
+	r := Result{Status: res.Status}
+	if err == nil {
+		return r
+	}
+	switch res.Outcome {
+	case outbound.OutcomeRetryAfter:
+		r.Classification = Classification{Class: ClassRetryAfter, RetryAfter: res.RetryAfter}
+	case outbound.OutcomeTransient:
+		r.Classification = Classification{Class: ClassTransient}
+	case outbound.OutcomeBlocked:
+		r.Classification, r.Blocked = Classification{Class: ClassFatal}, true
+	default:
+		r.Classification = Classification{Class: ClassUnknown}
+	}
+	text := "response_url answered " + strconv.Itoa(res.Status)
+	if responseError.MatchString(code) {
+		text += ": " + code
+		r.ErrorCode = code
+	}
+	if res.Status == 0 {
+		text = "response_url: no answer"
+		if oe, ok := errors.AsType[*outbound.Error](err); ok && oe.Network != "" {
+			r.Network = oe.Network
+			text = "response_url: " + oe.Network
+		}
+		if r.Blocked {
+			text = "response_url: blocked by the outbound address policy"
+		}
+	}
+	r.Error = outbound.Untrusted(text)
+	return r
 }

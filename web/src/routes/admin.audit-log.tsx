@@ -103,6 +103,8 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return "Mattermost";
     case "telegram":
       return "Telegram";
+    case "slack":
+      return "Slack";
     case "bridge":
       return t("audit.transport.bridge");
     case "cli":

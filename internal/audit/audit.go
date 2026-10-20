@@ -42,6 +42,7 @@ const (
 	TransportMattermost Transport = "mattermost"
 	TransportTelegram   Transport = "telegram"
 	TransportBridge     Transport = "bridge"
+	TransportSlack      Transport = "slack"
 	TransportCLI        Transport = "cli"
 	TransportSystem     Transport = "system"
 )
@@ -253,8 +254,8 @@ func (e Entry) check() error {
 		return fmt.Errorf("audit %s: unknown actor kind %q", e.Action, a.Kind)
 	}
 	switch e.Transport {
-	case TransportUI, TransportAPI, TransportMattermost, TransportTelegram, TransportBridge, TransportCLI,
-		TransportSystem:
+	case TransportUI, TransportAPI, TransportMattermost, TransportTelegram, TransportBridge, TransportSlack,
+		TransportCLI, TransportSystem:
 	default:
 		return fmt.Errorf("audit %s: unknown transport %q", e.Action, e.Transport)
 	}

@@ -1466,6 +1466,7 @@ func (e MentionSettingEveryone) Valid() bool {
 const (
 	MessengerBridge     Messenger = "bridge"
 	MessengerMattermost Messenger = "mattermost"
+	MessengerSlack      Messenger = "slack"
 	MessengerTelegram   Messenger = "telegram"
 )
 
@@ -1475,6 +1476,8 @@ func (e Messenger) Valid() bool {
 	case MessengerBridge:
 		return true
 	case MessengerMattermost:
+		return true
+	case MessengerSlack:
 		return true
 	case MessengerTelegram:
 		return true
@@ -3043,6 +3046,7 @@ const (
 	TransportBridge     Transport = "bridge"
 	TransportCli        Transport = "cli"
 	TransportMattermost Transport = "mattermost"
+	TransportSlack      Transport = "slack"
 	TransportSystem     Transport = "system"
 	TransportTelegram   Transport = "telegram"
 	TransportUi         Transport = "ui"
@@ -3058,6 +3062,8 @@ func (e Transport) Valid() bool {
 	case TransportCli:
 		return true
 	case TransportMattermost:
+		return true
+	case TransportSlack:
 		return true
 	case TransportSystem:
 		return true
@@ -3519,7 +3525,7 @@ func (e ListRequestLogParamsStatusClass) Valid() bool {
 
 // AccountLink defines model for AccountLink.
 type AccountLink struct {
-	// Connection The Connection the link was made through; Mattermost and Bridge links belong to it.
+	// Connection The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 
@@ -3891,7 +3897,7 @@ type AuditEntry struct {
 	TokenId   nullable.Nullable[NullablePublicId] `json:"token_id,omitempty"`
 	TokenName nullable.Nullable[string]           `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -5403,7 +5409,7 @@ type Note struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -6729,6 +6735,12 @@ type SlackDestinationInputType string
 // SlackEventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
 type SlackEventMode string
 
+// SlackInteractionForm The form Slack posts for an interaction of the app; the signature covers its raw bytes.
+type SlackInteractionForm struct {
+	// Payload The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.
+	Payload string `json:"payload"`
+}
+
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
 type SnapshotState string
 
@@ -7191,7 +7203,7 @@ type TimelineActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -7436,7 +7448,7 @@ type TotpStatus struct {
 	RecoveryCodesRemaining int                          `json:"recovery_codes_remaining"`
 }
 
-// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
 // User defines model for User.
@@ -7547,7 +7559,7 @@ type WebhookActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -8118,6 +8130,15 @@ type BridgeEventParams struct {
 	WebhookSignature string `json:"webhook-signature"`
 }
 
+// SlackInteractionParams defines parameters for SlackInteraction.
+type SlackInteractionParams struct {
+	// XSlackSignature `v0=` and the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Slack signing secret.
+	XSlackSignature string `json:"X-Slack-Signature"`
+
+	// XSlackRequestTimestamp Unix time of the request, in seconds.
+	XSlackRequestTimestamp string `json:"X-Slack-Request-Timestamp"`
+}
+
 // ListConnectionsParams defines parameters for ListConnections.
 type ListConnectionsParams struct {
 	// Cursor Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.
@@ -8501,6 +8522,9 @@ type BridgeEventJSONRequestBody = BridgeEvent
 
 // MattermostActionJSONRequestBody defines body for MattermostAction for application/json ContentType.
 type MattermostActionJSONRequestBody = MattermostActionRequest
+
+// SlackInteractionFormdataRequestBody defines body for SlackInteraction for application/x-www-form-urlencoded ContentType.
+type SlackInteractionFormdataRequestBody = SlackInteractionForm
 
 // TelegramWebhookJSONRequestBody defines body for TelegramWebhook for application/json ContentType.
 type TelegramWebhookJSONRequestBody = TelegramUpdate
@@ -10934,6 +10958,24 @@ type ClientInterface interface {
 	// Corresponds with POST /callbacks/mattermost/{connection_id} (the `MattermostAction` operationId).
 	MattermostAction(ctx context.Context, connectionId ConnectionId, body MattermostActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// SlackInteractionWithBody Receive a Slack button press (http event mode)
+	//
+	// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+	SlackInteractionWithBody(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SlackInteractionWithFormdataBody Receive a Slack button press (http event mode)
+	//
+	// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+	//
+	// Takes a body of the `application/x-www-form-urlencoded` content type.
+	//
+	// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+	SlackInteractionWithFormdataBody(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, body SlackInteractionFormdataRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// TelegramWebhookWithBody Receive a Telegram update (webhook update mode)
 	//
 	// Used only when the Connection's update mode is `webhook`. A request without the right secret token header, or for a Connection that does not exist or is not in webhook mode, is answered `401` and changes nothing.
@@ -12814,6 +12856,44 @@ func (c *Client) MattermostActionWithBody(ctx context.Context, connectionId Conn
 // Corresponds with POST /callbacks/mattermost/{connection_id} (the `MattermostAction` operationId).
 func (c *Client) MattermostAction(ctx context.Context, connectionId ConnectionId, body MattermostActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewMattermostActionRequest(c.Server, connectionId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SlackInteractionWithBody Receive a Slack button press (http event mode)
+//
+// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+func (c *Client) SlackInteractionWithBody(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSlackInteractionRequestWithBody(c.Server, connectionId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SlackInteractionWithFormdataBody Receive a Slack button press (http event mode)
+//
+// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+//
+// Takes a body of the `application/x-www-form-urlencoded` content type.
+//
+// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+func (c *Client) SlackInteractionWithFormdataBody(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, body SlackInteractionFormdataRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSlackInteractionRequestWithFormdataBody(c.Server, connectionId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -17686,6 +17766,75 @@ func NewMattermostActionRequestWithBody(server string, connectionId ConnectionId
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewSlackInteractionRequestWithFormdataBody calls the generic SlackInteraction builder with application/x-www-form-urlencoded body
+func NewSlackInteractionRequestWithFormdataBody(server string, connectionId ConnectionId, params *SlackInteractionParams, body SlackInteractionFormdataRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	bodyStr, err := runtime.MarshalForm(body, nil)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = strings.NewReader(bodyStr.Encode())
+	return NewSlackInteractionRequestWithBody(server, connectionId, params, "application/x-www-form-urlencoded", bodyReader)
+}
+
+// NewSlackInteractionRequestWithBody constructs an http.Request for the SlackInteraction method, with any body, and a specified content type
+func NewSlackInteractionRequestWithBody(server string, connectionId ConnectionId, params *SlackInteractionParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/callbacks/slack/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-Slack-Signature", params.XSlackSignature, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Slack-Signature", headerParam0)
+
+		var headerParam1 string
+
+		headerParam1, err = runtime.StyleParamWithOptions("simple", false, "X-Slack-Request-Timestamp", params.XSlackRequestTimestamp, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-Slack-Request-Timestamp", headerParam1)
+
+	}
 
 	return req, nil
 }
@@ -23937,6 +24086,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /callbacks/mattermost/{connection_id} (the `MattermostAction` operationId).
 	MattermostActionWithResponse(ctx context.Context, connectionId ConnectionId, body MattermostActionJSONRequestBody, reqEditors ...RequestEditorFn) (*MattermostActionResponse, error)
 
+	// SlackInteractionWithBodyWithResponse Receive a Slack button press (http event mode)
+	//
+	// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+	SlackInteractionWithBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SlackInteractionResponse, error)
+
+	// SlackInteractionWithFormdataBodyWithResponse Receive a Slack button press (http event mode)
+	//
+	// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+	//
+	// Takes a body of the `application/x-www-form-urlencoded` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+	SlackInteractionWithFormdataBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, body SlackInteractionFormdataRequestBody, reqEditors ...RequestEditorFn) (*SlackInteractionResponse, error)
+
 	// TelegramWebhookWithBodyWithResponse Receive a Telegram update (webhook update mode)
 	//
 	// Used only when the Connection's update mode is `webhook`. A request without the right secret token header, or for a Connection that does not exist or is not in webhook mode, is answered `401` and changes nothing.
@@ -27212,6 +27379,61 @@ func (r MattermostActionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r MattermostActionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SlackInteractionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationproblemJSON500 *InternalError
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r SlackInteractionResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r SlackInteractionResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r SlackInteractionResponse) GetApplicationproblemJSON500() *InternalError {
+	return r.ApplicationproblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SlackInteractionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SlackInteractionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SlackInteractionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SlackInteractionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -38790,6 +39012,36 @@ func (c *ClientWithResponses) MattermostActionWithResponse(ctx context.Context, 
 	return ParseMattermostActionResponse(rsp)
 }
 
+// SlackInteractionWithBodyWithResponse Receive a Slack button press (http event mode)
+//
+// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+func (c *ClientWithResponses) SlackInteractionWithBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SlackInteractionResponse, error) {
+	rsp, err := c.SlackInteractionWithBody(ctx, connectionId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSlackInteractionResponse(rsp)
+}
+
+// SlackInteractionWithFormdataBodyWithResponse Receive a Slack button press (http event mode)
+//
+// Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+//
+// Takes a body of the `application/x-www-form-urlencoded` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /callbacks/slack/{connection_id} (the `SlackInteraction` operationId).
+func (c *ClientWithResponses) SlackInteractionWithFormdataBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *SlackInteractionParams, body SlackInteractionFormdataRequestBody, reqEditors ...RequestEditorFn) (*SlackInteractionResponse, error) {
+	rsp, err := c.SlackInteractionWithFormdataBody(ctx, connectionId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSlackInteractionResponse(rsp)
+}
+
 // TelegramWebhookWithBodyWithResponse Receive a Telegram update (webhook update mode)
 //
 // Used only when the Connection's update mode is `webhook`. A request without the right secret token header, or for a Connection that does not exist or is not in webhook mode, is answered `401` and changes nothing.
@@ -42958,6 +43210,49 @@ func ParseMattermostActionResponse(rsp *http.Response) (*MattermostActionRespons
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSlackInteractionResponse parses an HTTP response from a SlackInteractionWithResponse call
+func ParseSlackInteractionResponse(rsp *http.Response) (*SlackInteractionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SlackInteractionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
 
 	}
 

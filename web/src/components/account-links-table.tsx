@@ -47,6 +47,8 @@ export function linkMessenger(
       return "Telegram";
     case "mattermost":
       return "Mattermost";
+    case "slack":
+      return "Slack";
     case "bridge":
       return bridgeMessengerName(
         t,

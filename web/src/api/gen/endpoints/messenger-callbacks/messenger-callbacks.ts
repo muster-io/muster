@@ -33,6 +33,7 @@ import type {
   InternalErrorResponse,
   MattermostActionAnswer,
   MattermostActionRequest,
+  SlackInteractionForm,
   TelegramUpdate,
   UnauthorizedResponse
 } from '../../model';
@@ -310,4 +311,95 @@ export const useBridgeEvent = <TError = BadRequestResponse | UnauthorizedRespons
         TContext
       > => {
       return useMutation(getBridgeEventMutationOptions(options), queryClient);
+    }
+    export const getSlackInteractionUrl = (connectionId: string,) => {
+
+
+
+
+  return `/api/v1/callbacks/slack/${connectionId}`
+}
+
+/**
+ * Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+ * @summary Receive a Slack button press (http event mode)
+ */
+export const slackInteraction = async (connectionId: string,
+    slackInteractionForm: SlackInteractionForm, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
+    const formUrlEncoded = new URLSearchParams();
+formUrlEncoded.append(`payload`, slackInteractionForm.payload);
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<void>(getSlackInteractionUrl(connectionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...getHeaders(options?.headers) },
+    body: formUrlEncoded
+  }
+);}
+
+
+
+
+
+export const getSlackInteractionMutationKey = () => ['slackInteraction'] as const;
+
+export const getSlackInteractionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof slackInteraction>>, TError,SlackInteractionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof slackInteraction>>, TError,SlackInteractionMutationVariables, TContext> => {
+
+const mutationKey = getSlackInteractionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof slackInteraction>>, SlackInteractionMutationVariables> = (props) => {
+          const {connectionId,data} = props ?? {};
+
+          return  slackInteraction(connectionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SlackInteractionMutationResult = NonNullable<Awaited<ReturnType<typeof slackInteraction>>>
+    export type SlackInteractionMutationBody = SlackInteractionForm
+    export type SlackInteractionMutationError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse
+    export type SlackInteractionMutationVariables = {connectionId: string;data: SlackInteractionForm}
+
+    /**
+ * @summary Receive a Slack button press (http event mode)
+ */
+export const useSlackInteraction = <TError = BadRequestResponse | UnauthorizedResponse | InternalErrorResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof slackInteraction>>, TError,SlackInteractionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof slackInteraction>>,
+        TError,
+        SlackInteractionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSlackInteractionMutationOptions(options), queryClient);
     }

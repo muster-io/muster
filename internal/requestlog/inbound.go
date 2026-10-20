@@ -18,11 +18,12 @@ import (
 )
 
 // The operations of inbound records (C-23.FR-2): a Mattermost button press, a Telegram update in the webhook mode, a
-// pushed Bridge event.
+// pushed Bridge event, and a Slack interaction — a press in http mode (C-24.FR-14).
 const (
-	OperationPress  = "press"
-	OperationUpdate = "update"
-	OperationPush   = "push"
+	OperationPress       = "press"
+	OperationUpdate      = "update"
+	OperationPush        = "push"
+	OperationInteractive = "interactive"
 )
 
 // captureMax is the most of a request or an answer body Inbound keeps. The shape masking needs a JSON body whole, so a
