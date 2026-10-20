@@ -198,6 +198,7 @@ flowchart TB
         mmCb["Mattermost<br/>callback handler"]
         tgUp["Telegram updates<br/>poller on the Leader or webhook"]
         brEv["Bridge events<br/>poller on the Leader or push"]
+        slCb["Slack callback handler<br/>http mode"]
     end
 
     processing["snapshot processing<br/>(ingest)"]
@@ -218,7 +219,7 @@ flowchart TB
         interactive["interactive path"]
     end
 
-    adapters["adapters<br/>Mattermost, Telegram, Bridge,<br/>outgoing webhook"]
+    adapters["adapters<br/>Mattermost, Telegram, Slack, Bridge,<br/>outgoing webhook"]
     outbound["outbound HTTP package"]
     requestlog["Request log<br/>(requestlog)"]
     db[("PostgreSQL")]
@@ -230,6 +231,7 @@ flowchart TB
     mmCb -- "Commands" --> dispatcher
     tgUp -- "Commands" --> dispatcher
     brEv -- "Commands" --> dispatcher
+    slCb -- "Commands" --> dispatcher
     brEv -- "deleted Root messages" --> desired
     timers -- "system transitions" --> dispatcher
     dispatcher -- "lifecycle events" --> desired
@@ -237,11 +239,11 @@ flowchart TB
     worker --> desired
     worker -- "records" --> devents
     worker --> adapters
-    mmCb & tgUp & brEv -- "private answers" --> interactive
+    mmCb & tgUp & brEv & slCb -- "private answers" --> interactive
     interactive --> adapters
     adapters --> outbound
     outbound -- "each attempt, masked" --> requestlog
-    mmCb & tgUp & brEv -- "each request, masked" --> requestlog
+    mmCb & tgUp & brEv & slCb -- "each request, masked" --> requestlog
     requestlog --> db
 ```
 
@@ -280,19 +282,26 @@ flowchart TB
   runs presses and Text commands through the dispatcher with the Transport `bridge`, starts the deleted Root message
   flow for `message_deleted`, and answers the person through the interactive path before it acknowledges the event
   ([C-22].FR-10 to FR-14, [flow c'](#c-bridge-press-through-polling-or-push)).
+- **Slack presses** come, for a Slack Connection in the `http` event mode, to its callback on the ingest listener of
+  any replica, which checks Slack's signature and timestamp on the real clock and answers `200` at once; one handler,
+  which Socket Mode shares, binds each press to its message by channel and `ts`, maps the person through their Account
+  link, runs the Command through the dispatcher with the Transport `slack` and answers the person privately through the
+  interactive path ([C-24].FR-9 to FR-11, [flow c''](#c-slack-press-over-http)).
 - **Request log** keeps, for troubleshooting, the recent HTTP requests of the Connections and the outgoing webhook
   Destinations, each attempt with its answer, and the requests that reach a Connection's callbacks on the ingest
-  listener — Mattermost presses, Telegram updates in the webhook mode, pushed Bridge events — with Muster's answer,
-  refused ones included ([C-23]). The outbound HTTP package hands each attempt of a client that has an owner to the
-  Request log after its outcome is known, masked of the Secrets of the client and of the request and of the credential
-  headers; one middleware around the three callbacks hands over each request whose handler named its Connection, after
-  the answer was sent, its credential headers masked. The Request log masks what the shape of a value tells is a
-  secret — signed action ids, the tokens of `/start` and of `account_link` events — cuts each body to
+  listener — Mattermost presses, Telegram updates in the webhook mode, pushed Bridge events, Slack presses in the
+  `http` event mode — with Muster's answer, refused ones included ([C-23]). The outbound HTTP package hands each
+  attempt of a client that has an owner to the Request log after its outcome is known, masked of the Secrets of the
+  client and of the request and of the credential headers; one middleware around the four callbacks hands over each
+  request whose handler named its Connection, after the answer was sent, its credential headers masked. The Request
+  log masks what the shape of a value tells is a secret — signed action ids, the tokens of `/start` and of
+  `account_link` events, Slack's `X-Slack-Signature`, `response_url` and verification `token` — cuts each body to
   `request_log.body_max`, and inserts one row on the main pool, outside any transaction of the caller, never failing
   or delaying the request beyond that write. The delivery worker links each attempt to its Destination and Alert Group,
-  the Mattermost callback a press to its Destination and Alert Group, and each run of a check or a test — the
-  Connection check, the check before saving, the Destination check, the Destination test, a Broken probe — gives its
-  requests its kind and a check run that its result names. The API lists and reads the records within
+  the Mattermost callback a press to its Destination and Alert Group, a Slack press the requests of its answer, which
+  are made after the press is matched, and each run of a check or a test — the Connection check, the check before
+  saving, the Destination check, the Destination test, a Broken probe — gives its requests its kind and a check run
+  that its result names. The API lists and reads the records within
   `request_log.max_records` per owner and `request_log.max_age`, by owner or by check run, and the Leader prunes the
   rest every minute.
 
@@ -668,6 +677,76 @@ A crash between the Command and the record of the id runs the Command once more 
 preconditions turn into a refusal or a no-op; an event whose handling fails is not recorded, so the poller keeps its
 cursor and the push is answered `500`, and the event comes again. A failing poll backs off from 1 s to 1 min in the
 background client class and makes no Destination Broken.
+
+### c''. Slack press over HTTP
+
+Slack signs every request it sends with the app's Slack signing secret and waits 3 seconds for the answer, so the
+callback of a Connection in the `http` event mode answers before it handles the press; the press then takes the one
+path that Socket Mode shares ([C-24].FR-9 to FR-11, verified facts on
+[presses](facts.md#answers-and-presses) and [the signature](facts.md#http-mode)).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Responder
+    participant SL as Slack
+    participant IN as ingest listener (any replica)
+    participant PR as Slack presses (shared with Socket Mode)
+    participant DB as PostgreSQL
+    participant AL as account links
+    participant GR as groups dispatcher
+    participant IP as interactive path
+    participant DW as delivery worker
+
+    U->>SL: presses Ack on the Root message
+    SL->>IN: POST to MUSTER_INGEST_URL/api/v1/callbacks/slack/{connection_id}<br/>a form with payload, X-Slack-Signature and X-Slack-Request-Timestamp
+    IN->>IN: read the raw body, at most 1 MiB, and the Connection
+    alt unknown or deleted Connection, socket mode, a timestamp further than<br/>slack.request_tolerance from the real clock, or a signature that does not match
+        IN-->>SL: 401, the same for every reason, nothing changes
+    else a body over 1 MiB, or no payload that is a JSON object
+        IN-->>SL: 400
+    else signed
+        IN-->>SL: 200 with an empty body, at once
+        IN->>PR: the payload, in the process's context, not the request's
+        alt another type than block_actions
+            PR->>PR: ignore
+        else a press
+            PR->>PR: wait for one of slack.parallel_presses slots on this replica
+            PR->>AL: user.id to User, through the link for this Connection,<br/>first, for the language of every answer
+            PR->>PR: verify the action id with the key it names (must be in the Keyring)
+            alt the data of a test message
+                PR->>PR: change nothing
+            else any other data
+                PR->>DB: bind the press's channel and ts to a Root message or a sent Reminder<br/>of a Destination of the Connection
+                alt not bound, or the action id was issued for another message
+                    PR->>PR: not verified, nothing changes
+                else no Account link, or a disabled User
+                    PR->>PR: nothing changes
+                else linked User
+                    PR->>GR: Acknowledge, Transport slack
+                    GR-->>PR: done, or a refusal code
+                end
+            end
+            opt a refusal, a failure, no Account link, a test message or "Still on it"
+                PR->>IP: the text in the profile language, after the slot is free again
+                IP->>SL: chat.postEphemeral to the person in the press's channel, in the Thread for a Reminder,<br/>limiter token first, within delivery.interactive_budget
+                alt chat.postEphemeral fails
+                    IP->>SL: the same text to the press's response_url: ephemeral, replace_original false,<br/>only on hooks.slack.com, without a limiter
+                end
+                SL-->>U: shown only to the person who pressed
+            end
+        end
+    end
+    opt the command changed the Alert Group
+        DW->>SL: chat.update of the Root message to the new Desired state
+    end
+```
+
+A press is answered `200` before it is handled, so a crash between the answer and the Command loses it, as a press
+made while Muster is down is lost; Slack is not expected to send an interaction again, so presses are not
+deduplicated, and one that did come twice meets its precondition. The callback's inbound record in the Request log
+names only the Connection, because the press is matched after the answer; the records of the answer's requests also
+name the Destination and the Alert Group.
 
 ### d. Delivery reconciliation
 
@@ -1617,3 +1696,4 @@ These are engineering terms used in the ADRs and in this document; domain terms 
 [C-20]: prd/l1/C-20-organization-settings-and-security.md
 [C-22]: prd/l1/C-22-bridge.md
 [C-23]: prd/l1/C-23-request-log.md
+[C-24]: prd/l1/C-24-slack.md
