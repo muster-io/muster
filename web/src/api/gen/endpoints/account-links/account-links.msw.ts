@@ -32,22 +32,25 @@ import type {
   BridgeLinkStart,
   LinkableConnectionList,
   MattermostLinkStarted,
+  SlackLinkStarted,
   TelegramLinkStart
 } from '../../model';
 
 import {
   getConfirmBridgeLinkResponseMock,
   getConfirmMattermostLinkResponseMock,
+  getConfirmSlackLinkResponseMock,
   getListLinkableConnectionsResponseMock,
   getListMyAccountLinksResponseMock,
   getListUserAccountLinksResponseMock,
   getStartBridgeCodeLinkResponseMock,
   getStartBridgeLinkResponseMock,
   getStartMattermostLinkResponseMock,
+  getStartSlackLinkResponseMock,
   getStartTelegramLinkResponseMock
 } from './account-links.faker';
 
-export { getListMyAccountLinksResponseMock, getListLinkableConnectionsResponseMock, getStartTelegramLinkResponseMock, getStartMattermostLinkResponseMock, getConfirmMattermostLinkResponseMock, getStartBridgeLinkResponseMock, getStartBridgeCodeLinkResponseMock, getConfirmBridgeLinkResponseMock, getListUserAccountLinksResponseMock } from './account-links.faker';
+export { getListMyAccountLinksResponseMock, getListLinkableConnectionsResponseMock, getStartTelegramLinkResponseMock, getStartMattermostLinkResponseMock, getConfirmMattermostLinkResponseMock, getStartBridgeLinkResponseMock, getStartBridgeCodeLinkResponseMock, getConfirmBridgeLinkResponseMock, getStartSlackLinkResponseMock, getConfirmSlackLinkResponseMock, getListUserAccountLinksResponseMock } from './account-links.faker';
 
 
 export const getListMyAccountLinksMockHandler = (overrideResponse?: AccountLinkList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AccountLinkList> | AccountLinkList), options?: RequestHandlerOptions) => {
@@ -156,6 +159,30 @@ export const getConfirmBridgeLinkMockHandler = (overrideResponse?: AccountLink |
   }, options)
 }
 
+export const getStartSlackLinkMockHandler = (overrideResponse?: SlackLinkStarted | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<SlackLinkStarted> | SlackLinkStarted), options?: RequestHandlerOptions) => {
+  return http.post('*/me/account-links/slack', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getStartSlackLinkResponseMock(),
+      { status: 202
+      })
+  }, options)
+}
+
+export const getConfirmSlackLinkMockHandler = (overrideResponse?: AccountLink | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<AccountLink> | AccountLink), options?: RequestHandlerOptions) => {
+  return http.post('*/me/account-links/slack/confirmation', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getConfirmSlackLinkResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
 export const getListUserAccountLinksMockHandler = (overrideResponse?: AccountLinkList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AccountLinkList> | AccountLinkList), options?: RequestHandlerOptions) => {
   return http.get('*/users/:userId/account-links', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
 
@@ -187,6 +214,8 @@ export const getAccountLinksMock = () => [
   getStartBridgeLinkMockHandler(),
   getStartBridgeCodeLinkMockHandler(),
   getConfirmBridgeLinkMockHandler(),
+  getStartSlackLinkMockHandler(),
+  getConfirmSlackLinkMockHandler(),
   getListUserAccountLinksMockHandler(),
   getDeleteUserAccountLinkMockHandler()
 ]

@@ -2,8 +2,8 @@
 -- Copyright The Muster Authors
 
 -- Account links (C-18, C-22.FR-15): the messenger accounts linked to Users, one per identity space and User, and the
--- link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, or a hashed
--- Bridge token or code.
+-- link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, a hashed
+-- Bridge token or code, or a hashed Slack code.
 
 -- LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
 -- their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
@@ -31,14 +31,14 @@ WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
 -- ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
 -- a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
--- its bot can start a direct chat. Slack Connections are left out until links through them exist (C-24.FR-12).
+-- its bot can start a direct chat.
 -- name: ListLinkableConnections :many
 SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
        coalesce(bridge_info->>'user_lookup', '')::text AS user_lookup,
        coalesce((bridge_info->'capabilities'->'direct_messages'->>'bot_can_start')::boolean, false)::boolean
            AS bot_can_start
 FROM connections
-WHERE org_id = @org_id AND deleted_at IS NULL AND type <> 'slack'
+WHERE org_id = @org_id AND deleted_at IS NULL
 ORDER BY type, lower(name), id;
 
 -- LockLinkUser locks the User a link is made for, so that the links of one User change one at a time.
@@ -180,14 +180,21 @@ SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND user_id = @user_id AND connection_id = @connection_id AND messenger = 'bridge'
   AND method = 'code' AND consumed_at IS NULL AND voided_at IS NULL;
 
+-- VoidPendingSlackRequests voids the pending Slack requests of a User for a Connection, which a new one replaces.
+-- name: VoidPendingSlackRequests :execrows
+UPDATE account_link_requests
+SET voided_at = @now::timestamptz
+WHERE org_id = @org_id AND user_id = @user_id AND connection_id = @connection_id AND messenger = 'slack'
+  AND consumed_at IS NULL AND voided_at IS NULL;
+
 -- name: VoidLinkRequest :exec
 UPDATE account_link_requests
 SET voided_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND consumed_at IS NULL AND voided_at IS NULL;
 
--- LockCodeTarget takes, until the transaction ends, the lock of the Mattermost or Bridge code requests for one account
--- of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
--- concurrent requests serialize. A collision of the hash only serializes two accounts.
+-- LockCodeTarget takes, until the transaction ends, the lock of the Mattermost, Bridge or Slack code requests for one
+-- account of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one
+-- of concurrent requests serialize. A collision of the hash only serializes two accounts.
 -- name: LockCodeTarget :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(format('%s/%s/%s', @org_id::bigint, @connection_id::bigint,
                                                                 @target_external_id::text)));
@@ -220,6 +227,20 @@ SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamp
 FROM account_link_requests
 WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
   AND messenger = 'bridge' AND method = 'code' AND created_at > @since::timestamptz;
+
+-- CountUserSlackCodeRequests counts the Slack code requests of a User made after since, with the oldest of them.
+-- name: CountUserSlackCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = @org_id AND user_id = @user_id AND messenger = 'slack' AND created_at > @since::timestamptz;
+
+-- CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since, by any
+-- User, with the oldest of them.
+-- name: CountTargetSlackCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), @since::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = @org_id AND connection_id = @connection_id AND target_external_id = @target_external_id
+  AND messenger = 'slack' AND created_at > @since::timestamptz;
 
 -- DeleteUserAccountLinks deletes every link of a User and returns them with their Connections (C-03.FR-13).
 -- name: DeleteUserAccountLinks :many

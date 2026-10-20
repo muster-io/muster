@@ -776,6 +776,56 @@ func TestMentions(t *testing.T) {
 	}
 }
 
+// TestLinkedMentions is C-24.FR-6, C-24.AC-15 and C-12.FR-12: a User with an Account link for the Destination's
+// Connection is mentioned as <@U…> of the link's user id in `text` and the top section of a Loud Root message and of
+// a Reminder, never in the attachment; a User without a link there, and a link whose id has not the shape of a Slack
+// user id, are named by their display name as text; the footer names the User by the link's display name.
+func TestLinkedMentions(t *testing.T) {
+	e := newLayoutEnv(t)
+	linked := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "US0000000000U1",
+		Name: "Alice A.", Login: "alice", Username: "alice", ExternalID: "U0FAKEALICE", DisplayName: "Alice Smith"}}
+	odd := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "US0000000000U2", Name: "Bob B.",
+		Login: "bob", ExternalID: "U0>X"}}
+	dora := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "US0000000000U3",
+		Name: "Dora D.", Login: "dora"}}
+	got := mentionText([]mentions.Target{hereTarget, linked, odd, dora, linked}, nil)
+	if want := []string{"<!here>", "<@U0FAKEALICE>", "Bob B.", "Dora D."}; !slices.Equal(got, want) {
+		t.Errorf("mentions = %q, want %q", got, want)
+	}
+	for id, ok := range map[string]bool{"U0FAKEALICE": true, "W012ABC": true, "U0": false, "u0fake": false,
+		"D0FAKEALICE": false, "U0FAKE ALICE": false, "": false} {
+		if slackUserID.MatchString(id) != ok {
+			t.Errorf("slackUserID(%q) = %v", id, !ok)
+		}
+	}
+	conn := int64(3)
+	loud := delivery.Call{Destination: delivery.Destination{ID: 1, PublicID: "DS0000000000D1", Type: mentions.TypeSlack,
+		Connection: &conn}, Loudness: groups.Loud, Targets: []mentions.Target{linked, dora}}
+	src := layoutSource(messages.ColourFiring)
+	m := e.root(t, src)
+	o := layout(m, testLook(), callMentions(loud, m))
+	if o.Text != "🔴 #12 DiskFull <@U0FAKEALICE> Dora D." ||
+		o.Blocks[0].Text.Text != "🔴 #12 DiskFull\n<@U0FAKEALICE> Dora D." {
+		t.Errorf("loud = %q, %q", o.Text, o.Blocks[0].Text.Text)
+	}
+	if att := requestJSON(t, outgoing{Attachments: o.Attachments}); strings.Contains(att, "<@") ||
+		strings.Contains(att, "U0FAKEALICE") {
+		t.Errorf("a Mention in the attachment: %s", att)
+	}
+	r := e.reminder(t, "en")
+	o = layout(r, testLook(), mentionText([]mentions.Target{linked}, nil))
+	if !strings.Contains(o.Text, "<@U0FAKEALICE>") || !strings.HasPrefix(o.Blocks[0].Text.Text, "<@U0FAKEALICE>\n") ||
+		len(o.Attachments) != 0 {
+		t.Errorf("reminder = %q, %q", o.Text, o.Blocks[0].Text.Text)
+	}
+	ack := layoutSource(messages.ColourAcknowledged)
+	ack.FooterNames = map[string]string{"slack:3": "Alice Smith", "slack:4": "alice"}
+	body := strings.Split(sections(layout(e.root(t, ack), testLook(), nil))[blockBody], "\n")
+	if got := body[len(body)-1]; got != "Acknowledged by Alice Smith" {
+		t.Errorf("footer = %q", got)
+	}
+}
+
 // TestPlain is the request after Slack rejected the markup (C-24.FR-8): `text` alone, escaped as the blocks are,
 // within 3,000 bytes and under 4,000 bytes in the stored form, with no blocks and no attachment.
 func TestPlain(t *testing.T) {

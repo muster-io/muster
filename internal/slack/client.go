@@ -10,7 +10,8 @@
 // unexported chat calls of this file; and the presses of people (presses.go) — confirmed by the signed callback of
 // http mode (callback.go) or by the Leader's Socket Mode connections, which confirm each envelope at once and hand its
 // press over (socket.go) — and their private answers (answers.go), with chat.postEphemeral or the press's
-// response_url. Later stories add Account links.
+// response_url; and Account links (links.go): the lookup of a person by email or name and the bot's direct messages
+// with a code.
 package slack
 
 import (

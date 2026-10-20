@@ -23,7 +23,7 @@ import type { Messenger } from './messenger';
 import type { PublicId } from './publicId';
 
 /**
- * A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
+ * A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it; a Slack Connection has neither `link_methods` nor `handle_kind`, since its accounts link by a code sent by direct message.
  */
 export interface LinkableConnection {
   id: PublicId;

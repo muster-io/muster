@@ -53,6 +53,9 @@ import type {
   MattermostLinkRequest,
   MattermostLinkStarted,
   NotFoundResponse,
+  SlackLinkConfirm,
+  SlackLinkRequest,
+  SlackLinkStarted,
   TelegramLinkRequest,
   TelegramLinkStart,
   TooManyRequestsResponse,
@@ -192,7 +195,7 @@ export const getListLinkableConnectionsUrl = () => {
 }
 
 /**
- * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+ * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List the Connections an account can be linked through
  */
 export const listLinkableConnections = async ( options?: Parameters<typeof apiFetch>[1]): Promise<LinkableConnectionList> => {
@@ -885,6 +888,182 @@ export const useConfirmBridgeLink = <TError = BadRequestResponse | UnauthorizedR
         TContext
       > => {
       return useMutation(getConfirmBridgeLinkMutationOptions(options), queryClient);
+    }
+    export const getStartSlackLinkUrl = () => {
+
+
+
+
+  return `/api/v1/me/account-links/slack`
+}
+
+/**
+ * Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+ * @summary Start linking a Slack account with a code
+ */
+export const startSlackLink = async (slackLinkRequest: SlackLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<SlackLinkStarted> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<SlackLinkStarted>(getStartSlackLinkUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(slackLinkRequest)
+  }
+);}
+
+
+
+
+
+export const getStartSlackLinkMutationKey = () => ['startSlackLink'] as const;
+
+export const getStartSlackLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startSlackLink>>, TError,StartSlackLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startSlackLink>>, TError,StartSlackLinkMutationVariables, TContext> => {
+
+const mutationKey = getStartSlackLinkMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startSlackLink>>, StartSlackLinkMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  startSlackLink(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartSlackLinkMutationResult = NonNullable<Awaited<ReturnType<typeof startSlackLink>>>
+    export type StartSlackLinkMutationBody = SlackLinkRequest
+    export type StartSlackLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
+    export type StartSlackLinkMutationVariables = {data: SlackLinkRequest}
+
+    /**
+ * @summary Start linking a Slack account with a code
+ */
+export const useStartSlackLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startSlackLink>>, TError,StartSlackLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof startSlackLink>>,
+        TError,
+        StartSlackLinkMutationVariables,
+        TContext
+      > => {
+      return useMutation(getStartSlackLinkMutationOptions(options), queryClient);
+    }
+    export const getConfirmSlackLinkUrl = () => {
+
+
+
+
+  return `/api/v1/me/account-links/slack/confirmation`
+}
+
+/**
+ * At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+ * @summary Confirm a Slack link with the code
+ */
+export const confirmSlackLink = async (slackLinkConfirm: SlackLinkConfirm, options?: Parameters<typeof apiFetch>[1]): Promise<AccountLink> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<AccountLink>(getConfirmSlackLinkUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(slackLinkConfirm)
+  }
+);}
+
+
+
+
+
+export const getConfirmSlackLinkMutationKey = () => ['confirmSlackLink'] as const;
+
+export const getConfirmSlackLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmSlackLink>>, TError,ConfirmSlackLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof confirmSlackLink>>, TError,ConfirmSlackLinkMutationVariables, TContext> => {
+
+const mutationKey = getConfirmSlackLinkMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmSlackLink>>, ConfirmSlackLinkMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  confirmSlackLink(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConfirmSlackLinkMutationResult = NonNullable<Awaited<ReturnType<typeof confirmSlackLink>>>
+    export type ConfirmSlackLinkMutationBody = SlackLinkConfirm
+    export type ConfirmSlackLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
+    export type ConfirmSlackLinkMutationVariables = {data: SlackLinkConfirm}
+
+    /**
+ * @summary Confirm a Slack link with the code
+ */
+export const useConfirmSlackLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmSlackLink>>, TError,ConfirmSlackLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof confirmSlackLink>>,
+        TError,
+        ConfirmSlackLinkMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConfirmSlackLinkMutationOptions(options), queryClient);
     }
     export const getListUserAccountLinksUrl = (userId: string,) => {
 

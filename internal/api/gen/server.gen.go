@@ -3530,7 +3530,7 @@ type AccountLink struct {
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 
-	// DisplayName Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show.
+	// DisplayName Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
 	DisplayName *string `json:"display_name,omitempty"`
 	ExternalId  string  `json:"external_id"`
 
@@ -3539,7 +3539,7 @@ type AccountLink struct {
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Messenger  Messenger                    `json:"messenger"`
 
-	// Username The account's username; for a Bridge link, the handle the bridge reported.
+	// Username The account's username; for a Bridge link, the handle the bridge reported; for a Slack link, the account's `name`.
 	Username nullable.Nullable[string] `json:"username,omitempty"`
 }
 
@@ -5029,7 +5029,7 @@ type LinkRuleScope struct {
 // LinkRuleScopeType defines model for LinkRuleScope.Type.
 type LinkRuleScopeType string
 
-// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
+// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it; a Slack Connection has neither `link_methods` nor `handle_kind`, since its accounts link by a code sent by direct message.
 type LinkableConnection struct {
 	// HandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
 	HandleKind nullable.Nullable[LinkHandleKind] `json:"handle_kind,omitempty"`
@@ -5869,7 +5869,7 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
-	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
 	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
@@ -6747,6 +6747,33 @@ type SlackEventMode string
 type SlackInteractionForm struct {
 	// Payload The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.
 	Payload string `json:"payload"`
+}
+
+// SlackLinkConfirm defines model for SlackLinkConfirm.
+type SlackLinkConfirm struct {
+	// Code The code the bot sent as a direct message.
+	Code *string `json:"code,omitempty"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
+// SlackLinkRequest defines model for SlackLinkRequest.
+type SlackLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Handle The Slack email or name of the account to link; a leading `@` of a name is optional.
+	Handle string `json:"handle"`
+}
+
+// SlackLinkStarted defines model for SlackLinkStarted.
+type SlackLinkStarted struct {
+	AttemptsRemaining int       `json:"attempts_remaining"`
+	ExpiresAt         time.Time `json:"expires_at"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
 }
 
 // SlackSocketStatus What a `hello` of the Leader's Socket Mode connection of a Slack Connection counted.
@@ -8614,6 +8641,12 @@ type StartMattermostLinkJSONRequestBody = MattermostLinkRequest
 
 // ConfirmMattermostLinkJSONRequestBody defines body for ConfirmMattermostLink for application/json ContentType.
 type ConfirmMattermostLinkJSONRequestBody = MattermostLinkConfirm
+
+// StartSlackLinkJSONRequestBody defines body for StartSlackLink for application/json ContentType.
+type StartSlackLinkJSONRequestBody = SlackLinkRequest
+
+// ConfirmSlackLinkJSONRequestBody defines body for ConfirmSlackLink for application/json ContentType.
+type ConfirmSlackLinkJSONRequestBody = SlackLinkConfirm
 
 // StartTelegramLinkJSONRequestBody defines body for StartTelegramLink for application/json ContentType.
 type StartTelegramLinkJSONRequestBody = TelegramLinkRequest
@@ -10940,6 +10973,12 @@ type ServerInterface interface {
 	// ConfirmMattermostLink Confirm a Mattermost link with the code
 	// (POST /me/account-links/mattermost/confirmation)
 	ConfirmMattermostLink(w http.ResponseWriter, r *http.Request)
+	// StartSlackLink Start linking a Slack account with a code
+	// (POST /me/account-links/slack)
+	StartSlackLink(w http.ResponseWriter, r *http.Request)
+	// ConfirmSlackLink Confirm a Slack link with the code
+	// (POST /me/account-links/slack/confirmation)
+	ConfirmSlackLink(w http.ResponseWriter, r *http.Request)
 	// StartTelegramLink Start linking a Telegram account
 	// (POST /me/account-links/telegram)
 	StartTelegramLink(w http.ResponseWriter, r *http.Request)
@@ -14562,6 +14601,34 @@ func (siw *ServerInterfaceWrapper) ConfirmMattermostLink(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// StartSlackLink operation middleware
+func (siw *ServerInterfaceWrapper) StartSlackLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSlackLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmSlackLink operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmSlackLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmSlackLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartTelegramLink operation middleware
 func (siw *ServerInterfaceWrapper) StartTelegramLink(w http.ResponseWriter, r *http.Request) {
 
@@ -17028,6 +17095,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge", wrapper.StartBridgeLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge/codes", wrapper.StartBridgeCodeLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/bridge/confirmation", wrapper.ConfirmBridgeLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/slack", wrapper.StartSlackLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/slack/confirmation", wrapper.ConfirmSlackLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/account-links", wrapper.ListUserAccountLinks)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/account-links/{account_link_id}", wrapper.DeleteUserAccountLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/request-log", wrapper.ListRequestLog)
@@ -26076,6 +26145,302 @@ func (response ConfirmMattermostLink503ApplicationProblemPlusJSONResponse) Visit
 	return err
 }
 
+type StartSlackLinkRequestObject struct {
+	Body *StartSlackLinkJSONRequestBody
+}
+
+type StartSlackLinkResponseObject interface {
+	VisitStartSlackLinkResponse(w http.ResponseWriter) error
+}
+
+type StartSlackLink202JSONResponse SlackLinkStarted
+
+func (response StartSlackLink202JSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink400ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink401ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink403ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink409ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink422ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink429ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSlackLink503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response StartSlackLink503ApplicationProblemPlusJSONResponse) VisitStartSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLinkRequestObject struct {
+	Body *ConfirmSlackLinkJSONRequestBody
+}
+
+type ConfirmSlackLinkResponseObject interface {
+	VisitConfirmSlackLinkResponse(w http.ResponseWriter) error
+}
+
+type ConfirmSlackLink201JSONResponse AccountLink
+
+func (response ConfirmSlackLink201JSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink400ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink401ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink403ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink404ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink409ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink422ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink429ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmSlackLink503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmSlackLink503ApplicationProblemPlusJSONResponse) VisitConfirmSlackLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartTelegramLinkRequestObject struct {
 	Body *StartTelegramLinkJSONRequestBody
 }
@@ -33799,6 +34164,12 @@ type StrictServerInterface interface {
 	// ConfirmMattermostLink Confirm a Mattermost link with the code
 	// (POST /me/account-links/mattermost/confirmation)
 	ConfirmMattermostLink(ctx context.Context, request ConfirmMattermostLinkRequestObject) (ConfirmMattermostLinkResponseObject, error)
+	// StartSlackLink Start linking a Slack account with a code
+	// (POST /me/account-links/slack)
+	StartSlackLink(ctx context.Context, request StartSlackLinkRequestObject) (StartSlackLinkResponseObject, error)
+	// ConfirmSlackLink Confirm a Slack link with the code
+	// (POST /me/account-links/slack/confirmation)
+	ConfirmSlackLink(ctx context.Context, request ConfirmSlackLinkRequestObject) (ConfirmSlackLinkResponseObject, error)
 	// StartTelegramLink Start linking a Telegram account
 	// (POST /me/account-links/telegram)
 	StartTelegramLink(ctx context.Context, request StartTelegramLinkRequestObject) (StartTelegramLinkResponseObject, error)
@@ -36411,6 +36782,68 @@ func (sh *strictHandler) ConfirmMattermostLink(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ConfirmMattermostLinkResponseObject); ok {
 		if err := validResponse.VisitConfirmMattermostLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartSlackLink operation middleware
+func (sh *strictHandler) StartSlackLink(w http.ResponseWriter, r *http.Request) {
+	var request StartSlackLinkRequestObject
+
+	var body StartSlackLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartSlackLink(ctx, request.(StartSlackLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartSlackLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartSlackLinkResponseObject); ok {
+		if err := validResponse.VisitStartSlackLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmSlackLink operation middleware
+func (sh *strictHandler) ConfirmSlackLink(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmSlackLinkRequestObject
+
+	var body ConfirmSlackLinkJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmSlackLink(ctx, request.(ConfirmSlackLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmSlackLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmSlackLinkResponseObject); ok {
+		if err := validResponse.VisitConfirmSlackLinkResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

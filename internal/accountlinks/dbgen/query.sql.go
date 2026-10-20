@@ -98,6 +98,39 @@ func (q *Queries) CountTargetCodeRequests(ctx context.Context, arg CountTargetCo
 	return i, err
 }
 
+const countTargetSlackCodeRequests = `-- name: CountTargetSlackCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
+  AND messenger = 'slack' AND created_at > $1::timestamptz
+`
+
+type CountTargetSlackCodeRequestsParams struct {
+	Since            time.Time
+	OrgID            int64
+	ConnectionID     int64
+	TargetExternalID pgtype.Text
+}
+
+type CountTargetSlackCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountTargetSlackCodeRequests counts the Slack code requests for one account of a Connection made after since, by any
+// User, with the oldest of them.
+func (q *Queries) CountTargetSlackCodeRequests(ctx context.Context, arg CountTargetSlackCodeRequestsParams) (CountTargetSlackCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countTargetSlackCodeRequests,
+		arg.Since,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.TargetExternalID,
+	)
+	var i CountTargetSlackCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
 const countUserBridgeCodeRequests = `-- name: CountUserBridgeCodeRequests :one
 SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
 FROM account_link_requests
@@ -145,6 +178,31 @@ type CountUserCodeRequestsRow struct {
 func (q *Queries) CountUserCodeRequests(ctx context.Context, arg CountUserCodeRequestsParams) (CountUserCodeRequestsRow, error) {
 	row := q.db.QueryRow(ctx, countUserCodeRequests, arg.Since, arg.OrgID, arg.UserID)
 	var i CountUserCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
+const countUserSlackCodeRequests = `-- name: CountUserSlackCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND user_id = $3 AND messenger = 'slack' AND created_at > $1::timestamptz
+`
+
+type CountUserSlackCodeRequestsParams struct {
+	Since  time.Time
+	OrgID  int64
+	UserID int64
+}
+
+type CountUserSlackCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountUserSlackCodeRequests counts the Slack code requests of a User made after since, with the oldest of them.
+func (q *Queries) CountUserSlackCodeRequests(ctx context.Context, arg CountUserSlackCodeRequestsParams) (CountUserSlackCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countUserSlackCodeRequests, arg.Since, arg.OrgID, arg.UserID)
+	var i CountUserSlackCodeRequestsRow
 	err := row.Scan(&i.Requests, &i.Oldest)
 	return i, err
 }
@@ -672,7 +730,7 @@ SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
        coalesce((bridge_info->'capabilities'->'direct_messages'->>'bot_can_start')::boolean, false)::boolean
            AS bot_can_start
 FROM connections
-WHERE org_id = $1 AND deleted_at IS NULL AND type <> 'slack'
+WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY type, lower(name), id
 `
 
@@ -687,7 +745,7 @@ type ListLinkableConnectionsRow struct {
 
 // ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
 // a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
-// its bot can start a direct chat. Slack Connections are left out until links through them exist (C-24.FR-12).
+// its bot can start a direct chat.
 func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]ListLinkableConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, listLinkableConnections, orgID)
 	if err != nil {
@@ -727,9 +785,9 @@ type LockCodeTargetParams struct {
 	TargetExternalID string
 }
 
-// LockCodeTarget takes, until the transaction ends, the lock of the Mattermost or Bridge code requests for one account
-// of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
-// concurrent requests serialize. A collision of the hash only serializes two accounts.
+// LockCodeTarget takes, until the transaction ends, the lock of the Mattermost, Bridge or Slack code requests for one
+// account of a Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one
+// of concurrent requests serialize. A collision of the hash only serializes two accounts.
 func (q *Queries) LockCodeTarget(ctx context.Context, arg LockCodeTargetParams) error {
 	_, err := q.db.Exec(ctx, lockCodeTarget,
 		arg.LockClass,
@@ -843,8 +901,8 @@ type LookupAccountLinkRow struct {
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // Account links (C-18, C-22.FR-15): the messenger accounts linked to Users, one per identity space and User, and the
-// link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, or a hashed
-// Bridge token or code.
+// link requests started from the web session — a hashed Telegram deep-link token, a hashed Mattermost code, a hashed
+// Bridge token or code, or a hashed Slack code.
 // LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
 // their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
 func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkParams) (LookupAccountLinkRow, error) {
@@ -1039,6 +1097,34 @@ type VoidPendingMattermostRequestsParams struct {
 // replaces.
 func (q *Queries) VoidPendingMattermostRequests(ctx context.Context, arg VoidPendingMattermostRequestsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, voidPendingMattermostRequests,
+		arg.Now,
+		arg.OrgID,
+		arg.UserID,
+		arg.ConnectionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const voidPendingSlackRequests = `-- name: VoidPendingSlackRequests :execrows
+UPDATE account_link_requests
+SET voided_at = $1::timestamptz
+WHERE org_id = $2 AND user_id = $3 AND connection_id = $4 AND messenger = 'slack'
+  AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type VoidPendingSlackRequestsParams struct {
+	Now          time.Time
+	OrgID        int64
+	UserID       int64
+	ConnectionID int64
+}
+
+// VoidPendingSlackRequests voids the pending Slack requests of a User for a Connection, which a new one replaces.
+func (q *Queries) VoidPendingSlackRequests(ctx context.Context, arg VoidPendingSlackRequestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, voidPendingSlackRequests,
 		arg.Now,
 		arg.OrgID,
 		arg.UserID,

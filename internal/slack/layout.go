@@ -22,17 +22,18 @@ import (
 // `attachments`, an empty list where there are none, because an edit without them keeps or replaces what was there
 // (F-085), and turns unfurling off (F-083); it uses only `section`, `context` and `actions` blocks, never `rich_text`
 // or `markdown` (F-081, F-086). A Root message's `text` and top `section` hold the summary line — the status emoji, #N
-// and the title — and, on a Loud message, its Mentions after it; one attachment in the colour of its status (F-075)
-// holds a `section` with the heading linked to the Alert Group page, a `section` with items 3 to 11 in mrkdwn — the
-// body, the line of links that starts with "Open in Muster", the notices and the footer — within 3,000 code points as
-// sent (F-076), a `context` with "Muster v<version>" and no image, and the buttons with the Snooze menu (C-24.FR-5). A
-// Thread reply, a Reminder and a Storm summary have their Mentions and text in one `section`, a Reminder's buttons in
+// and the title — and, on a Loud message, its Mentions after it: a User with an Account link for the Destination's
+// Connection as `<@U…>` (F-097), anyone else by their display name as text; one attachment in the colour of its status
+// (F-075) holds a `section` with the heading linked to the Alert Group page, a `section` with items 3 to 11 in mrkdwn —
+// the body, the line of links that starts with "Open in Muster", the notices and the footer — within 3,000 code points
+// as sent (F-076), a `context` with "Muster v<version>" and no image, and the buttons with the Snooze menu (C-24.FR-5).
+// A Thread reply, a Reminder and a Storm summary have their Mentions and text in one `section`, a Reminder's buttons in
 // an `actions` block, and no attachment. `text` is only a notification's fallback: its title is cut to 60 code points
 // and its Mentions to 1,000 bytes, so that it stays under the 4,000 bytes an edit takes even when Slack stores every
 // character as an entity or a shortcode (F-077 to F-079). Alert data reach the layout escaped for mrkdwn by
 // internal/messages (C-24.FR-7); template output keeps its markup, with its trusted Mention tokens as text that
-// notifies nobody and its literal `<!…>` and `<@…>` neutralized, so that only the Destination's Mention settings
-// notify (C-12.FR-8). After Slack rejected the markup, the same message goes as `text` alone (C-11.FR-8).
+// notifies nobody and its literal `<!…>` and `<@…>` neutralized, so that only the Destination's Mention settings notify
+// (C-12.FR-8). After Slack rejected the markup, the same message goes as `text` alone (C-11.FR-8).
 
 // LengthLimit is the longest text of a section in code points of the mrkdwn as sent, entities and link markup
 // included (F-076): the length limit the adapter declares, which the body of a message is shortened to (C-12.FR-11).
@@ -503,8 +504,9 @@ func templateTokens(m messages.Message) []templates.Token {
 }
 
 // mentionText are the Mentions of a Loud message in mrkdwn, in order and without duplicates (C-24.FR-6): of the
-// targets, everyone in the chat as <!channel> or <!here>, and a User by their display name as text, escaped, which
-// notifies nobody; then everyone of the template tokens. `all` and messenger groups, which a Slack Destination refuses,
+// targets, everyone in the chat as <!channel> or <!here>, a User with an Account link for the Destination's Connection
+// as <@U…> of the link's user id (F-097), and anyone else by their display name as text, escaped, which notifies
+// nobody; then everyone of the template tokens. `all` and messenger groups, which a Slack Destination refuses,
 // mention nobody.
 func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 	var out []string
@@ -518,7 +520,11 @@ func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 		case mentions.TargetEveryone:
 			add(everyoneMentions[t.Everyone])
 		case mentions.TargetUser:
-			if t.User != nil {
+			switch {
+			case t.User == nil:
+			case slackUserID.MatchString(t.User.ExternalID):
+				add("<@" + t.User.ExternalID + ">")
+			default:
 				add(messages.EscapeMrkdwn(messages.Value(strings.Join(strings.Fields(t.User.Name), " "))))
 			}
 		}

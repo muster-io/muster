@@ -89,6 +89,8 @@ func messengerName(messenger string) string {
 		return "Telegram"
 	case MessengerBridge:
 		return "Bridge"
+	case MessengerSlack:
+		return "Slack"
 	}
 	return "Mattermost"
 }

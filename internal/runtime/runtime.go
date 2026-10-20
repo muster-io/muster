@@ -992,11 +992,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	conns := connections.New(connsCfg)
 	p.connections, p.interactive, p.roles = conns, interactive, roles
 	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013,
-	// C-22.FR-15).
+	// C-22.FR-15, C-24.FR-12).
 	p.links = accountlinks.New(accountlinks.Config{OrgID: orgID, Store: accountlinks.NewStore(p.db.AccountLinksDB()),
 		Audit: w, Business: p.clocks.Business, Log: p.log, Telegram: telegram.Bots{Conns: conns, Path: interactive},
 		Mattermost: mattermost.LinkBots{Conns: conns, Path: interactive},
-		Bridge:     bridge.LinkBots{Conns: conns, Path: interactive}})
+		Bridge:     bridge.LinkBots{Conns: conns, Path: interactive},
+		Slack:      slack.LinkBots{Conns: conns, Path: interactive}})
 	p.messengerAdapters()
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {

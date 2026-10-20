@@ -54,6 +54,7 @@ func (f *fakeAccountLinks) Connections(context.Context) ([]accountlinks.Linkable
 		{PublicID: "CNAAAAAAAAAAA3", Name: "Dev Bridge", Messenger: "bridge", LinkMethods: []string{"token", "code"},
 			HandleKind: "email"},
 		{PublicID: "CNAAAAAAAAAAA2", Name: "mm", Messenger: "mattermost"},
+		{PublicID: "CNAAAAAAAAAAA5", Name: "sl", Messenger: "slack"},
 		{PublicID: "CNAAAAAAAAAAA1", Name: "Dev Telegram", Messenger: "telegram"}}, f.err
 }
 
@@ -101,6 +102,20 @@ func (f *fakeAccountLinks) ConfirmBridge(_ context.Context, r accountlinks.Reque
 	return f.links[2], f.record(r, "bridge-confirm "+id)
 }
 
+func (f *fakeAccountLinks) StartSlack(_ context.Context, r accountlinks.Requester, conn, handle string) (
+	accountlinks.SlackStarted, error) {
+	return accountlinks.SlackStarted{RequestPublicID: "ARAAAAAAAAAAA5", ExpiresAt: t0.Add(10 * time.Minute),
+		AttemptsRemaining: 5}, f.record(r, "slack "+conn+" "+handle)
+}
+
+func (f *fakeAccountLinks) ConfirmSlack(_ context.Context, r accountlinks.Requester, id, code string) (
+	accountlinks.Link, error) {
+	f.confirm = code
+	return accountlinks.Link{PublicID: "AKAAAAAAAAAAA5", Messenger: "slack", ConnectionPublicID: "CNAAAAAAAAAAA5",
+		ConnectionName: "sl", ExternalID: "U0FAKEALICE", Username: ptr("alice"), DisplayName: ptr("Alice Smith"),
+		CreatedAt: t0}, f.record(r, "slack-confirm "+id)
+}
+
 func newAccountLinksAPI(t *testing.T) (*testAPI, *fakeAccountLinks) {
 	t.Helper()
 	x := newTestAPI(t)
@@ -146,6 +161,7 @@ func TestAccountLinksLists(t *testing.T) {
 	a = x.call(t, http.MethodGet, "/api/v1/me/account-links/connections", "", "Cookie", "viewer-cookie")
 	for _, want := range []string{`{"id":"CNAAAAAAAAAAA2","messenger":"mattermost","name":"mm"}`,
 		`{"id":"CNAAAAAAAAAAA1","messenger":"telegram","name":"Dev Telegram"}`,
+		`{"id":"CNAAAAAAAAAAA5","messenger":"slack","name":"sl"}`,
 		`{"handle_kind":null,"id":"CNAAAAAAAAAAA4","link_methods":["token"],"messenger":"bridge","name":"br"}`,
 		`{"handle_kind":"email","id":"CNAAAAAAAAAAA3","link_methods":["token","code"],"messenger":"bridge",` +
 			`"name":"Dev Bridge"}`} {
@@ -227,6 +243,8 @@ func TestAccountLinksStart(t *testing.T) {
 		{http.MethodPost, "/api/v1/me/account-links/bridge", `{"connection_id":"CNAAAAAAAAAAA3"}`},
 		{http.MethodPost, "/api/v1/me/account-links/bridge/codes", `{"connection_id":"CNAAAAAAAAAAA3","handle":"x"}`},
 		{http.MethodPost, "/api/v1/me/account-links/bridge/confirmation", `{"request_id":"ARAAAAAAAAAAA3","code":"x"}`},
+		{http.MethodPost, "/api/v1/me/account-links/slack", `{"connection_id":"CNAAAAAAAAAAA5","handle":"x"}`},
+		{http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"ARAAAAAAAAAAA5","code":"x"}`},
 	} {
 		for _, token := range []string{fullToken, readOnlyToken, serviceToken} {
 			a := x.call(t, c.method, c.path, c.body, "Authorization", "Bearer "+token)
@@ -566,5 +584,103 @@ func TestProblemCodesOfBridgeLinks(t *testing.T) {
 		if !found[c] {
 			t.Errorf("%s is not catalogued", c)
 		}
+	}
+}
+
+// TestSlackAccountLinks is C-24.FR-12 and AC-14 through the API: startSlackLink answers the started request with its
+// expiry and attempts, confirmSlackLink the link with its user id, name and display name; each acts on the signed-in
+// User from the web session, and a missing code is empty. The refusals are 422 handle_not_found, handle_ambiguous and
+// direct_message_refused at /handle and unknown_id at /connection_id, 409 account_linked_elsewhere and without a code
+// for a refusal of Slack, 422 link_code_invalid with the attempts left at /code, 429 link_code_requests_exceeded with
+// Retry-After, 503 with Retry-After without a limiter token or after Slack's 429, and 404 for an unknown request.
+func TestSlackAccountLinks(t *testing.T) {
+	x, f := newAccountLinksAPI(t)
+	a := x.call(t, http.MethodPost, "/api/v1/me/account-links/slack",
+		`{"connection_id":"CNAAAAAAAAAAA5","handle":"Alice@Example.ORG"}`, adminCSRF...)
+	if a.status != http.StatusAccepted || a.json(t)["request_id"] != "ARAAAAAAAAAAA5" ||
+		a.json(t)["attempts_remaining"] != float64(5) || a.json(t)["expires_at"] != "2026-10-05T12:10:00Z" ||
+		f.calls[0] != "slack CNAAAAAAAAAAA5 Alice@Example.ORG" || f.by[0].UserID != 1 ||
+		f.by[0].Transport != audit.TransportUI {
+		t.Fatalf("= %d %s %v", a.status, a.body, f.calls)
+	}
+	a = x.call(t, http.MethodPost, "/api/v1/me/account-links/slack/confirmation",
+		`{"request_id":"ARAAAAAAAAAAA5","code":"ABCD2345"}`, adminCSRF...)
+	if a.status != http.StatusCreated || a.json(t)["id"] != "AKAAAAAAAAAAA5" || a.json(t)["messenger"] != "slack" ||
+		a.json(t)["external_id"] != "U0FAKEALICE" || a.json(t)["username"] != "alice" ||
+		a.json(t)["display_name"] != "Alice Smith" || a.json(t)["connection"].(map[string]any)["name"] != "sl" ||
+		f.confirm != "ABCD2345" || f.calls[1] != "slack-confirm ARAAAAAAAAAAA5" {
+		t.Fatalf("= %d %s", a.status, a.body)
+	}
+	for _, body := range []string{`{"connection_id":"CNAAAAAAAAAAA5","handle":""}`, `{"connection_id":"CNAAAAAAAAAAA5"}`,
+		`{"connection_id":"CNAAAAAAAAAAA5","handle":"` + strings.Repeat("a", 321) + `"}`} {
+		if a := x.call(t, http.MethodPost, "/api/v1/me/account-links/slack", body, adminCSRF...); a.status !=
+			http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, a.status, a.body)
+		}
+	}
+	if a := x.call(t, http.MethodPost, "/api/v1/me/account-links/slack/confirmation",
+		`{"request_id":"ARAAAAAAAAAAA5"}`, adminCSRF...); a.status != http.StatusBadRequest {
+		t.Errorf("a confirmation without a code = %d %s", a.status, a.body)
+	}
+	start := func(t *testing.T, err error) answer {
+		t.Helper()
+		f.err = err
+		return x.call(t, http.MethodPost, "/api/v1/me/account-links/slack",
+			`{"connection_id":"CNAAAAAAAAAAA5","handle":"Sam"}`, adminCSRF...)
+	}
+	for _, c := range []struct{ pointer, code, detail string }{
+		{"/handle", accountlinks.CodeHandleNotFound, "No Slack account with this email or name was found."},
+		{"/handle", accountlinks.CodeHandleAmbiguous, "Several Slack accounts have this name. Enter the email instead."},
+		{"/handle", accountlinks.CodeDirectMessageRefused, "The bot cannot send a direct message to this Slack account."},
+		{"/connection_id", "unknown_id", "No Slack Connection has this id."},
+	} {
+		a := start(t, &accountlinks.FieldError{Pointer: c.pointer, Code: c.code, Detail: c.detail})
+		errs, _ := a.json(t)["errors"].([]any)
+		if a.status != http.StatusUnprocessableEntity || len(errs) != 1 || errs[0].(map[string]any)["code"] != c.code ||
+			errs[0].(map[string]any)["pointer"] != c.pointer || errs[0].(map[string]any)["detail"] != c.detail {
+			t.Errorf("%s = %d %s", c.code, a.status, a.body)
+		}
+	}
+	if a := start(t, accountlinks.ErrLinkedElsewhere); a.status != http.StatusConflict ||
+		a.code(t) != codeAccountLinkedElsewhere {
+		t.Errorf("an account linked elsewhere = %d %s", a.status, a.body)
+	}
+	if a := start(t, &accountlinks.MessengerError{Call: "users.list", Outcome: "fatal", Status: 200}); a.status !=
+		http.StatusConflict || a.json(t)["code"] != nil {
+		t.Errorf("a refusal of Slack = %d %s", a.status, a.body)
+	}
+	if a := start(t, &accountlinks.RateLimitedError{RetryAfter: time.Minute}); a.status != http.StatusTooManyRequests ||
+		a.code(t) != codeLinkCodeRequestsExceeded || a.header.Get("Retry-After") != "60" {
+		t.Errorf("a limit = %d %s", a.status, a.body)
+	}
+	if a := start(t, &delivery.LimitedError{RetryAfter: 2 * time.Second}); a.status != http.StatusServiceUnavailable ||
+		a.header.Get("Retry-After") != "2" {
+		t.Errorf("no limiter token = %d %s", a.status, a.body)
+	}
+	left := 0
+	f.err = &accountlinks.FieldError{Pointer: "/code", Code: accountlinks.CodeLinkCodeInvalid, Detail: "Wrong.",
+		AttemptsRemaining: &left}
+	a = x.call(t, http.MethodPost, "/api/v1/me/account-links/slack/confirmation",
+		`{"request_id":"ARAAAAAAAAAAA5","code":"22222222"}`, adminCSRF...)
+	if v, ok := a.json(t)["attempts_remaining"]; a.status != http.StatusUnprocessableEntity || !ok || v != float64(0) {
+		t.Errorf("the sixth code = %d %s", a.status, a.body)
+	}
+	f.err = accountlinks.ErrNotFound
+	if a := x.call(t, http.MethodPost, "/api/v1/me/account-links/slack/confirmation",
+		`{"request_id":"ARAAAAAAAAAAA9","code":"x"}`, adminCSRF...); a.status != http.StatusNotFound {
+		t.Errorf("an unknown request = %d", a.status)
+	}
+}
+
+// TestProblemCodesOfSlackLinks: the problem code handle_ambiguous of the Slack links is catalogued in x-problem-codes,
+// beside the codes it shares with the Bridge links.
+func TestProblemCodesOfSlackLinks(t *testing.T) {
+	doc, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(doc.Components.Schemas["Problem"].Value.Extensions["x-problem-codes"])
+	if !strings.Contains(string(raw), `"code":"`+accountlinks.CodeHandleAmbiguous+`"`) {
+		t.Errorf("%s is not catalogued", accountlinks.CodeHandleAmbiguous)
 	}
 }

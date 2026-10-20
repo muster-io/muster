@@ -312,6 +312,7 @@ var implemented = map[string]bool{
 	"ListMyAccountLinks": true, "ListLinkableConnections": true, "DeleteMyAccountLink": true,
 	"StartTelegramLink": true, "StartMattermostLink": true, "ConfirmMattermostLink": true,
 	"StartBridgeLink": true, "StartBridgeCodeLink": true, "ConfirmBridgeLink": true,
+	"StartSlackLink": true, "ConfirmSlackLink": true,
 	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true, "GetKeyring": true,
 	"ListRequestLog": true, "GetRequestRecord": true,
 }

@@ -605,32 +605,33 @@ var TelegramUpdateDropped = newEvent("telegram_update_dropped", LevelInfo, "C-14
 		"my_chat_member or other. Private messages, such as /start, go to the handler of Account links.",
 	"connection", "kind")
 
-// AccountLinkLinked is logged when a messenger account was linked to a User (C-18.FR-2, FR-3, C-22.FR-15).
+// AccountLinkLinked is logged when a messenger account was linked to a User (C-18.FR-2, FR-3, C-22.FR-15,
+// C-24.FR-12).
 var AccountLinkLinked = newEvent("account_link_linked", LevelInfo, "C-18",
 	"A messenger account was linked to a User, through /start with a deep-link token in Telegram, a code from the "+
-		"bot's direct message in Mattermost, or through a Bridge an account_link event with a token sent to the bot "+
-		"or a code from the bot's direct message, and the account-links hint went to the User: messenger is "+
-		"telegram, mattermost or bridge, connection the public_id of the Connection, user the public_id of the User. "+
-		"error, when present, says why the bot's confirmation or the answer to the account_link event was not sent; "+
-		"the link stays. Never carries the token or the code.",
+		"bot's direct message in Mattermost or Slack, or through a Bridge an account_link event with a token sent to "+
+		"the bot or a code from the bot's direct message, and the account-links hint went to the User: messenger is "+
+		"telegram, mattermost, bridge or slack, connection the public_id of the Connection, user the public_id of the "+
+		"User. error, when present, says why the bot's confirmation or the answer to the account_link event was not "+
+		"sent; the link stays. Never carries the token or the code.",
 	"messenger", "connection", "user", "error")
 
 // AccountLinkRejected is logged when a link of a messenger account was refused (C-18.FR-2, FR-3, FR-5,
-// C-22.FR-15).
+// C-22.FR-15, C-24.FR-12).
 var AccountLinkRejected = newEvent("account_link_rejected", LevelInfo, "C-18",
 	"A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram, "+
-		"mattermost or bridge, connection the public_id of the Connection, reason token_unknown, token_used, "+
+		"mattermost, bridge or slack, connection the public_id of the Connection, reason token_unknown, token_used, "+
 		"token_expired or wrong_connection for a /start or a Bridge account_link event, wrong_code, token_used or "+
-		"token_expired for a Mattermost or Bridge code, or conflict for an account linked to another User. error, "+
-		"when present, says why the bot's answer was not sent. Never carries the token or the code.",
+		"token_expired for a Mattermost, Bridge or Slack code, or conflict for an account linked to another User. "+
+		"error, when present, says why the bot's answer was not sent. Never carries the token or the code.",
 	"messenger", "connection", "reason", "error")
 
 // AccountLinkUnlinked is logged when an Account link was removed (C-18.FR-4, FR-6, C-03.FR-13).
 var AccountLinkUnlinked = newEvent("account_link_unlinked", LevelInfo, "C-18",
-	"An Account link was removed and recorded as account_link.unlink: messenger is telegram, mattermost or bridge, "+
-		"connection the public_id of the Connection it was made through, user the public_id of its User, reason "+
-		"removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity "+
-		"space took its place, or user_deleted when its User was deleted.",
+	"An Account link was removed and recorded as account_link.unlink: messenger is telegram, mattermost, bridge or "+
+		"slack, connection the public_id of the Connection it was made through, user the public_id of its User, "+
+		"reason removed when the User or an Admin unlinked it, replaced when a new link of the User in the same "+
+		"identity space took its place, or user_deleted when its User was deleted.",
 	"messenger", "connection", "user", "reason")
 
 // TelegramUpdateFailed is logged when the webhook endpoint of a Telegram Connection answered 500 (C-14.FR-1).

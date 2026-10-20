@@ -15,7 +15,13 @@
 // chat.postMessage, chat.update, chat.delete, chat.postEphemeral and chat.getPermalink keep each channel's messages
 // and Threads by the rules of F-074 to F-092 that Muster relies on (messages.go); chat.postEphemeral shows a message
 // only to one of the fake's people — UserAlice, UserBob, UserCarol, UserDora and the person UserID, members of every
-// channel the bot is in — and answers user_not_in_channel for anyone else. Any other method is unknown_method. A POST
+// channel the bot is in — and answers user_not_in_channel for anyone else. Each app's workspace has a directory of
+// people (people.go, F-095), which users.list answers over three pages with next_cursor, users.info by user id and
+// users.lookupByEmail by an address in any letter case: Slackbot, two accounts whose display name is "Sam", a bot
+// whose display name is "Bob", the app's bot user, a deleted account whose display name is "bob", and UserAlice,
+// UserBob, UserCarol and UserDora; conversations.open answers the bot's direct chat with one of them, and
+// chat.postMessage to a person's user id posts into that direct chat (F-096), cannot_dm_bot for a bot and
+// user_not_found for a deleted account. Any other method is unknown_method. A POST
 // to the response_url of a press, /actions/<team>/<n>/<hex>, takes an answer, five at most (presses.go); /link/ is the
 // Socket Mode WebSocket of an address apps.connections.open answered (socket.go); any other path is 404.
 //
@@ -26,7 +32,8 @@
 // makes conversations.list answer smaller pages; the request_url of each app, the Interactivity Request URL its
 // presses go to; and the extra_connections of each app, the connections of other programs that the hello of its
 // sockets counts. GET /_fake/messages lists the messages of a channel, with their Thread replies, and POST
-// /_fake/delete deletes one as a person would (messages.go). POST /_fake/press presses a button of a message as one of
+// /_fake/delete deletes one as a person would (messages.go); GET /_fake/dms?user=U…[&app=a|b] lists the direct
+// messages the bot sent to a person (people.go). POST /_fake/press presses a button of a message as one of
 // the people and sends the app's request_url the payload signed with the app's Slack signing secret and with its
 // verification token, answering Muster's status and body, or sends it as an interactive envelope through a socket of
 // the app, answering whether Muster confirmed it; GET /_fake/ephemeral lists what chat.postEphemeral showed and GET
@@ -211,6 +218,7 @@ func New() *Fake {
 	})
 	f.HandleControl("PUT /_fake/config", f.putConfig)
 	f.HandleControl("GET /_fake/messages", f.listMessages)
+	f.HandleControl("GET /_fake/dms", f.listDMs)
 	f.HandleControl("POST /_fake/delete", f.deleteByPerson)
 	f.HandleControl("POST /_fake/press", f.press)
 	f.HandleControl("GET /_fake/ephemeral", f.listEphemeral)
@@ -449,6 +457,10 @@ var acceptedScopes = map[string]string{
 	"chat.delete":           chatScope,
 	"chat.postEphemeral":    chatScope,
 	"chat.getPermalink":     "",
+	"users.list":            usersScope,
+	"users.info":            usersScope,
+	"users.lookupByEmail":   emailScope,
+	"conversations.open":    openScopes,
 }
 
 // conversationScopes are the scopes the methods that read conversations accept (F-071).
@@ -510,7 +522,19 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		conversationsInfo(w, c, cfg, scopes, args["channel"])
 	case "conversations.list":
 		conversationsList(w, c, cfg, scopes, args)
+	case "users.list":
+		usersList(w, c, scopes, args)
+	case "users.info":
+		usersInfo(w, c, scopes, args["user"])
+	case "users.lookupByEmail":
+		usersLookupByEmail(w, c, scopes, args["email"])
+	case "conversations.open":
+		conversationsOpen(w, c, scopes, args["users"])
 	case "chat.postMessage":
+		if channel, _ := chatArgs(raw).text("channel"); directTarget(channel) {
+			f.postDirect(w, c, scopes, raw)
+			return
+		}
 		f.postMessage(w, c, cfg, scopes, raw)
 	case "chat.update":
 		f.updateMessage(w, c, cfg, scopes, raw)
