@@ -716,3 +716,81 @@ func TestInboundSlackPress(t *testing.T) {
 		t.Errorf("answers %v %q, %v", q.inserts[0].Status, q.inserts[0].ResponseBody.String, q.inserts[1].Status)
 	}
 }
+
+// TestRecordEnvelope covers the record of an envelope of Slack's Socket Mode (C-24.FR-14, C-23.FR-1 to FR-3): the
+// direction inbound, the operation of its type, the method WEBSOCKET, the socket's address as given, no request
+// headers, the envelope as the request body with its response_url, verification token and signed action ids
+// [redacted], no status or answer headers and the confirmation as the answer's body; the path, the latency, the
+// business time and the Connection; a type longer than the column is cut, an empty one is envelope; a write that fails
+// is logged without the record; a nil Writer records nothing.
+func TestRecordEnvelope(t *testing.T) {
+	ack := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge)
+	hooks := "https://hooks.slack.com/actions/T0123ABCD/4567890123/aBcDeF0123456789xyz"
+	envelope := `{"envelope_id":"3f0c6a1e-5b2d-4c8e-9f7a-0123456789ab","type":"interactive","payload":` +
+		slackPayload(t, hooks, ack) + `,"accepts_response_payload":false}`
+	confirmation := `{"envelope_id":"3f0c6a1e-5b2d-4c8e-9f7a-0123456789ab"}`
+	records := func() uint64 { return metrics.RequestLogRecords.With("inbound").Get() }
+	q := &fakeQueries{}
+	w, out, business := newTestWriter(q, 0)
+	business.Advance(time.Minute)
+	before := records()
+	w.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7, ConnectionID: inboundConn},
+		Operation: OperationInteractive, URL: "wss://wss-primary.slack.com/link/", Envelope: []byte(envelope),
+		Confirmation: []byte(confirmation), Via: "proxy", Latency: 3 * time.Millisecond})
+	if len(q.inserts) != 1 || records() != before+1 || out.Len() != 0 {
+		t.Fatalf("%d inserts, records +%d, logged %s", len(q.inserts), records()-before, out)
+	}
+	p := q.inserts[0]
+	if p.OrgID != 1 || !p.At.Equal(t0.Add(time.Minute)) || p.Direction != "inbound" || p.Operation != "interactive" ||
+		p.Method != "WEBSOCKET" || p.Url != "wss://wss-primary.slack.com/link/" || p.Via != "proxy" ||
+		p.Attempt != 1 || p.LatencyMs != 3 || p.ErrorClass.Valid || p.ErrorCode.Valid || p.Error.Valid ||
+		p.ConnectionID != (pgtype.Int8{Int64: 7, Valid: true}) || p.DestinationID.Valid || p.AlertGroupID.Valid ||
+		p.CheckKind.Valid || p.CheckRun.Valid || string(p.RequestHeaders) != "{}" ||
+		p.RequestBodyBytes != int64(len(envelope)) || p.RequestBodyTruncated || p.Status.Valid ||
+		p.ResponseHeaders != nil || p.ResponseBody != (pgtype.Text{String: confirmation, Valid: true}) ||
+		p.ResponseBodyBytes != int64(len(confirmation)) || p.ResponseBodyTruncated {
+		t.Errorf("an envelope: %+v", p)
+	}
+	var e struct {
+		EnvelopeID string         `json:"envelope_id"`
+		Payload    map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(p.RequestBody), &e); err != nil || e.EnvelopeID == "" ||
+		e.Payload["response_url"] != redacted || e.Payload["token"] != redacted || e.Payload["type"] != "block_actions" {
+		t.Errorf("the envelope as stored: %s", p.RequestBody)
+	}
+	for _, secret := range []string{ack, hooks, "Vt0kenOfTheApp99"} {
+		if strings.Contains(p.RequestBody, secret) {
+			t.Errorf("the envelope stores %q", secret)
+		}
+	}
+
+	long := strings.Repeat("t", 70)
+	w.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7, ConnectionID: inboundConn},
+		Operation: long, URL: "wss://h/link/", Envelope: []byte(`{"envelope_id":"e2"}`),
+		Confirmation: []byte(`{"envelope_id":"e2"}`)})
+	w.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7, ConnectionID: inboundConn},
+		URL: "wss://h/link/", Envelope: []byte(`{"envelope_id":"e3"}`), Confirmation: []byte(`{"envelope_id":"e3"}`)})
+	w.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7, ConnectionID: inboundConn},
+		Operation: "events\x00api", URL: "wss://h/link/", Envelope: []byte(`{}`), Confirmation: []byte(`{}`)})
+	if len(q.inserts) != 4 || q.inserts[1].Operation != long[:maxOperation] || q.inserts[1].Via != "direct" ||
+		q.inserts[2].Operation != "envelope" || q.inserts[3].Operation != "events�api" {
+		t.Errorf("operations %q %q %q, via %q", q.inserts[1].Operation, q.inserts[2].Operation, q.inserts[3].Operation,
+			q.inserts[1].Via)
+	}
+
+	failing, out, _ := newTestWriter(&fakeQueries{insert: func(context.Context, dbgen.InsertRecordParams) error {
+		return errors.New("insert failed")
+	}}, 0)
+	failing.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7, ConnectionID: inboundConn},
+		Operation: OperationInteractive, URL: "wss://h/link/", Envelope: []byte(envelope),
+		Confirmation: []byte(confirmation)})
+	if !strings.Contains(out.String(), `"event":"request_log_write_failed"`) ||
+		!strings.Contains(out.String(), `"operation":"interactive"`) || strings.Contains(out.String(), "envelope_id") {
+		t.Errorf("logged %s", out)
+	}
+
+	var none *Writer
+	none.RecordEnvelope(t.Context(), EnvelopeRecord{Links: Links{Connection: 7}})
+	var _ EnvelopeRecorder = none
+}

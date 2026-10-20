@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -1258,4 +1259,623 @@ func TestSlackPresses(t *testing.T) {
 			}
 		}
 	})
+}
+
+// socketWait bounds the waits on a Socket Mode connection: a hello, a log line, a reconnection after the first back-off
+// of slack.socket_backoff, which starts at 1 s, and a socket that closes; socketPoll is how often they look.
+const (
+	socketWait = 15 * time.Second
+	socketPoll = 50 * time.Millisecond
+)
+
+// socketDirect are the members of the Connection sl in socket mode without a proxy.
+const socketDirect = `"event_mode":"socket","proxy":{"enabled":false}`
+
+// socketLeak finds what no record of the Request log and no log line may hold: an app-level token of the fake and the
+// ticket of a Socket Mode address.
+var socketLeak = regexp.MustCompile(`xapp-muster-dev-slack-token|ticket=[^\[]`)
+
+// within polls cond every socketPoll until it holds and fails t after d.
+func within(t *testing.T, what string, d time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("waited %v for %s", d, what)
+		}
+		time.Sleep(socketPoll)
+	}
+}
+
+// leading waits for the replica that leads and returns it.
+func leading(t *testing.T, h *Harness) *Replica {
+	t.Helper()
+	var got *Replica
+	eventually(t, "a replica to lead", func() bool {
+		for _, r := range h.Replicas {
+			if r.Running() && r.Metric(t, "muster_leader") == "1" {
+				got = r
+				return true
+			}
+		}
+		return false
+	})
+	return got
+}
+
+// connLines are the log lines of event for the Connection conn in the output of r's current run.
+func connLines(r *Replica, conn, event string) []map[string]any {
+	var out []map[string]any
+	for _, l := range logLines(r, event) {
+		if l["connection"] == conn {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// socketLines are the log lines of event for the Connection conn of every replica.
+func (s *slk) socketLines(conn, event string) []map[string]any {
+	var out []map[string]any
+	for _, r := range s.h.Replicas {
+		out = append(out, connLines(r, conn, event)...)
+	}
+	return out
+}
+
+// waitSocketLines waits until the replicas logged more than after lines of event for the Connection conn, and returns
+// those after the first after.
+func (s *slk) waitSocketLines(conn, event string, after int) []map[string]any {
+	s.t.Helper()
+	var got []map[string]any
+	within(s.t, fmt.Sprintf("a log line %s of %s", event, conn), socketWait, func() bool {
+		got = s.socketLines(conn, event)
+		return len(got) > after
+	})
+	return got[after:]
+}
+
+// socket is the Socket Mode state of the fake Slack server.
+func (s *slk) socket() fakeslack.SocketState {
+	s.t.Helper()
+	var st fakeslack.SocketState
+	decode(s.t, call(s.t, http.MethodGet, s.fs+"/socket", ""), &st)
+	return st
+}
+
+// appB is the Socket Mode state of the fake's second app.
+func (s *slk) appB() fakeslack.AppSockets {
+	s.t.Helper()
+	return s.socket().Apps[fakeslack.AppB]
+}
+
+// script carries out the socket script body, a fakeslack.SocketScript, and returns the state it answers.
+func (s *slk) script(body string) fakeslack.SocketState {
+	s.t.Helper()
+	a := call(s.t, http.MethodPost, s.fs+"/socket", body)
+	if a.status != http.StatusOK {
+		s.t.Fatalf("socket script %s = %d %s", body, a.status, a.body)
+	}
+	var st fakeslack.SocketState
+	decode(s.t, a, &st)
+	return st
+}
+
+// pressedOverSocket presses action on the message ts as alice through the socket of the fake's second app and fails
+// unless Muster confirmed the envelope.
+func (s *slk) pressedOverSocket(ts, action string) fakeslack.PressResult {
+	s.t.Helper()
+	res := s.press(ts, action, fakeslack.UserAlice, map[string]any{"transport": fakeslack.TransportSocket})
+	if res.Transport != fakeslack.TransportSocket || res.Confirmed == nil || !*res.Confirmed || res.ConfirmMS == nil {
+		s.t.Fatalf("press %s on %s over the socket = %+v", action, ts, res)
+	}
+	return res
+}
+
+// save saves the Connection sl with fields, the members of its event mode and proxy, and returns it.
+func (s *slk) save(fields string) map[string]any {
+	s.t.Helper()
+	etag := s.api.do(http.MethodGet, "/api/v1/connections/"+s.conn, "").header.Get("ETag")
+	return s.api.json(http.MethodPut, "/api/v1/connections/"+s.conn, `{"type":"slack","name":"sl",`+fields+
+		`,"limiter":{"limit":50,"per_seconds":1}}`, http.StatusOK, "If-Match", etag)
+}
+
+// otherConnections is socket.other_connections of the Connection sl, -1 while its socket is null.
+func (s *slk) otherConnections() float64 {
+	s.t.Helper()
+	sock, _ := s.api.json(http.MethodGet, "/api/v1/connections/"+s.conn, "", http.StatusOK)["socket"].(map[string]any)
+	if sock == nil {
+		return -1
+	}
+	n, _ := sock["other_connections"].(float64)
+	return n
+}
+
+// check runs the check of the Connection sl and returns whether it passed, its warnings and its steps by name.
+func (s *slk) check() (bool, []string, map[string]bool) {
+	s.t.Helper()
+	var res struct {
+		OK       bool     `json:"ok"`
+		Warnings []string `json:"warnings"`
+		Steps    []struct {
+			Name string `json:"name"`
+			OK   bool   `json:"ok"`
+		} `json:"steps"`
+	}
+	a := s.api.do(http.MethodPost, "/api/v1/connections/"+s.conn+"/checks", "")
+	if a.status != http.StatusOK {
+		s.t.Fatalf("check = %d %s", a.status, a.body)
+	}
+	decode(s.t, a, &res)
+	steps := map[string]bool{}
+	for _, st := range res.Steps {
+		steps[st.Name] = st.OK
+	}
+	return res.OK, res.Warnings, steps
+}
+
+// links counts the Socket Mode connections the fake Slack server accepted or refused.
+func (s *slk) links() int {
+	s.t.Helper()
+	return countRequests(s.t, s.h.Fakes.Slack, "/link/")
+}
+
+// tickets are the tickets of every Socket Mode address dialled on the fake Slack server.
+func (s *slk) tickets() []string {
+	s.t.Helper()
+	var out []string
+	for _, r := range fakeRequests(s.t, s.h.Fakes.Slack) {
+		if q, err := url.ParseQuery(r.Query); r.Path == "/link/" && err == nil && q.Get("ticket") != "" {
+			out = append(out, q.Get("ticket"))
+		}
+	}
+	return out
+}
+
+// envelopeRecord is the record of the envelope id, nil without one.
+func (s *slk) envelopeRecord(id string) map[string]any {
+	s.t.Helper()
+	for _, rec := range s.inbound(s.conn, "interactive") {
+		if full, _ := s.requestRecord(rec["id"].(string)); strings.Contains(fmt.Sprint(full["request_body"]), id) {
+			return rec
+		}
+	}
+	return nil
+}
+
+// deadAddress is a loopback address where nothing listens.
+func deadAddress(t *testing.T) string {
+	t.Helper()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return addr
+}
+
+// TestSlackSocket is the Verification of S-101 against `muster dev` and the fake Slack server, with E2E_REPLICAS=2 on
+// two replicas: the Connection "sl" in socket mode, whose Socket Mode connection only the Leader holds; a press through
+// it is confirmed at once and acknowledges as the linked User with the Transport slack, and an envelope of another type
+// is confirmed and ignored (C-24.FR-9, AC-10); a planned refresh opens the next connection before the old one closes; a
+// second program on the same app is counted, shown, warned about by the check and muster doctor, and cleared by the
+// next hello (C-24.FR-2); the check calls apps.connections.open without a socket; link_disabled and
+// too_many_websockets back off and break nothing; the Request log of envelopes, without a status, and the ticket
+// masked everywhere (C-24.FR-14, AC-17, C-23.FR-3); the socket through the fake HTTP proxy, and a dead proxy
+// (C-24.AC-3); and the socket closed within a second of a switch to http mode and of a deletion. The back-off starts
+// at 1 s (slack.socket_backoff), so every reconnection below is a second away and the waits poll for it.
+func TestSlackSocket(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	s := newSlack(t, h, r)
+	s.api.json(http.MethodPost, "/api/v1/users", `{"name":"alice","login":"alice","role":"responder"}`,
+		http.StatusCreated)
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
+		display_name, created_at) SELECT 1, 'AK0000000000S1', u.id, 'slack', c.id, '`+fakeslack.UserAlice+`', 'alice',
+		u.name, now() FROM users u, connections c WHERE u.login = 'alice' AND c.public_id = '`+s.conn+`'`)
+	connected := func() int { return len(s.socketLines(s.conn, "slack_socket_connected")) }
+	failed := func() int { return len(s.socketLines(s.conn, "slack_socket_failed")) }
+	var leader *Replica
+	var g string
+	var root slackMessage
+
+	t.Run("socket_press", func(t *testing.T) {
+		s := s.on(t)
+		hello := s.waitSocketLines(s.conn, "slack_socket_connected", 0)[0]
+		leader = leading(t, h)
+		if hello["num_connections"] != 1.0 || hello["held"] != 1.0 || hello["error"] != nil {
+			t.Errorf("slack_socket_connected %v", hello)
+		}
+		for i, rep := range h.Replicas {
+			if n := len(connLines(rep, s.conn, "slack_socket_connected")); (rep == leader) != (n > 0) {
+				t.Errorf("replica %d (leader %t) logged slack_socket_connected %d times", i, rep == leader, n)
+			}
+		}
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		s.fire("w1", "DiskFull", "u1", `{"team":"sl","cluster":"a","pod":"u1"}`)
+		g = s.groupOf("a")
+		root = s.root(s.number(g), "DiskFull")
+		res := s.pressedOverSocket(root.TS, "ack")
+		if *res.ConfirmMS >= 1000 {
+			t.Errorf("the envelope was confirmed after %d ms", *res.ConfirmMS)
+		}
+		t.Logf("the press over the socket was confirmed after %d ms", *res.ConfirmMS)
+		eventually(t, "the acknowledgement by alice", func() bool { return s.alertGroup(g)["status"] == "acknowledged" })
+		if owner, _ := s.alertGroup(g)["owner"].(map[string]any); owner["login"] != "alice" {
+			t.Errorf("owner %v", owner)
+		}
+		var acked []timelineEntry
+		for _, x := range s.timeline(g, "") {
+			if x.Kind == "status" && x.Event == "acknowledged" {
+				acked = append(acked, x)
+			}
+		}
+		if len(acked) != 1 || acked[0].Actor.Transport != "slack" || acked[0].Actor.Name != "alice" {
+			t.Errorf("acknowledged %+v", acked)
+		}
+		var press map[string]any
+		eventually(t, "slack_press on the leader", func() bool {
+			for _, l := range logLines(leader, "slack_press") {
+				if l["group"] == g && l["outcome"] == "done" {
+					press = l
+				}
+			}
+			return press != nil
+		})
+		if press["connection"] != s.conn || press["command"] != "acknowledge" || press["answer"] != nil {
+			t.Errorf("slack_press %v", press)
+		}
+
+		// An envelope of another type is confirmed and changes nothing.
+		entries := s.changes(g)
+		sent := s.script(`{"app":"b","send":{"type":"events_api"}}`).Envelopes
+		id := sent[len(sent)-1].EnvelopeID
+		within(t, "the confirmation of the events_api envelope", socketWait, func() bool {
+			return slices.ContainsFunc(s.socket().Envelopes, func(e fakeslack.Envelope) bool {
+				return e.EnvelopeID == id && e.Type == "events_api" && e.Confirmed
+			})
+		})
+		if got := s.changes(g); got != entries {
+			t.Errorf("the events_api envelope changed the timeline: %d entries, want %d", got, entries)
+		}
+	})
+
+	t.Run("refresh", func(t *testing.T) {
+		s := s.on(t)
+		for _, reason := range []string{"refresh_requested", "warning"} {
+			before, fails, hellos := connected(), failed(), s.appB().Hellos
+			s.script(`{"app":"b","disconnect":"` + reason + `"}`)
+			within(t, "the overlapped refresh after "+reason, socketWait, func() bool {
+				b := s.appB()
+				return b.Overlapped && b.Open == 1
+			})
+			hello := s.waitSocketLines(s.conn, "slack_socket_connected", before)[0]
+			if hello["num_connections"] != 2.0 || hello["held"] != 2.0 {
+				t.Errorf("the hello of the refresh after %s %v", reason, hello)
+			}
+			if b := s.appB(); b.Hellos != hellos+1 || b.Open != 1 {
+				t.Errorf("after %s: %+v, %d hellos before", reason, b, hellos)
+			}
+			if n := failed(); n != fails {
+				t.Errorf("the refresh after %s logged slack_socket_failed: %v", reason,
+					s.socketLines(s.conn, "slack_socket_failed")[fails:])
+			}
+		}
+	})
+
+	t.Run("shared", func(t *testing.T) {
+		s := s.on(t)
+		etag := s.api.do(http.MethodGet, "/api/v1/connections/"+s.conn, "").header.Get("ETag")
+		shared, before := len(s.socketLines(s.conn, "slack_socket_shared")), connected()
+		s.fake(http.MethodPut, s.fs+"/config", `{"extra_connections":{"b":1}}`)
+		s.script(`{"app":"b","disconnect":"refresh_requested"}`)
+		if l := s.waitSocketLines(s.conn, "slack_socket_shared", shared)[0]; l["other_connections"] != 1.0 ||
+			l["level"] != "WARN" {
+			t.Errorf("slack_socket_shared %v", l)
+		}
+		if l := s.waitSocketLines(s.conn, "slack_socket_connected", before)[0]; l["num_connections"] != 3.0 ||
+			l["held"] != 2.0 {
+			t.Errorf("slack_socket_connected %v", l)
+		}
+		if n := s.otherConnections(); n != 1 {
+			t.Errorf("socket.other_connections %v, want 1", n)
+		}
+		if got := s.api.do(http.MethodGet, "/api/v1/connections/"+s.conn, "").header.Get("ETag"); got != etag {
+			t.Errorf("the hello changed the ETag from %s to %s", etag, got)
+		}
+		ok, warnings, _ := s.check()
+		if !ok || !slices.Equal(warnings, []string{"another_client_connected"}) {
+			t.Errorf("check ok %t, warnings %v", ok, warnings)
+		}
+		warn := "WARN connection sl: " + slack.HintAnotherClientConnected + "\n"
+		if code, out := h.runCLIStdout(t, "doctor"); !strings.Contains(out, warn) {
+			t.Errorf("doctor (exit %d) has no line %q:\n%s", code, warn, out)
+		}
+
+		before = connected()
+		s.fake(http.MethodPut, s.fs+"/config", `{"extra_connections":{"b":0}}`)
+		s.script(`{"app":"b","disconnect":"refresh_requested"}`)
+		if l := s.waitSocketLines(s.conn, "slack_socket_connected", before)[0]; l["num_connections"] != 2.0 {
+			t.Errorf("slack_socket_connected %v", l)
+		}
+		if n := s.otherConnections(); n != 0 {
+			t.Errorf("socket.other_connections %v, want 0", n)
+		}
+		if ok, warnings, _ := s.check(); !ok || len(warnings) != 0 {
+			t.Errorf("check ok %t, warnings %v", ok, warnings)
+		}
+		if code, out := h.runCLIStdout(t, "doctor"); strings.Contains(out, "WARN connection sl:") {
+			t.Errorf("doctor (exit %d) still warns:\n%s", code, out)
+		}
+		if n := len(s.socketLines(s.conn, "slack_socket_shared")); n != shared+1 {
+			t.Errorf("slack_socket_shared %d times, want %d", n, shared+1)
+		}
+	})
+
+	t.Run("check_open", func(t *testing.T) {
+		s := s.on(t)
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		opens, links := len(s.requests("apps.connections.open")), s.links()
+		ok, warnings, steps := s.check()
+		if !ok || len(warnings) != 0 || !steps["app_token"] {
+			t.Errorf("check ok %t, warnings %v, steps %v", ok, warnings, steps)
+		}
+		if got := s.requests("apps.connections.open")[opens:]; len(got) != 1 || got[0].Status != http.StatusOK ||
+			!carries(got[0], fakeslack.SecondAppToken) {
+			t.Errorf("the check's apps.connections.open %d requests: %v", len(got), described(got))
+		}
+		if got := s.links(); got != links {
+			t.Errorf("the check opened %d sockets", got-links)
+		}
+		if b := s.appB(); b.Open != 1 {
+			t.Errorf("after the check %+v", b)
+		}
+	})
+
+	t.Run("backoff", func(t *testing.T) {
+		s := s.on(t)
+		before, fails := connected(), failed()
+		s.script(`{"app":"b","disconnect":"link_disabled"}`)
+		f := s.waitSocketLines(s.conn, "slack_socket_failed", fails)[0]
+		wait, _ := f["backoff_seconds"].(float64)
+		if f["reason"] != "link_disabled" || f["error"] != nil || wait < 0.5 || wait > 1 {
+			t.Errorf("slack_socket_failed %v", f)
+		}
+		if l := s.waitSocketLines(s.conn, "slack_socket_connected", before)[0]; l["num_connections"] != 1.0 ||
+			l["held"] != 1.0 {
+			t.Errorf("slack_socket_connected after link_disabled %v", l)
+		}
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		if hl := s.health(s.dest); hl.State != "healthy" {
+			t.Errorf("health after link_disabled %+v", hl)
+		}
+
+		// too_many_websockets refuses the next connection of a refresh; the old one keeps taking presses.
+		before, fails = connected(), failed()
+		s.script(`{"app":"b","too_many_websockets":1,"disconnect":"refresh_requested"}`)
+		f = s.waitSocketLines(s.conn, "slack_socket_failed", fails)[0]
+		wait, _ = f["backoff_seconds"].(float64)
+		if f["reason"] != "too_many_websockets" || f["error"] != nil || wait < 0.5 || wait > 1 {
+			t.Errorf("slack_socket_failed %v", f)
+		}
+		s.waitActions(root.TS, "unack")
+		s.pressedOverSocket(root.TS, "unack")
+		eventually(t, "the unacknowledgement", func() bool { return s.alertGroup(g)["status"] == "firing" })
+		if l := s.waitSocketLines(s.conn, "slack_socket_connected", before)[0]; l["held"] != 2.0 {
+			t.Errorf("the old socket did not stay open until the next one's hello: %v", l)
+		}
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		if n := failed(); n != fails+1 {
+			t.Errorf("slack_socket_failed %v", s.socketLines(s.conn, "slack_socket_failed")[fails:])
+		}
+		if hl := s.health(s.dest); hl.State != "healthy" {
+			t.Errorf("health after too_many_websockets %+v", hl)
+		}
+	})
+
+	t.Run("request_log", func(t *testing.T) {
+		s := s.on(t)
+		types := map[string]string{}
+		for _, e := range s.socket().Envelopes {
+			if e.App == fakeslack.AppB && e.Confirmed {
+				types[e.EnvelopeID] = e.Type
+			}
+		}
+		var records []map[string]any
+		eventually(t, "a record of each envelope", func() bool {
+			records = s.requestLog("connection=" + s.conn + "&direction=inbound")
+			return len(records) >= len(types)
+		})
+		seen := map[string]int{}
+		for _, rec := range records {
+			full, _ := s.requestRecord(rec["id"].(string))
+			var env struct {
+				EnvelopeID string         `json:"envelope_id"`
+				Type       string         `json:"type"`
+				Payload    map[string]any `json:"payload"`
+			}
+			_ = json.Unmarshal([]byte(fmt.Sprint(full["request_body"])), &env)
+			headers, _ := full["request_headers"].(map[string]any)
+			if types[env.EnvelopeID] != env.Type || rec["operation"] != env.Type || rec["status"] != nil ||
+				rec["method"] != "WEBSOCKET" || rec["url"] != "ws://"+devmode.SlackAddr+"/link/" ||
+				rec["via"] != "direct" || rec["destination"] != nil || rec["alert_group"] != nil ||
+				full["response_headers"] != nil || headers == nil || len(headers) != 0 || full["error"] != nil ||
+				full["response_body"] != `{"envelope_id":"`+env.EnvelopeID+`"}` {
+				t.Errorf("record %v: %v", rec, full)
+			}
+			if env.Type == "interactive" && (env.Payload["token"] != "[redacted]" ||
+				env.Payload["response_url"] != "[redacted]" || len(signedStrings(env.Payload)) != 0) {
+				t.Errorf("the payload of %s is not masked: %v", env.EnvelopeID, full["request_body"])
+			}
+			seen[env.Type]++
+		}
+		if len(records) != len(types) || seen["interactive"] < 2 || seen["events_api"] != 1 {
+			t.Errorf("%d records of %d envelopes: %v", len(records), len(types), seen)
+		}
+
+		opens := s.requestLog("connection=" + s.conn + "&operation=apps.connections.open")
+		if len(opens) == 0 {
+			t.Fatal("no record of apps.connections.open")
+		}
+		for _, rec := range opens {
+			full, _ := s.requestRecord(rec["id"].(string))
+			if body := fmt.Sprint(full["response_body"]); rec["direction"] != "outbound" ||
+				rec["status"] != 200.0 || !strings.Contains(body, "ticket=[redacted]") {
+				t.Errorf("record %v answered %s", rec, body)
+			}
+		}
+
+		tickets, values := s.tickets(), s.buttonValues()
+		if len(tickets) == 0 || len(values) == 0 {
+			t.Fatalf("%d tickets, %d button values", len(tickets), len(values))
+		}
+		for _, rec := range s.requestLog("connection=" + s.conn) {
+			_, text := s.requestRecord(rec["id"].(string))
+			if m := socketLeak.FindString(text) + slackLeak.FindString(text); m != "" {
+				t.Errorf("record %s %s holds %q", rec["id"], rec["operation"], m)
+			}
+			for _, v := range append(slices.Clone(tickets), values...) {
+				if strings.Contains(text, v) {
+					t.Errorf("record %s %s holds a ticket or a signed action id", rec["id"], rec["operation"])
+				}
+			}
+		}
+		for i, rep := range h.Replicas {
+			out := rep.Output()
+			if m := socketLeak.FindString(out); m != "" {
+				t.Errorf("the output of replica %d holds %q", i, m)
+			}
+			for _, ticket := range tickets {
+				if strings.Contains(out, ticket) {
+					t.Errorf("the output of replica %d holds a ticket", i)
+				}
+			}
+		}
+	})
+
+	t.Run("proxy", func(t *testing.T) {
+		s := s.on(t)
+		resetProxy(t)
+		before := connected()
+		s.save(`"event_mode":"socket","proxy":{"enabled":true,"type":"http","address":"` + devmode.HTTPProxyAddr + `"}`)
+		s.waitSocketLines(s.conn, "slack_socket_connected", before)
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		// The confirmation goes from Muster to the fake over the socket, which only a CONNECT tunnel carries through
+		// the fake proxy.
+		s.waitActions(root.TS, "ack")
+		res := s.pressedOverSocket(root.TS, "ack")
+		eventually(t, "the acknowledgement through the proxy", func() bool {
+			return s.alertGroup(g)["status"] == "acknowledged"
+		})
+		targets := proxyTargets(t)
+		if len(targets) < 2 || slices.ContainsFunc(targets, func(x string) bool { return x != devmode.SlackAddr }) {
+			t.Errorf("the proxy connected to %v, want only %s", targets, devmode.SlackAddr)
+		}
+		var rec map[string]any
+		eventually(t, "the record of the press", func() bool {
+			rec = s.envelopeRecord(res.EnvelopeID)
+			return rec != nil
+		})
+		if rec["via"] != "proxy" {
+			t.Errorf("record %v", rec)
+		}
+
+		// A dead proxy: apps.connections.open is retried in the background class until its bound of 20 s, then
+		// the connection fails as dial.
+		fails := failed()
+		s.save(`"event_mode":"socket","proxy":{"enabled":true,"type":"http","address":"` + deadAddress(t) + `"}`)
+		var f map[string]any
+		within(t, "slack_socket_failed through the dead proxy", 45*time.Second, func() bool {
+			if got := s.socketLines(s.conn, "slack_socket_failed"); len(got) > fails {
+				f = got[fails]
+			}
+			return f != nil
+		})
+		msg, _ := f["error"].(string)
+		if f["reason"] != "dial" || !strings.Contains(msg, "apps.connections.open") || socketLeak.MatchString(msg) ||
+			strings.Contains(msg, fakeslack.SecondBotToken) {
+			t.Errorf("slack_socket_failed %v", f)
+		}
+		if b := s.appB(); b.Open != 0 {
+			t.Errorf("a socket is open through the dead proxy: %+v", b)
+		}
+		before = connected()
+		s.save(socketDirect)
+		s.waitSocketLines(s.conn, "slack_socket_connected", before)
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+	})
+
+	t.Run("mode_switch", func(t *testing.T) {
+		s := s.on(t)
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+		conn := s.save(`"event_mode":"http","slack_signing_secret":"` + fakeslack.SecondSigningSecret +
+			`","proxy":{"enabled":false}`)
+		if conn["event_mode"] != "http" {
+			t.Fatalf("the connection %v", conn)
+		}
+		within(t, "the socket to close after the switch to http", time.Second, func() bool {
+			return s.appB().Open == 0
+		})
+
+		gone := s.api.json(http.MethodPost, "/api/v1/connections", `{"type":"slack","name":"gone",
+			"event_mode":"socket","bot_token":"`+fakeslack.SecondBotToken+`","app_token":"`+fakeslack.SecondAppToken+
+			`","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":1}}`, http.StatusCreated)["id"].(string)
+		s.waitSocketLines(gone, "slack_socket_connected", 0)
+		within(t, "the socket of gone", socketWait, func() bool { return s.appB().Open == 1 })
+		s.api.json(http.MethodDelete, "/api/v1/connections/"+gone, "", http.StatusNoContent)
+		within(t, "the socket to close after the deletion", time.Second, func() bool { return s.appB().Open == 0 })
+
+		before := connected()
+		s.save(socketDirect)
+		s.waitSocketLines(s.conn, "slack_socket_connected", before)
+		within(t, "one open socket", socketWait, func() bool { return s.appB().Open == 1 })
+	})
+
+	for i, rep := range h.Replicas {
+		if m := socketLeak.FindString(rep.Output()); m != "" {
+			t.Errorf("the output of replica %d holds %q", i, m)
+		}
+		if leader == nil || rep == leader {
+			continue
+		}
+		for _, event := range []string{"slack_socket_connected", "slack_socket_shared", "slack_socket_failed"} {
+			if n := len(connLines(rep, s.conn, event)); n != 0 {
+				t.Errorf("replica %d, which does not lead, logged %s %d times", i, event, n)
+			}
+		}
+	}
+}
+
+// TestSlackSocketLeader is C-24.FR-9 on two replicas: only the Leader holds the Socket Mode connection of a Connection
+// in socket mode, and after it stops the new Leader opens one, so that the fake Slack server sees one open socket.
+func TestSlackSocketLeader(t *testing.T) {
+	h := Start(t, FakesInProcess)
+	a := h.StartReplica(t, ReplicaOptions{})
+	a.waitFor(t, "replica A to lead", func() bool { return a.Metric(t, "muster_leader") == "1" })
+	b := h.StartReplica(t, ReplicaOptions{ListenApp: ":8080", ListenIngest: ":8081", ListenInternal: ":8082"})
+	s := newSlack(t, h, b)
+	fake := h.InProcess.Slack
+	a.waitFor(t, "A's socket", func() bool {
+		return len(connLines(a, s.conn, "slack_socket_connected")) > 0 && fake.Sockets().Apps[fakeslack.AppB].Open == 1
+	})
+	if n := len(connLines(b, s.conn, "slack_socket_connected")); n != 0 || b.Metric(t, "muster_leader") == "1" {
+		t.Errorf("replica B, which does not lead, logged slack_socket_connected %d times", n)
+	}
+	opened := fake.Sockets().Apps[fakeslack.AppB].Opened
+
+	a.Stop(t)
+	b.waitFor(t, "replica B to lead", func() bool { return b.Metric(t, "muster_leader") == "1" })
+	b.waitFor(t, "B's socket", func() bool {
+		return len(connLines(b, s.conn, "slack_socket_connected")) > 0 && fake.Sockets().Apps[fakeslack.AppB].Open == 1
+	})
+	if l := connLines(b, s.conn, "slack_socket_connected")[0]; l["num_connections"] != 1.0 || l["held"] != 1.0 {
+		t.Errorf("replica B's slack_socket_connected %v", l)
+	}
+	if st := fake.Sockets().Apps[fakeslack.AppB]; st.Open != 1 || st.Opened != opened+1 {
+		t.Errorf("after the handover %+v, %d opened before", st, opened)
+	}
 }

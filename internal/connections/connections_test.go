@@ -294,6 +294,7 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	if a.ForgetUpdates {
 		r.TelegramUpdateOffset = pgtype.Int8{}
 	}
+	r.SlackSocketHelloAt, r.SlackSocketOtherConnections = pgtype.Timestamptz{}, pgtype.Int4{}
 	r.Version++
 	return nil
 }

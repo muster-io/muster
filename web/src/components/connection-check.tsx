@@ -223,8 +223,12 @@ export function CheckDetail({
   );
 }
 
-/** The hint of a warning; the permission is Mattermost's identifier and shows as code. */
+/**
+ * The hint of a warning; the permission is Mattermost's identifier and shows as code. A Slack app whose last Socket Mode
+ * hello counted another connection shares its presses with that program (C-24.FR-2, FR-9).
+ */
 function WarningText({ warning }: { warning: ConnectionCheckResultWarningsItem }) {
+  const { t } = useTranslation();
   switch (warning) {
     case "press_answers_in_thread":
       return (
@@ -233,6 +237,8 @@ function WarningText({ warning }: { warning: ConnectionCheckResultWarningsItem }
           components={{ code: <code className="rounded bg-muted px-1 font-mono text-xs" /> }}
         />
       );
+    case "another_client_connected":
+      return t("connections.check.warnings.anotherClientConnected");
     default:
       return warning;
   }

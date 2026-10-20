@@ -11,7 +11,8 @@
 // this check", which lists the requests of that run alone, the check before saving included. A Slack check names its
 // steps and translates its four codes; the scopes a bot token lacks are named from missing_scopes, never read from the
 // English message, and without them the text names none (D396). "Slack refused the token." stays the detail of the
-// generic text of token_invalid. English and Russian.
+// generic text of token_invalid. A Slack check that passes with another_client_connected warns that another program
+// shares the app (C-24.FR-2). English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -686,6 +687,44 @@ describe("the check of a Slack Connection", () => {
       .element(page.getByTestId("connection-check-step-detail"))
       .toHaveTextContent("Details: The bot token lacks the scopes users:read.email.");
   });
+
+  test.each([
+    [
+      "en",
+      "Check connection",
+      "Connected as muster-dev-slack-bot",
+      "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Muster installation.",
+    ],
+    [
+      "ru",
+      "Проверить подключение",
+      "Подключено как muster-dev-slack-bot",
+      "К этому приложению Slack через Socket Mode подключена другая программа: нажатия случайным образом делятся между ними. Используйте отдельное приложение Slack для каждой установки Muster.",
+    ],
+  ] as const)(
+    "passes with the warning that another program shares the Slack app (%s)",
+    async (language, start, summary, warning) => {
+      await i18n.changeLanguage(language);
+      answer(() =>
+        json(200, {
+          ok: true,
+          steps: [
+            step("token", { latency_ms: 12 }),
+            step("scopes"),
+            step("app_token", { latency_ms: 7 }),
+          ],
+          warnings: ["another_client_connected"],
+          bot_name: "muster-dev-slack-bot",
+          request_log_run: RUN,
+        } satisfies ConnectionCheckResult),
+      );
+      await renderCheck({ connectionId: SAVED_ID, type: "slack" });
+      await page.getByRole("button", { name: start }).click();
+      await expect.element(page.getByTestId("connection-check-summary")).toHaveTextContent(summary);
+      await expect.element(page.getByTestId("connection-check-warning")).toHaveTextContent(warning);
+      expect(page.getByTestId("connection-check-warning").elements()).toHaveLength(1);
+    },
+  );
 
   test("translates the four codes of a Slack check in English and Russian", () => {
     const en = i18n.getFixedT("en");

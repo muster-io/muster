@@ -19,6 +19,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
+       c.slack_socket_hello_at, c.slack_socket_other_connections,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -41,6 +42,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
+       c.slack_socket_hello_at, c.slack_socket_other_connections,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -95,6 +97,8 @@ RETURNING id;
 -- A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, what a
 -- bridge told — its info and the cursor of its events — and what a Slack check learned — the workspace, the app and
 -- the bot's id; a new bot token also forgets telegram_update_offset, since another bot's update ids start elsewhere.
+-- Every save forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket starts
+-- again and counts at its next hello.
 -- name: UpdateConnection :exec
 UPDATE connections
 SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
@@ -126,6 +130,7 @@ SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
     slack_app_id = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_app_id END,
     slack_bot_id = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_bot_id END,
     telegram_update_offset = CASE WHEN @forget_updates::boolean THEN NULL ELSE telegram_update_offset END,
+    slack_socket_hello_at = NULL, slack_socket_other_connections = NULL,
     proxy = @proxy, proxy_password_ciphertext = sqlc.narg('proxy_password_ciphertext'),
     proxy_password_key_id = sqlc.narg('proxy_password_key_id'),
     proxy_password_updated_at = sqlc.narg('proxy_password_updated_at'), limiter_limit = @limiter_limit,
@@ -154,6 +159,27 @@ SET slack_team_id = @team_id, slack_team_name = @team_name, slack_team_url = @te
     bot_user_id = @bot_user_id, bot_username = @bot_username,
     slack_app_id = coalesce(sqlc.narg('app_id')::text, slack_app_id)
 WHERE org_id = @org_id AND id = @id AND type = 'slack' AND version = @version AND deleted_at IS NULL;
+
+-- ListSocketConnections lists the Slack Connections that are not deleted and receive their presses through Socket
+-- Mode, with their secrets as stored and their version, for the Leader's sockets (C-24.FR-9).
+-- name: ListSocketConnections :many
+SELECT id, public_id, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_app_token_ciphertext,
+       slack_app_token_key_id, slack_app_token_updated_at, slack_signing_secret_ciphertext,
+       slack_signing_secret_key_id, slack_signing_secret_updated_at, proxy, proxy_password_ciphertext,
+       proxy_password_key_id, proxy_password_updated_at, version
+FROM connections
+WHERE org_id = @org_id AND type = 'slack' AND slack_event_mode = 'socket' AND deleted_at IS NULL
+ORDER BY id;
+
+-- RecordSocketHello records what a hello of the Socket Mode connection of a Slack Connection counted — when it came,
+-- on the business clock, and the connections of the app beyond those the Leader holds — unless the Connection changed
+-- since its socket read it or left socket mode: a socket of an earlier version writes nothing. It is not a change of
+-- the configuration.
+-- name: RecordSocketHello :execrows
+UPDATE connections
+SET slack_socket_hello_at = @hello_at::timestamptz, slack_socket_other_connections = @other_connections::integer
+WHERE org_id = @org_id AND id = @id AND type = 'slack' AND slack_event_mode = 'socket' AND version = @version
+  AND deleted_at IS NULL;
 
 -- CountConnectionDestinations counts the Destinations that are not deleted of a Connection, under the lock of the
 -- Connection's deletion, which a Destination's save takes in share mode.

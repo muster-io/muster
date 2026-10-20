@@ -37,7 +37,9 @@
   [`0017_slack_destinations`](../../internal/db/migrations/0017_slack_destinations.up.sql)
   (Slack Destinations, S-098) and
   [`0018_slack_presses_and_links`](../../internal/db/migrations/0018_slack_presses_and_links.up.sql)
-  (the Transport `slack` and Slack Account links and requests, S-100), in
+  (the Transport `slack` and Slack Account links and requests, S-100) and
+  [`0019_request_log_socket_envelopes`](../../internal/db/migrations/0019_request_log_socket_envelopes.up.sql)
+  (`request_log_answer_check` takes the answer of an inbound record without a status, S-101), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -740,9 +742,13 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `slack_team_url` (the `url` of `auth.test`), `slack_app_id` and `slack_bot_id`, with the bot's user id and name in
   `bot_user_id` and `bot_username` — is written only for the version of the Connection the check read and is not a
   change of the configuration; a new bot token forgets it. `slack_socket_hello_at` and `slack_socket_other_connections`
-  hold what the last Socket Mode `hello` counted, written by the Leader from S-101. `UNIQUE (id, type)` is the target of
-  type-checked foreign keys. A Connection cannot be deleted while a Destination that is not deleted uses it; deleting
-  it abandons the final edits still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
+  hold what the last Socket Mode `hello` counted — its time on the business clock and the connections it counted beyond
+  those the Leader holds — written by the Leader from S-101 for the version its socket read, not a change of the
+  configuration; a save that changes the Connection forgets both, since its socket starts again and counts at its next
+  `hello`; a save without changes writes nothing and keeps them.
+  `UNIQUE (id, type)` is the target of type-checked foreign keys. A Connection cannot be deleted while a Destination
+  that is not deleted uses it; deleting it abandons the final edits still pending for its deleted Destinations, whose
+  deliveries end as `not_delivered`.
 - **`destinations`** — one table for the five types, with type-specific nullable columns and a `CHECK` per type. The
   composite foreign key `(connection_id, type) REFERENCES connections (id, type)` guarantees that a Mattermost
   Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection, a Bridge one
@@ -1171,24 +1177,30 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   ahead of waiting deliveries. Limiter settings themselves are columns of `destinations` and `connections`.
 - **`request_log`** (migration 0013, C-23) — the Request log: one row per HTTP request Muster sent for a Connection or
   an outgoing webhook Destination, each attempt a row of its own, and one per request that reached a Connection's
-  callbacks (a Mattermost `press`, a Telegram `update` in the webhook mode, a Bridge `push`), refused ones included,
-  with its answer. Columns: `public_id` (`RQ`), `at` on the business clock, `direction` (`outbound`, `inbound`),
+  callbacks (a Mattermost `press`, a Telegram `update` in the webhook mode, a Bridge `push`, a Slack `interactive`),
+  refused ones included, with its answer, and one per envelope that reached a Slack Connection over its Socket Mode
+  connection (from S-101). Columns: `public_id` (`RQ`), `at` on the business clock, `direction` (`outbound`, `inbound`),
   `operation` as its protocol names it (1 to 64 characters), `check_kind` (`connection_check`, `draft_check`,
   `destination_check`, `test` or `probe`) and `check_run` (a `CR` id that the requests of one run of a check or a test
   share, which its result names), both null for any other request, `method`, `url` as errors show it — for an inbound
   request its path and query as received —, the request's `request_headers` (a `jsonb` object of string arrays) and
   `request_body`, the answer's `status` (100 to 999), `response_headers` and `response_body` — all three null for a
-  request that got no answer (`request_log_answer_check`) — each body's size (`*_body_bytes`: the length in bytes of the
-  body the outbound package hands over — after Secrets are masked, before the masking of signed action ids and tokens,
-  the replacement of invalid bytes and the cut; for an answer larger than the client reads, of the bytes read) and
-  whether its text was cut (`*_truncated`), `latency_ms` on the real clock, `via` (`direct`, `proxy`), `attempt`, and
-  for a failed attempt `error_class` (the outcomes of the outbound package), `error_code` (a check code, only without an
-  answer: `request_log_code_without_answer_check`) and the masked `error`. An inbound record has the path `direct`, the
-  attempt 1, no error and Muster's answer as its status; a body the callback did not read whole, or larger than 256 KiB,
-  is stored empty, marked cut, with its size. Nothing secret is stored: the outbound package masks the Secrets of the
-  client and of the request and the values of `outbound.MaskedHeaders` before the record leaves it, `requestlog.Inbound`
-  the values of `outbound.MaskedHeaders` of an inbound request and its answer, and `internal/requestlog` masks signed
-  action ids, `/start` tokens and the token of an `account_link` event, cuts each body to `request_log.body_max` at a
+  request that got no answer, and an answer with a status has the other two (`request_log_answer_check`) — each body's
+  size (`*_body_bytes`: the length in bytes of the body the outbound package hands over — after Secrets are masked,
+  before the masking of signed action ids and tokens, the replacement of invalid bytes and the cut; for an answer
+  larger than the client reads, of the bytes read) and whether its text was cut (`*_truncated`), `latency_ms` on the
+  real clock, `via` (`direct`, `proxy`), `attempt`, and for a failed attempt `error_class` (the outcomes of the outbound
+  package), `error_code` (a check code, only without an answer: `request_log_code_without_answer_check`) and the masked
+  `error`. An inbound record has the path `direct`, the attempt 1, no error and Muster's answer as its status; a body
+  the callback did not read whole, or larger than 256 KiB, is stored empty, marked cut, with its size. The record of an
+  envelope of Slack's Socket Mode (C-24.FR-14) is inbound, with the envelope's `type` as its operation, the method
+  `WEBSOCKET` — a frame has no HTTP method — the socket's address without its query as its URL, no request headers, the
+  envelope as its request body, and Muster's confirmation `{"envelope_id": …}` as the answer's body without a status or
+  headers: only an inbound record may have an answer body without a status (`request_log_answer_check`, migration 0019);
+  its `via` is that of the Connection. Nothing secret is stored: the outbound package masks the Secrets of the client
+  and of the request and the values of `outbound.MaskedHeaders` before the record leaves it, `requestlog.Inbound` the
+  values of `outbound.MaskedHeaders` of an inbound request and its answer, and `internal/requestlog` masks signed action
+  ids, `/start` tokens and the token of an `account_link` event, cuts each body to `request_log.body_max` at a
   character boundary and replaces bytes that are not UTF-8 and NUL; headers, bodies and the error are untrusted text.
   The caller of a callback chooses its URL and headers, up to the 1 MiB net/http takes, so a record also keeps at most
   `request_log.body_max` bytes of a URL and 64 KiB of the names and values of each set of headers (the bound of the
@@ -1216,9 +1228,10 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   should a plan show a large scan). Not partitioned: its size is bounded per owner, so it is short-lived state removed
   by batched deletes (section 6); time partitions would not spare the deletes the count bound needs, and ADR-0006 keeps
   partitions for tables whose size grows with their retention period. Written by `internal/requestlog` only, one
-  `INSERT` per attempt after its outcome and per inbound request after its answer was sent, on the main pool outside any
-  transaction of the caller, under its own 2-second timeout; a write that fails is dropped, logged
-  (`request_log_write_failed`) and counted, and never fails the request it records.
+  `INSERT` per attempt after its outcome, per inbound request after its answer was sent and per envelope after its
+  confirmation was sent, on the main pool outside any transaction of the caller, under its own 2-second timeout; a
+  write that fails is dropped, logged (`request_log_write_failed`) and counted, and never fails the request it
+  records.
   - *Notes (write volume)*: one row per request — each Publication, edit and Thread reply, answer, check, non-empty poll
     and callback request — typically a few thousand to a few tens of thousands a day per installation. Outbound rows
     are at most the sum of the limiters at a peak (a Mattermost Connection 5 requests per second, a Telegram Connection

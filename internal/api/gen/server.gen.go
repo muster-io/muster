@@ -532,12 +532,15 @@ func (e CommandOutcome) Valid() bool {
 
 // Defines values for ConnectionCheckResultWarnings.
 const (
-	PressAnswersInThread ConnectionCheckResultWarnings = "press_answers_in_thread"
+	AnotherClientConnected ConnectionCheckResultWarnings = "another_client_connected"
+	PressAnswersInThread   ConnectionCheckResultWarnings = "press_answers_in_thread"
 )
 
 // Valid indicates whether the value is a known member of the ConnectionCheckResultWarnings enum.
 func (e ConnectionCheckResultWarnings) Valid() bool {
 	switch e {
+	case AnotherClientConnected:
+		return true
 	case PressAnswersInThread:
 		return true
 	default:
@@ -4404,7 +4407,7 @@ type ConnectionCheckResult struct {
 	Slack nullable.Nullable[SlackCheckInfo] `json:"slack,omitempty"`
 	Steps []ConnectionCheckStep             `json:"steps"`
 
-	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader's; presses are shared between them at random — use one Slack app for each installation.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
 
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.
@@ -6049,7 +6052,9 @@ type RequestRecord struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id        PublicId `json:"id"`
 	LatencyMs int      `json:"latency_ms"`
-	Method    string   `json:"method"`
+
+	// Method The HTTP method, `WEBSOCKET` for an envelope received over a Slack Socket Mode connection.
+	Method string `json:"method"`
 
 	// Operation The operation as its protocol names it — the Bot API method for Telegram, the Web API method for Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
 	Operation string `json:"operation"`
@@ -6066,7 +6071,7 @@ type RequestRecord struct {
 	// RequestHeaders HTTP headers by name, each with its values, masked. Untrusted text.
 	RequestHeaders HttpHeaders `json:"request_headers"`
 
-	// ResponseBody The answer's body, masked and cut as the request body; null without an answer; untrusted text.
+	// ResponseBody The answer's body, masked and cut as the request body — for a Socket Mode envelope Muster's confirmation; null without an answer; untrusted text.
 	ResponseBody nullable.Nullable[string] `json:"response_body"`
 
 	// ResponseBodyBytes The length in bytes of the answer's body after Secrets are masked and before signed action ids and tokens are masked, bytes that are not UTF-8 replaced and the body cut; for an answer larger than the client reads, of the bytes read. 0 without an answer.
@@ -6075,10 +6080,10 @@ type RequestRecord struct {
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.
 	ResponseBodyTruncated bool `json:"response_body_truncated"`
 
-	// ResponseHeaders HTTP headers by name, each with its values, masked, or null. Untrusted text.
+	// ResponseHeaders The answer's headers, masked; null without an answer and for a Socket Mode envelope, whose confirmation has none.
 	ResponseHeaders nullable.Nullable[NullableHttpHeaders] `json:"response_headers"`
 
-	// Status The status of the answer, null when the attempt got no answer.
+	// Status The status of the answer, null when the attempt got no answer, and for a Socket Mode envelope, whose confirmation has no status.
 	Status nullable.Nullable[int] `json:"status"`
 
 	// Url The URL as errors show it, masked; untrusted text. Without user information, with the path prefix of the base URL as `[redacted]`.
@@ -6123,7 +6128,9 @@ type RequestRecordSummary struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id        PublicId `json:"id"`
 	LatencyMs int      `json:"latency_ms"`
-	Method    string   `json:"method"`
+
+	// Method The HTTP method, `WEBSOCKET` for an envelope received over a Slack Socket Mode connection.
+	Method string `json:"method"`
 
 	// Operation The operation as its protocol names it — the Bot API method for Telegram, the Web API method for Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
 	Operation string `json:"operation"`
@@ -6134,7 +6141,7 @@ type RequestRecordSummary struct {
 	// ResponseBodyTruncated The answer's body is cut to `request_log.body_max` bytes.
 	ResponseBodyTruncated bool `json:"response_body_truncated"`
 
-	// Status The status of the answer, null when the attempt got no answer.
+	// Status The status of the answer, null when the attempt got no answer, and for a Socket Mode envelope, whose confirmation has no status.
 	Status nullable.Nullable[int] `json:"status"`
 
 	// Url The URL as errors show it, masked; untrusted text. Without user information, with the path prefix of the base URL as `[redacted]`.
@@ -6626,6 +6633,9 @@ type SlackConnection struct {
 	// SlackSigningSecretStatus What a read shows instead of a Secret. The value itself is never returned.
 	SlackSigningSecretStatus SecretStatus `json:"slack_signing_secret_status"`
 
+	// Socket Socket Mode only. What the last `hello` of the Leader's Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.
+	Socket nullable.Nullable[SlackSocketStatus] `json:"socket,omitempty"`
+
 	// TeamId The workspace's id (`T…`); null as `bot_name`.
 	TeamId nullable.Nullable[string] `json:"team_id,omitempty"`
 
@@ -6737,6 +6747,15 @@ type SlackEventMode string
 type SlackInteractionForm struct {
 	// Payload The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.
 	Payload string `json:"payload"`
+}
+
+// SlackSocketStatus What a `hello` of the Leader's Socket Mode connection of a Slack Connection counted.
+type SlackSocketStatus struct {
+	// HelloAt When the Leader's Socket Mode connection last received `hello`, on the business clock.
+	HelloAt time.Time `json:"hello_at"`
+
+	// OtherConnections The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.
+	OtherConnections int `json:"other_connections"`
 }
 
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
@@ -8346,7 +8365,7 @@ type ListRequestLogParams struct {
 	// Direction Only the requests Muster sent (`outbound`) or received (`inbound`).
 	Direction *RequestDirection `form:"direction,omitempty" json:"direction,omitempty"`
 
-	// StatusClass Only the records whose answer has a status of this class, or, with `none`, those that got no answer.
+	// StatusClass Only the records whose answer has a status of this class, or, with `none`, those that got no answer or are a Socket Mode envelope, whose confirmation has no status.
 	StatusClass *ListRequestLogParamsStatusClass `form:"status_class,omitempty" json:"status_class,omitempty"`
 
 	// Operation Only the records of this operation, such as `createPost`, `getUpdates`, `pollEvents` or `event`.

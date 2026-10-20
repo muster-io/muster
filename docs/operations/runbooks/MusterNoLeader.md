@@ -25,6 +25,9 @@ What stops while no replica leads:
 - **Bridge polling**: Bridge Connections in the `poll` event delivery mode receive no events — no button presses, Text
   commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
   command that is older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
+- **Slack's Socket Mode**: Slack Connections in the `socket` event mode hold no Socket Mode connection, so a button
+  press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
+  not count on Slack to send such presses again.
 - The **Heartbeat** check and the **Stale** check: no Integration becomes Heartbeat lost, and no alert is resolved as
   Stale.
 - Partition maintenance, retention and the pruning of short-lived state, the outgoing heartbeat, the expiry check of
@@ -32,9 +35,10 @@ What stops while no replica leads:
   `muster_heartbeat_lost`, `muster_ingest_backlog`, `muster_storm_active`), which go stale or disappear.
 
 What keeps working: ingestion, delivery to every Destination, timers (the end of a Snooze, Ack timeouts and Reminders),
-the UI, the API, the webhook update mode of Telegram and the `push` event delivery mode of Bridge Connections. After
-`leader.absence_notice` (2 minutes) without a Leader, the UI shows the banner "No replica is leading: Telegram and
-Bridge polling, Heartbeat and Stale checks are paused."
+the UI, the API, the webhook update mode of Telegram, the `push` event delivery mode of Bridge Connections and the
+`http` event mode of Slack Connections, whose presses any replica receives. After `leader.absence_notice` (2 minutes)
+without a Leader, the UI shows the banner "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode,
+Heartbeat and Stale checks are paused."
 
 ## Diagnosis
 
@@ -64,4 +68,7 @@ Bridge polling, Heartbeat and Stale checks are paused."
 - Raise the database's connection limit if the session connections are refused: each replica holds about three of
   them besides its main pool.
 - Once a Leader returns, the paused tasks run again at their next interval: the new Leader polls Telegram and the
-  bridges, and the Heartbeat and Stale checks resume from the signals and Snapshots that ingestion recorded meanwhile.
+  bridges and connects Slack's Socket Mode, and the Heartbeat and Stale checks resume from the signals and Snapshots
+  that ingestion recorded meanwhile.
+- A Slack Connection that must not lose a press while no replica leads uses the `http` event mode, which every replica
+  serves.

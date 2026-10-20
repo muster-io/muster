@@ -46,6 +46,10 @@ const TelegramPollingInterval = 10 * time.Second
 // such as a failed read of the Connections; while it runs, it polls without pause.
 const BridgePollingInterval = 10 * time.Second
 
+// SlackSocketModeInterval is how soon the Leader runs the Slack sockets again after they stopped with an error, such as
+// a failed read of the Connections; while they run, they hold their connections.
+const SlackSocketModeInterval = 10 * time.Second
+
 // OIDCSecretExpiryInterval is how often the Leader checks the expiry date of the OIDC client secret (C-19.FR-5); a
 // change of the OIDC settings is seen at the next run.
 const OIDCSecretExpiryInterval = 5 * time.Minute
@@ -183,6 +187,10 @@ type Work struct {
 	// request_log.max_age at now or past the newest request_log.max_records of their owner, and returns how many it
 	// deleted (C-23.FR-4).
 	RequestLogPruning func(ctx context.Context, orgID int64, now time.Time) (int64, error)
+	// SlackSocketMode holds the Socket Mode connections of the Slack Connections in socket mode of the Organization
+	// orgID until ctx ends (C-24.FR-9): it closes every one of them before it returns, and a failed read of the
+	// Connections returns early.
+	SlackSocketMode func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
 	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
 	// secret expiry check, the outgoing heartbeat and the pruning of the Request log when the development clock moved, so
@@ -247,12 +255,12 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
-// Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open
-// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated, the polling of the events of
-// Bridge Connections in poll mode (C-22.FR-11) and the pruning of the Request log (C-23.FR-4). Later capabilities add
-// theirs at the end of the list. The Keeper calls the result at every leadership, so each one starts with a takeover;
-// the Heartbeat check waits for it, so that it measures the timeouts from the end of a downtime the takeover records
-// (C-07.FR-4).
+// Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open Root
+// messages after a key rotation (C-20.FR-7), which also runs when a key was activated, the polling of the events of
+// Bridge Connections in poll mode (C-22.FR-11), the pruning of the Request log (C-23.FR-4) and the Socket Mode
+// connections of Slack Connections (C-24.FR-9). Later capabilities add theirs at the end of the list. The Keeper calls
+// the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it, so that it
+// measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
@@ -313,6 +321,7 @@ func Tasks(w Work) func() []Task {
 			{Name: "bridge_polling", Every: BridgePollingInterval, Run: w.bridgePolling},
 			{Name: "request_log_pruning", Every: RequestLogPruningInterval, Wake: requestLogWake,
 				Run: w.requestLogPruning},
+			{Name: "slack_socket_mode", Every: SlackSocketModeInterval, Run: w.slackSocketMode},
 		}
 	}
 }
@@ -500,6 +509,13 @@ func (w Work) telegramPolling(ctx context.Context) error {
 // polled twice is handled once by its id, and a cursor stored late only makes the bridge send events again.
 func (w Work) bridgePolling(ctx context.Context) error {
 	return w.everyOrganizationAtOnce(ctx, "poll bridge events for", w.BridgePolling)
+}
+
+// slackSocketMode holds the Socket Mode connections of the Slack Connections of every Organization at once until ctx
+// ends, which is when the lock is lost or the process stops. Running it on a frozen old Leader and its successor at
+// once is safe: two connections of one Connection share its presses, and Slack sends each press to one of them.
+func (w Work) slackSocketMode(ctx context.Context) error {
+	return w.everyOrganizationAtOnce(ctx, "hold the slack sockets of", w.SlackSocketMode)
 }
 
 // requestLogPruning prunes the Request log of every Organization at the same now, on the business clock, and logs and

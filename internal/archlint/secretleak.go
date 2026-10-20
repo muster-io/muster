@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -127,6 +128,7 @@ var registry = []Probe{
 	{Name: "bridge_check", Run: probeBridgeCheck},
 	{Name: "slack_connections", Run: probeSlack},
 	{Name: "slack_presses", Run: probeSlackPresses},
+	{Name: "slack_socket", Run: probeSlackSocket},
 	{Name: "connection_drafts", Run: probeConnectionDrafts},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
@@ -2424,6 +2426,9 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		body = map[string]any{"ok": false, "error": "ratelimited", "warning": echo}
+	case method == "apps.connections.open":
+		body = map[string]any{"ok": true, "url": "wss://wss-primary.slack.com/link/?ticket=" +
+			"0123456789abcdef0123456789abcdef&app_id=" + appID, "warning": echo}
 	case method == "auth.test" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer xapp-"):
 		body = map[string]any{"ok": true, "app_id": appID}
 	case method == "auth.test":
@@ -5373,6 +5378,294 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 	return errors.Join(append(errs, probeRLLeaks(stored, leaks),
 		fmt.Errorf("request_log rows: %s", strings.Join(values, "\n")))...)
 }
+
+// probeSlackSocket is the probe of Slack's Socket Mode (C-24.FR-9, FR-14, C-23.FR-3): the Leader's slack.Sockets hold
+// the connections of two Slack Connections in socket mode against a stand-in Slack, with a requestlog.Writer whose
+// records the in-memory probeRLRows keeps. The app-level token is the first secret; the ticket of the address that
+// apps.connections.open answers is the second without secretSuffix — a ticket has only letters and digits (F-100), so
+// the probe looks for it, in every leak form, in the log output, the returned error and the records itself; and the
+// password of the HTTP proxy of the second Connection, which refuses it, is the third. The stand-in answers
+// apps.connections.open with that address and a warning that echoes the Authorization header. It refuses the first
+// connection of the first Connection with 403 and a body that echoes the address; the second says hello counting one
+// connection beyond the Leader's, whose count is stored with an error that echoes the app-level token, sends an
+// events_api envelope and, once it is confirmed, disconnects with link_disabled; the third never says hello; the fourth
+// says hello and closes with a close frame whose reason echoes the ticket, and the fifth says hello and disconnects
+// with an unknown reason that echoes it. Its hellos and disconnects echo the ticket. Then apps.connections.open and the
+// dial run once directly, the dial also through the refusing proxy, and what they answered is returned. No log line,
+// error or record may carry the app-level token, the ticket or the proxy password; the probe is incomplete unless the
+// log shows the failed dial, link_disabled, hello_timeout and two closed of the first Connection, the failed dial of
+// the second and one slack_socket_shared, the counts 1, 0 and 0 were stored, the envelope was confirmed, and the
+// records hold two calls of apps.connections.open and the envelope.
+func probeSlackSocket(ctx context.Context, secrets []string, log io.Writer) error {
+	var lines bytes.Buffer
+	var linesMu sync.Mutex
+	logger := logging.New(io.MultiWriter(log, &lockedWriter{w: &lines, mu: &linesMu}), logging.LevelInfo)
+	logged := func() string {
+		linesMu.Lock()
+		defer linesMu.Unlock()
+		return lines.String()
+	}
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	appToken, ticket, proxyPassword := "xapp-"+secrets[0], strings.TrimSuffix(secrets[1], secretSuffix), secrets[2]
+	envelopeID := probeWord()
+	var links atomic.Int32
+	confirmed := make(chan string, 1)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	address := "ws://" + ln.Addr().String() + "/link/?ticket=" + ticket + "&app_id=A0PROBE"
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/apps.connections.open":
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "url": address,
+					"warning": r.Header.Get("Authorization")})
+			case "/link/":
+				probeSocketLink(w, r, links.Add(1), envelopeID, confirmed)
+			default:
+				http.NotFound(w, r)
+			}
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	refusing, err := fakeproxy.Start(ctx, fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = refusing.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	rows := &probeRLRows{}
+	writer := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
+	network := slack.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clocks.Real, Recorder: writer}
+	settings := func(id int64, publicID string, proxy *outbound.Proxy) slack.Settings {
+		return slack.Settings{BotToken: logging.Secret("xoxb-" + secrets[1]), AppToken: logging.Secret(appToken),
+			Proxy: proxy, Owner: outbound.Owner{Connection: id, PublicID: publicID},
+			Route: func(logging.Secret) string { return "http://" + ln.Addr().String() + "/api/" }}
+	}
+	direct, err := slack.NewClient(network, settings(6, "CNAAAAAAAAAAA6", nil))
+	if err != nil {
+		return err
+	}
+	proxied, err := slack.NewClient(network, settings(7, "CNAAAAAAAAAAA7", &outbound.Proxy{Type: outbound.ProxyHTTP,
+		Address: refusing.Addr(), Username: "muster", Password: logging.Secret(proxyPassword)}))
+	if err != nil {
+		return err
+	}
+	source := &probeSocketSource{err: errors.New("the hello was not stored: " + appToken), conns: []slack.SocketConn{
+		{Conn: slack.Conn{ID: 6, PublicID: "CNAAAAAAAAAAA6", Mode: slack.EventModeSocket, Client: direct}, Version: 1},
+		{Conn: slack.Conn{ID: 7, PublicID: "CNAAAAAAAAAAA7", Mode: slack.EventModeSocket, Client: proxied}, Version: 1},
+	}}
+	sockets := &slack.Sockets{Source: source, Presses: probeNoPresses{}, Recorder: writer, Real: clocks.Real,
+		Log: logger, HelloTimeout: time.Second, BackoffBase: 10 * time.Millisecond, Every: time.Minute}
+	var errs []error
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	ran := make(chan error, 1)
+	go func() { ran <- sockets.Run(runCtx) }()
+	seen := func() bool {
+		f := probeSocketFailures(logged())
+		source.mu.Lock()
+		stored := len(source.others)
+		source.mu.Unlock()
+		return f["CNAAAAAAAAAAA6"]["closed"] >= 2 && f["CNAAAAAAAAAAA7"]["dial"] > 0 && stored >= 3
+	}
+	deadline := time.After(10 * time.Second)
+	for waiting := true; waiting && !seen(); {
+		select {
+		case <-deadline:
+			waiting = false
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	stop()
+	errs = append(errs, <-ran)
+	answered := func(r slack.Result) {
+		errs = append(errs, errors.New(string(r.Error)), errors.New(string(r.Warning)), errors.New(r.ErrorCode),
+			errors.New(r.Detail), errors.New(string(r.Body)))
+	}
+	open, r := direct.OpenSocket(ctx)
+	answered(r)
+	if r.OK() {
+		for _, c := range []*slack.Client{direct, proxied} {
+			conn, err := c.DialSocket(ctx, open)
+			if err == nil {
+				_ = conn.CloseNow()
+				errs = append(errs, &probeIncomplete{"a refused Socket Mode connection was opened"})
+			}
+			errs = append(errs, err)
+		}
+	} else {
+		errs = append(errs, &probeIncomplete{"apps.connections.open failed when called directly"})
+	}
+	_, r = proxied.OpenSocket(ctx)
+	answered(r)
+	text := logged()
+	failures := probeSocketFailures(text)
+	var ack string
+	select {
+	case ack = <-confirmed:
+	default:
+	}
+	source.mu.Lock()
+	others := slices.Clone(source.others)
+	source.mu.Unlock()
+	switch {
+	case failures["CNAAAAAAAAAAA6"]["dial"] == 0 || failures["CNAAAAAAAAAAA6"]["link_disabled"] == 0 ||
+		failures["CNAAAAAAAAAAA6"]["hello_timeout"] == 0 || failures["CNAAAAAAAAAAA6"]["closed"] < 2 ||
+		failures["CNAAAAAAAAAAA7"]["dial"] == 0:
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("slack_socket_failed %v, want dial, link_disabled, "+
+			"hello_timeout and two closed of CNAAAAAAAAAAA6 and dial of CNAAAAAAAAAAA7", failures)})
+	case strings.Count(text, `"event":"slack_socket_shared"`) != 1 || !slices.Equal(others, []int{1, 0, 0}):
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d slack_socket_shared lines and the counts %v stored, "+
+			"want 1 and [1 0 0]", strings.Count(text, `"event":"slack_socket_shared"`), others)})
+	case ack != `{"envelope_id":"`+envelopeID+`"}`:
+		errs = append(errs, &probeIncomplete{"the envelope was not confirmed"})
+	}
+	rows.mu.Lock()
+	stored := slices.Clone(rows.rows)
+	rows.mu.Unlock()
+	ops := map[string]int{}
+	var values []string
+	for _, row := range stored {
+		ops[row.operation]++
+		values = append(values, row.values...)
+	}
+	if ops["apps.connections.open"] < 2 || ops["events_api"] != 1 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("records %v, want 2 or more apps.connections.open and 1 "+
+			"events_api", ops)})
+	}
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	var leaks []probeRLValue
+	var found []string
+	for _, v := range []struct{ what, value string }{{"the app-level token", appToken}, {"the ticket", ticket},
+		{"the proxy password", proxyPassword}} {
+		for _, f := range leakForms(v.value) {
+			leaks = append(leaks, probeRLValue{v.what, f.text})
+			if strings.Contains(text, f.text) {
+				found = append(found, v.what+" reached the log output")
+			}
+			if strings.Contains(returned, f.text) {
+				found = append(found, v.what+" reached the returned error")
+			}
+		}
+	}
+	if len(found) > 0 {
+		slices.Sort(found)
+		errs = append(errs, &probeLeak{what: slices.Compact(found)})
+	}
+	return errors.Join(append(errs, probeRLLeaks(stored, leaks),
+		fmt.Errorf("request_log rows: %s", strings.Join(values, "\n")))...)
+}
+
+// probeSocketLink answers the nth connection to the Socket Mode address of probeSlackSocket's stand-in: the second
+// says hello counting two connections, sends an events_api envelope, hands its confirmation to confirmed and
+// disconnects with link_disabled; the third says nothing; the fourth says hello counting one and closes with a close
+// frame whose reason echoes the ticket; the fifth says hello counting one and disconnects with an unknown reason that
+// echoes it; every other is refused with 403 and a body that echoes the address. The hellos and the disconnects echo
+// the ticket.
+func probeSocketLink(w http.ResponseWriter, r *http.Request, n int32, envelopeID string, confirmed chan<- string) {
+	if n < 2 || n > 5 {
+		http.Error(w, "refused "+r.URL.String(), http.StatusForbidden)
+		return
+	}
+	c, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = c.CloseNow() }()
+	ctx := r.Context()
+	ticket := r.URL.Query().Get("ticket")
+	debug := `{"host":"applink-` + ticket + `"}`
+	switch n {
+	case 4:
+		if c.Write(ctx, websocket.MessageText, []byte(`{"type":"hello","num_connections":1,"debug_info":`+debug+
+			`}`)) == nil {
+			_ = c.Close(websocket.StatusPolicyViolation, "bad "+ticket)
+		}
+		return
+	case 5:
+		for _, f := range []string{`{"type":"hello","num_connections":1,"debug_info":` + debug + `}`,
+			`{"type":"disconnect","reason":"gone ` + ticket + `","debug_info":` + debug + `}`} {
+			if c.Write(ctx, websocket.MessageText, []byte(f)) != nil {
+				return
+			}
+		}
+	case 2:
+		for _, f := range []string{`{"type":"hello","num_connections":2,"debug_info":` + debug + `}`,
+			`{"envelope_id":"` + envelopeID + `","type":"events_api","payload":{"event":{"type":"app_mention"}},` +
+				`"accepts_response_payload":false}`} {
+			if c.Write(ctx, websocket.MessageText, []byte(f)) != nil {
+				return
+			}
+		}
+		rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_, ack, err := c.Read(rctx)
+		cancel()
+		if err != nil {
+			return
+		}
+		confirmed <- string(ack)
+		if c.Write(ctx, websocket.MessageText, []byte(`{"type":"disconnect","reason":"link_disabled","debug_info":`+
+			debug+`}`)) != nil {
+			return
+		}
+	}
+	for {
+		if _, _, err := c.Read(ctx); err != nil {
+			return
+		}
+	}
+}
+
+// probeSocketFailures counts the slack_socket_failed lines of the log output text by Connection and reason.
+func probeSocketFailures(text string) map[string]map[string]int {
+	out := map[string]map[string]int{}
+	for line := range strings.Lines(text) {
+		var l struct{ Event, Connection, Reason string }
+		if json.Unmarshal([]byte(line), &l) != nil || l.Event != logging.SlackSocketFailed.Name() {
+			continue
+		}
+		if out[l.Connection] == nil {
+			out[l.Connection] = map[string]int{}
+		}
+		out[l.Connection][l.Reason]++
+	}
+	return out
+}
+
+// probeSocketSource lists the Slack Connections of probeSlackSocket and keeps what their hellos counted, which it
+// fails to store with err.
+type probeSocketSource struct {
+	conns []slack.SocketConn
+	err   error
+
+	mu     sync.Mutex
+	others []int
+}
+
+func (p *probeSocketSource) SocketConnections(context.Context) ([]slack.SocketConn, error) {
+	return slices.Clone(p.conns), nil
+}
+
+func (p *probeSocketSource) RecordSocketHello(_ context.Context, _ slack.SocketConn, other int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.others = append(p.others, other)
+	return p.err
+}
+
+// probeNoPresses handles no press: the envelopes of probeSlackSocket are not interactive.
+type probeNoPresses struct{}
+
+func (probeNoPresses) Go(context.Context, slack.Conn, []byte) {}
 
 // lockedWriter is w written under mu, for log lines written by several goroutines and read by the probe.
 type lockedWriter struct {

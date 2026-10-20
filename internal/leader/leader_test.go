@@ -326,7 +326,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
 		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling",
-		"request_log_pruning"}
+		"request_log_pruning", "slack_socket_mode"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -375,9 +375,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		t.Errorf("bridge polling without a poller")
 	}
 	// Without a pruning of the Request log the task does nothing, and outside development mode nothing wakes it.
-	if last := tasks[len(tasks)-1]; last.Every != RequestLogPruningInterval || last.Wake != nil ||
-		last.Run(t.Context()) != nil {
+	if pruning := tasks[18]; pruning.Every != RequestLogPruningInterval || pruning.Wake != nil ||
+		pruning.Run(t.Context()) != nil {
 		t.Errorf("request log pruning without a pruning")
+	}
+	// Without the Slack sockets the task does nothing and nothing wakes it.
+	if last := tasks[len(tasks)-1]; last.Every != 10*time.Second || last.Wake != nil || last.Run(t.Context()) != nil {
+		t.Errorf("slack socket mode without the sockets")
 	}
 }
 
@@ -653,6 +657,60 @@ func TestBridgePollingTask(t *testing.T) {
 	}
 }
 
+// TestSlackSocketModeTask covers C-24.FR-9 and C-02.FR-10 (ADR-0007): the Leader holds the Socket Mode connections of
+// the Slack Connections of every Organization at once until its context ends, which is when the lock is lost or the
+// process stops, with the Organization passed to each, and returns their errors; the task runs again after
+// SlackSocketModeInterval and nothing else wakes it.
+func TestSlackSocketModeTask(t *testing.T) {
+	failed := errors.New("list failed")
+	started := make(chan int64, 2)
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		SlackSocketMode: func(ctx context.Context, org int64) error {
+			started <- org
+			if org == 2 {
+				return failed
+			}
+			<-ctx.Done()
+			return nil
+		},
+	}
+	tasks := Tasks(work)()
+	task := tasks[19]
+	if task.Name != "slack_socket_mode" || task.Every != SlackSocketModeInterval || task.Wake != nil {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- task.Run(ctx) }()
+	held := []int64{<-started, <-started}
+	select {
+	case err := <-done:
+		t.Fatalf("the task returned while it held the sockets of organization 1: %v", err)
+	default:
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, failed) {
+		t.Fatalf("run = %v", err)
+	}
+	slices.Sort(held)
+	if !slices.Equal(held, []int64{1, 2}) {
+		t.Fatalf("held %v", held)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	tasks = Tasks(work)()
+	if err := tasks[19].Run(t.Context()); !errors.Is(err, orgsErr) ||
+		err.Error() != "list the organizations to hold the slack sockets of: down" {
+		t.Fatalf("organizations = %v", err)
+	}
+	tasks = Tasks(Work{})()
+	if err := tasks[19].Run(t.Context()); err != nil {
+		t.Fatalf("unwired = %v", err)
+	}
+}
+
 // TestRequestLogPruningTask covers C-23.FR-4 and C-02.FR-10 (ADR-0007): the Leader prunes the Request log of every
 // Organization at one business now, goes on past one that fails and returns its error, logs request_log_pruned with
 // the rows and counts them only when it deleted anything, so that a second run that finds nothing says nothing; it
@@ -685,7 +743,7 @@ func TestRequestLogPruningTask(t *testing.T) {
 	}
 	before := metrics.RequestLogPruned.With().Get()
 	tasks := Tasks(w)()
-	task := tasks[len(tasks)-1]
+	task := tasks[18]
 	if task.Name != "request_log_pruning" || task.Every != time.Minute || task.Wake == nil {
 		t.Fatalf("task %s every %v", task.Name, task.Every)
 	}
@@ -716,7 +774,7 @@ func TestRequestLogPruningTask(t *testing.T) {
 	orgsErr := errors.New("down")
 	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
 	tasks = Tasks(w)()
-	if err := tasks[len(tasks)-1].Run(t.Context()); !errors.Is(err, orgsErr) ||
+	if err := tasks[18].Run(t.Context()); !errors.Is(err, orgsErr) ||
 		err.Error() != "list the organizations to prune the request log of: down" {
 		t.Errorf("organizations = %v", err)
 	}

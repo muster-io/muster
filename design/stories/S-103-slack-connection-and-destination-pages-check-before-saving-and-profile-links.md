@@ -5,7 +5,7 @@ capability: C-24
 kind: fe
 layer: L1
 depends_on: [S-102, S-105, S-070]
-covers: [C-24.FR-1, C-24.FR-2, C-24.FR-3, C-24.FR-12, C-24.FR-13, C-24.FR-7, C-24.AC-2, C-24.AC-9, C-24.AC-16, C-24.AC-18, C-13.FR-14]
+covers: [C-24.FR-1, C-24.FR-2, C-24.FR-3, C-24.FR-12, C-24.FR-13, C-24.FR-7, C-24.AC-2, C-24.AC-9, C-24.AC-16, C-24.AC-17, C-24.AC-18, C-13.FR-14]
 files_touched:
   - web/src/components/slack-connection-fields.tsx
   - web/src/components/slack-connection-fields.test.tsx
@@ -29,6 +29,9 @@ files_touched:
   - web/src/components/account-links-table.tsx
   - web/src/components/timeline.tsx
   - web/src/components/template-preview.tsx
+  - web/src/components/request-record.tsx
+  - web/src/components/request-record.test.tsx
+  - web/src/components/request-log.tsx
   - web/src/routes/connections.new.tsx
   - web/src/routes/connections.$connectionId.tsx
   - web/src/routes/destinations.new.tsx
@@ -48,6 +51,7 @@ acceptance:
   - "[C-24.FR-13, C-24.AC-16] The test panel of a Slack Destination shows, beside the result of its one step, the note of reference.md that Slack does not let a bot press its own button; the preview panel draws the message Muster would send — the colour bar, the summary, the sections as text, the buttons with `primary` shown green and the Snooze menu — from its JSON, every text as plain text."
   - "[C-24.FR-12, C-24.AC-18] Profile → Messenger accounts offers \"Link Slack\" for each Slack Connection: a field \"Your Slack email or name\", \"Send code\", the code entry with the attempts left, and the refusals of S-102 as their texts; the list shows the Slack link with the Connection, the display name and its last use, and unlinks it; the user page of an Admin shows and removes it."
   - "[C-24.FR-7, C-24.FR-1] The Route editor's template preview offers Slack's mrkdwn beside Mattermost and Telegram; the Timeline names the Transport `slack` \"Slack\"; the Audit log labels the fields of a Slack Connection and names its secrets without values; the labels of Connections and Destinations (S-070) name the Slack type and the workspace."
+  - "[C-24.AC-17] In the Request log of a Slack Connection in `socket` mode, an envelope's record (`interactive`, method `WEBSOCKET`, recorded by S-101) shows the envelope as its request and Muster's confirmation as its answer, without a status, and the list's status column does not call it \"No answer\" (`request-record.test.tsx`)."
   - "[C-24.AC-18] Every text above exists in English and Russian, `make lint` finds no missing key, and the Slack Connection page, the Slack Destination form and the profile's link dialog show no horizontal scrollbar at 360 px wide (Playwright)."
 verify: "make ci e2e"
 operator_attention: false
@@ -138,7 +142,7 @@ None.
 - Suggested commit: `feat(web): add slack connection and destination pages and linking slack accounts`.
 - The operation of the check before saving is S-105, a backend story, so that this one stays a frontend story; the
   panel here only sends the form's draft.
-- With 34 files the story stays under the size signal; the Connection and Destination halves share the check panels
+- With 37 files the story stays under the size signal; the Connection and Destination halves share the check panels
   and the labels, which splitting would touch twice.
 - The live part types no token: Playwright traces record what is typed, so a real token never goes through a form in
   a recorded run.
@@ -156,5 +160,6 @@ None.
 | C-24.AC-2 | partial | the forms; the API is S-105 |
 | C-24.AC-9 | partial | "Check" on the page; the probe is S-099 |
 | C-24.AC-16 | partial | the panel's note; the message S-099, the press S-100 |
+| C-24.AC-17 | partial | the Request log page showing an envelope's confirmation; the records S-100, S-101 |
 | C-24.AC-18 | full | |
 | C-13.FR-14 | partial | the forms' check of a Slack draft; the operation is S-105 |

@@ -174,7 +174,7 @@ Other lifecycle values:
 | `destination.slack.limiter` | 30 requests/min, sends and edits together — half of Slack's "one message per second per channel" ([F-099](../../facts.md#rate-limits)) | Destination | C-24 | P-61 |
 | `connection.slack.event_mode` | `socket`: the Leader holds a Socket Mode connection, which needs no address of Muster that Slack can reach; `http` when Slack can reach `MUSTER_INGEST_URL`, which loses no press during a change of the Leader | Connection | C-24 | decided |
 | `slack.hello_timeout` | 10 s: a Socket Mode connection whose `hello` has not come by then is closed, and the next one starts with a new `apps.connections.open` ([F-100](../../facts.md#socket-mode)) | built in | C-24 | decided |
-| `slack.socket_backoff` | from 1 s, doubling with jitter, up to 5 min after a Socket Mode connection failed or was refused (`too_many_websockets`, `link_disabled`); a `hello` resets it | built in | C-24 | decided |
+| `slack.socket_backoff` | from 1 s, doubling with jitter, up to 5 min after a Socket Mode connection failed or was refused (`too_many_websockets`, `link_disabled`), and never shorter than the `Retry-After` of a rate-limited `apps.connections.open`, up to that cap; a `hello` resets it once the connection has lasted 30 s, and so does a planned refresh | built in | C-24 | decided |
 | `slack.request_tolerance` | 5 min between a press's `X-Slack-Request-Timestamp` and Muster's real clock, as Slack recommends ([F-104](../../facts.md#http-mode)) | built in | C-24 | decided |
 | `slack.parallel_presses` | 2 Slack presses handled at the same time per replica, over all its Slack Connections and both event modes, like `bridge.parallel_events`; the others wait, already confirmed | built in | C-24 | decided |
 

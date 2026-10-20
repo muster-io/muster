@@ -570,8 +570,8 @@ func slackInputOf(body gen.ConnectionInput) (connections.Input, error) {
 }
 
 // slackConnectionOf is the API form of a Slack Connection: its three secrets as their status, its callback address,
-// and the bot, the workspace and the app its last passing check learned, null before one and after the bot token
-// changed.
+// the bot, the workspace and the app its last passing check learned, null before one and after the bot token
+// changed, and what the last hello of its Socket Mode connection counted.
 func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, error) {
 	tag := etag(c.Version)
 	callback := s.connections.SlackCallbackURL(c.PublicID)
@@ -580,14 +580,26 @@ func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, er
 		AppTokenStatus: keyStatusOf(c.AppToken), SlackSigningSecretStatus: keyStatusOf(c.SlackSigningSecret),
 		CallbackUrl: &callback, BotName: nullableString(c.BotUsername), BotUserId: nullableString(c.BotUserID),
 		TeamId: nullableString(c.SlackTeamID), TeamName: nullableString(c.SlackTeamName),
-		AppId: nullableString(c.SlackAppID), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
-		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
-		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag}
+		AppId: nullableString(c.SlackAppID), Socket: slackSocketOf(c.SlackSocket),
+		Proxy: proxyOf(c.Proxy, c.ProxyPassword), DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt,
+		Limiter: gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)}, Etag: &tag}
 	var out gen.Connection
 	if err := out.FromSlackConnection(sl); err != nil {
 		return gen.Connection{}, err
 	}
 	return out, nil
+}
+
+// slackSocketOf is what the last hello of a Slack Connection's Socket Mode connection counted, in the API form; null in
+// http mode and before the first hello after a save.
+func slackSocketOf(sock *connections.SlackSocket) nullable.Nullable[gen.SlackSocketStatus] {
+	var out nullable.Nullable[gen.SlackSocketStatus]
+	if sock == nil {
+		out.SetNull()
+		return out
+	}
+	out.Set(gen.SlackSocketStatus{HelloAt: sock.HelloAt.UTC(), OtherConnections: sock.OtherConnections})
+	return out
 }
 
 // slackCheckInfoOf is what a check of a Slack Connection found, in the API form: the workspace, the bot's user id and

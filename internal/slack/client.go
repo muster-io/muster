@@ -8,8 +8,9 @@
 // (classify.go); the Connection check (check.go); the Destination check of a channel and the channel list
 // (channels.go); delivery (adapter.go), whose messages are laid out in blocks (layout.go) and sent with the
 // unexported chat calls of this file; and the presses of people (presses.go) — confirmed by the signed callback of
-// http mode (callback.go) — and their private answers (answers.go), with chat.postEphemeral or the press's
-// response_url. Later stories add Socket Mode and Account links.
+// http mode (callback.go) or by the Leader's Socket Mode connections, which confirm each envelope at once and hand its
+// press over (socket.go) — and their private answers (answers.go), with chat.postEphemeral or the press's
+// response_url. Later stories add Account links.
 package slack
 
 import (
@@ -27,6 +28,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/coder/websocket"
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
@@ -119,6 +122,9 @@ type Client struct {
 	// hooks is the outbound client of the answers to response_url, in the interactive class, without a base URL:
 	// built on its first answer.
 	hooks *outbound.Client
+	// socket is the outbound client of the Socket Mode handshakes, in the background class, without a base URL: built
+	// on its first connection.
+	socket *outbound.Client
 }
 
 // errBaseURL is a Route answer that is not an absolute http or https URL without user information, query or fragment.
@@ -804,4 +810,134 @@ func responded(res outbound.Result, err error, code string) Result {
 	}
 	r.Error = outbound.Untrusted(text)
 	return r
+}
+
+// SocketDomain is the domain whose hosts a Socket Mode address may be on outside `muster dev` (C-24.FR-9, ADR-0015).
+const SocketDomain = "slack.com"
+
+// The errors of a Socket Mode address the client may not connect to and of a client that could not be built; neither
+// shows the address, whose query holds the ticket.
+var (
+	errSocketAddress = errors.New("the Socket Mode address is not Slack's")
+	errSocketClient  = errors.New("the Socket Mode client could not be built")
+)
+
+// OpenSocket calls apps.connections.open with the app-level token in the background class (F-100) and returns the
+// address of a new Socket Mode connection, with its single-use ticket, as a Secret: only an address that socketTarget
+// accepts, built anew. Its record in the Request log has the ticket masked by its shape, and the answer's body is
+// dropped from the Result, so that the ticket travels no further. An answer without an address is unknown, and so is
+// one whose address the client may not connect to, without showing it.
+func (c *Client) OpenSocket(ctx context.Context) (logging.Secret, Result) {
+	r := c.CallApp(ctx, outbound.ClassBackground, "apps.connections.open", nil)
+	if !r.OK() {
+		return "", r
+	}
+	var out struct {
+		URL string `json:"url"`
+	}
+	if r.Decode(&out) != nil || out.URL == "" {
+		return "", notExpected(r, "apps.connections.open")
+	}
+	r.Body = nil
+	target, ok := c.socketTarget(out.URL)
+	if !ok {
+		return "", Result{Status: r.Status, Classification: Classification{Class: ClassUnknown},
+			Error: outbound.Untrusted("apps.connections.open: " + errSocketAddress.Error())}
+	}
+	return logging.Secret(target), r
+}
+
+// DialSocket opens the Socket Mode connection at address through outbound.DialWebSocket in the background class, with
+// the Connection's proxy, and lets it read messages of up to MaxRequestBytes. An address socketTarget does not accept
+// is not dialled. Its error never shows the address's query, nor the client's secrets.
+func (c *Client) DialSocket(ctx context.Context, address logging.Secret) (*websocket.Conn, error) {
+	target, ok := c.socketTarget(string(address))
+	if !ok {
+		return nil, errSocketAddress
+	}
+	oc, err := c.socketClient()
+	if err != nil {
+		return nil, errSocketClient
+	}
+	conn, err := outbound.DialWebSocket(ctx, oc, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	conn.SetReadLimit(MaxRequestBytes)
+	return conn, nil
+}
+
+// socketTarget is the address a Socket Mode connection may go to (C-24.FR-9), built anew, and whether it may: raw is a
+// wss address on SocketDomain or a host below it, with the port 443 or none, without user information or a fragment;
+// or, for a client that `muster dev` routes to the fake Slack server, a ws address for an http server — wss for https
+// — on the server's host and port. The host is compared in ASCII only, as responseTarget does. Its path and query are
+// kept as raw gave them.
+func (c *Client) socketTarget(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" || strings.Contains(raw, "#") ||
+		u.Host == "" || !ascii(u.Host) {
+		return "", false
+	}
+	host, rest := strings.ToLower(u.Host), u.EscapedPath()
+	if u.RawQuery != "" {
+		rest += "?" + u.RawQuery
+	}
+	if u.Scheme == "wss" && slackSocketHost(host) {
+		return "wss://" + host + rest, true
+	}
+	if c.base == BaseURL {
+		return "", false
+	}
+	scheme, origin, _ := strings.Cut(c.origin, "://")
+	socketScheme := map[string]string{"http": "ws", "https": "wss"}[strings.ToLower(scheme)]
+	if socketScheme == "" || u.Scheme != socketScheme || host != strings.ToLower(origin) {
+		return "", false
+	}
+	return socketScheme + "://" + origin + rest, true
+}
+
+// slackSocketHost reports whether host, lower-cased, is SocketDomain or a name below it, with the port 443 or none:
+// every label of the name is letters, digits and hyphens.
+func slackSocketHost(host string) bool {
+	name := host
+	if i := strings.LastIndexByte(host, ':'); i >= 0 {
+		if host[i+1:] != "443" {
+			return false
+		}
+		name = host[:i]
+	}
+	if name != SocketDomain && !strings.HasSuffix(name, "."+SocketDomain) {
+		return false
+	}
+	for label := range strings.SplitSeq(name, ".") {
+		if label == "" {
+			return false
+		}
+		for i := range len(label) {
+			if b := label[i]; (b < 'a' || b > 'z') && (b < '0' || b > '9') && b != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// socketClient is the outbound client of the Socket Mode handshakes: the background class through the Connection's
+// proxy, with the client's secrets and connect timeout, CallTimeout for a handshake, no base URL, and no Request log,
+// since a handshake carries the ticket and nothing of the protocol.
+func (c *Client) socketClient() (*outbound.Client, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.socket != nil {
+		return c.socket, nil
+	}
+	s, n := c.settings, c.network
+	oc, err := outbound.New(outbound.Config{Class: outbound.ClassBackground, ConnectTimeout: connectTimeout,
+		Timeout: CallTimeout, Proxy: s.Proxy, Secrets: []logging.Secret{s.BotToken, s.AppToken, s.SigningSecret},
+		Policy: n.Policy, Logger: n.Log, Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes})
+	if err != nil {
+		return nil, err
+	}
+	c.socket = oc
+	return oc, nil
 }

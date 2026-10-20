@@ -292,3 +292,75 @@ func TestMaskSlack(t *testing.T) {
 		}
 	}
 }
+
+// TestMaskSocketTicket covers C-24.FR-14 and C-23.FR-3 for the ticket of a Socket Mode address (F-100): in the answer
+// of apps.connections.open as Slack and Go encode it, with escaped slashes, percent-encoded, in a form, in capitals and
+// wherever the ticket stands in the query, its value is [redacted] up to the end of the value; a ticket= that is not
+// in a ws or wss address is kept.
+func TestMaskSocketTicket(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"Slack's answer", `{"ok":true,"url":"wss:\/\/wss-primary.slack.com\/link\/?ticket=1a2b3c4d-5e6f-7a8b-9c0d` +
+			`-e1f2a3b4c5d6&app_id=A0MUSTERDEVB"}`,
+			`{"ok":true,"url":"wss:\/\/wss-primary.slack.com\/link\/?ticket=[redacted]&app_id=A0MUSTERDEVB"}`},
+		{"plain JSON", `"url":"wss://wss-primary.slack.com/link/?ticket=abc-123&app_id=A0X"`,
+			`"url":"wss://wss-primary.slack.com/link/?ticket=[redacted]&app_id=A0X"`},
+		{"Go's JSON, & escaped", `{"ok":true,"url":"ws://127.0.0.1:18097/link/?ticket=0a1b2c3d4e5f60718293a4b5c6d7e8f9` +
+			`\u0026app_id=A0MUSTERDEVB"}`, `{"ok":true,"url":"ws://127.0.0.1:18097/link/?ticket=[redacted]` +
+			`\u0026app_id=A0MUSTERDEVB"}`},
+		{"percent-encoded", "u=wss%3A%2F%2Fwss-primary.slack.com%2Flink%2F%3Fticket%3Dabc%2B1%2F2%3D%26app_id%3DA0X&v=1",
+			"u=wss%3A%2F%2Fwss-primary.slack.com%2Flink%2F%3Fticket%3D[redacted]%26app_id%3DA0X&v=1"},
+		{"escaped, then percent-encoded", "wss%3A%5C%2F%5C%2Fh.slack.com%5C%2Flink%5C%2F%3Fticket%3Dabc%22",
+			"wss%3A%5C%2F%5C%2Fh.slack.com%5C%2Flink%5C%2F%3Fticket%3D[redacted]%22"},
+		{"the ticket after another parameter", "wss://h.slack.com/link/?app_id=A0X&ticket=abc",
+			"wss://h.slack.com/link/?app_id=A0X&ticket=[redacted]"},
+		{"after an escaped &", `"wss://h.slack.com/link/?app_id=A0X\u0026ticket=abc"`,
+			`"wss://h.slack.com/link/?app_id=A0X\u0026ticket=[redacted]"`},
+		{"after a percent-encoded &", "wss%3A%2F%2Fh%2Flink%2F%3Fapp_id%3DA%26ticket%3Dabc",
+			"wss%3A%2F%2Fh%2Flink%2F%3Fapp_id%3DA%26ticket%3D[redacted]"},
+		{"in capitals", "WSS://H.SLACK.COM/LINK/?TICKET=ABC&APP_ID=A", "WSS://H.SLACK.COM/LINK/?TICKET=[redacted]&APP_ID=A"},
+		{"base64 characters", "wss://h/link/?ticket=ab+c/d=e#f", "wss://h/link/?ticket=[redacted]#f"},
+		{"at the end of a text", "dial wss://h/link/?ticket=abc", "dial wss://h/link/?ticket=[redacted]"},
+		{"in an error", `websocket "wss://h/link/?ticket=abc&app_id=A": 403`,
+			`websocket "wss://h/link/?ticket=[redacted]&app_id=A": 403`},
+		{"two addresses", "wss://a/?ticket=x and ws://b/?ticket=y", "wss://a/?ticket=[redacted] and ws://b/?ticket=[redacted]"},
+		{"a label", "ticket=OPS-1 is open", "ticket=OPS-1 is open"},
+		{"an https address", "https://example.org/?ticket=x", "https://example.org/?ticket=x"},
+		{"another scheme ending in ws", "news://h/?ticket=x", "news://h/?ticket=x"},
+		{"a parameter that only ends in ticket", "wss://h/?xticket=x", "wss://h/?xticket=x"},
+		{"no ticket", "wss://h/link/?app_id=A", "wss://h/link/?app_id=A"},
+		{"an address in another JSON string", `{"a":"wss://h/x","b":"https://y/?ticket=k"}`,
+			`{"a":"wss://h/x","b":"https://y/?ticket=k"}`},
+		{"an address in another JSON string, percent-encoded",
+			"%7B%22a%22%3A%22wss%3A%2F%2Fh%2Fx%22%2C%22b%22%3A%22https%3A%2F%2Fy%2F%3Fticket%3Dk%22%7D",
+			"%7B%22a%22%3A%22wss%3A%2F%2Fh%2Fx%22%2C%22b%22%3A%22https%3A%2F%2Fy%2F%3Fticket%3Dk%22%7D"},
+		{"across a blank", "wss://h/x then ?ticket=k", "wss://h/x then ?ticket=k"},
+	}
+	for _, tt := range tests {
+		if got := maskShape(tt.in); got != tt.want {
+			t.Errorf("%s:\n got %s\nwant %s", tt.name, got, tt.want)
+		}
+	}
+
+	ticket := "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+	answer, err := json.Marshal(map[string]any{"ok": true, "url": "wss://wss-primary.slack.com/link/?ticket=" + ticket +
+		"&app_id=A0MUSTERDEVB"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, form := range []string{string(answer), strings.ReplaceAll(string(answer), "/", `\/`),
+		"payload=" + url.QueryEscape(string(answer))} {
+		got := maskShape(form)
+		if strings.Contains(got, ticket) || !strings.Contains(got, "A0MUSTERDEVB") {
+			t.Errorf("masked %s", got)
+		}
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(maskShape(string(answer))), &m); err != nil ||
+		m["url"] != "wss://wss-primary.slack.com/link/?ticket=[redacted]&app_id=A0MUSTERDEVB" {
+		t.Errorf("the masked answer is %v, %v", m, err)
+	}
+}

@@ -6,11 +6,13 @@ package fakeslack
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -25,8 +27,9 @@ import (
 )
 
 // The presses of the fake (F-093, F-104). POST /_fake/press presses a button, or chooses an option of the Snooze menu,
-// of a message the fake keeps, as one of its people, and sends the block_actions payload Slack would send to the app's
-// request_url, signed with its Slack signing secret, as Slack's Interactivity does in http mode. The payload's
+// of a message the fake keeps, as one of its people, and sends the block_actions payload Slack would send: to the app's
+// request_url, signed with its Slack signing secret, as Slack's Interactivity does in http mode, or as an interactive
+// envelope through the newest socket of the app that said hello, as it does in Socket Mode (socket.go). The payload's
 // response_url is the fake's own /actions/<team>/<n>/<hex>, outside /_fake/, so that what Muster posts to it is recorded
 // in /_fake/requests and takes faults; GET /_fake/responses lists it. GET /_fake/ephemeral lists what
 // chat.postEphemeral showed.
@@ -56,8 +59,11 @@ const (
 	SecondVerificationToken = "muster-dev-slack-verification-token-b" //nolint:gosec // G101: the published development token of the fake
 )
 
-// TransportHTTP is how /_fake/press sends a press: to the app's request_url. It is the only one until Socket Mode.
-const TransportHTTP = "http"
+// The transports of /_fake/press: to the app's request_url, or as an envelope through a socket of the app.
+const (
+	TransportHTTP   = "http"
+	TransportSocket = "socket"
+)
 
 const (
 	// actionsPrefix starts the path of every response_url of the fake.
@@ -66,12 +72,16 @@ const (
 	responseUses = 5
 	// pressTimeout bounds a press's request to the app's request_url.
 	pressTimeout = 10 * time.Second
+	// socketConfirmWait is how long a press over a socket waits for its confirmation: Slack's deadline (F-093).
+	socketConfirmWait = 3 * time.Second
 )
 
 // PressRequest is the body of POST /_fake/press: the app, b by default; the message by its channel and ts; the action
 // — ack, unack, resolve, unsnooze, still_on_it, or snooze with the index of the option; the person who pressed; for the
 // negative cases, a Signature sent as it is instead of the right one, a timestamp that many seconds from now, the value
-// of the same action of the message ValueOfTS of the channel, or a Value sent as it is; and the Transport, http.
+// of the same action of the message ValueOfTS of the channel, or a Value sent as it is; and the Transport, http or
+// socket, by default http when the app has a request_url and otherwise socket. Signature and the timestamp offset
+// concern http only.
 type PressRequest struct {
 	App                    string  `json:"app"`
 	Channel                string  `json:"channel"`
@@ -86,10 +96,16 @@ type PressRequest struct {
 	Transport              string  `json:"transport"`
 }
 
-// PressResult is Muster's answer to a press: its status and body.
+// PressResult is how a press went: its transport; over http Muster's status and body; over a socket, where the status
+// is 0 and the body empty, the envelope's envelope_id, whether Muster confirmed it within three seconds and, when it
+// did, the time from sending to the confirmation in milliseconds.
 type PressResult struct {
-	Status int    `json:"status"`
-	Body   string `json:"body"`
+	Status     int    `json:"status"`
+	Body       string `json:"body"`
+	Transport  string `json:"transport"`
+	EnvelopeID string `json:"envelope_id,omitempty"`
+	Confirmed  *bool  `json:"confirmed,omitempty"`
+	ConfirmMS  *int64 `json:"confirm_ms,omitempty"`
 }
 
 // Ephemeral is a message chat.postEphemeral showed, as GET /_fake/ephemeral lists it: the app, channel and user, the
@@ -144,7 +160,7 @@ func (f *Fake) listResponses(w http.ResponseWriter, _ *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, f.Responses())
 }
 
-// pressError is a press the fake cannot send, with the status of its answer.
+// pressError is a press or a socket script the fake cannot carry out, with the status of its answer.
 type pressError struct {
 	status int
 	msg    string
@@ -253,31 +269,52 @@ func Sign(secret, timestamp string, body []byte) string {
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// payload is the block_actions payload of the press in (F-093), whose response_url the fake keeps, and the app's
-// request_url, under f.mu.
-func (f *Fake) payload(in PressRequest, app App, cfg Config, base string) ([]byte, string, *pressError) {
+// route is how the press of app goes, under f.mu: over http to the app's request_url, or over a socket of the app
+// that said hello; transport names one, and without it a press goes over http when the app has a request_url and
+// otherwise over a socket. An app without the way asked, or without either, is 409.
+func (f *Fake) route(transport string, app App, cfg Config) (string, string, *pressError) {
 	target := cfg.RequestURL[app.Key]
+	socket := f.newest(app.Key, true) != nil
+	switch {
+	case transport == TransportHTTP || transport == "" && target != "":
+		if target == "" {
+			return "", "", &pressError{http.StatusConflict, "the app has no request_url"}
+		}
+		return TransportHTTP, target, nil
+	case transport == TransportSocket || socket:
+		if !socket {
+			return "", "", &pressError{http.StatusConflict, "the app has no socket that said hello"}
+		}
+		return TransportSocket, "", nil
+	}
+	return "", "", &pressError{http.StatusConflict, "the app has no request_url and no socket"}
+}
+
+// payload is the block_actions payload of the press in (F-093), whose response_url the fake keeps, under f.mu; a
+// message the fake does not keep is 404 and then unroutable, how the press cannot go, its error.
+func (f *Fake) payload(in PressRequest, app App, cfg Config, base string, unroutable *pressError) ([]byte,
+	*pressError) {
 	k := chatKey{app.Key, in.Channel}
 	m, root := f.find(k, in.TS)
 	switch {
 	case m == nil:
-		return nil, "", &pressError{http.StatusNotFound, "no such message"}
-	case target == "":
-		return nil, "", &pressError{http.StatusConflict, "the app has no request_url"}
+		return nil, &pressError{http.StatusNotFound, "no such message"}
+	case unroutable != nil:
+		return nil, unroutable
 	}
 	a, perr := actionOf(m, in.Action, in.Option)
 	if perr != nil {
-		return nil, "", perr
+		return nil, perr
 	}
 	value := valueOf(a)
 	if in.ValueOfTS != "" {
 		other, _ := f.find(k, in.ValueOfTS)
 		if other == nil {
-			return nil, "", &pressError{http.StatusNotFound, "no such message " + in.ValueOfTS}
+			return nil, &pressError{http.StatusNotFound, "no such message " + in.ValueOfTS}
 		}
 		o, perr := actionOf(other, in.Action, in.Option)
 		if perr != nil {
-			return nil, "", perr
+			return nil, perr
 		}
 		value = valueOf(o)
 	}
@@ -315,17 +352,17 @@ func (f *Fake) payload(in PressRequest, app App, cfg Config, base string) ([]byt
 		"actions":               []any{withValue(a, value, n+".000000")},
 	})
 	if err != nil {
-		return nil, "", &pressError{http.StatusInternalServerError, err.Error()}
+		return nil, &pressError{http.StatusInternalServerError, err.Error()}
 	}
-	return b, target, nil
+	return b, nil
 }
 
 // pressClient sends the presses to the apps' request_url.
 var pressClient = &http.Client{Timeout: pressTimeout}
 
-// press answers POST /_fake/press with PressResult: 400 for a request it cannot read or a transport other than http,
-// 404 for a message the fake does not keep, 409 for an app without a request_url, 422 for an action the message does
-// not carry and 502 when the request_url does not answer.
+// press answers POST /_fake/press with PressResult: 400 for a request it cannot read or a transport other than http
+// and socket, 404 for a message the fake does not keep, 409 for an app without the request_url or the socket the press
+// needs, 422 for an action the message does not carry and 502 when the request_url does not answer.
 func (f *Fake) press(w http.ResponseWriter, r *http.Request) {
 	var in PressRequest
 	if err := fakeserver.DecodeJSON(w, r, &in); err != nil {
@@ -337,8 +374,8 @@ func (f *Fake) press(w http.ResponseWriter, r *http.Request) {
 	case !ok:
 		fakeserver.WriteError(w, http.StatusBadRequest, "app: "+in.App+" is not a or b")
 		return
-	case cmp.Or(in.Transport, TransportHTTP) != TransportHTTP:
-		fakeserver.WriteError(w, http.StatusBadRequest, "transport: only http sends presses")
+	case in.Transport != "" && in.Transport != TransportHTTP && in.Transport != TransportSocket:
+		fakeserver.WriteError(w, http.StatusBadRequest, "transport: "+in.Transport+" is not http or socket")
 		return
 	case in.Channel == "" || in.TS == "" || in.Action == "" || in.User == "":
 		fakeserver.WriteError(w, http.StatusBadRequest, "channel, ts, action and user are required")
@@ -346,10 +383,15 @@ func (f *Fake) press(w http.ResponseWriter, r *http.Request) {
 	}
 	base, cfg := f.URL(), f.Config()
 	f.mu.Lock()
-	payload, target, perr := f.payload(in, app, cfg, base)
+	transport, target, unroutable := f.route(in.Transport, app, cfg)
+	payload, perr := f.payload(in, app, cfg, base, unroutable)
 	f.mu.Unlock()
 	if perr != nil {
 		fakeserver.WriteError(w, perr.status, perr.msg)
+		return
+	}
+	if transport == TransportSocket {
+		f.pressOverSocket(w, r, app, payload)
 		return
 	}
 	body := []byte("payload=" + url.QueryEscape(string(payload)))
@@ -371,7 +413,27 @@ func (f *Fake) press(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	fakeserver.WriteJSON(w, http.StatusOK, PressResult{Status: resp.StatusCode, Body: string(answer)})
+	fakeserver.WriteJSON(w, http.StatusOK, PressResult{Status: resp.StatusCode, Body: string(answer),
+		Transport: TransportHTTP})
+}
+
+// pressOverSocket sends the payload as an interactive envelope through the newest socket of app that said hello and
+// waits up to socketConfirmWait for Muster's confirmation (F-093); 409 when the socket ended meanwhile.
+func (f *Fake) pressOverSocket(w http.ResponseWriter, r *http.Request, app App, payload []byte) {
+	sent, err := f.SendEnvelope(r.Context(), app.Key, "interactive", payload)
+	if err != nil {
+		status := http.StatusConflict
+		if perr, ok := errors.AsType[*pressError](err); ok {
+			status = perr.status
+		}
+		fakeserver.WriteError(w, status, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketConfirmWait)
+	defer cancel()
+	got, confirmed := f.WaitConfirmed(ctx, sent.EnvelopeID)
+	fakeserver.WriteJSON(w, http.StatusOK, PressResult{Transport: TransportSocket, EnvelopeID: sent.EnvelopeID,
+		Confirmed: &confirmed, ConfirmMS: got.ConfirmMS})
 }
 
 // respond answers a POST to a press's response_url (F-093): an unknown one, or one that took its five answers, is

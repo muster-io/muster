@@ -29,6 +29,16 @@ const tokenLen = 43
 // payload of Slack carries it.
 const slash = `(?:/|\\/|%2[Ff]|%5[Cc]%2[Ff])`
 
+const (
+	// addrChar is a character of a Socket Mode address before the value of its ticket, within the text it stands in:
+	// anything but a blank, a quote, <, > and a backslash, which ends a JSON string, except the backslash of a
+	// JSON-escaped slash or &, and anything percent-encoded but a quote.
+	addrChar = `(?:[^\s"'<>%\\]|\\/|\\u0026|%(?:[013-9A-Fa-f][0-9A-Fa-f]|2[013-9A-Fa-f]))`
+	// ticketChar is a character of the value of a ticket: as addrChar, without & and #, which end a query value, nor
+	// their percent-encoded forms or those of a blank, a quote, <, > and a backslash.
+	ticketChar = `(?:[^\s"'<>&#%\\]|\\/|%(?:[0146-9A-Fa-f][0-9A-Fa-f]|2[14589A-Fa-f]|3[0-9ABDFabdf]|5[0-9ABD-Fabd-f]))`
+)
+
 var (
 	// slackSignatureRe is a value of X-Slack-Signature wherever it stands: `v0=` and the 64 hex digits of the HMAC.
 	slackSignatureRe = regexp.MustCompile(`v0(?:=|%3[Dd])[0-9A-Fa-f]{64}`)
@@ -46,6 +56,13 @@ var (
 	// member token of a Slack payload: in JSON, and in JSON that a form carries percent-encoded.
 	responseURLRes = memberRes("response_url")
 	slackTokenRes  = memberRes("token")
+	// ticketRe finds the single-use ticket of a Socket Mode address (F-100): the value of the query parameter ticket of
+	// a ws or wss address whose scheme follows no letter — plain, with JSON-escaped or percent-encoded slashes, its ?
+	// and = percent-encoded too, the & before it JSON-escaped or percent-encoded too. The first group ends right before
+	// the value. Neither the address nor the value crosses the end of the text or JSON string they stand in, so that a
+	// ticket= elsewhere, such as an alert label or the query of an https address, is kept.
+	ticketRe = regexp.MustCompile(`(?i)((?:^|[^a-z])wss?(?::|%3A)` + slash + slash + addrChar + `*?(?:\?|%3F)(?:` +
+		addrChar + `*?(?:&|\\u0026|%26))?ticket(?:=|%3D))` + ticketChar + `+`)
 )
 
 // memberRes are the expressions of the string value of the member name: in JSON, `"name":"…"`, and percent-encoded in
@@ -78,8 +95,9 @@ func maskShape(s string) string {
 
 // maskSlack masks what Slack's requests carry (C-24.FR-14): a value of X-Slack-Signature; the value of the member
 // response_url, whatever its address, and, in a Slack payload — one that names block_actions or api_app_id — that of
-// its legacy verification token, in JSON and in a form; and any address on hooks.slack.com and any path of a
-// response_url, plain, with JSON-escaped slashes or percent-encoded.
+// its legacy verification token, in JSON and in a form; any address on hooks.slack.com and any path of a
+// response_url, plain, with JSON-escaped slashes or percent-encoded; and the ticket of a Socket Mode address in the
+// same forms, so that the answer of apps.connections.open is masked whichever Secrets its request had.
 func maskSlack(s string) string {
 	if strings.Contains(s, "v0") {
 		s = slackSignatureRe.ReplaceAllLiteralString(s, redacted)
@@ -95,6 +113,9 @@ func maskSlack(s string) string {
 	}
 	if strings.Contains(s, "actions") {
 		s = actionsRe.ReplaceAllLiteralString(s, redacted)
+	}
+	if containsFold(s, "ticket") {
+		s = ticketRe.ReplaceAllString(s, "${1}"+redacted)
 	}
 	return s
 }

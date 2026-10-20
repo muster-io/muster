@@ -862,7 +862,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-24.AC-14 | S-102 | complete |  |
 | C-24.AC-15 | S-098 (part), S-099 (part), S-102 (part) | complete |  |
 | C-24.AC-16 | S-099 (part), S-100 (part), S-103 (part) | complete |  |
-| C-24.AC-17 | S-100 (part), S-101 (part) | complete |  |
+| C-24.AC-17 | S-100 (part), S-101 (part), S-103 (part) | complete |  |
 | C-24.AC-18 | S-103 | complete |  |
 | C-24.AC-19 | S-100 (part), S-101 (part) | complete | a person's press on the maintainer's test workspace: HTTP in S-100, Socket Mode in S-101 |
 | C-24.AC-20 | S-104 | complete |  |

@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 // ListMattermostDestinations names each Destination of targets dest-<id>.
@@ -326,8 +327,8 @@ func TestDoctorSlack(t *testing.T) {
 	for _, r := range f.Requests() {
 		paths = append(paths, r.Path)
 	}
-	wantPaths := []string{"/api/auth.test", "/api/auth.test", "/api/bots.info", "/api/auth.test",
-		"/api/conversations.info", "/api/conversations.info", "/api/conversations.info"}
+	wantPaths := []string{"/api/auth.test", "/api/apps.connections.open", "/api/auth.test", "/api/bots.info",
+		"/api/auth.test", "/api/conversations.info", "/api/conversations.info", "/api/conversations.info"}
 	if !slices.Equal(paths, wantPaths) {
 		t.Errorf("requests %q, want %q", paths, wantPaths)
 	}
@@ -370,5 +371,50 @@ func TestDoctorSlack(t *testing.T) {
 		"connection sl: the bot token cannot be opened: the master keys could not be loaded\n") ||
 		!strings.Contains(got, "destination sl-dest-31: its Connection failed its check: the bot token cannot be opened") {
 		t.Errorf("without a keyring:\n%s", got)
+	}
+}
+
+// TestDoctorSlackSharedApp is C-24.FR-2 and AC-10 for muster doctor: a Slack Connection in socket mode whose check
+// passes while its last hello counted another connection of its app than the Leader's has the warning
+// slack.HintAnotherClientConnected; none for a count of 0, in http mode, and none beside a failed check.
+func TestDoctorSlackSharedApp(t *testing.T) {
+	e, f := newSlackEnv(t)
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	q := slackDoctorStore{memStore: e.store}
+	hello := func(other int) {
+		t.Helper()
+		if err := e.svc.RecordSocketHello(t.Context(), slack.SocketConn{Conn: slack.Conn{ID: sl.ID,
+			PublicID: sl.PublicID}, Version: e.store.rows[sl.ID].row.Version}, other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := findings(t, e.svc, q); got != "connection sl: ok" {
+		t.Errorf("before a hello: %s", got)
+	}
+	hello(1)
+	if got, want := findings(t, e.svc, q), "connection sl: warning: "+slack.HintAnotherClientConnected; got != want {
+		t.Errorf("shared:\n%s\nwant:\n%s", got, want)
+	}
+	cfg := fakeslack.DefaultConfig()
+	cfg.Revoked = []string{fakeslack.BotToken}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	found, err := e.svc.Doctor(t.Context(), q, time.Second)
+	if err != nil || len(found) != 1 || found[0].OK() || found[0].Warning != "" {
+		t.Errorf("a failed check = %+v, %v", found, err)
+	}
+	if err := f.SetConfig(fakeslack.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	hello(0)
+	if got := findings(t, e.svc, q); got != "connection sl: ok" {
+		t.Errorf("alone: %s", got)
+	}
+	r := &e.store.rows[sl.ID].row
+	r.SlackSocketOtherConnections = pgtype.Int4{Int32: 1, Valid: true}
+	r.SlackEventMode = pgtype.Text{String: connections.EventModeHTTP, Valid: true}
+	if got := findings(t, e.svc, q); got != "connection sl: ok" {
+		t.Errorf("http mode: %s", got)
 	}
 }

@@ -10,24 +10,29 @@
 // method accepts in x-accepted-oauth-scopes and, for a valid token, the token's scopes in x-oauth-scopes. auth.test
 // answers the bot and its workspace for a bot token, the person alice for a token configured as a person's, and the
 // app's id alone for an app-level token; bots.info answers the bot of the token's app; apps.connections.open answers a
-// Socket Mode address with a new ticket for an app-level token; conversations.info answers a channel of the token's
-// app and conversations.list its channels page by page (F-098, channels.go); chat.postMessage, chat.update,
-// chat.delete, chat.postEphemeral and chat.getPermalink keep each channel's messages and Threads by the rules of
-// F-074 to F-092 that Muster relies on (messages.go); chat.postEphemeral shows a message only to one of the fake's
-// people — UserAlice, UserBob, UserCarol, UserDora and the person UserID, members of every channel the bot is in — and
-// answers user_not_in_channel for anyone else. Any other method is unknown_method. A POST to the response_url of a
-// press, /actions/<team>/<n>/<hex>, takes an answer, five at most (presses.go); any other path is 404.
+// Socket Mode address on the fake with a new single-use ticket for an app-level token (socket.go); conversations.info
+// answers a channel of the token's app and conversations.list its channels page by page (F-098, channels.go);
+// chat.postMessage, chat.update, chat.delete, chat.postEphemeral and chat.getPermalink keep each channel's messages
+// and Threads by the rules of F-074 to F-092 that Muster relies on (messages.go); chat.postEphemeral shows a message
+// only to one of the fake's people — UserAlice, UserBob, UserCarol, UserDora and the person UserID, members of every
+// channel the bot is in — and answers user_not_in_channel for anyone else. Any other method is unknown_method. A POST
+// to the response_url of a press, /actions/<team>/<n>/<hex>, takes an answer, five at most (presses.go); /link/ is the
+// Socket Mode WebSocket of an address apps.connections.open answered (socket.go); any other path is 404.
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests; faults, such as an error answer, a
 // 429 with Retry-After or a delay) and add GET and PUT /_fake/config: the scopes of each app's bot token, the revoked
 // tokens, the tokens answered as a person's and the app of each token, over the published pairing; the channels of
 // each app, by id, with their name, the bot's membership and whether they are archived or private; a page size that
-// makes conversations.list answer smaller pages; and the request_url of each app, the Interactivity Request URL its
-// presses go to. GET /_fake/messages lists the messages of a channel, with their Thread replies, and POST /_fake/delete
-// deletes one as a person would (messages.go). POST /_fake/press presses a button of a message as one of the people
-// and sends the app's request_url the payload signed with the app's Slack signing secret and with its verification
-// token, answering Muster's status and body; GET /_fake/ephemeral lists what chat.postEphemeral showed and GET
-// /_fake/responses what the response_url of presses took (presses.go).
+// makes conversations.list answer smaller pages; the request_url of each app, the Interactivity Request URL its
+// presses go to; and the extra_connections of each app, the connections of other programs that the hello of its
+// sockets counts. GET /_fake/messages lists the messages of a channel, with their Thread replies, and POST
+// /_fake/delete deletes one as a person would (messages.go). POST /_fake/press presses a button of a message as one of
+// the people and sends the app's request_url the payload signed with the app's Slack signing secret and with its
+// verification token, answering Muster's status and body, or sends it as an interactive envelope through a socket of
+// the app, answering whether Muster confirmed it; GET /_fake/ephemeral lists what chat.postEphemeral showed and GET
+// /_fake/responses what the response_url of presses took (presses.go). GET /_fake/socket shows the sockets of each app
+// and the envelopes sent, and POST /_fake/socket sends a socket disconnect or an envelope, ends a socket, or arms the
+// next sockets to get no hello or too_many_websockets (socket.go).
 package fakeslack
 
 import (
@@ -128,39 +133,44 @@ func PublishedBotToken(token string) bool {
 // its key, over the published pairing; a token it names that the fake did not publish is an app-level token when it
 // starts with xapp- and a bot token otherwise. Channels are the channels of each app's workspace, by app key and
 // channel id. PageSize, when positive, is the most channels a page of conversations.list holds. RequestURL is the
-// Interactivity Request URL of each app, by app key, where /_fake/press sends its presses.
+// Interactivity Request URL of each app, by app key, where /_fake/press sends its presses. ExtraConnections are the
+// connections of other programs to each app, by app key, which the hello of its sockets counts beside the fake's own
+// (F-102).
 type Config struct {
-	Scopes     map[string]string             `json:"scopes"`
-	Revoked    []string                      `json:"revoked"`
-	UserTokens []string                      `json:"user_tokens"`
-	AppOf      map[string]string             `json:"app_of"`
-	Channels   map[string]map[string]Channel `json:"channels"`
-	PageSize   int                           `json:"page_size"`
-	RequestURL map[string]string             `json:"request_url"`
+	Scopes           map[string]string             `json:"scopes"`
+	Revoked          []string                      `json:"revoked"`
+	UserTokens       []string                      `json:"user_tokens"`
+	AppOf            map[string]string             `json:"app_of"`
+	Channels         map[string]map[string]Channel `json:"channels"`
+	PageSize         int                           `json:"page_size"`
+	RequestURL       map[string]string             `json:"request_url"`
+	ExtraConnections map[string]int                `json:"extra_connections"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
 // scopes, whose entries are set one by one: a text sets an app's scopes and null restores DefaultScopes; and channels,
 // merged by id within each app: a channel replaces the one of its id, null deletes it, and an app given as null gets
-// its default channels again; and request_url, set app by app: a URL sets an app's, null removes it.
+// its default channels again; and request_url and extra_connections, set app by app: a value sets an app's, null
+// removes it, as does an extra_connections of 0.
 type configPatch struct {
-	Scopes     map[string]*string             `json:"scopes"`
-	Revoked    *[]string                      `json:"revoked"`
-	UserTokens *[]string                      `json:"user_tokens"`
-	AppOf      *map[string]string             `json:"app_of"`
-	Channels   map[string]map[string]*Channel `json:"channels"`
-	PageSize   *int                           `json:"page_size"`
-	RequestURL map[string]*string             `json:"request_url"`
+	Scopes           map[string]*string             `json:"scopes"`
+	Revoked          *[]string                      `json:"revoked"`
+	UserTokens       *[]string                      `json:"user_tokens"`
+	AppOf            *map[string]string             `json:"app_of"`
+	Channels         map[string]map[string]*Channel `json:"channels"`
+	PageSize         *int                           `json:"page_size"`
+	RequestURL       map[string]*string             `json:"request_url"`
+	ExtraConnections map[string]*int                `json:"extra_connections"`
 }
 
 // DefaultConfig is the configuration of a new fake: both apps with DefaultScopes and the default channels, nothing
-// revoked, no person's token, the published pairing of tokens and apps, pages of the size conversations.list asks and
-// no request_url.
+// revoked, no person's token, the published pairing of tokens and apps, pages of the size conversations.list asks, no
+// request_url and no other program's connections.
 func DefaultConfig() Config {
 	return Config{Scopes: map[string]string{AppA: DefaultScopes, AppB: DefaultScopes}, Revoked: []string{},
 		UserTokens: []string{}, AppOf: map[string]string{},
 		Channels:   map[string]map[string]Channel{AppA: defaultChannels(), AppB: defaultChannels()},
-		RequestURL: map[string]string{}}
+		RequestURL: map[string]string{}, ExtraConnections: map[string]int{}}
 }
 
 // Fake is the fake Slack Web API server.
@@ -179,12 +189,22 @@ type Fake struct {
 	responses []Response
 	slots     map[string]*responseSlot
 	pressSeq  int64
+	// tickets are the tickets apps.connections.open issued that no socket used yet, with their app's key; sockets the
+	// open sockets by id, socketSeq the counter of their ids and appSockets the Socket Mode state of each app by key;
+	// envelopes the envelopes sent, in order, and envelopeIDs the same by envelope_id (socket.go).
+	tickets     map[string]string
+	sockets     map[int64]*fakeSocket
+	socketSeq   int64
+	appSockets  map[string]*appSocket
+	envelopes   []*envelopeState
+	envelopeIDs map[string]*envelopeState
 }
 
 // New returns the fake with DefaultConfig.
 func New() *Fake {
 	f := &Fake{config: DefaultConfig(), chats: map[chatKey][]*stored{}, ephemeral: []Ephemeral{},
-		responses: []Response{}, slots: map[string]*responseSlot{}}
+		responses: []Response{}, slots: map[string]*responseSlot{}, tickets: map[string]string{},
+		sockets: map[int64]*fakeSocket{}, appSockets: map[string]*appSocket{}, envelopeIDs: map[string]*envelopeState{}}
 	f.Server = fakeserver.New("Slack", http.HandlerFunc(f.serve))
 	f.HandleControl("GET /_fake/config", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Config())
@@ -195,6 +215,8 @@ func New() *Fake {
 	f.HandleControl("POST /_fake/press", f.press)
 	f.HandleControl("GET /_fake/ephemeral", f.listEphemeral)
 	f.HandleControl("GET /_fake/responses", f.listResponses)
+	f.HandleControl("GET /_fake/socket", f.getSocket)
+	f.HandleControl("POST /_fake/socket", f.postSocket)
 	return f
 }
 
@@ -206,8 +228,8 @@ func (f *Fake) Config() Config {
 }
 
 // SetConfig replaces the whole configuration; it fails on an app key other than a and b, an empty channel id, a
-// negative page size and a request_url that is not an absolute http or https URL, and an app without scopes gets
-// DefaultScopes, one without channels the default channels.
+// negative page size or number of extra connections and a request_url that is not an absolute http or https URL, and
+// an app without scopes gets DefaultScopes, one without channels the default channels.
 func (f *Fake) SetConfig(c Config) error {
 	c = clone(c)
 	for _, a := range apps {
@@ -228,7 +250,7 @@ func (f *Fake) SetConfig(c Config) error {
 }
 
 // check refuses a configuration that names an app the fake does not have, a channel without an id, a negative page
-// size or a request_url that is not an absolute http or https URL.
+// size or number of extra connections, or a request_url that is not an absolute http or https URL.
 func check(c Config) error {
 	for key := range c.Scopes {
 		if _, ok := appByKey(key); !ok {
@@ -259,6 +281,14 @@ func check(c Config) error {
 			return fmt.Errorf("request_url: %q of the app %q is not an absolute http or https URL", target, key)
 		}
 	}
+	for key, n := range c.ExtraConnections {
+		if _, ok := appByKey(key); !ok {
+			return fmt.Errorf("extra_connections: the app %q is not a or b", key)
+		}
+		if n < 0 {
+			return fmt.Errorf("extra_connections: %d of the app %q is negative", n, key)
+		}
+	}
 	return nil
 }
 
@@ -266,7 +296,7 @@ func check(c Config) error {
 func clone(c Config) Config {
 	out := Config{Scopes: maps.Clone(c.Scopes), Revoked: slices.Clone(c.Revoked),
 		UserTokens: slices.Clone(c.UserTokens), AppOf: maps.Clone(c.AppOf), Channels: cloneChannels(c.Channels),
-		PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL)}
+		PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL), ExtraConnections: maps.Clone(c.ExtraConnections)}
 	if out.Scopes == nil {
 		out.Scopes = map[string]string{}
 	}
@@ -281,6 +311,9 @@ func clone(c Config) Config {
 	}
 	if out.RequestURL == nil {
 		out.RequestURL = map[string]string{}
+	}
+	if out.ExtraConnections == nil {
+		out.ExtraConnections = map[string]int{}
 	}
 	return out
 }
@@ -334,6 +367,13 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		c.RequestURL[key] = *target
+	}
+	for key, n := range p.ExtraConnections {
+		if n == nil || *n == 0 {
+			delete(c.ExtraConnections, key)
+			continue
+		}
+		c.ExtraConnections[key] = *n
 	}
 	c = clone(c)
 	err := check(c)
@@ -414,10 +454,15 @@ var acceptedScopes = map[string]string{
 // conversationScopes are the scopes the methods that read conversations accept (F-071).
 const conversationScopes = "channels:read,groups:read,mpim:read,im:read,read"
 
-// serve answers `/api/<method>` as Slack does and the response_url of presses; any other path is 404.
+// serve answers `/api/<method>` as Slack does, the response_url of presses and the Socket Mode WebSocket; any other
+// path is 404.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, actionsPrefix) {
 		f.respond(w, r)
+		return
+	}
+	if r.URL.Path == linkPath {
+		f.link(w, r)
 		return
 	}
 	method, ok := strings.CutPrefix(r.URL.Path, "/api/")
@@ -512,7 +557,7 @@ func botsInfo(w http.ResponseWriter, c caller, scopes, botID string) {
 }
 
 // connectionsOpen answers apps.connections.open (F-100) for an app-level token: a Socket Mode address on the fake's own
-// listen address with a new single-use ticket; any other token is the wrong kind.
+// listen address with a new single-use ticket, kept for the token's app; any other token is the wrong kind.
 func (f *Fake) connectionsOpen(w http.ResponseWriter, c caller) {
 	if c.kind != kindApp {
 		writeError(w, "not_allowed_token_type")
@@ -520,9 +565,12 @@ func (f *Fake) connectionsOpen(w http.ResponseWriter, c caller) {
 	}
 	var b [16]byte
 	_, _ = rand.Read(b[:])
+	ticket := hex.EncodeToString(b[:])
 	host := strings.TrimPrefix(f.URL(), "http://")
-	writeOK(w, map[string]any{"url": "ws://" + host + "/link/?ticket=" + hex.EncodeToString(b[:]) + "&app_id=" +
-		c.app.AppID})
+	f.mu.Lock()
+	f.tickets[ticket] = c.app.Key
+	f.mu.Unlock()
+	writeOK(w, map[string]any{"url": "ws://" + host + linkPath + "?ticket=" + ticket + "&app_id=" + c.app.AppID})
 }
 
 // maxBody is the largest JSON body the fake reads.

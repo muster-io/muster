@@ -25,16 +25,21 @@ const (
 
 	httpPkg    = "net/http"
 	httpSuffix = "; HTTP clients and transports come only from internal/outbound"
+
+	wsPkg    = "github.com/coder/websocket"
+	wsSuffix = "; WebSocket connections come only from internal/outbound (outbound.DialWebSocket)"
 )
 
 var (
 	httpDefaults = []string{"DefaultClient", "DefaultTransport"}
 	httpFuncs    = []string{"Get", "Post", "Head", "PostForm"}
+	// wsFuncs open a WebSocket connection; the server side, websocket.Accept, is never reported.
+	wsFuncs = []string{"Dial"}
 )
 
 // checkGo runs the Go part of rule 2 (imports of the generated groups queries), rule 3 (messenger sends and edits)
-// and rule 4 (HTTP clients and transports) over the non-test files of the module, the code behind the lint build tag
-// included.
+// and rule 4 (HTTP clients and transports, and WebSocket dials) over the non-test files of the module, the code
+// behind the lint build tag included.
 func checkGo(root string, cfg Config) ([]Diagnostic, error) {
 	pkgs, err := packages.Load(&packages.Config{
 		Mode:       loadMode,
@@ -194,7 +199,7 @@ func (c *goFile) inspect(f *ast.File) {
 }
 
 // httpNode reports rule 4 constructs other than method selections: references to the package-level defaults and
-// helpers, and every way to make an http.Client or http.Transport value.
+// helpers, every way to make an http.Client or http.Transport value, and references to the WebSocket dial.
 func (c *goFile) httpNode(n ast.Node, info *types.Info) {
 	switch n := n.(type) {
 	case *ast.Ident:
@@ -247,10 +252,20 @@ func (c *goFile) selector(n *ast.SelectorExpr, sel *types.Selection) {
 	}
 }
 
-// httpObject reports references to the package-level default client and transport and to the helper functions that
-// use them.
+// httpObject reports references to the package-level default client and transport, to the helper functions that use
+// them, and to the function that dials a WebSocket connection, called or taken as a value.
 func (c *goFile) httpObject(id *ast.Ident, obj types.Object) {
-	if obj == nil || obj.Pkg() == nil || obj.Pkg().Path() != httpPkg || obj.Pkg().Scope().Lookup(obj.Name()) != obj {
+	if obj == nil || obj.Pkg() == nil {
+		return
+	}
+	path := obj.Pkg().Path()
+	if (path != httpPkg && path != wsPkg) || obj.Pkg().Scope().Lookup(obj.Name()) != obj {
+		return
+	}
+	if path == wsPkg {
+		if _, ok := obj.(*types.Func); ok && slices.Contains(wsFuncs, obj.Name()) {
+			c.report(4, id.Pos(), "websocket.%s opens a WebSocket connection%s", obj.Name(), wsSuffix)
+		}
 		return
 	}
 	switch obj.(type) {

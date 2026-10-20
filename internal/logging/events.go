@@ -781,6 +781,43 @@ var SlackPressRejected = newEvent("slack_press_rejected", LevelWarn, "C-24",
 		"Never carries the signature, the Slack signing secret, the headers or the body.",
 	"connection", "reason")
 
+// SlackSocketConnected is logged at each hello of a Slack Connection's Socket Mode connection (C-24.FR-9, FR-17).
+var SlackSocketConnected = newEvent("slack_socket_connected", LevelInfo, "C-24",
+	"The Leader's Socket Mode connection of a Slack Connection received its hello: connection is the public_id of the "+
+		"Connection, num_connections the connections of the Slack app that Slack counts, this one included, and held "+
+		"how many of them the Leader holds for the Connection — two while a planned refresh overlaps the next "+
+		"connection with the old one. The count beyond held is stored on the Connection for its check and page, "+
+		"and the line is written once it was; error, when present, says that it could not be stored within 5 s, "+
+		"and the next hello stores it again. A hello whose count the next hello replaces before it is stored "+
+		"has no line: only the next one is stored and logged; nor has a store that the Leader's stop cut "+
+		"short.",
+	"connection", "num_connections", "held", "error")
+
+// SlackSocketShared is logged when a hello counted connections of the Slack app beyond the Leader's (C-24.FR-2, FR-9).
+var SlackSocketShared = newEvent("slack_socket_shared", LevelWarn, "C-24",
+	"A hello of a Slack Connection's Socket Mode connection counted more connections of the Slack app than the Leader "+
+		"holds: another program — usually a second Muster installation on the same app — is connected and takes some "+
+		"of its presses at random. connection is the public_id of the Connection and other_connections the "+
+		"connections beyond the Leader's. Right after a Leader change Slack may still count the old Leader's "+
+		"connection; a later hello clears the count. Use one Slack app for each installation.",
+	"connection", "other_connections")
+
+// SlackSocketFailed is logged when a Socket Mode connection of a Slack Connection failed or was refused (C-24.FR-9).
+var SlackSocketFailed = newEvent("slack_socket_failed", LevelWarn, "C-24",
+	"A Socket Mode connection of a Slack Connection could not be opened or ended without a planned refresh: "+
+		"connection is the public_id of the Connection; reason dial (apps.connections.open failed, the address it "+
+		"answered is not Slack's, the WebSocket handshake failed or the Connection's client could not be built), "+
+		"hello_timeout (no hello within slack.hello_timeout), link_disabled (Socket Mode was turned off in the app's "+
+		"settings), too_many_websockets (the app already has ten connections) or closed (the connection ended, a ping "+
+		"got no pong within 10 s or a confirmation could not be written); backoff_seconds the wait before the next "+
+		"connection, from 1 s doubling with jitter up to 5 min (slack.socket_backoff), never shorter than the "+
+		"Retry-After of a rate-limited apps.connections.open, up to that cap, and reset by a hello once its "+
+		"connection has lasted 30 s, or by a planned refresh — absent when the Connection's client could not be "+
+		"built; error what failed, with the tokens and the address's query, the ticket among it, masked, absent for "+
+		"hello_timeout, link_disabled and too_many_websockets. It counts against nothing and makes no Destination "+
+		"Broken; presses made until the next hello are lost.",
+	"connection", "reason", "backoff_seconds", "error")
+
 // RequestLogWriteFailed is logged when a record of the Request log could not be written (C-23.FR-4, FR-7).
 var RequestLogWriteFailed = newEvent("request_log_write_failed", LevelWarn, "C-23",
 	"A record of the Request log could not be written — the database refused it, or its write ran past its 2 s "+

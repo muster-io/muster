@@ -64,16 +64,18 @@ type doctorSlackClient struct {
 }
 
 // Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost, Telegram, Bridge and
-// Slack Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection
-// (GET /api/v4/users/me), the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), of a Bridge one
-// (getInfo, then whether the info it read offers the Connection's event delivery mode, C-22.FR-2) and of a Slack one
-// (token, scopes and in socket mode app_token, C-24.FR-2), and the Destination checks of mattermost.CheckDestination,
+// Slack Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection (GET
+// /api/v4/users/me), the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), of a Bridge one (getInfo, then
+// whether the info it read offers the Connection's event delivery mode, C-22.FR-2) and of a Slack one (token, scopes
+// and in socket mode app_token, C-24.FR-2), and the Destination checks of mattermost.CheckDestination,
 // telegram.CheckDestination, bridge.CheckDestination (checkChannel, C-22.FR-3) and slack.CheckChannel
 // (conversations.info, C-24.FR-3), each request made at once in the background client class, whose retries each check
 // bounds by each. A Telegram, Bridge or Slack Connection that fails names the failing step with its message, and a
-// Bridge or Slack Destination the item channel. It only reads: it records nothing of what it finds, not even a Bridge's
-// info or a Slack workspace. It needs the Keyring and the Network of the Service only, and the Slack route under muster
-// dev; without a Keyring every check fails, for the bot tokens cannot be opened.
+// Bridge or Slack Destination the item channel; a Slack Connection in socket mode that passes warns when the last hello
+// of its Socket Mode connection counted another connection of its Slack app than the Leader's. It only reads: it
+// records nothing of what it finds, not even a Bridge's info or a Slack workspace. It needs the Keyring and the Network
+// of the Service only, and the Slack route under muster dev; without a Keyring every check fails, for the bot tokens
+// cannot be opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
@@ -91,7 +93,7 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeSlack {
 				var c doctorSlackClient
-				c.client, c.bot, f.Message = s.doctorSlack(ctx, dbgen.GetConnectionRow(r), each)
+				c.client, c.bot, f.Message, f.Warning = s.doctorSlack(ctx, dbgen.GetConnectionRow(r), each)
 				if f.OK() {
 					slClients[r.ID] = c
 				} else {
