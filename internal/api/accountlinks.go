@@ -21,6 +21,9 @@ const (
 	codeLinkCodeRequestsExceeded = "link_code_requests_exceeded"
 	// codeCodeNotOffered refuses a Bridge link code through a Connection whose info offers none (C-22.FR-15).
 	codeCodeNotOffered = "code_not_offered"
+	// codeMessagesTabDisabled refuses a Slack link code that Slack would not send because the Messages tab of the
+	// Slack app is off (C-24.FR-12).
+	codeMessagesTabDisabled = "messages_tab_disabled"
 )
 
 // AccountLinks is what the API needs of internal/accountlinks.
@@ -88,6 +91,10 @@ func linkProblem(err error) error {
 	case errors.Is(err, accountlinks.ErrCodeNotOffered):
 		return problem(http.StatusConflict, typeConflict, codeCodeNotOffered,
 			"This Bridge Connection offers no link code; send the token to the bot instead.")
+	case errors.Is(err, accountlinks.ErrMessagesTabDisabled):
+		return problem(http.StatusConflict, typeConflict, codeMessagesTabDisabled,
+			"The Messages tab of the Slack app is off, so the bot cannot send the code; an admin of the Slack app "+
+				"turns it on under App Home.")
 	}
 	return err
 }

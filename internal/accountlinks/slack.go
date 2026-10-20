@@ -34,8 +34,13 @@ const (
 // CodeHandleAmbiguous is the field error of a name that several Slack accounts have.
 const CodeHandleAmbiguous = "handle_ambiguous"
 
-// ErrHandleAmbiguous is a name that several Slack accounts have (C-24.FR-12).
-var ErrHandleAmbiguous = errors.New("several slack accounts have this name")
+var (
+	// ErrHandleAmbiguous is a name that several Slack accounts have (C-24.FR-12).
+	ErrHandleAmbiguous = errors.New("several slack accounts have this name")
+	// ErrMessagesTabDisabled is a direct message Slack refused because the Messages tab of the Slack app is off, which
+	// C-24.FR-12 keeps on: no account of the Connection receives a code until an admin of the app turns it on.
+	ErrMessagesTabDisabled = errors.New("the messages tab of the slack app is off")
+)
 
 // SlackAccount is a Slack account found by email or name: its user id, its name, and its display name — its
 // profile's display_name, else its real_name, empty without either.
@@ -51,7 +56,8 @@ type SlackBot interface {
 	// Slackbot included — is ErrMessengerUserNotFound, and several with the name ErrHandleAmbiguous.
 	FindUser(ctx context.Context, handle string) (SlackAccount, error)
 	// SendCode sends text, which holds code, by direct message to the account userID, with code masked in the Request
-	// log; an account the bot cannot write to is ErrDirectMessageRefused.
+	// log; an account the bot cannot write to is ErrDirectMessageRefused, and an app whose Messages tab is off
+	// ErrMessagesTabDisabled.
 	SendCode(ctx context.Context, userID string, code logging.Secret, text string) error
 	// SendLinked sends text by direct message to the account userID.
 	SendLinked(ctx context.Context, userID, text string) error
@@ -82,8 +88,8 @@ type SlackStarted struct {
 // another User is ErrLinkedElsewhere, recorded as link_rejected with conflict; otherwise the User's pending Slack
 // requests for the Connection are voided, a code of account_link.slack_code is stored as its SHA-256 with the account's
 // user id, name and display name, and the bot sends it by direct message. A message that fails voids the request, which
-// still counts toward the limits; one Slack refuses for the account is a FieldError direct_message_refused. A
-// Connection that is missing, deleted or not a Slack one is a FieldError unknown_id.
+// still counts toward the limits; one Slack refuses for the account is a FieldError direct_message_refused, and one it
+// refuses because the app's Messages tab is off ErrMessagesTabDisabled. A Connection that is missing, deleted or not a Slack one is a FieldError unknown_id.
 func (s *Service) StartSlack(ctx context.Context, r Requester, connectionPublicID, handle string) (SlackStarted,
 	error) {
 	conn, err := s.connection(ctx, connectionPublicID, MessengerSlack)
@@ -199,6 +205,9 @@ func (s *Service) startSlack(ctx context.Context, b SlackBot, r Requester, conn 
 	if errors.Is(err, ErrDirectMessageRefused) {
 		return SlackStarted{}, &FieldError{Pointer: pointerHandle, Code: CodeDirectMessageRefused,
 			Detail: "The bot cannot send a direct message to this Slack account."}
+	}
+	if errors.Is(err, ErrMessagesTabDisabled) {
+		return SlackStarted{}, ErrMessagesTabDisabled
 	}
 	return SlackStarted{}, err
 }

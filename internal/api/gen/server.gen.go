@@ -5940,6 +5940,9 @@ type ProblemError struct {
 	// Line Line of a template error.
 	Line *int `json:"line,omitempty"`
 
+	// MissingScopes Set on `destination_check_failed` with the `check_code` `missing_scope` (Slack), omitted otherwise — the scopes Slack named as needed, as in `DestinationCheckItem`, which clients name in their own words; `detail` names them in English.
+	MissingScopes *[]string `json:"missing_scopes,omitempty"`
+
 	// Pointer RFC 6901 JSON Pointer to the offending field in the request body, or `` for the whole body. Query and path parameters use `/query/<name>` and `/path/<name>`.
 	Pointer string `json:"pointer"`
 }

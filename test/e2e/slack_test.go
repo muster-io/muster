@@ -299,7 +299,8 @@ func signedStrings(v any) []string {
 // replicas: the Root message in blocks with its colour, buttons and Snooze menu, escaped alert data and the Loud
 // Mention (C-24.AC-5, AC-6, AC-15), the edit and the Thread reply (C-24.FR-6), the Request log (C-24.FR-14), a Root
 // message deleted after a reply and one deleted before any (C-24.AC-8), 429, rejected blocks and a closed edit window
-// (C-24.AC-8), the test message and the preview (C-24.AC-16, C-16.FR-3), and Broken and the probe (C-24.AC-9).
+// (C-24.AC-8), the test message and the preview (C-24.AC-16, C-16.FR-3), a template's literal Mentions neutralized in
+// the mrkdwn preview (C-12.FR-8), and Broken and the probe (C-24.AC-9).
 func TestSlack(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -632,6 +633,17 @@ func TestSlack(t *testing.T) {
 		}
 		if got := len(s.messages()); got != before {
 			t.Errorf("the preview posted: %d messages, want %d", got, before)
+		}
+
+		// C-12.FR-8, C-24.FR-6: a literal Mention in a template's text shows in the mrkdwn preview as delivery sends
+		// it, as an entity that notifies nobody, while a link stays a link.
+		tp := s.api.json(http.MethodPost, "/api/v1/template-previews", `{"kind":"root_message","format":"mrkdwn",`+
+			`"template":"<!here> <@`+fakeslack.UserAlice+`> <https://e.org|runbook>","alert_group_id":"`+g+`"}`,
+			http.StatusOK)
+		if out, _ := tp["output"].(string); tp["valid"] != true ||
+			!strings.Contains(out, "\n&lt;!here> &lt;@\u200b"+fakeslack.UserAlice+"> <https://e.org|runbook>\n") ||
+			strings.Contains(out, "<!") || strings.Contains(out, "<@") {
+			t.Errorf("template preview %v", tp)
 		}
 	})
 

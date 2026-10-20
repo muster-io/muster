@@ -295,7 +295,7 @@ func TestConfig(t *testing.T) {
 		`"C0FAKEOTHER":{"name":"other","member":false,"archived":false,"private":false}}`
 	if got := do(t, req); got.raw != `{"scopes":{"a":"`+fakeslack.DefaultScopes+`","b":"`+fakeslack.DefaultScopes+
 		`"},"revoked":[],"user_tokens":[],"app_of":{},"channels":{"a":`+channels+`,"b":`+channels+
-		`},"page_size":0,"request_url":{},"extra_connections":{}}`+"\n" {
+		`},"page_size":0,"request_url":{},"extra_connections":{},"messages_tab_off":[]}`+"\n" {
 		t.Fatalf("default config %s", got.raw)
 	}
 	five := "chat:write,channels:read,groups:read,im:write,users:read"
@@ -2228,4 +2228,39 @@ func TestDirectMessages(t *testing.T) {
 	if dms := f.DirectMessages(fakeslack.AppB, fakeslack.UserBob); len(dms) != 0 {
 		t.Errorf("a refused direct message was kept: %+v", dms)
 	}
+}
+
+// TestMessagesTabOff covers messages_tab_off in /_fake/config: a direct message of an app whose Messages tab is off is
+// messages_tab_disabled and kept nowhere, while the other app and a channel of the same app still post; the bot and
+// deleted refusals come first; an unknown app is refused, changing nothing; null leaves the list as it is.
+func TestMessagesTabOff(t *testing.T) {
+	f := start(t)
+	if a := putConfig(t, f, `{"messages_tab_off":["b"]}`); a.status != http.StatusOK ||
+		!strings.Contains(a.raw, `"messages_tab_off":["b"]`) {
+		t.Fatalf("set = %d %s", a.status, a.raw)
+	}
+	slackError(t, post(t, f, map[string]any{"channel": fakeslack.UserAlice, "text": "code 1"}),
+		"messages_tab_disabled")
+	slackError(t, post(t, f, map[string]any{"channel": fakeslack.UserHelper, "text": "x"}), "cannot_dm_bot")
+	slackError(t, post(t, f, map[string]any{"channel": fakeslack.UserBobOld, "text": "x"}), "user_not_found")
+	if dms := f.DirectMessages("", fakeslack.UserAlice); len(dms) != 0 {
+		t.Errorf("a refused direct message was kept: %+v", dms)
+	}
+	ok(t, post(t, f, map[string]any{"text": "to the channel"}))
+	ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": fakeslack.UserAlice,
+		"text": "from a"}))
+	for _, body := range []string{`{"messages_tab_off":["c"]}`, `{"messages_tab_off":"b"}`} {
+		if a := putConfig(t, f, body); a.status != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, a.status, a.raw)
+		}
+	}
+	putConfig(t, f, `{"messages_tab_off":null}`)
+	if got := f.Config().MessagesTabOff; !slices.Equal(got, []string{"b"}) {
+		t.Errorf("messages_tab_off %v", got)
+	}
+	if err := f.SetConfig(fakeslack.Config{MessagesTabOff: []string{"c"}}); err == nil {
+		t.Error("SetConfig took an unknown app")
+	}
+	putConfig(t, f, `{"messages_tab_off":[]}`)
+	ok(t, post(t, f, map[string]any{"channel": fakeslack.UserAlice, "text": "code 2"}))
 }

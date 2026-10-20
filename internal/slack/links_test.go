@@ -530,6 +530,43 @@ func TestSendCodeRefused(t *testing.T) {
 	}
 }
 
+// TestSendCodeMessagesTabOff is C-24.FR-12: Slack refusing the direct message because the Messages tab of the app is
+// off is accountlinks.ErrMessagesTabDisabled, for the code and the confirmation, which leaves the Connection as it is;
+// with the tab on again the code goes.
+func TestSendCodeMessagesTabOff(t *testing.T) {
+	e := newLinkEnv(t)
+	c := e.f.Config()
+	c.MessagesTabOff = []string{fakeslack.AppB}
+	if err := e.f.SetConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run(t, func(ctx context.Context, b accountlinks.SlackBot) error {
+		return b.SendCode(ctx, fakeslack.UserAlice, "ABCD2345", "code ABCD2345")
+	}); !errors.Is(err, accountlinks.ErrMessagesTabDisabled) {
+		t.Errorf("SendCode with the tab off = %v", err)
+	}
+	if o := e.path.last(); o.Kind != delivery.OutcomeOK || len(e.db.held()) != 0 {
+		t.Errorf("the tab off changed the outcome %+v or held %v", o, e.db.held())
+	}
+	if err := e.run(t, func(ctx context.Context, b accountlinks.SlackBot) error {
+		return b.SendLinked(ctx, fakeslack.UserAlice, "Linked")
+	}); !errors.Is(err, accountlinks.ErrMessagesTabDisabled) {
+		t.Errorf("SendLinked with the tab off = %v", err)
+	}
+	if dms := e.f.DirectMessages("", fakeslack.UserAlice); len(dms) != 0 {
+		t.Errorf("direct messages %+v", dms)
+	}
+	c.MessagesTabOff = nil
+	if err := e.f.SetConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.run(t, func(ctx context.Context, b accountlinks.SlackBot) error {
+		return b.SendCode(ctx, fakeslack.UserAlice, "ABCD2345", "code ABCD2345")
+	}); err != nil {
+		t.Errorf("SendCode with the tab on = %v", err)
+	}
+}
+
 // TestLinkSession: a Session takes a limiter token of its Connection on the interactive path; a Connection that is
 // unknown, deleted or not a Slack one is accountlinks.ErrNoConnection, any other failure to find it is returned, and
 // no token within the budget runs nothing.

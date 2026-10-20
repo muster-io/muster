@@ -1364,6 +1364,29 @@ func TestPreviewMrkdwn(t *testing.T) {
 		strings.Contains(res.Output, "<https://phish") {
 		t.Errorf("generator url in a line template = %+v, %v", res, err)
 	}
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message",
+		Template:     `<!here> <!channel> <@U0123ABCD> {{ mention "channel" }} <https://e.org|runbook>`,
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || !strings.Contains(res.Output,
+		"\n&lt;!here> &lt;!channel> &lt;@\u200bU0123ABCD> @channel <https://e.org|runbook>\n") ||
+		strings.Contains(res.Output, "<!") || strings.Contains(res.Output, "<@") {
+		t.Errorf("literal Mentions of a root template = %+v, %v", res, err)
+	}
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "<!here> {{ .Labels.pod }}",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || !strings.HasPrefix(res.Output, "• &lt;!here> ") || strings.Contains(res.Output, "<!") {
+		t.Errorf("literal Mentions of a line template = %+v, %v", res, err)
+	}
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "ack_timeout_notice", Template: "<!channel> nobody acknowledged",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || res.Output != "&lt;!channel> nobody acknowledged" {
+		t.Errorf("literal Mentions of an ack timeout notice = %+v, %v", res, err)
+	}
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: "<!here>",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMarkdown})
+	if err != nil || !res.Valid || !strings.Contains(res.Output, "\n<!here>\n") {
+		t.Errorf("Markdown keeps the text as written = %+v, %v", res, err)
+	}
 }
 
 // TestRootSnoozeSecondsMrkdwn (C-24.FR-5): a Root message rendered in mrkdwn carries a copy of the Route's Snooze
