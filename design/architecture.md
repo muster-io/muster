@@ -713,7 +713,7 @@ sequenceDiagram
         alt another type than block_actions
             PR->>PR: ignore
         else 64 presses already wait for a slot on this replica
-            PR->>PR: drop the press, unanswered, logged as failed
+            PR->>PR: drop the press, logged as failed, not answered
         else a press
             PR->>PR: wait for one of slack.parallel_presses slots on this replica,<br/>within 30 s for the wait and the Command
             PR->>AL: user.id to User, through the link for this Connection,<br/>first, for the language of every answer
@@ -732,7 +732,7 @@ sequenceDiagram
                 end
             end
             opt a refusal, a failure, no Account link, a test message or "Still on it"
-                PR->>IP: the text in the profile language, after the slot is free again
+                PR->>IP: the text in the profile language, after the slot is free again;<br/>in English when the 30 s ended in the wait for a slot, before the link was read
                 IP->>SL: chat.postEphemeral to the person in the press's channel, in the Thread for a Reminder,<br/>limiter token first, within delivery.interactive_budget
                 alt chat.postEphemeral fails
                     IP->>SL: the same text to the press's response_url: ephemeral, replace_original false,<br/>only on hooks.slack.com, without a limiter
@@ -748,14 +748,16 @@ sequenceDiagram
 
 A press is answered `200` before it is handled, so a crash between the answer and the Command loses it, as a press
 made while Muster is down is lost; a graceful stop drains the presses in flight within `process.shutdown_grace`, after
-the listeners and before the database pool closes, and ends those still running at its end as failed. Each press has
-30 s for its wait for a slot and its Command, the time Mattermost waits for the answer to a press, so that a Command
-stuck on the database frees its slot; its answer keeps `delivery.interactive_budget` of its own. At most 64 presses
-wait for a slot on a replica, which bounds what a replay of a captured signed request within
-`slack.request_tolerance` holds; one more is dropped. Slack is not expected to send an interaction again, so presses
-are not deduplicated, and one that did come twice meets its precondition. The callback's inbound record in the Request log
-names only the Connection, because the press is matched after the answer; the records of the answer's requests also
-name the Destination and the Alert Group.
+the listeners and before the database pool closes, and ends those still waiting or running at its end as failed,
+logged and not answered. Each press has 30 s for its wait for a slot and its Command, the time Mattermost waits for the
+answer to a press, so that a Command stuck on the database frees its slot; its answer keeps
+`delivery.interactive_budget` of its own, so a press that ran out of time is answered with the failure text, in English
+when it ran out while waiting for a slot, since the Account link that gives the language is read only in a slot. At
+most 64 presses wait for a slot on a replica, which bounds what a replay of a captured signed request within
+`slack.request_tolerance` holds; one more is dropped, logged as failed and not answered. Slack is not expected to send
+an interaction again, so presses are not deduplicated, and one that did come twice meets its precondition. The
+callback's inbound record in the Request log names only the Connection, because the press is matched after the answer;
+the records of the answer's requests also name the Destination and the Alert Group.
 
 ### d. Delivery reconciliation
 

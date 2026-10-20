@@ -111,9 +111,10 @@ issue: 309
   JSON object, answers `400` and logs `slack_press_rejected` with `too_large` or `no_payload`; a failed read of the
   Connection answers `500`; a valid press is handed to `Presses` with a context of the process, not of the request, and
   the `200` written at once; the press goes over through `Presses.Go`, and its context is one that the start of a
-shutdown does not end, only the end of its grace period. Mounted in `runtime.Callbacks` under the Request log's inbound recorder with the operation
-  `interactive`. The inbound record names the Connection only — a known one, refused requests included: the press is
-  matched to its Destination and Alert Group after the answer, so those are linked on the records of its answers.
+  shutdown does not end, only the end of its grace period. Mounted in `runtime.Callbacks` under the Request log's
+  inbound recorder with the operation `interactive`. The inbound record names the Connection only — a known one,
+  refused requests included: the press is matched to its Destination and Alert Group after the answer, so those are
+  linked on the records of its answers.
 - **Presses** (`internal/slack/presses.go`): `Handle(ctx, conn, payload)` — the one path for both event modes —
   parses `block_actions`, takes the value of the first action (`value`, or `selected_option.value` for the menu),
   verifies it with the key it names (`internal/buttons`), binds it to the Root message or the sent Reminder of a
@@ -124,13 +125,15 @@ shutdown does not end, only the end of its grace period. Mounted in `runtime.Cal
   and Alert Group, else the press is not verified, as for Bridge. It maps `user.id` through `accountlinks.Lookup` for
   this Connection first, so that every answer has the person's language, and dispatches the Command with the Transport
   `slack`, as the Mattermost callback does; a semaphore of `slack.parallel_presses` per replica bounds the presses in
-  flight, at most `slack.MaxWaitingPresses` (64) wait for a slot — one more is dropped, unanswered, and logged as
-  `failed` with "too many presses waiting" — and each press has `slack.PressDeadline` (30 s) for its wait and its
-  Command, while its answer keeps `delivery.interactive_budget`. `Go(ctx, conn, payload)` hands a press over in the
-  background and `Wait(ctx)` waits for those in flight: `runtime` drains them after the listeners and before the pool
-  closes, within `process.shutdown_grace`, and at its end ends their context, so that the rest end as `failed`,
-  unanswered. "Still on it" changes no message, so it is answered "Done: Still on it" in the Thread, as C-17 says; C-24.FR-10
-  says a successful press is not answered, and the pull request proposes its wording to the maintainer.
+  flight, at most `slack.MaxWaitingPresses` (64) wait for a slot — one more is dropped, logged as `failed` with "too
+  many presses waiting" and not answered — and each press has `slack.PressDeadline` (30 s) for its wait and its
+  Command, while its answer keeps `delivery.interactive_budget`; a press whose deadline ends while it waits for a slot
+  is answered with the failure text in English, since the Account link that gives the language is read only in a slot.
+  `Go(ctx, conn, payload)` hands a press over in the background and `Wait(ctx)` waits for those in flight: `runtime`
+  drains them after the listeners and before the pool closes, within `process.shutdown_grace`, and at its end ends
+  their context, so that the rest end as `failed`, logged and not answered. "Still on it" changes no message, so it is
+  answered "Done: Still on it" in the Thread, as C-17 says; C-24.FR-10 says a successful press is not answered, and the
+  pull request proposes its wording to the maintainer, as it does for the two presses that fail unanswered (Notes).
 - **Answers** (`internal/slack/answers.go`): the texts of
   [reference.md](../prd/l1/reference.md#banners-warnings-and-notices) in the person's language, sent by
   `chat.postEphemeral` through `delivery.Interactive` on the Connection's limiter, and on any failure to the press's
@@ -371,16 +374,31 @@ None.
   presses and never writes one as a constant.
 - Each press has `slack.PressDeadline`, 30 s, for its wait for a slot and its Command — the time Mattermost waits for
   the answer to a press (F-032), which bounds a Mattermost press the same way — so that a Command stuck on the
-  database, which sets no statement timeout, frees its slot instead of stopping every Slack press of the replica; the
-  answer keeps `delivery.interactive_budget` of its own, so the person still learns that the press failed. At most
-  `slack.MaxWaitingPresses`, 64, presses wait for a slot on a replica, and one more is dropped unanswered: a slot frees
-  in the time of one Command, so 64 are seconds of work and more than a team presses at once, while their payloads
-  stay under 64 MiB however often a captured signed request is replayed within `slack.request_tolerance`. Both are
-  code constants, not settings: the first follows Mattermost and the second only bounds abuse.
+  database, which sets no statement timeout, frees its slot instead of stopping every Slack press of the replica. The
+  answer keeps `delivery.interactive_budget` of its own, so the person still learns that the press failed: a press
+  whose deadline ends in its Command is answered with the failure text in the person's language, and one whose
+  deadline ends while it waits for a slot with the failure text in English, because the Account link that gives the
+  language is read only in a slot, behind the stalled ones. At most `slack.MaxWaitingPresses`, 64, presses wait for a
+  slot on a replica, and one more is dropped, logged as `failed` and not answered: a slot frees in the time of one
+  Command, so 64 are seconds of work and more than a team presses at once, while their payloads stay under 64 MiB
+  however often a captured signed request is replayed within `slack.request_tolerance`. Both are code constants, not
+  settings: the first follows Mattermost and the second only bounds abuse.
+- Answers run after the slot is released, outside the bound of `slack.parallel_presses`, so their number is not
+  capped; each is bounded by `delivery.interactive_budget` for each of its two ways and holds only its target — the
+  channel, the user, the Thread, the `response_url` and the text — not the payload, so what a press keeps while it is
+  answered stays small.
 - A graceful stop drains the presses that were answered `200`: after the listeners stop, `runtime` waits for them within
   `process.shutdown_grace`, before the database pool closes, and at its end ends their context with "the grace period
-  of the shutdown ended", so that a press still waiting or running ends as `failed`, unanswered, instead of hanging.
-  `internal/runtime/runtime_test.go` joins `files_touched` for the test of that drain.
+  of the shutdown ended", so that a press still waiting or running ends as `failed`, logged and not answered, instead
+  of hanging: nothing may reach Slack once that context has ended. `internal/runtime/runtime_test.go` joins
+  `files_touched` for the test of that drain.
+- Two presses fail without an answer: one dropped beyond `slack.MaxWaitingPresses`, and one still waiting or running
+  at the end of `process.shutdown_grace`. Both are logged `slack_press` with the outcome `failed` and their reason.
+  This deviates from C-24.FR-10, by which "the others wait, already confirmed" and a failure is answered; the pull
+  request proposes to the maintainer that C-24.FR-10 read "…the others wait, already confirmed, up to a bound; a press
+  beyond it, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer
+  and is logged." Likewise, the answer to a press whose deadline ends while it waits for a slot is in English even for
+  a linked User, where C-24.FR-11 names the profile language, and the pull request proposes adding that exception.
 
 ## Coverage
 
