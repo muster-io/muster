@@ -41,6 +41,7 @@ files_touched:
   - internal/requestlog/mask_test.go
   - internal/outbound/record.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/fakes/fakeslack/presses.go
   - internal/fakes/fakeslack/fakeslack.go
   - internal/fakes/fakeslack/messages.go
@@ -109,7 +110,8 @@ issue: 309
   (`bad_signature`, `stale`, `unknown_connection`, `wrong_mode`); a body over 1 MiB, or without a `payload` that is a
   JSON object, answers `400` and logs `slack_press_rejected` with `too_large` or `no_payload`; a failed read of the
   Connection answers `500`; a valid press is handed to `Presses` with a context of the process, not of the request, and
-  the `200` written at once. Mounted in `runtime.Callbacks` under the Request log's inbound recorder with the operation
+  the `200` written at once; the press goes over through `Presses.Go`, and its context is one that the start of a
+shutdown does not end, only the end of its grace period. Mounted in `runtime.Callbacks` under the Request log's inbound recorder with the operation
   `interactive`. The inbound record names the Connection only — a known one, refused requests included: the press is
   matched to its Destination and Alert Group after the answer, so those are linked on the records of its answers.
 - **Presses** (`internal/slack/presses.go`): `Handle(ctx, conn, payload)` — the one path for both event modes —
@@ -122,7 +124,12 @@ issue: 309
   and Alert Group, else the press is not verified, as for Bridge. It maps `user.id` through `accountlinks.Lookup` for
   this Connection first, so that every answer has the person's language, and dispatches the Command with the Transport
   `slack`, as the Mattermost callback does; a semaphore of `slack.parallel_presses` per replica bounds the presses in
-  flight. "Still on it" changes no message, so it is answered "Done: Still on it" in the Thread, as C-17 says; C-24.FR-10
+  flight, at most `slack.MaxWaitingPresses` (64) wait for a slot — one more is dropped, unanswered, and logged as
+  `failed` with "too many presses waiting" — and each press has `slack.PressDeadline` (30 s) for its wait and its
+  Command, while its answer keeps `delivery.interactive_budget`. `Go(ctx, conn, payload)` hands a press over in the
+  background and `Wait(ctx)` waits for those in flight: `runtime` drains them after the listeners and before the pool
+  closes, within `process.shutdown_grace`, and at its end ends their context, so that the rest end as `failed`,
+  unanswered. "Still on it" changes no message, so it is answered "Done: Still on it" in the Thread, as C-17 says; C-24.FR-10
   says a successful press is not answered, and the pull request proposes its wording to the maintainer.
 - **Answers** (`internal/slack/answers.go`): the texts of
   [reference.md](../prd/l1/reference.md#banners-warnings-and-notices) in the person's language, sent by
@@ -135,7 +142,9 @@ issue: 309
   `X-Slack-Signature` among the headers masked whatever they hold (`outbound.MaskedHeaders`), and its `v0=` values
   masked by shape elsewhere; `response_url` masked by its host `hooks.slack.com` — plain, with JSON-escaped slashes and
   percent-encoded — and as the value of the member `response_url` in JSON and in form-encoded JSON, which covers the
-  fake server's address too; the payload's legacy verification `token` masked as a member of a Slack payload; beside
+  fake server's address too, as does its path `/actions/<team>/<n>/<token>` on any host, matched in its case and only
+  with a Slack team id (`T…` or `E…`), so that other `/actions/` links, such as GitHub Actions runs in an annotation,
+  are kept; the payload's legacy verification `token` masked as a member of a Slack payload; beside
   the signed action ids that are already masked; outbound answers recorded as `chat.postEphemeral` and `response_url`.
 - **Log events**: `slack_press` (info, the fields `connection`, `group`, `command`, `outcome`, `answer` and `error`:
   the Connection, the Alert Group and the Command once verified, the outcome — `done`, `unchanged`, `refused`,
@@ -360,8 +369,18 @@ None.
 - Until S-103 the Timeline shows the Transport `slack` through its default branch, as "via Muster".
 - The fake server's `ts` counter is shared by both apps and by ephemerals, so the Verification reads every `ts` it
   presses and never writes one as a constant.
-- Presses waiting for a slot are not bounded in number; only signed presses get that far, and Slack limits its own
-  rate.
+- Each press has `slack.PressDeadline`, 30 s, for its wait for a slot and its Command — the time Mattermost waits for
+  the answer to a press (F-032), which bounds a Mattermost press the same way — so that a Command stuck on the
+  database, which sets no statement timeout, frees its slot instead of stopping every Slack press of the replica; the
+  answer keeps `delivery.interactive_budget` of its own, so the person still learns that the press failed. At most
+  `slack.MaxWaitingPresses`, 64, presses wait for a slot on a replica, and one more is dropped unanswered: a slot frees
+  in the time of one Command, so 64 are seconds of work and more than a team presses at once, while their payloads
+  stay under 64 MiB however often a captured signed request is replayed within `slack.request_tolerance`. Both are
+  code constants, not settings: the first follows Mattermost and the second only bounds abuse.
+- A graceful stop drains the presses that were answered `200`: after the listeners stop, `runtime` waits for them within
+  `process.shutdown_grace`, before the database pool closes, and at its end ends their context with "the grace period
+  of the shutdown ended", so that a press still waiting or running ends as `failed`, unanswered, instead of hanging.
+  `internal/runtime/runtime_test.go` joins `files_touched` for the test of that drain.
 
 ## Coverage
 
