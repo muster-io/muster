@@ -4157,7 +4157,8 @@ paths:
       tags:
       - Connections
       summary: Create Connection
-      description: '`type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.'
+      description: '`type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level
+        token and the Slack signing secret are write-only Secrets.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -4368,8 +4369,12 @@ paths:
         Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A
         Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a
         passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers
-        the Connection''s event delivery mode. Runs on the interactive path: when no limiter token is free within
-        `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
+        the Connection''s event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with
+        the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must
+        name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket`
+        mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids
+        must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path:
+        when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -4409,8 +4414,9 @@ paths:
       tags:
       - Connections
       summary: List channels visible to the bot
-      description: 'Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge
-        Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write`
+      description: 'Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or
+        Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the
+        channel list of a Slack Connection is not there yet. Requires `connections:write`
         because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`,
         the answer is `503` with `Retry-After`.'
       x-permission: connections:write
@@ -5434,8 +5440,8 @@ paths:
       description: The profile's own short list of the Connections that are not deleted, for picking one when linking a
         messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name
         and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it —
-        `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403`
-        (`service_account_not_allowed`).
+        `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links
+        through them exist. Service account tokens get `403` (`service_account_not_allowed`).
       x-permission: authenticated
       x-listener: app
       security:
@@ -11738,6 +11744,7 @@ components:
       - mattermost
       - telegram
       - bridge
+      - slack
     MattermostConnectionBase:
       type: object
       required:
@@ -12008,6 +12015,141 @@ components:
             writeOnly: true
             description: Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with
               `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+          proxy:
+            $ref: '#/components/schemas/ProxyConfigInput'
+    SlackEventMode:
+      type: string
+      description: 'How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new
+        Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no
+        address of Muster; `http` — Slack posts each press to the Connection''s `callback_url`, signed with the Slack
+        signing secret.'
+      enum:
+      - socket
+      - http
+    SlackConnectionBase:
+      type: object
+      required:
+      - type
+      - name
+      - event_mode
+      - limiter
+      properties:
+        type:
+          type: string
+          enum:
+          - slack
+        name:
+          type: string
+          minLength: 1
+        event_mode:
+          $ref: '#/components/schemas/SlackEventMode'
+        limiter:
+          $ref: '#/components/schemas/Limiter'
+    SlackConnection:
+      allOf:
+      - $ref: '#/components/schemas/SlackConnectionBase'
+      - type: object
+        required:
+        - id
+        - bot_token_status
+        - app_token_status
+        - slack_signing_secret_status
+        - callback_url
+        - bot_name
+        - bot_user_id
+        - team_id
+        - team_name
+        - app_id
+        - proxy
+        - destination_count
+        - created_at
+        - etag
+        properties:
+          id:
+            $ref: '#/components/schemas/PublicId'
+          bot_token_status:
+            $ref: '#/components/schemas/SecretStatus'
+          app_token_status:
+            $ref: '#/components/schemas/SecretStatus'
+          slack_signing_secret_status:
+            $ref: '#/components/schemas/SecretStatus'
+          callback_url:
+            type: string
+            format: uri
+            readOnly: true
+            description: Where Slack posts the button presses of this Connection in `http` mode,
+              `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity
+              Request URL of the Slack app. Slack's own address is fixed, so the Connection has no address field.
+          bot_name:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The bot's name (`user` of `auth.test`), as the last successful Connection check found it; null
+              before one and after the bot token changed.
+          bot_user_id:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The bot's user id (`U…`); null as `bot_name`.
+          team_id:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The workspace's id (`T…`); null as `bot_name`.
+          team_name:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The workspace's name; null as `bot_name`.
+          app_id:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The Slack app's id (`A…`), found by the step `app_token` of a check in `socket` mode; null
+              before one and after the bot token changed.
+          proxy:
+            $ref: '#/components/schemas/ProxyConfig'
+          destination_count:
+            type: integer
+            description: A Connection used by Destinations cannot be deleted.
+          created_at:
+            type: string
+            format: date-time
+          etag:
+            type: string
+            readOnly: true
+            description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
+              an item of a list without reading it again.
+    SlackConnectionInput:
+      allOf:
+      - $ref: '#/components/schemas/SlackConnectionBase'
+      - type: object
+        required:
+        - proxy
+        properties:
+          bot_token:
+            type: string
+            format: password
+            writeOnly: true
+            description: Write-only Secret, the bot token (`xoxb-…`). Omit on update to keep the stored one; a new one
+              forgets what the last check learned.
+          app_token:
+            type: string
+            format: password
+            writeOnly: true
+            description: Write-only Secret, the app-level token (`xapp-…`, with the scope `connections:write`); required
+              in `socket` mode, sent now or stored. Omit on update to keep the stored one; a change to `http` keeps it.
+          slack_signing_secret:
+            type: string
+            format: password
+            writeOnly: true
+            description: Write-only Secret, the Slack signing secret of the app; required in `http` mode, sent now or
+              stored. Omit on update to keep the stored one; a change to `socket` keeps it. It is never sent anywhere.
           proxy:
             $ref: '#/components/schemas/ProxyConfigInput'
     BridgeInfo:
@@ -12348,24 +12490,28 @@ components:
       - $ref: '#/components/schemas/MattermostConnection'
       - $ref: '#/components/schemas/TelegramConnection'
       - $ref: '#/components/schemas/BridgeConnection'
+      - $ref: '#/components/schemas/SlackConnection'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostConnection'
           telegram: '#/components/schemas/TelegramConnection'
           bridge: '#/components/schemas/BridgeConnection'
+          slack: '#/components/schemas/SlackConnection'
     ConnectionInput:
       description: A Connection as written; `type` selects the variant and cannot change on update.
       oneOf:
       - $ref: '#/components/schemas/MattermostConnectionInput'
       - $ref: '#/components/schemas/TelegramConnectionInput'
       - $ref: '#/components/schemas/BridgeConnectionInput'
+      - $ref: '#/components/schemas/SlackConnectionInput'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostConnectionInput'
           telegram: '#/components/schemas/TelegramConnectionInput'
           bridge: '#/components/schemas/BridgeConnectionInput'
+          slack: '#/components/schemas/SlackConnectionInput'
     ConnectionList:
       type: object
       required:
@@ -12505,6 +12651,8 @@ components:
           - get_webhook_info
           - info
           - event_delivery
+          - scopes
+          - app_token
         ok:
           type: boolean
         skipped:
@@ -12514,7 +12662,8 @@ components:
           - integer
           - 'null'
           description: 'How long the step''s request took; null for a step that made no request: one that was skipped,
-            and `event_delivery`, which only reads the info that the step `info` read.'
+            `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of
+            the answer of `token`. The latency of `app_token` is that of its two requests together.'
         via:
           $ref: '#/components/schemas/ConnectionPath'
         message:
@@ -12533,7 +12682,12 @@ components:
       description: 'What a step of the Connection check found, as a stable code that clients translate, with `message` as
         its detail in English; null when the step passed with nothing to say or was skipped. A step that failed:
         `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token
-        (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET
+        (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`,
+        `app_token`), `wrong_token_type` — the bot token is not a bot''s: Slack answered `not_allowed_token_type`, or
+        `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which
+        `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token
+        (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack''s JSON; for the dry
+        probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET
         <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a
         Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200`
         JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge
@@ -12566,6 +12720,10 @@ components:
       - event_delivery_not_offered
       - not_mattermost
       - not_bridge
+      - wrong_token_type
+      - missing_scope
+      - app_mismatch
+      - not_slack
       - null
     ConnectionCheckResult:
       type: object
@@ -12612,9 +12770,40 @@ components:
           oneOf:
           - $ref: '#/components/schemas/BridgeInfo'
           - type: 'null'
+        slack:
+          description: Slack only. What the step `token` found — the workspace and the bot — and the app that the step
+            `app_token` found, stored on the Connection by a passing `checkConnection`; null when `token` failed, and for
+            the other types.
+          oneOf:
+          - $ref: '#/components/schemas/SlackCheckInfo'
+          - type: 'null'
         request_log_run:
           description: The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.
           $ref: '#/components/schemas/PublicId'
+    SlackCheckInfo:
+      type: object
+      description: What a check of a Slack Connection found.
+      required:
+      - team_id
+      - team_name
+      - bot_user_id
+      - app_id
+      properties:
+        team_id:
+          type: string
+          description: The workspace's id (`T…`).
+        team_name:
+          type: string
+          description: The workspace's name.
+        bot_user_id:
+          type: string
+          description: The bot's user id (`U…`).
+        app_id:
+          type:
+          - string
+          - 'null'
+          description: The Slack app's id (`A…`); null in `http` mode, which has no step `app_token`, and when that step
+            failed.
     MattermostChannel:
       type: object
       required:
@@ -14231,9 +14420,10 @@ components:
           $ref: '#/components/schemas/RequestDirection'
         operation:
           type: string
-          description: The operation as its protocol names it — the Bot API method for Telegram, the `operationId` of the
-            Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook
-            `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
+          description: The operation as its protocol names it — the Bot API method for Telegram, the Web API method for
+            Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of
+            Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the
+            template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
         method:
           type: string
         url:
