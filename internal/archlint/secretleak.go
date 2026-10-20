@@ -5196,7 +5196,9 @@ func (probeInbound) HandleEventOnce(context.Context, int64, string, func(context
 // probeSlackPresses is the probe of Slack presses in http mode (C-24.FR-9 to FR-11, FR-14): the presses of the Slack
 // Connection CNAAAAAAAAAAA5 reach slackInteraction behind the Request log's inbound recorder, whose records, and those
 // of the answers, a requestlog.Writer keeps in the in-memory probeRLRows. The bot token is the first secret, the last
-// segment of the press's response_url the second, and the Slack signing secret the third. A press with a signature
+// segment of the press's response_url the second without secretSuffix — a response_url's token has only letters and
+// digits (F-093), so the probe looks for it, in every leak form, in the log output, the returned error and the records
+// itself — and the Slack signing secret the third. A press with a signature
 // that has not even its shape and a stale one are refused; one from an account without an Account link and one from a linked account
 // whose Command is refused are answered, and both answers fail both ways: the stand-in Slack refuses
 // chat.postEphemeral with user_not_in_channel and the request and the secrets echoed, and the response_url answers 500
@@ -5227,7 +5229,7 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 	if err != nil {
 		return err
 	}
-	botToken, hooksToken, signing := "xoxb-"+secrets[0], secrets[1], secrets[2]
+	botToken, hooksToken, signing := "xoxb-"+secrets[0], strings.TrimSuffix(secrets[1], secretSuffix), secrets[2]
 	var ephemerals, responses atomic.Int32
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
@@ -5352,6 +5354,21 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 		{"the path of a response_url", "/actions/T0PROBE"}}
 	for _, sig := range sigs {
 		leaks = append(leaks, probeRLValue{"the value of X-Slack-Signature", sig})
+	}
+	returned := strings.Join(errorTexts(errors.Join(errs...), 0), "\n")
+	var tokenLeaks []string
+	for _, f := range leakForms(hooksToken) {
+		leaks = append(leaks, probeRLValue{"the token of a response_url", f.text})
+		if strings.Contains(logged, f.text) {
+			tokenLeaks = append(tokenLeaks, "the token of a response_url reached the log output")
+		}
+		if strings.Contains(returned, f.text) {
+			tokenLeaks = append(tokenLeaks, "the token of a response_url reached the returned error")
+		}
+	}
+	if len(tokenLeaks) > 0 {
+		slices.Sort(tokenLeaks)
+		errs = append(errs, &probeLeak{what: slices.Compact(tokenLeaks)})
 	}
 	return errors.Join(append(errs, probeRLLeaks(stored, leaks),
 		fmt.Errorf("request_log rows: %s", strings.Join(values, "\n")))...)

@@ -5,6 +5,7 @@ package slack
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -148,38 +149,88 @@ func TestAnswerFailsBothWays(t *testing.T) {
 }
 
 // TestResponseURLPinned is C-24.FR-11 and AC-13: a response_url is called only when it is https on hooks.slack.com,
-// without a port, user information or fragment — or, for a client `muster dev` routes to the fake server, on that
-// server — and only in the interactive class; the client of a Connection that goes to Slack never calls another host.
-// The host is compared in ASCII: the Kelvin sign, which Unicode folds to a `k`, is refused.
+// without a port, user information, query or fragment, with the path /actions/<team>/<n>/<token> of F-093 — or, for a
+// client `muster dev` routes to the fake server, on that server — and only in the interactive class; the client of a
+// Connection that goes to Slack never calls another host. The address called is built from hooks.slack.com, or the
+// fake server's configured origin, and the checked path, never taken from the response_url. The host is compared in
+// ASCII: the Kelvin sign, which Unicode folds to a `k`, is refused. A refused response_url reaches no network.
 func TestResponseURLPinned(t *testing.T) {
 	s := startStandIn(t, answerJSON(http.StatusOK, `{"ok":true}`))
+	res, rec := &resolver{}, &records{}
 	n := network(t, nil)
+	n.Resolver, n.Recorder = res, rec
 	routed := newClient(t, n, settings(s.base()))
-	direct := newClient(t, n, Settings{BotToken: testBot})
+	direct := newClient(t, n, Settings{BotToken: testBot, Owner: outbound.Owner{Connection: 7, PublicID: "CN0000000000SL"}})
+	const hooks = "https://hooks.slack.com/actions/T0/1/abc"
 	for _, c := range []struct {
 		client *Client
 		url    string
-		ok     bool
+		want   string
 	}{
-		{direct, "https://hooks.slack.com/actions/T0/1/abc", true},
-		{direct, "https://HOOKS.slack.com/actions/T0/1/abc", true},
-		{direct, "https://hoo\u212as.slack.com/actions/T0/1/abc", false},
-		{routed, "https://hooks.slack.com/actions/T0/1/abc", true},
-		{routed, s.srv.URL + "/actions/T0/1/abc", true},
-		{direct, s.srv.URL + "/actions/T0/1/abc", false},
-		{direct, "http://hooks.slack.com/actions/T0/1/abc", false},
-		{direct, "https://hooks.slack.com:8443/actions/T0/1/abc", false},
-		{direct, "https://user@hooks.slack.com/actions/T0/1/abc", false},
-		{direct, "https://hooks.slack.com/actions/T0/1/abc#x", false},
-		{direct, "https://hooks.slack.com.example.org/actions/T0/1/abc", false},
-		{direct, "https://evil.example.org/hooks.slack.com/actions", false},
-		{direct, "https://hooks.slack.com", false},
-		{direct, "::not a url", false},
-		{routed, "http://127.0.0.1:1/actions/T0/1/abc", false},
+		{direct, hooks, hooks},
+		{direct, "https://HOOKS.slack.com/actions/T0/1/abc", hooks},
+		{direct, "https://hooks.slack.com/actions/T0MUSTERDEVB/12/0123456789abcdef01234567",
+			"https://hooks.slack.com/actions/T0MUSTERDEVB/12/0123456789abcdef01234567"},
+		{direct, "https://hooks.slack.com/actions/E0ENTERPRISE/1/AbC9", "https://hooks.slack.com/actions/E0ENTERPRISE/1/AbC9"},
+		{direct, "https://hoo\u212as.slack.com/actions/T0/1/abc", ""},
+		{routed, hooks, hooks},
+		{routed, s.srv.URL + "/actions/T0/1/abc", s.srv.URL + "/actions/T0/1/abc"},
+		{routed, strings.ToUpper(s.srv.URL[:4]) + s.srv.URL[4:] + "/actions/T0/1/abc", s.srv.URL + "/actions/T0/1/abc"},
+		{direct, s.srv.URL + "/actions/T0/1/abc", ""},
+		{direct, "https://evil.example.org/actions/T0/1/abc", ""},
+		{direct, "http://hooks.slack.com/actions/T0/1/abc", ""},
+		{direct, "https://hooks.slack.com:8443/actions/T0/1/abc", ""},
+		{direct, "https://hooks.slack.com:443/actions/T0/1/abc", ""},
+		{direct, "https://user@hooks.slack.com/actions/T0/1/abc", ""},
+		{direct, "https://x@hooks.slack.com/actions/T0/1/abc", ""},
+		{direct, "https://hooks.slack.com/actions/T0/1/abc#x", ""},
+		{direct, "https://hooks.slack.com/actions/T0/1/abc?a=b", ""},
+		{direct, "https://hooks.slack.com/actions/T0/1/abc?", ""},
+		{direct, "https://hooks.slack.com.example.org/actions/T0/1/abc", ""},
+		{direct, "https://hooks.slack.com.evil.com/actions/T0/1/abc", ""},
+		{direct, "https://evil.example.org/hooks.slack.com/actions", ""},
+		{direct, "https://hooks.slack.com", ""},
+		{direct, "https://hooks.slack.com/", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/3/4", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/abc/", ""},
+		{direct, "https://hooks.slack.com/actions/../x", ""},
+		{direct, "https://hooks.slack.com/actions/T1/../../api/x", ""},
+		{direct, "https://hooks.slack.com//actions/T1/2/abc", ""},
+		{direct, "https://hooks.slack.com/api/chat.postMessage", ""},
+		{direct, "https://hooks.slack.com/commands/T1/2/abc", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/a%2Fb", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/ab%43", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/abc%0A", ""},
+		{direct, "https://hooks.slack.com/actions/t1/2/abc", ""},
+		{direct, "https://hooks.slack.com/actions/A1/2/abc", ""},
+		{direct, "https://hooks.slack.com/actions/T1/x/abc", ""},
+		{direct, "https://hooks.slack.com/actions/T1/2/a-b", ""},
+		{direct, "::not a url", ""},
+		{routed, "http://127.0.0.1:1/actions/T0/1/abc", ""},
+		{routed, s.srv.URL + "/actions/T0/1", ""},
+		{routed, s.srv.URL + "/actions/T0/1/abc?a=b", ""},
+		{routed, s.srv.URL + "/api/chat.postMessage", ""},
 	} {
-		if _, ok := c.client.responseURLAllowed(c.url); ok != c.ok {
-			t.Errorf("%s via %s: %v", c.url, c.client.Base(), ok)
+		got, path, ok := c.client.responseTarget(c.url)
+		if got != c.want || ok != (c.want != "") || (ok && !strings.HasSuffix(got, "/"+path)) {
+			t.Errorf("%s via %s: %q, %q, %v; want %q", c.url, c.client.Base(), got, path, ok, c.want)
 		}
+		if c.want != "" {
+			continue
+		}
+		if r := c.client.respond(t.Context(), outbound.ClassInteractive, c.url, "x"); r.OK() ||
+			string(r.Error) != "the response_url is not Slack's" {
+			t.Errorf("%s via %s: %+v", c.url, c.client.Base(), r)
+		}
+	}
+	if got, recs := res.got(), rec.got(); len(got) != 0 || len(recs) != 0 {
+		t.Fatalf("a refused response_url reached the network: resolved %v, records %+v", got, recs)
+	}
+	r := direct.respond(t.Context(), outbound.ClassInteractive, "https://HOOKS.slack.com/actions/T0/1/abc", "x")
+	if recs := rec.got(); r.OK() || r.Network != outbound.NetworkDNS || fmt.Sprint(res.got()) != "[hooks.slack.com]" ||
+		len(recs) != 1 || recs[0].URL != "https://hooks.slack.com[redacted]" || recs[0].Operation != "response_url" {
+		t.Fatalf("Slack's response_url = %+v, resolved %v, records %+v", r, res.got(), recs)
 	}
 	for _, url := range []string{s.srv.URL + "/actions/T0/1/abc", "http://hooks.slack.com/actions/T0/1/abc"} {
 		if r := direct.respond(t.Context(), outbound.ClassInteractive, url, "x"); r.OK() ||

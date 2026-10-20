@@ -664,20 +664,38 @@ type responseAnswer struct {
 // is not shown.
 var responseError = regexp.MustCompile(`^[a-z_]{1,64}$`)
 
-// responseURLAllowed is responseURL parsed when the client may call it (C-24.FR-11): an https address on HooksHost,
-// without a port, user information or fragment; or, for a client that `muster dev` routes to the fake Slack server, an
-// address on that server. The host is compared in ASCII only: one with any other character, such as the Kelvin sign
-// that Unicode folds to a `k`, is refused.
-func (c *Client) responseURLAllowed(responseURL string) (*url.URL, bool) {
+// hooksPrefix starts every address a response_url is answered at outside `muster dev`: HooksHost, followed by the
+// checked path of the response_url.
+const hooksPrefix = "https://" + HooksHost + "/"
+
+// responsePath is the path of a press's response_url without its leading slash (F-093): actions/<team>/<n>/<token>,
+// with a Slack team id, T or E and capitals or digits, as the Request log masks it; nothing else, no percent-encoding.
+var responsePath = regexp.MustCompile(`^actions/[TE][A-Z0-9]+/[0-9]+/[A-Za-z0-9]+$`)
+
+// responseTarget is the address the client answers responseURL at when it may call it (C-24.FR-11), and its checked
+// path: responseURL is an https address on HooksHost, without a port, user information, query or fragment, whose path
+// is responsePath, answered at hooksPrefix and that path; or, for a client that `muster dev` routes to the fake Slack
+// server, an address on that server with such a path, answered at the server's configured origin and that path. The
+// address is built anew, never taken from responseURL. The host is compared in ASCII only: one with any other
+// character, such as the Kelvin sign that Unicode folds to a `k`, is refused.
+func (c *Client) responseTarget(responseURL string) (target, path string, ok bool) {
 	u, err := url.Parse(responseURL)
-	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Path == "" || !ascii(u.Host) {
-		return nil, false
+	if err != nil || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" ||
+		!ascii(u.Host) {
+		return "", "", false
+	}
+	path = strings.TrimPrefix(u.EscapedPath(), "/")
+	if !responsePath.MatchString(path) {
+		return "", "", false
 	}
 	host := strings.ToLower(u.Host)
 	if u.Scheme == "https" && host == HooksHost {
-		return u, true
+		return hooksPrefix + path, path, true
 	}
-	return u, c.base != BaseURL && u.Scheme+"://"+host == strings.ToLower(c.origin)
+	if c.base != BaseURL && u.Scheme+"://"+host == strings.ToLower(c.origin) {
+		return c.origin + "/" + path, path, true
+	}
+	return "", "", false
 }
 
 // ascii reports whether s has only ASCII characters.
@@ -719,7 +737,7 @@ func (c *Client) respond(ctx context.Context, class outbound.Class, responseURL,
 	if class != outbound.ClassInteractive {
 		return unknown("a response_url is answered only in the interactive class")
 	}
-	u, ok := c.responseURLAllowed(responseURL)
+	target, path, ok := c.responseTarget(responseURL)
 	if !ok {
 		return unknown("the response_url is not Slack's")
 	}
@@ -728,8 +746,7 @@ func (c *Client) respond(ctx context.Context, class outbound.Class, responseURL,
 		return unknown("response_url: the client could not be built")
 	}
 	body, _ := json.Marshal(responseAnswer{ResponseType: "ephemeral", ReplaceOriginal: false, Text: text}) // strings
-	ctx = outbound.WithSecrets(ctx, logging.Secret(responseURL), logging.Secret(u.EscapedPath()),
-		logging.Secret(u.Path))
+	ctx = outbound.WithSecrets(ctx, logging.Secret(responseURL), logging.Secret(target), logging.Secret("/"+path))
 	code := ""
 	refused := func(_ int, data []byte) (outbound.BodyError, bool) {
 		var env struct {
@@ -747,7 +764,7 @@ func (c *Client) respond(ctx context.Context, class outbound.Class, responseURL,
 		}
 		return (&answerClass{}).mapping(status, d, hasRetryAfter)
 	}
-	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodPost, URL: responseURL,
+	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodPost, URL: target,
 		Header: http.Header{"Content-Type": {"application/json; charset=utf-8"}}, Body: body, Mapping: mapping,
 		ClassifyBody: refused, Operation: "response_url"})
 	return responded(res, err, code)
