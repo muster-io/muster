@@ -100,10 +100,10 @@ const (
 )
 
 // MaskedHeaders are the headers whose values every record shows as [redacted], whatever they hold (C-23.FR-3): the
-// credentials of the request and of the proxy, cookies, Telegram's webhook secret token and the signature of an
-// outgoing webhook or a Bridge push.
+// credentials of the request and of the proxy, cookies, Telegram's webhook secret token, the signature of an outgoing
+// webhook or a Bridge push, and Slack's signature of a press (C-24.FR-14).
 var MaskedHeaders = []string{"Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie",
-	"X-Telegram-Bot-Api-Secret-Token", "Webhook-Signature"}
+	"X-Telegram-Bot-Api-Secret-Token", "Webhook-Signature", "X-Slack-Signature"}
 
 // MaskHeaders is a copy of h with the values of MaskedHeaders replaced by [redacted] and every other name and value
 // passed through redact; nil stays nil.

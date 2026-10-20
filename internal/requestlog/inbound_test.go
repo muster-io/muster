@@ -6,10 +6,12 @@ package requestlog
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -646,5 +648,71 @@ func TestBodyAllowed(t *testing.T) {
 		if bodyAllowed(status) != want {
 			t.Errorf("bodyAllowed(%d) = %v", status, !want)
 		}
+	}
+}
+
+// TestInboundSlackPress covers C-24.FR-14 and C-23.FR-1 to FR-3 for a Slack press in http mode: the request to the
+// callback is recorded as inbound with the operation interactive and Muster's answer, the refused one too, naming the
+// Connection only; the value of X-Slack-Signature, whatever it holds, the response_url, the verification token and the
+// signed action ids of the form as it arrived — percent-encoded, with Slack's escaped slashes — reach no column; the
+// form stays a form whose payload is JSON.
+func TestInboundSlackPress(t *testing.T) {
+	ack, resolve := signed(t, buttons.SubjectRoot, buttons.CommandAcknowledge), signed(t, buttons.SubjectRoot,
+		buttons.CommandResolve)
+	hooks := "https://hooks.slack.com/actions/T0123ABCD/4567890123/aBcDeF0123456789xyz"
+	sig := "v0=" + strings.Repeat("9f", 32)
+	q := &fakeQueries{}
+	writer, out, _ := newTestWriter(q, 0)
+	h := Inbound(writer, clock.NewManual(t0), OperationInteractive, http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.ReadAll(r.Body)
+			Annotate(r.Context(), Links{Connection: 7, ConnectionID: inboundConn})
+			if r.Header.Get("X-Slack-Signature") != sig {
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"status":401}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+	payload := strings.ReplaceAll(slackPayload(t, hooks, ack, resolve), "/", `\/`)
+	body := "payload=" + url.QueryEscape(payload)
+	for i, header := range []string{sig, "wrong"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/callbacks/slack/"+inboundConn,
+			strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Slack-Signature", header)
+		req.Header.Set("X-Slack-Request-Timestamp", "1760000000")
+		w := serve(t, h, req)
+		if len(q.inserts) != i+1 {
+			t.Fatalf("request %d: %d inserts, logged %s", i, len(q.inserts), out)
+		}
+		p := q.inserts[i]
+		if p.Direction != "inbound" || p.Operation != "interactive" || int(p.Status.Int32) != w.Code ||
+			p.ConnectionID != (pgtype.Int8{Int64: 7, Valid: true}) || p.DestinationID.Valid || p.AlertGroupID.Valid {
+			t.Errorf("request %d: %+v", i, p)
+		}
+		for _, text := range texts(p) {
+			for _, secret := range []string{ack, resolve, header, "Vt0kenOfTheApp99", "hooks.slack.com", "actions%5C%2F",
+				"actions%2F", "/actions/"} {
+				if strings.Contains(text, secret) {
+					t.Errorf("request %d stores %q in %q", i, secret, text)
+				}
+			}
+		}
+		if !strings.Contains(string(p.RequestHeaders), `"X-Slack-Signature":["[redacted]"]`) ||
+			!strings.Contains(string(p.RequestHeaders), `"X-Slack-Request-Timestamp":["1760000000"]`) {
+			t.Errorf("request %d: headers %s", i, p.RequestHeaders)
+		}
+		form, err := url.ParseQuery(p.RequestBody)
+		var m map[string]any
+		if err != nil || json.Unmarshal([]byte(form.Get("payload")), &m) != nil || m["token"] != redacted ||
+			m["response_url"] != redacted || m["type"] != "block_actions" {
+			t.Errorf("request %d: body %s", i, p.RequestBody)
+		}
+	}
+	if q.inserts[0].Status.Int32 != http.StatusOK || q.inserts[0].ResponseBody.String != "" ||
+		q.inserts[1].Status.Int32 != http.StatusUnauthorized {
+		t.Errorf("answers %v %q, %v", q.inserts[0].Status, q.inserts[0].ResponseBody.String, q.inserts[1].Status)
 	}
 }
