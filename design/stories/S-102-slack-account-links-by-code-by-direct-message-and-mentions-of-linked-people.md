@@ -144,7 +144,7 @@ curl -s "${AH[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":
 curl -s -b jar "$API/request-log?connection=$C&operation=chat.postMessage&limit=5" | jq -r '.items[].id' | while read -r I; do curl -s -b jar "$API/request-log/$I"; done | grep -c "$CODE"   # 0
 
 # C-24.FR-6, AC-15: Alice mentioned and named
-M=$(curl -s -b jar $API/destinations/$D | jq -c --arg a "$(curl -s -b ajar $API/me | jq -r .id)" '.mentions | .new_alert_group.user_ids = [$a] | .new_alert_group.everyone = "none"')
+M=$(curl -s -b jar $API/destinations/$D | jq -c --arg a "$(curl -s -b ajar $API/me | jq -r .user.id)" '.mentions | .new_alert_group.user_ids = [$a] | .new_alert_group.everyone = "none"')
 curl -s "${H[@]}" -X PUT -H "If-Match: $(curl -s -b jar $API/destinations/$D | jq -r .etag)" $API/destinations/$D \
   -d "$(curl -s -b jar $API/destinations/$D | jq -c --argjson m "$M" '{type, name, connection_id, channel_id, limiter, mentions: $m}')" > /dev/null
 FIRE n1 MentionMe u1; G=$(AG 'pod%3D%22u1%22')
