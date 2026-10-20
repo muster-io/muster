@@ -32,16 +32,31 @@ const (
 	PingInterval = 30 * time.Second
 	PingTimeout  = 10 * time.Second
 	// SocketBackoffBase and SocketBackoffCap are slack.socket_backoff: the wait after a failed connection doubles
-	// from the base up to the cap, with equal jitter, and a hello resets it.
+	// from the base up to the cap, with equal jitter, and starts from the base again once a connection has lasted
+	// socketSettled after its hello, or is ended by a planned refresh.
 	SocketBackoffBase = time.Second
 	SocketBackoffCap  = 5 * time.Minute
+	// socketSettled is how long a connection must last after its hello for its end to reset the back-off: one ping
+	// interval, so that a connection that ends right after its hello keeps backing off.
+	socketSettled = PingInterval
 	// SocketReadInterval is how often the Connections are read again without a wake.
 	SocketReadInterval = time.Minute
 	// confirmTimeout bounds the write of the confirmation of an envelope.
 	confirmTimeout = 10 * time.Second
 	// openTimeout bounds apps.connections.open, whose background class retries what is transient.
 	openTimeout = 2 * CallTimeout
+	// helloWriteTimeout bounds the store of what a hello counted.
+	helloWriteTimeout = 5 * time.Second
+	// closeGrace is how long a socket Muster lets go waits for Slack to answer its normal closure before it is closed
+	// at once.
+	closeGrace = time.Second
+	// minSecretValue is the length in bytes from which a value in the query of a socket's address is masked on its
+	// own in what Muster logs of the socket, as the outbound package masks it; the ticket always is.
+	minSecretValue = 8
 )
+
+// socketTask is the Leader task that runs Sockets, as leader_task_failed names it.
+const socketTask = "slack_socket_mode"
 
 // The reasons of slack_socket_failed.
 const (
@@ -98,9 +113,13 @@ type SocketSource interface {
 // callback of http mode hands over its presses, and any other type is ignored; each is recorded in the Request log.
 // A disconnect warning or refresh_requested opens the next connection, with its hello, before the old one is closed;
 // link_disabled, too_many_websockets, a failed dial, a missing hello and a connection that ended back off by
-// slack.socket_backoff, reset by a hello, and log slack_socket_failed; nothing counts them and nothing becomes Broken.
-// Each hello logs slack_socket_connected and stores, through Source, the connections of the app it counts beyond
-// those held, logging slack_socket_shared when there are any.
+// slack.socket_backoff — at least as long as a Retry-After of apps.connections.open asks, and reset once a connection
+// has lasted socketSettled or by a planned refresh — and log slack_socket_failed, with the address's query masked;
+// nothing counts them and nothing becomes Broken. Each hello stores, through Source, the connections of the app it
+// counts beyond those held, and then logs slack_socket_connected, and slack_socket_shared when there are any; a
+// holder's writer does it in order, within helloWriteTimeout, so that a slow store holds up neither the frames nor the
+// hello, and a count the next hello replaces before it is stored is left out. A socket Muster lets go is closed with a
+// normal closure, cut after closeGrace without an answer; a broken one is closed at once.
 //
 // Running it on two replicas at once is safe: each press reaches one of their connections.
 type Sockets struct {
@@ -121,10 +140,11 @@ type Sockets struct {
 	// SocketReadInterval when they are set.
 	HelloTimeout, BackoffBase, BackoffCap, Every time.Duration
 
-	// after arms a timer on the real clock and returns its channel and its stop; jitter spreads a back-off. Tests
-	// replace them.
-	after  func(d time.Duration) (<-chan time.Time, func())
-	jitter func(d time.Duration) time.Duration
+	// after arms a timer on the real clock and returns its channel and its stop; jitter spreads a back-off;
+	// openTimeout replaces openTimeout when it is set. Tests replace them.
+	after       func(d time.Duration) (<-chan time.Time, func())
+	jitter      func(d time.Duration) time.Duration
+	openTimeout time.Duration
 
 	wakeOnce sync.Once
 	wake     chan struct{}
@@ -147,8 +167,9 @@ func (s *Sockets) Wake() {
 // them at once before it returns, after their readers, pingers and records have ended: a holder starts for each
 // Connection in socket mode, starts again when the Connection's version changes and stops when it leaves socket mode,
 // is deleted, or its client cannot be built — logged once for each version. The Connections are read again on Wake
-// and every Every. A failed read of the Connections stops every holder and returns its error, so that the Leader task
-// runs again.
+// and every Every. When the first read fails Run returns its error, so that the Leader task runs again; a later one is
+// logged as leader_task_failed, keeps the holders, which hold versions read before, and is tried again at the next
+// wake or Every.
 func (s *Sockets) Run(ctx context.Context) error {
 	base := s.Base
 	if base == nil {
@@ -170,13 +191,20 @@ func (s *Sockets) Run(ctx context.Context) error {
 		}
 	}
 	defer func() { stop(slices.Collect(maps.Keys(running))...) }()
-	for {
+	for first := true; ; first = false {
 		list, err := s.Source.SocketConnections(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			if first {
+				return err
+			}
+			s.Log.Log(ctx, logging.LeaderTaskFailed, logging.F("task", socketTask), logging.F("error", err.Error()))
+			if !s.waitRead(ctx, every) {
+				return nil
+			}
+			continue
 		}
 		want := make(map[int64]SocketConn, len(list))
 		listed := make(map[int64]bool, len(list))
@@ -192,7 +220,7 @@ func (s *Sockets) Run(ctx context.Context) error {
 			}
 			if v, ok := broken[c.ID]; !ok || v != c.Version {
 				broken[c.ID] = c.Version
-				s.failed(ctx, c, reasonDial, every, c.Err)
+				s.failed(ctx, c, socketFailure{reason: reasonDial, err: c.Err}, 0)
 			}
 		}
 		maps.DeleteFunc(broken, func(id, _ int64) bool { return !listed[id] })
@@ -209,7 +237,7 @@ func (s *Sockets) Run(ctx context.Context) error {
 			}
 			hctx, cancel := context.WithCancel(ctx)
 			h := &holder{s: s, c: c, base: base, cancel: cancel, done: make(chan struct{}),
-				open: map[*socket]struct{}{}}
+				open: map[*socket]struct{}{}, counts: make(chan helloCount, 1)}
 			running[id] = h
 			go func() {
 				defer close(h.done)
@@ -236,8 +264,9 @@ func (s *Sockets) waitRead(ctx context.Context, every time.Duration) bool {
 }
 
 // holder holds the Socket Mode connection of one version of a Connection: the one in use, the next one while a
-// planned refresh opens it, and the old ones while they close. held counts the sockets whose reader runs; bg the
-// closes of old sockets and the writes of records, which the holder waits for before it ends.
+// planned refresh opens it, and the old ones while they close. held counts the sockets whose reader runs; counts holds
+// the count of the last hello until the writer takes it; bg the writer, the closes of old sockets and the writes of
+// records, which the holder waits for before it ends.
 type holder struct {
 	s      *Sockets
 	c      SocketConn
@@ -245,24 +274,42 @@ type holder struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	held atomic.Int32
-	mu   sync.Mutex
-	open map[*socket]struct{}
-	bg   sync.WaitGroup
+	held     atomic.Int32
+	mu       sync.Mutex
+	open     map[*socket]struct{}
+	countsMu sync.Mutex
+	counts   chan helloCount
+	bg       sync.WaitGroup
 }
 
-// socket is one Socket Mode connection: its WebSocket, the address of its records, its context, which its reader and
-// pinger end with, and what its reader tells the holder — that its first hello came and was counted, and once the
-// first disconnect reason, or "" when it ended.
+// helloCount is what a hello counted: num_connections, those of them the holder held, and the others.
+type helloCount struct {
+	n, held, other int
+}
+
+// socketFailure is why a connection could not be opened or ended: the reason of slack_socket_failed, what failed, and
+// the least wait that Slack asked for before the next one.
+type socketFailure struct {
+	reason string
+	err    error
+	after  time.Duration
+}
+
+// socket is one Socket Mode connection: its WebSocket, the address of its records, what a text may show of its
+// address's query, its context, which its reader and pinger end with, and what its reader tells the holder — that its
+// first hello came, at since on the real clock, and was counted, and once the first disconnect reason, or "" when it
+// ended.
 type socket struct {
-	conn   *websocket.Conn
-	url    string
-	ctx    context.Context //nolint:containedctx // the lifetime of the socket, which its reader and pinger share
-	cancel context.CancelFunc
-	hello  chan struct{}
-	stop   chan string
-	ended  chan struct{}
-	pinged chan struct{}
+	conn    *websocket.Conn
+	url     string
+	secrets []string
+	since   time.Time
+	ctx     context.Context //nolint:containedctx // the lifetime of the socket, which its reader and pinger share
+	cancel  context.CancelFunc
+	hello   chan struct{}
+	stop    chan string
+	ended   chan struct{}
+	pinged  chan struct{}
 
 	mu     sync.Mutex
 	endErr error
@@ -295,30 +342,29 @@ func (sc *socket) cause() error {
 	return sc.endErr
 }
 
-// run holds the connection until ctx ends, and then closes every socket at once and waits for their goroutines and
-// records.
+// run holds the connection until ctx ends, and then closes every socket and waits for their goroutines, the writer and
+// the records. The failures in a row count from the last connection that lasted socketSettled after its hello, or that
+// a planned refresh ended.
 func (h *holder) run(ctx context.Context) {
 	defer h.bg.Wait()
 	defer h.closeAll()
+	h.bg.Go(func() { h.store(ctx) })
 	var cur *socket
 	refreshing := false
 	failures := 0
 	for ctx.Err() == nil {
 		if cur == nil || refreshing {
-			next, reason, err := h.connect(ctx)
+			next, f := h.connect(ctx)
 			if ctx.Err() != nil {
 				return
 			}
 			if next == nil {
 				failures++
-				wait := h.s.backoff(failures)
-				h.s.failed(ctx, h.c, reason, wait, err)
-				if !h.s.pause(ctx, wait) {
+				if !h.backOff(ctx, failures, f) {
 					return
 				}
 				continue
 			}
-			failures = 0
 			if cur != nil {
 				h.retire(cur)
 			}
@@ -333,26 +379,40 @@ func (h *holder) run(ctx context.Context) {
 				return
 			}
 			if reason == disconnectWarning || reason == disconnectRefresh {
-				refreshing = true
+				failures, refreshing = 0, true
 				continue
 			}
 			h.closeNow(cur)
-			why, err := failureOf(reason, cur)
+			if h.s.Real.Now().Sub(cur.since) >= socketSettled {
+				failures = 0
+			}
+			f := failureOf(reason, cur)
 			cur = nil
 			failures++
-			wait := h.s.backoff(failures)
-			h.s.failed(ctx, h.c, why, wait, err)
-			if !h.s.pause(ctx, wait) {
+			if !h.backOff(ctx, failures, f) {
 				return
 			}
 		}
 	}
 }
 
+// backOff logs the failure f, the nth in a row, and waits for its back-off, at least as long as Slack asked; it
+// reports false when ctx ended first.
+func (h *holder) backOff(ctx context.Context, n int, f socketFailure) bool {
+	wait := max(h.s.backoff(n), f.after)
+	h.s.failed(ctx, h.c, f, wait)
+	return h.s.pause(ctx, wait)
+}
+
 // connect opens a new connection: apps.connections.open, the dial, and its hello within the hello timeout. It returns
-// the socket, or why it failed — the reason of slack_socket_failed and what failed, masked.
-func (h *holder) connect(ctx context.Context) (*socket, string, error) {
-	octx, cancel := context.WithTimeout(ctx, openTimeout)
+// the socket, or why it failed, masked. The socket's context does not end with ctx: the socket is closed only by the
+// holder, which lets it go with a normal closure.
+func (h *holder) connect(ctx context.Context) (*socket, socketFailure) {
+	timeout := h.s.openTimeout
+	if timeout <= 0 {
+		timeout = openTimeout
+	}
+	octx, cancel := context.WithTimeout(ctx, timeout)
 	address, r := h.c.Client.OpenSocket(octx)
 	cancel()
 	if !r.OK() {
@@ -360,55 +420,103 @@ func (h *holder) connect(ctx context.Context) (*socket, string, error) {
 		if !strings.Contains(text, "apps.connections.open") {
 			text = "apps.connections.open: " + text
 		}
-		return nil, reasonDial, errors.New(text)
+		f := socketFailure{reason: reasonDial, err: errors.New(text)}
+		if r.Classification.Class == ClassRetryAfter {
+			f.after = r.Classification.RetryAfter
+		}
+		return nil, f
 	}
+	secrets := addressSecrets(string(address))
 	conn, err := h.c.Client.DialSocket(ctx, address)
 	if err != nil {
-		return nil, reasonDial, err
+		return nil, socketFailure{reason: reasonDial, err: errors.New(maskWith(secrets, err.Error()))}
 	}
-	sctx, scancel := context.WithCancel(ctx)
-	sc := &socket{conn: conn, url: recordURL(string(address)), ctx: sctx, cancel: scancel, hello: make(chan struct{}, 1),
-		stop: make(chan string, 1), ended: make(chan struct{}), pinged: make(chan struct{})}
+	sctx, scancel := context.WithCancel(context.WithoutCancel(ctx))
+	sc := &socket{conn: conn, url: recordURL(string(address)), secrets: secrets, ctx: sctx, cancel: scancel,
+		hello: make(chan struct{}, 1), stop: make(chan string, 1), ended: make(chan struct{}),
+		pinged: make(chan struct{})}
 	h.mu.Lock()
 	h.open[sc] = struct{}{}
 	h.mu.Unlock()
 	h.held.Add(1)
 	go h.read(sc)
 	go h.ping(sc)
-	timeout := h.s.HelloTimeout
-	if timeout <= 0 {
-		timeout = HelloTimeout
+	wait := h.s.HelloTimeout
+	if wait <= 0 {
+		wait = HelloTimeout
 	}
-	timer, stop := h.s.timer(timeout)
+	timer, stop := h.s.timer(wait)
 	defer stop()
 	select {
 	case <-sc.hello:
-		return sc, "", nil
+		return sc, socketFailure{}
 	case reason := <-sc.stop:
 		h.closeNow(sc)
-		why, err := failureOf(reason, sc)
-		return nil, why, err
+		return nil, failureOf(reason, sc)
 	case <-timer:
 		h.closeNow(sc)
-		return nil, reasonHelloTimeout, nil
+		return nil, socketFailure{reason: reasonHelloTimeout}
 	case <-ctx.Done():
-		h.closeNow(sc)
-		return nil, "", ctx.Err()
+		h.part(sc)
+		return nil, socketFailure{err: ctx.Err()}
 	}
 }
 
-// failureOf is the reason of slack_socket_failed and what failed for a socket that told the holder reason: a disconnect
-// reason, or "" when it ended.
-func failureOf(reason string, sc *socket) (string, error) {
+// failureOf is why a socket that told the holder reason — a disconnect reason, or "" when it ended — failed, with the
+// query of its address masked in what failed: Slack may repeat it in a disconnect reason or a close frame.
+func failureOf(reason string, sc *socket) socketFailure {
 	switch reason {
 	case disconnectLinkDisabled:
-		return reasonLinkDisabled, nil
+		return socketFailure{reason: reasonLinkDisabled}
 	case disconnectTooMany:
-		return reasonTooMany, nil
+		return socketFailure{reason: reasonTooMany}
 	case "":
-		return reasonClosed, sc.cause()
+		return socketFailure{reason: reasonClosed, err: errors.New(sc.mask(sc.cause().Error()))}
 	}
-	return reasonClosed, errors.New("disconnect " + disconnectReason(reason))
+	return socketFailure{reason: reasonClosed, err: errors.New("disconnect " + disconnectReason(sc.mask(reason)))}
+}
+
+// addressSecrets are what a text may show of the query of a socket's address, the longer first: the query as sent
+// and unescaped, the ticket, and each other value of at least minSecretValue bytes, as sent and unescaped.
+func addressSecrets(address string) []string {
+	u, err := url.Parse(address)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	add := func(v string) {
+		if v != "" && !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	add(u.RawQuery)
+	if q, err := url.QueryUnescape(u.RawQuery); err == nil {
+		add(q)
+	}
+	for pair := range strings.SplitSeq(u.RawQuery, "&") {
+		key, raw, _ := strings.Cut(pair, "=")
+		v, err := url.QueryUnescape(raw)
+		if err != nil {
+			v = raw
+		}
+		if key == "ticket" || len(v) >= minSecretValue {
+			add(raw)
+			add(v)
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int { return len(b) - len(a) })
+	return out
+}
+
+// mask replaces what text shows of the query of the socket's address.
+func (sc *socket) mask(text string) string { return maskWith(sc.secrets, text) }
+
+// maskWith replaces each of secrets, the longer first, in text.
+func maskWith(secrets []string, text string) string {
+	for _, v := range secrets {
+		text = strings.ReplaceAll(text, v, "[redacted]")
+	}
+	return text
 }
 
 // disconnectReason is a reason of disconnect Muster does not know, as a log line shows it: printable ASCII, at most
@@ -435,7 +543,7 @@ func recordURL(address string) string {
 	return u.Scheme + "://" + u.Host + u.EscapedPath()
 }
 
-// closeNow closes the socket sc at once and waits for its reader and pinger.
+// closeNow closes the broken socket sc at once, cancelling its reads, and waits for its reader and pinger.
 func (h *holder) closeNow(sc *socket) {
 	sc.cancel()
 	_ = sc.conn.CloseNow() // closed already when its reader or pinger closed it
@@ -444,29 +552,47 @@ func (h *holder) closeNow(sc *socket) {
 	h.forget(sc)
 }
 
-// retire closes the old socket sc of a planned refresh with a normal closure, in the background: it keeps reading and
-// confirming until then.
-func (h *holder) retire(sc *socket) {
-	h.bg.Go(func() {
-		_ = sc.conn.Close(websocket.StatusNormalClosure, "") // a socket that ended meanwhile is closed already
+// part lets the socket sc go with a normal closure, so that Slack learns at once that it is gone, and closes it at
+// once when Slack has not answered within closeGrace, or when its reader has ended already; it waits for its reader
+// and pinger. A cancelled read closes the connection at once, so the reads are cancelled only after the closure.
+func (h *holder) part(sc *socket) {
+	select {
+	case <-sc.ended:
 		h.closeNow(sc)
-	})
+		return
+	default:
+	}
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		_ = sc.conn.Close(websocket.StatusNormalClosure, "") // closeNow below closes a socket Slack did not answer
+	}()
+	grace, stop := h.s.timer(closeGrace)
+	select {
+	case <-closed:
+	case <-grace:
+	}
+	stop()
+	h.closeNow(sc)
+	<-closed
 }
 
-// closeAll closes every socket of the holder at once and waits for their readers and pingers.
+// retire lets the old socket sc of a planned refresh go in the background: it keeps reading and confirming until
+// then.
+func (h *holder) retire(sc *socket) {
+	h.bg.Go(func() { h.part(sc) })
+}
+
+// closeAll lets every socket of the holder go, all at once, and waits for their readers and pingers.
 func (h *holder) closeAll() {
 	h.mu.Lock()
 	all := slices.Collect(maps.Keys(h.open))
 	h.mu.Unlock()
+	var wg sync.WaitGroup
 	for _, sc := range all {
-		sc.cancel()
-		_ = sc.conn.CloseNow() // closed already when its reader or pinger closed it
+		wg.Go(func() { h.part(sc) })
 	}
-	for _, sc := range all {
-		<-sc.ended
-		<-sc.pinged
-		h.forget(sc)
-	}
+	wg.Wait()
 }
 
 func (h *holder) forget(sc *socket) {
@@ -485,8 +611,9 @@ type frame struct {
 }
 
 // read reads the frames of sc until it ends: each envelope with an envelope_id is confirmed and handled; each hello is
-// counted, in order, and the first then tells the holder that waits for it; a disconnect tells the holder its reason.
-// Binary frames and frames that are not JSON are ignored. A confirmation that cannot be written ends the socket.
+// counted, in order, and handed to the writer, and the first then tells the holder that waits for it; a disconnect
+// tells the holder its reason. Binary frames and frames that are not JSON are ignored. A confirmation that cannot be
+// written ends the socket.
 func (h *holder) read(sc *socket) {
 	defer func() {
 		h.held.Add(-1)
@@ -511,7 +638,10 @@ func (h *holder) read(sc *socket) {
 				return
 			}
 		case f.Type == frameHello:
-			h.helloed(sc.ctx, f.NumConnections)
+			if first {
+				sc.since = h.s.Real.Now()
+			}
+			h.counted(f.NumConnections)
 			if first {
 				first = false
 				sc.hello <- struct{}{}
@@ -596,33 +726,61 @@ func (h *holder) pingOnce(sc *socket) error {
 	}
 }
 
-// helloed records what a hello of the holder's connection counted: num_connections n, of which the holder holds
-// those whose reader runs — two while a planned refresh overlaps.
-func (h *holder) helloed(ctx context.Context, n int) {
+// counted counts a hello of the holder's connection — num_connections n, of which the holder holds those whose reader
+// runs, two while a planned refresh overlaps — and hands the count to the writer, replacing one it has not taken yet.
+func (h *holder) counted(n int) {
 	held := int(h.held.Load())
-	other := max(n-held, 0)
-	err := h.s.Source.RecordSocketHello(ctx, h.c, other)
-	fields := []logging.Field{logging.F("connection", h.c.PublicID), logging.F("num_connections", n),
-		logging.F("held", held)}
+	c := helloCount{n: n, held: held, other: max(n-held, 0)}
+	h.countsMu.Lock()
+	defer h.countsMu.Unlock()
+	select {
+	case <-h.counts:
+	default:
+	}
+	h.counts <- c
+}
+
+// store is the holder's writer: until ctx ends it stores each count it takes, within helloWriteTimeout, and logs it.
+func (h *holder) store(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case c := <-h.counts:
+			h.record(ctx, c)
+		}
+	}
+}
+
+// record stores what a hello counted through Source, logs slack_socket_connected, with the error of the store when
+// it failed, and slack_socket_shared when the hello counted others.
+func (h *holder) record(ctx context.Context, c helloCount) {
+	wctx, cancel := context.WithTimeout(ctx, helloWriteTimeout)
+	err := h.s.Source.RecordSocketHello(wctx, h.c, c.other)
+	cancel()
+	fields := []logging.Field{logging.F("connection", h.c.PublicID), logging.F("num_connections", c.n),
+		logging.F("held", c.held)}
 	if err != nil {
 		fields = append(fields, logging.F("error", h.c.Client.mask(err.Error())))
 	}
 	h.s.Log.Log(ctx, logging.SlackSocketConnected, fields...)
-	if other > 0 {
+	if c.other > 0 {
 		h.s.Log.Log(ctx, logging.SlackSocketShared, logging.F("connection", h.c.PublicID),
-			logging.F("other_connections", other))
+			logging.F("other_connections", c.other))
 	}
 }
 
-// failed logs slack_socket_failed for the Connection c: the reason, the wait before the next connection and what
-// failed, masked of the client's secrets; none for a reason that says it all.
-func (s *Sockets) failed(ctx context.Context, c SocketConn, reason string, wait time.Duration, err error) {
-	fields := []logging.Field{logging.F("connection", c.PublicID), logging.F("reason", reason),
-		logging.F("backoff_seconds", wait.Seconds())}
-	if err != nil {
-		text := cut(err.Error())
+// failed logs slack_socket_failed for the Connection c: the reason of f, the wait before the next connection when there
+// is one, and what failed, masked of the client's secrets; none for a reason that says it all.
+func (s *Sockets) failed(ctx context.Context, c SocketConn, f socketFailure, wait time.Duration) {
+	fields := []logging.Field{logging.F("connection", c.PublicID), logging.F("reason", f.reason)}
+	if wait > 0 {
+		fields = append(fields, logging.F("backoff_seconds", wait.Seconds()))
+	}
+	if f.err != nil {
+		text := cut(f.err.Error())
 		if c.Client != nil {
-			text = c.Client.mask(err.Error())
+			text = c.Client.mask(f.err.Error())
 		}
 		fields = append(fields, logging.F("error", text))
 	}

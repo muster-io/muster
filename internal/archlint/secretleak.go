@@ -5388,12 +5388,14 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 // apps.connections.open with that address and a warning that echoes the Authorization header. It refuses the first
 // connection of the first Connection with 403 and a body that echoes the address; the second says hello counting one
 // connection beyond the Leader's, whose count is stored with an error that echoes the app-level token, sends an
-// events_api envelope and, once it is confirmed, disconnects with link_disabled; the third never says hello. Its hello
-// and disconnect echo the ticket. Then apps.connections.open and the dial run once directly, the dial also through the
-// refusing proxy, and what they answered is returned. No log line, error or record may carry the app-level token, the
-// ticket or the proxy password; the probe is incomplete unless the log shows the failed dial, link_disabled and
-// hello_timeout of the first Connection, the failed dial of the second and one slack_socket_shared, the envelope was
-// confirmed, and the records hold two calls of apps.connections.open and the envelope.
+// events_api envelope and, once it is confirmed, disconnects with link_disabled; the third never says hello; the fourth
+// says hello and closes with a close frame whose reason echoes the ticket, and the fifth says hello and disconnects
+// with an unknown reason that echoes it. Its hellos and disconnects echo the ticket. Then apps.connections.open and the
+// dial run once directly, the dial also through the refusing proxy, and what they answered is returned. No log line,
+// error or record may carry the app-level token, the ticket or the proxy password; the probe is incomplete unless the
+// log shows the failed dial, link_disabled, hello_timeout and two closed of the first Connection, the failed dial of
+// the second and one slack_socket_shared, the counts 1, 0 and 0 were stored, the envelope was confirmed, and the
+// records hold two calls of apps.connections.open and the envelope.
 func probeSlackSocket(ctx context.Context, secrets []string, log io.Writer) error {
 	var lines bytes.Buffer
 	var linesMu sync.Mutex
@@ -5470,7 +5472,10 @@ func probeSlackSocket(ctx context.Context, secrets []string, log io.Writer) erro
 	go func() { ran <- sockets.Run(runCtx) }()
 	seen := func() bool {
 		f := probeSocketFailures(logged())
-		return f["CNAAAAAAAAAAA6"]["hello_timeout"] > 0 && f["CNAAAAAAAAAAA7"]["dial"] > 0
+		source.mu.Lock()
+		stored := len(source.others)
+		source.mu.Unlock()
+		return f["CNAAAAAAAAAAA6"]["closed"] >= 2 && f["CNAAAAAAAAAAA7"]["dial"] > 0 && stored >= 3
 	}
 	deadline := time.After(10 * time.Second)
 	for waiting := true; waiting && !seen(); {
@@ -5514,12 +5519,13 @@ func probeSlackSocket(ctx context.Context, secrets []string, log io.Writer) erro
 	source.mu.Unlock()
 	switch {
 	case failures["CNAAAAAAAAAAA6"]["dial"] == 0 || failures["CNAAAAAAAAAAA6"]["link_disabled"] == 0 ||
-		failures["CNAAAAAAAAAAA6"]["hello_timeout"] == 0 || failures["CNAAAAAAAAAAA7"]["dial"] == 0:
-		errs = append(errs, &probeIncomplete{fmt.Sprintf("slack_socket_failed %v, want dial, link_disabled and "+
-			"hello_timeout of CNAAAAAAAAAAA6 and dial of CNAAAAAAAAAAA7", failures)})
-	case strings.Count(text, `"event":"slack_socket_shared"`) != 1 || !slices.Equal(others, []int{1}):
+		failures["CNAAAAAAAAAAA6"]["hello_timeout"] == 0 || failures["CNAAAAAAAAAAA6"]["closed"] < 2 ||
+		failures["CNAAAAAAAAAAA7"]["dial"] == 0:
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("slack_socket_failed %v, want dial, link_disabled, "+
+			"hello_timeout and two closed of CNAAAAAAAAAAA6 and dial of CNAAAAAAAAAAA7", failures)})
+	case strings.Count(text, `"event":"slack_socket_shared"`) != 1 || !slices.Equal(others, []int{1, 0, 0}):
 		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d slack_socket_shared lines and the counts %v stored, "+
-			"want 1 and [1]", strings.Count(text, `"event":"slack_socket_shared"`), others)})
+			"want 1 and [1 0 0]", strings.Count(text, `"event":"slack_socket_shared"`), others)})
 	case ack != `{"envelope_id":"`+envelopeID+`"}`:
 		errs = append(errs, &probeIncomplete{"the envelope was not confirmed"})
 	}
@@ -5561,10 +5567,12 @@ func probeSlackSocket(ctx context.Context, secrets []string, log io.Writer) erro
 
 // probeSocketLink answers the nth connection to the Socket Mode address of probeSlackSocket's stand-in: the second
 // says hello counting two connections, sends an events_api envelope, hands its confirmation to confirmed and
-// disconnects with link_disabled; the third says nothing; every other is refused with 403 and a body that echoes the
-// address. The hello and the disconnect echo the ticket.
+// disconnects with link_disabled; the third says nothing; the fourth says hello counting one and closes with a close
+// frame whose reason echoes the ticket; the fifth says hello counting one and disconnects with an unknown reason that
+// echoes it; every other is refused with 403 and a body that echoes the address. The hellos and the disconnects echo
+// the ticket.
 func probeSocketLink(w http.ResponseWriter, r *http.Request, n int32, envelopeID string, confirmed chan<- string) {
-	if n != 2 && n != 3 {
+	if n < 2 || n > 5 {
 		http.Error(w, "refused "+r.URL.String(), http.StatusForbidden)
 		return
 	}
@@ -5574,8 +5582,23 @@ func probeSocketLink(w http.ResponseWriter, r *http.Request, n int32, envelopeID
 	}
 	defer func() { _ = c.CloseNow() }()
 	ctx := r.Context()
-	if n == 2 {
-		debug := `{"host":"applink-` + r.URL.Query().Get("ticket") + `"}`
+	ticket := r.URL.Query().Get("ticket")
+	debug := `{"host":"applink-` + ticket + `"}`
+	switch n {
+	case 4:
+		if c.Write(ctx, websocket.MessageText, []byte(`{"type":"hello","num_connections":1,"debug_info":`+debug+
+			`}`)) == nil {
+			_ = c.Close(websocket.StatusPolicyViolation, "bad "+ticket)
+		}
+		return
+	case 5:
+		for _, f := range []string{`{"type":"hello","num_connections":1,"debug_info":` + debug + `}`,
+			`{"type":"disconnect","reason":"gone ` + ticket + `","debug_info":` + debug + `}`} {
+			if c.Write(ctx, websocket.MessageText, []byte(f)) != nil {
+				return
+			}
+		}
+	case 2:
 		for _, f := range []string{`{"type":"hello","num_connections":2,"debug_info":` + debug + `}`,
 			`{"envelope_id":"` + envelopeID + `","type":"events_api","payload":{"event":{"type":"app_mention"}},` +
 				`"accepts_response_payload":false}`} {

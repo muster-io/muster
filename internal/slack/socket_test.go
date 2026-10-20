@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
@@ -84,6 +86,18 @@ func (ft *fakeTimers) fire(t *testing.T, d time.Duration) {
 	})
 }
 
+// fireArmed fires every timer of d neither stopped nor fired, without waiting for one.
+func (ft *fakeTimers) fireArmed(d time.Duration) {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	for _, x := range ft.list {
+		if x.d == d && !x.stopped && !x.fired {
+			x.fired = true
+			x.ch <- time.Time{}
+		}
+	}
+}
+
 // armed counts the timers of d neither stopped nor fired.
 func (ft *fakeTimers) armed(d time.Duration) int {
 	ft.mu.Lock()
@@ -118,7 +132,8 @@ type sourceHello struct {
 	other       int
 }
 
-// socketSource lists the Connections set and records the hellos; err fails the list, helloErr the records.
+// socketSource lists the Connections set and records the hellos; err fails the list, helloErr the records. While block
+// is set, a record sends the deadline of its context to entered and waits for block or for its context.
 type socketSource struct {
 	mu       sync.Mutex
 	conns    []SocketConn
@@ -126,6 +141,8 @@ type socketSource struct {
 	helloErr error
 	hellos   []sourceHello
 	reads    int
+	block    chan struct{}
+	entered  chan time.Time
 }
 
 func (s *socketSource) set(conns ...SocketConn) {
@@ -147,7 +164,19 @@ func (s *socketSource) SocketConnections(context.Context) ([]SocketConn, error) 
 	return slices.Clone(s.conns), s.err
 }
 
-func (s *socketSource) RecordSocketHello(_ context.Context, c SocketConn, other int) error {
+func (s *socketSource) RecordSocketHello(ctx context.Context, c SocketConn, other int) error {
+	s.mu.Lock()
+	block, entered := s.block, s.entered
+	s.mu.Unlock()
+	if block != nil {
+		deadline, _ := ctx.Deadline()
+		entered <- deadline
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hellos = append(s.hellos, sourceHello{id: c.ID, version: c.Version, other: other})
@@ -288,7 +317,8 @@ func (e *socketEnv) start(t *testing.T) {
 	t.Cleanup(func() { _ = e.stop(t) })
 }
 
-// stop ends the run and returns what Run returned.
+// stop ends the run and returns what Run returned; a socket whose peer does not answer its closure is closed at once
+// after a few milliseconds.
 func (e *socketEnv) stop(t *testing.T) error {
 	t.Helper()
 	if e.cancel == nil {
@@ -296,11 +326,30 @@ func (e *socketEnv) stop(t *testing.T) error {
 	}
 	e.cancel()
 	e.cancel = nil
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case err := <-e.done:
+			return err
+		case <-time.After(20 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run did not return")
+			return nil
+		}
+		e.timers.fireArmed(closeGrace)
+	}
+}
+
+// ended waits for the run, stopped by the test, to return within d, and returns what it returned.
+func (e *socketEnv) ended(t *testing.T, d time.Duration) error {
+	t.Helper()
 	select {
 	case err := <-e.done:
+		e.cancel = nil
 		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return")
+	case <-time.After(d):
+		t.Fatalf("Run did not return within %s", d)
 		return nil
 	}
 }
@@ -365,19 +414,21 @@ func num(line map[string]any, name string) float64 {
 	return v
 }
 
-// failedLine checks a slack_socket_failed line: its Connection, reason and back-off, and an error only when one is
-// wanted.
+// failedLine checks a slack_socket_failed line: its Connection, reason and back-off — none when backoff is negative —
+// and an error only when one is wanted.
 func failedLine(t *testing.T, line map[string]any, conn, reason string, backoff float64, withError bool) {
 	t.Helper()
-	if field(line, "connection") != conn || field(line, "reason") != reason || num(line, "backoff_seconds") != backoff ||
-		line["level"] != "WARN" || (line["error"] != nil) != withError {
+	wait, hasWait := line["backoff_seconds"].(float64)
+	if field(line, "connection") != conn || field(line, "reason") != reason || hasWait != (backoff >= 0) ||
+		(hasWait && wait != backoff) || line["level"] != "WARN" || (line["error"] != nil) != withError {
 		t.Fatalf("slack_socket_failed %v, want %s %s %v error %v", line, conn, reason, backoff, withError)
 	}
 }
 
 // TestSocketOnePerConnection covers C-24.FR-9, AC-10: one socket for each Connection in socket mode, each opened after
 // its own apps.connections.open with its app-level token; each hello logs slack_socket_connected with num_connections
-// and held, and is recorded; a Connection whose client cannot be built is not held and logged once for each version.
+// and held, and is recorded; a Connection whose client cannot be built is not held and logged once for each version,
+// without a back-off.
 func TestSocketOnePerConnection(t *testing.T) {
 	e := newSocketEnv(t)
 	broken := SocketConn{Conn: Conn{ID: 3, PublicID: "CN0000000000K3", Mode: EventModeSocket}, Version: 4,
@@ -410,7 +461,7 @@ func TestSocketOnePerConnection(t *testing.T) {
 		t.Fatalf("hellos %+v", hellos)
 	}
 	failed := e.lines(t, "slack_socket_failed", 1)
-	failedLine(t, failed[0], "CN0000000000K3", reasonDial, 60, true)
+	failedLine(t, failed[0], "CN0000000000K3", reasonDial, -1, true)
 	if field(failed[0], "error") != "the app-level token cannot be decrypted" {
 		t.Fatalf("failed %v", failed[0])
 	}
@@ -584,6 +635,9 @@ func TestSocketStopsAtOnce(t *testing.T) {
 	if n := e.records.written(); n != 1 {
 		t.Fatalf("%d records written", n)
 	}
+	if _, cut := e.timers.made(closeGrace); cut != 0 {
+		t.Fatalf("%d closures the fake answers were cut", cut)
+	}
 	if _, err := e.fake.SendEnvelope(t.Context(), fakeslack.AppB, "events_api", nil); err == nil {
 		t.Fatal("a socket is still open")
 	}
@@ -637,27 +691,41 @@ func TestSocketEveryMinute(t *testing.T) {
 	e.lines(t, "slack_socket_connected", 1)
 }
 
-// TestSocketReadFails: a failed read of the Connections closes every socket and returns its error, so that the
-// Leader task runs again.
+// TestSocketReadFails: when the first read of the Connections fails, Run returns its error, so that the Leader task
+// runs again; a later failed read keeps the sockets, which still confirm, is logged as leader_task_failed, and is tried
+// again at the next wake.
 func TestSocketReadFails(t *testing.T) {
+	down := errors.New("the database went away")
+	first := newSocketEnv(t)
+	first.source.fail(down, nil)
+	first.start(t)
+	if err := first.ended(t, 5*time.Second); !errors.Is(err, down) {
+		t.Fatalf("Run = %v", err)
+	}
+
 	e := newSocketEnv(t)
 	e.source.set(e.conn(t, 2, false))
 	e.start(t)
 	e.lines(t, "slack_socket_connected", 1)
-	down := errors.New("the database went away")
 	e.source.fail(down, nil)
 	e.sockets.Wake()
+	if l := e.lines(t, "leader_task_failed", 1)[0]; field(l, "task") != "slack_socket_mode" ||
+		field(l, "error") != down.Error() || l["level"] != "WARN" {
+		t.Fatalf("leader_task_failed %v", l)
+	}
+	e.send(t, "events_api", `{}`)
+	reads := e.source.readCount()
+	e.source.fail(nil, nil)
+	e.sockets.Wake()
+	eventually(t, "a read", func() bool { return e.source.readCount() > reads })
 	select {
 	case err := <-e.done:
-		if !errors.Is(err, down) {
-			t.Fatalf("Run = %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return")
+		t.Fatalf("Run returned %v", err)
+	default:
 	}
-	e.cancel()
-	e.cancel = nil
-	eventually(t, "the socket closed", func() bool { return e.app().Open == 0 })
+	if st := e.app(); st.Open != 1 || st.Opened != 1 || len(e.log.lines(t, "slack_socket_failed")) != 0 {
+		t.Fatalf("the socket did not stay: %+v", st)
+	}
 }
 
 // TestSocketRefreshOverlap covers C-24.FR-9, AC-10: after disconnect warning or refresh_requested the next connection
@@ -717,9 +785,11 @@ func TestSocketRefreshOpenFails(t *testing.T) {
 
 // TestSocketBackoff covers C-24.FR-9, AC-10: link_disabled, too_many_websockets, a refused handshake, a connection
 // that ended and an unknown disconnect each close the socket, log slack_socket_failed with their reason and back off
-// from 1 s doubling; a hello resets the back-off.
+// from 1 s doubling; a connection that lasted 30 s after its hello resets the back-off.
 func TestSocketBackoff(t *testing.T) {
 	e := newSocketEnv(t)
+	rc := clock.NewManual(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC))
+	e.sockets.Real = rc
 	e.source.set(e.conn(t, 2, false))
 	e.start(t)
 	e.lines(t, "slack_socket_connected", 1)
@@ -746,21 +816,64 @@ func TestSocketBackoff(t *testing.T) {
 
 	e.timers.fire(t, 4*time.Second)
 	e.lines(t, "slack_socket_connected", 2)
+	rc.Advance(socketSettled)
 	e.script(t, fakeslack.SocketScript{Close: true})
 	l = e.lines(t, "slack_socket_failed", 4)[3]
 	failedLine(t, l, conn, reasonClosed, 1, true)
 
 	e.timers.fire(t, time.Second)
 	e.lines(t, "slack_socket_connected", 3)
+	rc.Advance(socketSettled - time.Millisecond)
 	e.script(t, fakeslack.SocketScript{Disconnect: "socket_mode_disabled"})
 	l = e.lines(t, "slack_socket_failed", 5)[4]
-	failedLine(t, l, conn, reasonClosed, 1, true)
+	failedLine(t, l, conn, reasonClosed, 2, true)
 	if field(l, "error") != "disconnect socket_mode_disabled" {
 		t.Fatalf("error %q", field(l, "error"))
 	}
-	e.timers.fire(t, time.Second)
+	e.timers.fire(t, 2*time.Second)
 	e.lines(t, "slack_socket_connected", 4)
 	eventually(t, "one socket", func() bool { return e.app().Open == 1 })
+}
+
+// TestSocketBackoffAfterHello covers slack.socket_backoff: a connection that ends right after its hello does not reset
+// the back-off, which keeps doubling — 1 s, 2 s, 4 s — so that a socket Slack ends at once is not opened again every
+// second; a planned refresh starts it from 1 s again.
+func TestSocketBackoffAfterHello(t *testing.T) {
+	e := newSocketEnv(t)
+	e.source.set(e.conn(t, 2, false))
+	e.start(t)
+	const conn = "CN0000000000K2"
+	for i, want := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
+		e.lines(t, "slack_socket_connected", i+1)
+		e.script(t, fakeslack.SocketScript{Close: true})
+		failedLine(t, e.lines(t, "slack_socket_failed", i+1)[i], conn, reasonClosed, want.Seconds(), true)
+		e.timers.fire(t, want)
+	}
+	e.lines(t, "slack_socket_connected", 4)
+	e.script(t, fakeslack.SocketScript{Disconnect: disconnectRefresh})
+	e.lines(t, "slack_socket_connected", 5)
+	eventually(t, "the old socket closed", func() bool { return e.app().Open == 1 })
+	e.script(t, fakeslack.SocketScript{Close: true})
+	failedLine(t, e.lines(t, "slack_socket_failed", 4)[3], conn, reasonClosed, 1, true)
+}
+
+// TestSocketRetryAfter: when apps.connections.open is rate-limited with a Retry-After longer than the back-off, the
+// next connection waits for the Retry-After.
+func TestSocketRetryAfter(t *testing.T) {
+	e := newSocketEnv(t)
+	e.sockets.openTimeout = 100 * time.Millisecond
+	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/apps.connections.open", Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 30, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	e.source.set(e.conn(t, 2, false))
+	e.start(t)
+	failedLine(t, e.lines(t, "slack_socket_failed", 1)[0], "CN0000000000K2", reasonDial, 30, true)
+	e.timers.fire(t, 30*time.Second)
+	e.lines(t, "slack_socket_connected", 1)
+	if made, _ := e.timers.made(SocketBackoffBase); made != 0 {
+		t.Fatal("the back-off did not wait for the Retry-After")
+	}
 }
 
 // TestSocketBackoffBounds covers slack.socket_backoff: from 1 s doubling up to 5 min, with equal jitter in [d/2, d];
@@ -876,8 +989,9 @@ func TestSocketPing(t *testing.T) {
 	}
 }
 
-// TestSocketFrames covers C-24.FR-2, FR-9: a later hello on the same connection is counted at once; binary frames,
-// frames that are not JSON and frames of other types are ignored.
+// TestSocketFrames covers C-24.FR-2, FR-9: a later hello on the same connection is counted and stored, replacing the
+// count of an earlier one not stored yet; binary frames, frames that are not JSON and frames of other types are
+// ignored.
 func TestSocketFrames(t *testing.T) {
 	e := newSocketEnv(t)
 	srv := startSocketStandIn(t, "0123456789abcdef0123456789abcdef", sending(
@@ -885,16 +999,179 @@ func TestSocketFrames(t *testing.T) {
 		[]byte(`{"type":"hello","num_connections":3}`)))
 	e.source.set(socketConn(4, newClient(t, e.network(t), settings(srv.URL+"/api/"))))
 	e.start(t)
-	lines := e.lines(t, "slack_socket_connected", 2)
-	if num(lines[1], "num_connections") != 3 || num(lines[1], "held") != 1 {
-		t.Fatalf("connected %v", lines)
-	}
 	shared := e.lines(t, "slack_socket_shared", 1)
 	if field(shared[0], "connection") != "CN0000000000K4" || num(shared[0], "other_connections") != 2 {
 		t.Fatalf("shared %v", shared)
 	}
+	lines := e.log.lines(t, "slack_socket_connected")
+	if last := lines[len(lines)-1]; len(lines) > 2 || num(last, "num_connections") != 3 || num(last, "held") != 1 {
+		t.Fatalf("connected %v", lines)
+	}
+	if h := e.source.recorded(); h[len(h)-1].other != 2 {
+		t.Fatalf("hellos %+v", h)
+	}
 	if n := len(e.log.lines(t, "slack_socket_failed")); n != 0 {
 		t.Fatalf("%d failures", n)
+	}
+}
+
+// TestSocketHelloStoreBlocked: a store of what a hello counted that does not return holds up nothing — the hello
+// reaches the holder, which stops its hello timeout, and an envelope is confirmed meanwhile — is bounded by 5 s, and
+// ends with the run, which returns at once.
+func TestSocketHelloStoreBlocked(t *testing.T) {
+	e := newSocketEnv(t)
+	entered := make(chan time.Time, 4)
+	e.source.mu.Lock()
+	e.source.block, e.source.entered = make(chan struct{}), entered
+	e.source.mu.Unlock()
+	e.source.set(e.conn(t, 2, false))
+	e.start(t)
+	select {
+	case deadline := <-entered:
+		if d := time.Until(deadline); d <= 0 || d > helloWriteTimeout {
+			t.Fatalf("the store has %s left", d)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the count was not stored")
+	}
+	eventually(t, "the hello", func() bool {
+		made, _ := e.timers.made(HelloTimeout)
+		return made == 1 && e.timers.armed(HelloTimeout) == 0
+	})
+	e.send(t, "events_api", `{}`)
+	if n := len(e.log.lines(t, "slack_socket_connected")) + len(e.log.lines(t, "slack_socket_failed")); n != 0 {
+		t.Fatalf("%d lines while the store is blocked", n)
+	}
+	e.cancel()
+	if err := e.ended(t, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if l := e.lines(t, "slack_socket_connected", 1)[0]; field(l, "error") != context.Canceled.Error() {
+		t.Fatalf("connected %v", l)
+	}
+}
+
+// TestSocketClosesWithClosure covers C-24.FR-9 and ADR-0007: a socket Muster lets go — its Connection left socket
+// mode, or the run ended — is closed with a normal closure, which the peer answers at once; a socket whose peer does
+// not answer it is closed at once after a second, and the run ends then.
+func TestSocketClosesWithClosure(t *testing.T) {
+	statuses := make(chan websocket.StatusCode, 4)
+	srv := startSocketStandIn(t, "0123456789abcdef0123456789abcdef",
+		func(w http.ResponseWriter, r *http.Request, _ <-chan struct{}) {
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.CloseNow() }()
+			if conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"hello","num_connections":1}`)) != nil {
+				return
+			}
+			for {
+				if _, _, err := conn.Read(r.Context()); err != nil {
+					statuses <- websocket.CloseStatus(err)
+					return
+				}
+			}
+		})
+	closure := func(what string) {
+		t.Helper()
+		select {
+		case got := <-statuses:
+			if got != websocket.StatusNormalClosure {
+				t.Fatalf("%s: the peer saw %v", what, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the socket was not closed", what)
+		}
+	}
+	e := newSocketEnv(t)
+	c := socketConn(4, newClient(t, e.network(t), settings(srv.URL+"/api/")))
+	e.source.set(c)
+	e.start(t)
+	e.lines(t, "slack_socket_connected", 1)
+	e.source.set()
+	e.sockets.Wake()
+	closure("a Connection that left socket mode")
+	e.source.set(c)
+	e.sockets.Wake()
+	e.lines(t, "slack_socket_connected", 2)
+	e.cancel()
+	closure("the end of the run")
+	if err := e.ended(t, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if made, fired := e.timers.made(closeGrace); made != 2 || fired != 0 {
+		t.Fatalf("%d waits for the closure, %d cut", made, fired)
+	}
+
+	q := newSocketEnv(t)
+	silent := startSocketStandIn(t, "0123456789abcdef0123456789abcdef",
+		sending([]byte(`{"type":"hello","num_connections":1}`)))
+	q.source.set(socketConn(5, newClient(t, q.network(t), settings(silent.URL+"/api/"))))
+	q.start(t)
+	q.lines(t, "slack_socket_connected", 1)
+	q.cancel()
+	eventually(t, "the wait for the closure", func() bool { return q.timers.armed(closeGrace) == 1 })
+	select {
+	case <-q.done:
+		t.Fatal("Run returned before the closure was answered or cut")
+	default:
+	}
+	q.timers.fire(t, closeGrace)
+	if err := q.ended(t, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.log.lines(t, "slack_socket_failed")) + len(q.log.lines(t, "slack_socket_failed")); n != 0 {
+		t.Fatalf("%d failures", n)
+	}
+}
+
+// TestSocketReasonsMasked covers C-24.FR-14, C-23.FR-3: a close frame and a disconnect whose reasons repeat the
+// address's query are logged with it masked.
+func TestSocketReasonsMasked(t *testing.T) {
+	const ticket = "4c2b9e7a1d3f5a6b8c0d2e4f6a8b0c1d"
+	var links atomic.Int32
+	e := newSocketEnv(t)
+	srv := startSocketStandIn(t, ticket, func(w http.ResponseWriter, r *http.Request, _ <-chan struct{}) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ctx := r.Context()
+		if conn.Write(ctx, websocket.MessageText, []byte(`{"type":"hello","num_connections":1}`)) != nil {
+			return
+		}
+		if links.Add(1) == 1 {
+			_ = conn.Close(websocket.StatusPolicyViolation, "bad "+r.URL.RawQuery)
+			return
+		}
+		if conn.Write(ctx, websocket.MessageText, []byte(`{"type":"disconnect","reason":"gone `+
+			r.URL.Query().Get("ticket")+`"}`)) != nil {
+			return
+		}
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	})
+	e.source.set(socketConn(4, newClient(t, e.network(t), settings(srv.URL+"/api/"))))
+	e.start(t)
+	l := e.lines(t, "slack_socket_failed", 1)[0]
+	failedLine(t, l, "CN0000000000K4", reasonClosed, 1, true)
+	if text := field(l, "error"); !strings.Contains(text, "StatusPolicyViolation") ||
+		!strings.Contains(text, `reason = "bad [redacted]"`) {
+		t.Fatalf("error %q", text)
+	}
+	e.timers.fire(t, time.Second)
+	l = e.lines(t, "slack_socket_failed", 2)[1]
+	failedLine(t, l, "CN0000000000K4", reasonClosed, 2, true)
+	if text := field(l, "error"); text != "disconnect gone?[redacted]" {
+		t.Fatalf("error %q", text)
+	}
+	if strings.Contains(e.log.String(), ticket) {
+		t.Fatalf("the ticket reached the log: %s", e.log.String())
 	}
 }
 
@@ -1149,5 +1426,25 @@ func TestDisconnectReason(t *testing.T) {
 	}
 	if recordURL("wss://wss-primary.slack.com/link/?ticket=t") != "wss://wss-primary.slack.com/link/" {
 		t.Fatal("the record URL keeps the query")
+	}
+}
+
+// TestAddressSecrets: what a log may show of a socket's address is its query, as sent and unescaped, its ticket
+// whatever its length, and its other values of 8 bytes or more, the longer first.
+func TestAddressSecrets(t *testing.T) {
+	for address, want := range map[string][]string{
+		"wss://h/link/?ticket=a%2Fb&app_id=A1&x=0123456789": {"ticket=a%2Fb&app_id=A1&x=0123456789",
+			"ticket=a/b&app_id=A1&x=0123456789", "0123456789", "a%2Fb", "a/b"},
+		"wss://h/link/?ticket=%zz": {"ticket=%zz", "%zz"},
+		"wss://h/link/":            nil,
+		"%zz":                      nil,
+	} {
+		if got := addressSecrets(address); !slices.Equal(got, want) {
+			t.Errorf("%s: %q, want %q", address, got, want)
+		}
+	}
+	if got := maskWith(addressSecrets("wss://h/?ticket=t1&app_id=A1"), `reason = "bad ticket=t1&app_id=A1 t1"`); got !=
+		`reason = "bad [redacted] [redacted]"` {
+		t.Errorf("masked %q", got)
 	}
 }
