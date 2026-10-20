@@ -23,4 +23,5 @@ export type ConnectionCheckResultWarningsItem = typeof ConnectionCheckResultWarn
 
 export const ConnectionCheckResultWarningsItem = {
   press_answers_in_thread: 'press_answers_in_thread',
+  another_client_connected: 'another_client_connected',
 } as const;

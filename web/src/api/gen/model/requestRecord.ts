@@ -33,9 +33,10 @@ export type RequestRecord = RequestRecordSummary & ({
      * @minimum 0
      */
   request_body_bytes: number;
+  /** The answer's headers, masked; null without an answer and for a Socket Mode envelope, whose confirmation has none. */
   response_headers: NullableHttpHeaders | null;
   /**
-     * The answer's body, masked and cut as the request body; null without an answer; untrusted text.
+     * The answer's body, masked and cut as the request body — for a Socket Mode envelope Muster's confirmation; null without an answer; untrusted text.
      * @nullable
      */
   response_body: string | null;

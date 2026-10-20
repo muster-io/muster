@@ -47,7 +47,7 @@ destination?: PublicId;
  */
 direction?: RequestDirection;
 /**
- * Only the records whose answer has a status of this class, or, with `none`, those that got no answer.
+ * Only the records whose answer has a status of this class, or, with `none`, those that got no answer or are a Socket Mode envelope, whose confirmation has no status.
  */
 status_class?: ListRequestLogStatusClass;
 /**

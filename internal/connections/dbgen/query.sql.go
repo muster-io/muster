@@ -145,6 +145,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
+       c.slack_socket_hello_at, c.slack_socket_other_connections,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -204,6 +205,8 @@ type GetConnectionRow struct {
 	SlackTeamUrl                    pgtype.Text
 	SlackAppID                      pgtype.Text
 	SlackBotID                      pgtype.Text
+	SlackSocketHelloAt              pgtype.Timestamptz
+	SlackSocketOtherConnections     pgtype.Int4
 	DestinationCount                int64
 }
 
@@ -255,6 +258,8 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.SlackTeamUrl,
 		&i.SlackAppID,
 		&i.SlackBotID,
+		&i.SlackSocketHelloAt,
+		&i.SlackSocketOtherConnections,
 		&i.DestinationCount,
 	)
 	return i, err
@@ -728,6 +733,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
+       c.slack_socket_hello_at, c.slack_socket_other_connections,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -790,6 +796,8 @@ type ListConnectionsRow struct {
 	SlackTeamUrl                    pgtype.Text
 	SlackAppID                      pgtype.Text
 	SlackBotID                      pgtype.Text
+	SlackSocketHelloAt              pgtype.Timestamptz
+	SlackSocketOtherConnections     pgtype.Int4
 	DestinationCount                int64
 }
 
@@ -859,6 +867,8 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.SlackTeamUrl,
 			&i.SlackAppID,
 			&i.SlackBotID,
+			&i.SlackSocketHelloAt,
+			&i.SlackSocketOtherConnections,
 			&i.DestinationCount,
 		); err != nil {
 			return nil, err
@@ -1007,6 +1017,74 @@ func (q *Queries) ListSlackDestinations(ctx context.Context, orgID int64) ([]Lis
 			&i.Name,
 			&i.ConnectionID,
 			&i.SlackChannelID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSocketConnections = `-- name: ListSocketConnections :many
+SELECT id, public_id, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_app_token_ciphertext,
+       slack_app_token_key_id, slack_app_token_updated_at, slack_signing_secret_ciphertext,
+       slack_signing_secret_key_id, slack_signing_secret_updated_at, proxy, proxy_password_ciphertext,
+       proxy_password_key_id, proxy_password_updated_at, version
+FROM connections
+WHERE org_id = $1 AND type = 'slack' AND slack_event_mode = 'socket' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListSocketConnectionsRow struct {
+	ID                           int64
+	PublicID                     string
+	BotTokenCiphertext           []byte
+	BotTokenKeyID                pgtype.Text
+	BotTokenUpdatedAt            time.Time
+	SlackAppTokenCiphertext      []byte
+	SlackAppTokenKeyID           pgtype.Text
+	SlackAppTokenUpdatedAt       pgtype.Timestamptz
+	SlackSigningSecretCiphertext []byte
+	SlackSigningSecretKeyID      pgtype.Text
+	SlackSigningSecretUpdatedAt  pgtype.Timestamptz
+	Proxy                        []byte
+	ProxyPasswordCiphertext      []byte
+	ProxyPasswordKeyID           pgtype.Text
+	ProxyPasswordUpdatedAt       pgtype.Timestamptz
+	Version                      int64
+}
+
+// ListSocketConnections lists the Slack Connections that are not deleted and receive their presses through Socket
+// Mode, with their secrets as stored and their version, for the Leader's sockets (C-24.FR-9).
+func (q *Queries) ListSocketConnections(ctx context.Context, orgID int64) ([]ListSocketConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, listSocketConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSocketConnectionsRow{}
+	for rows.Next() {
+		var i ListSocketConnectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.BotTokenCiphertext,
+			&i.BotTokenKeyID,
+			&i.BotTokenUpdatedAt,
+			&i.SlackAppTokenCiphertext,
+			&i.SlackAppTokenKeyID,
+			&i.SlackAppTokenUpdatedAt,
+			&i.SlackSigningSecretCiphertext,
+			&i.SlackSigningSecretKeyID,
+			&i.SlackSigningSecretUpdatedAt,
+			&i.Proxy,
+			&i.ProxyPasswordCiphertext,
+			&i.ProxyPasswordKeyID,
+			&i.ProxyPasswordUpdatedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -1217,6 +1295,39 @@ func (q *Queries) RecordBridgeEvent(ctx context.Context, arg RecordBridgeEventPa
 	return err
 }
 
+const recordSocketHello = `-- name: RecordSocketHello :execrows
+UPDATE connections
+SET slack_socket_hello_at = $1::timestamptz, slack_socket_other_connections = $2::integer
+WHERE org_id = $3 AND id = $4 AND type = 'slack' AND slack_event_mode = 'socket' AND version = $5
+  AND deleted_at IS NULL
+`
+
+type RecordSocketHelloParams struct {
+	HelloAt          time.Time
+	OtherConnections int32
+	OrgID            int64
+	ID               int64
+	Version          int64
+}
+
+// RecordSocketHello records what a hello of the Socket Mode connection of a Slack Connection counted — when it came,
+// on the business clock, and the connections of the app beyond those the Leader holds — unless the Connection changed
+// since its socket read it or left socket mode: a socket of an earlier version writes nothing. It is not a change of
+// the configuration.
+func (q *Queries) RecordSocketHello(ctx context.Context, arg RecordSocketHelloParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordSocketHello,
+		arg.HelloAt,
+		arg.OtherConnections,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setBotIdentity = `-- name: SetBotIdentity :exec
 UPDATE connections
 SET bot_user_id = $1, bot_username = $2
@@ -1401,6 +1512,7 @@ SET name = $1, mattermost_server_url = $2,
     slack_app_id = CASE WHEN $23::boolean THEN NULL ELSE slack_app_id END,
     slack_bot_id = CASE WHEN $23::boolean THEN NULL ELSE slack_bot_id END,
     telegram_update_offset = CASE WHEN $24::boolean THEN NULL ELSE telegram_update_offset END,
+    slack_socket_hello_at = NULL, slack_socket_other_connections = NULL,
     proxy = $25, proxy_password_ciphertext = $26,
     proxy_password_key_id = $27,
     proxy_password_updated_at = $28, limiter_limit = $29,
@@ -1448,6 +1560,8 @@ type UpdateConnectionParams struct {
 // A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, what a
 // bridge told — its info and the cursor of its events — and what a Slack check learned — the workspace, the app and
 // the bot's id; a new bot token also forgets telegram_update_offset, since another bot's update ids start elsewhere.
+// Every save forgets what the last hello of a Slack Connection's Socket Mode connection counted: its socket starts
+// again and counts at its next hello.
 func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionParams) error {
 	_, err := q.db.Exec(ctx, updateConnection,
 		arg.Name,

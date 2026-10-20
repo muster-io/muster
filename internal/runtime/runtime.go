@@ -571,9 +571,12 @@ type process struct {
 	// callback of the ingest listener; bridgePoller is the polling the Leader task bridge_polling runs.
 	bridgeEvents *bridge.Events
 	bridgePoller *bridge.Poller
-	// slackPresses handles the presses of Slack Connections, from the callback of the ingest listener in http mode,
-	// one semaphore of slack.parallel_presses for the process.
+	// slackPresses handles the presses of Slack Connections, from the callback of the ingest listener in http mode
+	// and from the Leader's Socket Mode connections, one semaphore of slack.parallel_presses for the process.
 	slackPresses *slack.Presses
+	// slackSockets are the Socket Mode connections that the Leader task slack_socket_mode holds; their presses go to
+	// slackPresses in the process's context, as the callback's do.
+	slackSockets *slack.Sockets
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -684,13 +687,15 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 func (p *process) serve(ctx context.Context) error {
 	defer p.db.Close()
 	p.db.RegisterMetrics()
+	// The Slack presses that the callback answered 200, and those whose envelope the Leader's socket confirmed, outlive
+	// their requests and the Leader in a context of their own, which the start of a shutdown does not end, and the end
+	// of its grace period does (drainSlackPresses).
+	presses, endPresses := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer endPresses(nil)
+	p.slackSockets.Base = presses
 	p.keeper = p.newKeeper()
 	leader.Register(p.keeper)
 	health := server.NewHealth(p.db.Ping)
-	// The Slack presses that the callback answered 200 outlive their requests in a context of their own, which the
-	// start of a shutdown does not end, and the end of its grace period does (drainSlackPresses).
-	presses, endPresses := context.WithCancelCause(context.WithoutCancel(ctx))
-	defer endPresses(nil)
 	// Requests keep their context through the shutdown, so that the drain lets them finish.
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
@@ -755,8 +760,8 @@ func (p *process) serve(ctx context.Context) error {
 	health.ShuttingDown()
 	// Workers that later stories register stop claiming here and finish or release their rows within the grace.
 	drained := srv.Shutdown(shutdownCtx) == nil
-	// No callback hands over a press any more: the Slack presses still being handled finish within the grace, before
-	// the pool closes.
+	// No callback hands over a press any more, and the Leader's sockets closed with the Leader work: the Slack presses
+	// still being handled finish within the grace, before the pool closes.
 	if !drainSlackPresses(shutdownCtx, p.slackPresses, endPresses) {
 		drained = false
 	}
@@ -1022,6 +1027,10 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.slackPresses = &slack.Presses{Bindings: p.delivery, Links: p.links, Commands: p.groups, Roles: roles,
 		Keys: p.keyring, Path: interactive, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String(),
 		Log: p.log}
+	// The Leader holds the Socket Mode connections of the Slack Connections in socket mode (C-24.FR-9), records their
+	// envelopes in the Request log and hands their presses to the same handler; serve gives them the presses' context.
+	p.slackSockets = &slack.Sockets{Source: conns, Presses: p.slackPresses, Recorder: p.requestLog,
+		Real: p.clocks.Real, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,
@@ -1195,6 +1204,12 @@ func (p *process) newKeeper() *leader.Keeper {
 		RequestLogPruning: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
 			return requestlog.Prune(ctx, p.db.MessagesDB(), orgID, now)
 		},
+		SlackSocketMode: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.slackSockets.Run(ctx)
+		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -1360,6 +1375,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			case connections.Hint:
 				p.poller.Wake()
 				p.bridgePoller.Wake()
+				p.slackSockets.Wake()
 			}
 		}, func(restored bool) {
 			p.hub.Listening(restored)
@@ -1371,6 +1387,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.destinations.InfoChanged()
 				p.poller.Wake()
 				p.bridgePoller.Wake()
+				p.slackSockets.Wake()
 				p.loadDevClock(ctx)
 				p.replica.Wake()
 				p.keyringChanged.Wake()

@@ -37,11 +37,12 @@ export interface RequestRecordSummary {
   direction: RequestDirection;
   /** The operation as its protocol names it — the Bot API method for Telegram, the Web API method for Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`). */
   operation: string;
+  /** The HTTP method, `WEBSOCKET` for an envelope received over a Slack Socket Mode connection. */
   method: string;
   /** The URL as errors show it, masked; untrusted text. Without user information, with the path prefix of the base URL as `[redacted]`. */
   url: string;
   /**
-     * The status of the answer, null when the attempt got no answer.
+     * The status of the answer, null when the attempt got no answer, and for a Socket Mode envelope, whose confirmation has no status.
      * @nullable
      */
   status: number | null;

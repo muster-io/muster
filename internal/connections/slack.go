@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -55,7 +56,29 @@ const (
 	appTokenPrefix = "xapp-"
 )
 
-var _ slack.Targets = (*Service)(nil)
+// WarningAnotherClientConnected is the warning of a check of a Slack Connection in socket mode whose last hello
+// counted another connection of its Slack app than the Leader's: another program, usually a second installation, takes
+// some of its presses (C-24.FR-2, F-102).
+const WarningAnotherClientConnected = "another_client_connected"
+
+var (
+	_ slack.Targets      = (*Service)(nil)
+	_ slack.SocketSource = (*Service)(nil)
+)
+
+// slackSocketQueries are the queries of the Socket Mode connections of Slack Connections, part of Queries: the
+// Connections in socket mode and what a hello counted.
+type slackSocketQueries interface {
+	ListSocketConnections(ctx context.Context, orgID int64) ([]dbgen.ListSocketConnectionsRow, error)
+	RecordSocketHello(ctx context.Context, arg dbgen.RecordSocketHelloParams) (int64, error)
+}
+
+// SlackSocket is what the last hello of a Slack Connection's Socket Mode connection counted (C-24.FR-2, FR-9): when
+// it came, on the business clock, and the connections of the app beyond those the Leader holds.
+type SlackSocket struct {
+	HelloAt          time.Time
+	OtherConnections int
+}
 
 // cachedSlack is the Slack client of a version of a Connection.
 type cachedSlack struct {
@@ -248,6 +271,72 @@ func (s *Service) SlackPressConnection(ctx context.Context, publicID string) (sl
 	return conn, secret, nil
 }
 
+// SocketConnections lists the Slack Connections in socket mode that are not deleted, for the Leader's sockets
+// (slack.SocketSource): each with its client, kept until the Connection changes, whose requests — apps.connections.open
+// among them — go to the Request log of the Connection, and its version. A Connection whose client cannot be built has
+// the error instead of a client, and the sockets log it.
+func (s *Service) SocketConnections(ctx context.Context) ([]slack.SocketConn, error) {
+	rows, err := s.cfg.Store.ListSocketConnections(ctx, s.cfg.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the slack connections in socket mode: %w", err)
+	}
+	out := make([]slack.SocketConn, 0, len(rows))
+	for _, r := range rows {
+		row := dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: TypeSlack,
+			BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID,
+			BotTokenUpdatedAt: r.BotTokenUpdatedAt, SlackAppTokenCiphertext: r.SlackAppTokenCiphertext,
+			SlackAppTokenKeyID: r.SlackAppTokenKeyID, SlackAppTokenUpdatedAt: r.SlackAppTokenUpdatedAt,
+			SlackSigningSecretCiphertext: r.SlackSigningSecretCiphertext, Proxy: r.Proxy,
+			SlackSigningSecretKeyID: r.SlackSigningSecretKeyID, Version: r.Version,
+			SlackSigningSecretUpdatedAt: r.SlackSigningSecretUpdatedAt, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+			ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt}
+		c := slack.SocketConn{Conn: slack.Conn{ID: r.ID, PublicID: r.PublicID, Mode: EventModeSocket},
+			Version: r.Version}
+		c.Client, c.Err = s.cachedSlackClient(r.ID, r.Version, func() (*slack.Client, error) {
+			return s.slackClient(row)
+		})
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// RecordSocketHello records what a hello of the Socket Mode connection of the Slack Connection c counted
+// (slack.SocketSource): when it came, at the business clock's now, and other, the connections of its app beyond those
+// the Leader holds — unless the Connection changed since c was read, left socket mode or was deleted. When it recorded
+// them it sends the live hint, so that the Connection's page shows them. It is not a change of the configuration: the
+// version, the ETag and the Audit log stay as they were.
+func (s *Service) RecordSocketHello(ctx context.Context, c slack.SocketConn, other int) error {
+	return s.cfg.Store.InTx(ctx, func(q Queries) error {
+		n, err := q.RecordSocketHello(ctx, dbgen.RecordSocketHelloParams{OrgID: s.cfg.OrgID, ID: c.ID,
+			Version: c.Version, HelloAt: s.cfg.Clocks.Business.Now(),
+			OtherConnections: int32(min(max(other, 0), math.MaxInt32))})
+		if err != nil {
+			return fmt.Errorf("record the hello of the connection %s: %w", c.PublicID, err)
+		}
+		if n == 0 {
+			return nil
+		}
+		return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: c.PublicID})
+	})
+}
+
+// slackSocketOf is what the last hello of the Socket Mode connection of the Slack Connection row counted, nil for
+// another type, in http mode and before the first hello after a save.
+func slackSocketOf(r dbgen.GetConnectionRow) *SlackSocket {
+	if r.Type != TypeSlack || r.SlackEventMode.String != EventModeSocket || !r.SlackSocketHelloAt.Valid {
+		return nil
+	}
+	return &SlackSocket{HelloAt: r.SlackSocketHelloAt.Time.UTC(),
+		OtherConnections: int(r.SlackSocketOtherConnections.Int32)}
+}
+
+// sharedApp reports whether the last hello of the Socket Mode connection of the Slack Connection row counted another
+// connection of its Slack app than the Leader's.
+func sharedApp(r dbgen.GetConnectionRow) bool {
+	sock := slackSocketOf(r)
+	return sock != nil && sock.OtherConnections > 0
+}
+
 // SlackTarget is where the Slack Destination destinationID posts, for the Slack delivery (slack.Targets): its channel
 // id and its Connection with the Web API client, kept until the Connection changes, and the workspace address and the
 // bot's name the Connection's last passing check stored, read every time. A deleted Destination still has one, for
@@ -283,7 +372,8 @@ func (s *Service) SlackTarget(ctx context.Context, destinationID int64) (slack.T
 // checkSlack runs the check of the Slack Connection row (C-24.FR-2) on the interactive path, limited by the Connection,
 // with slack.RunCheck: token, scopes and, in socket mode, app_token. A passing check records what it found — the
 // workspace, the bot and the app — unless the Connection changed since it was read, and announces it with the live
-// hint; it takes no baseURL.
+// hint; in socket mode it passes with WarningAnotherClientConnected while the last hello counted another connection of
+// the app than the Leader's. It takes no baseURL.
 func (s *Service) checkSlack(ctx context.Context, row dbgen.GetConnectionRow, baseURL *string) (CheckResult, error) {
 	if baseURL != nil {
 		return CheckResult{}, &FieldError{Pointer: "/base_url", Code: CodeUnsupported,
@@ -304,7 +394,11 @@ func (s *Service) checkSlack(ctx context.Context, row dbgen.GetConnectionRow, ba
 			return CheckResult{}, err
 		}
 	}
-	return slackResultOf(res), nil
+	out := slackResultOf(res)
+	if out.OK && sharedApp(row) {
+		out.Warnings = []string{WarningAnotherClientConnected}
+	}
+	return out, nil
 }
 
 // storeSlackIdentity records what a passing check of the Slack Connection row found, unless the Connection changed
@@ -419,16 +513,17 @@ func (s *Service) SlackChannels(ctx context.Context, publicID, q string) (slack.
 
 // doctorSlack runs the steps of the check of the Slack Connection row in the background class, bounded by each, at
 // once, waiting for no limiter token: token, scopes and, in socket mode, app_token. It returns the client and the bot's
-// name the step token found, with an empty message when every step passed, otherwise the failing step with its message.
-// It stores nothing it finds.
+// name the step token found, with an empty message when every step passed, otherwise the failing step with its message,
+// and, when it passed in socket mode while the last hello counted another connection of the app than the Leader's, the
+// hint slack.HintAnotherClientConnected. It stores nothing it finds.
 func (s *Service) doctorSlack(ctx context.Context, row dbgen.GetConnectionRow, each time.Duration) (*slack.Client,
-	string, string) {
+	string, string, string) {
 	if s.cfg.Keyring == nil {
-		return nil, "", errNoKeyring.Error()
+		return nil, "", errNoKeyring.Error(), ""
 	}
 	c, err := s.slackClient(row)
 	if err != nil {
-		return nil, "", err.Error()
+		return nil, "", err.Error(), ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, each)
 	defer cancel()
@@ -436,11 +531,14 @@ func (s *Service) doctorSlack(ctx context.Context, row dbgen.GetConnectionRow, e
 	res, _ := slack.RunCheck(ctx, c, slack.Direct(delivery.Call{Class: outbound.ClassBackground}), s.cfg.Clocks.Real,
 		row.SlackEventMode.String)
 	if st, failed := res.Failed(); failed {
-		return nil, "", st.Name + ": " + cmp.Or(st.Message, checkFailed)
+		return nil, "", st.Name + ": " + cmp.Or(st.Message, checkFailed), ""
 	}
-	bot := ""
+	bot, hint := "", ""
 	if res.Identity != nil {
 		bot = res.Identity.BotName
 	}
-	return c, bot, ""
+	if sharedApp(row) {
+		hint = slack.HintAnotherClientConnected
+	}
+	return c, bot, "", hint
 }

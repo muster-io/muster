@@ -173,8 +173,9 @@ type Limiter struct {
 // Connection is a Connection as the API reads it; its secrets show only their status. ServerURL is a Mattermost
 // Connection's; BotAPIBaseURL, UpdateMode and Warnings are a Telegram Connection's; BridgeBaseURL, EventDelivery,
 // PushSecret, BridgeInfo — the last info its check read, as the bridge sent it, nil before — and BridgeInfoReadAt are a
-// Bridge Connection's; EventMode, AppToken, SlackSigningSecret and what its last passing check learned —
-// SlackTeamID, SlackTeamName and SlackAppID, nil before — are a Slack Connection's.
+// Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its last passing check learned — SlackTeamID,
+// SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last hello of its Socket Mode connection
+// counted, nil in http mode and before the first hello after a save — are a Slack Connection's.
 type Connection struct {
 	ID                 int64
 	PublicID           string
@@ -195,6 +196,7 @@ type Connection struct {
 	SlackTeamID        *string
 	SlackTeamName      *string
 	SlackAppID         *string
+	SlackSocket        *SlackSocket
 	BotToken           keyring.SecretStatus
 	BotUsername        *string
 	BotUserID          *string
@@ -276,6 +278,7 @@ type Queries interface {
 	GetSlackDestinationTarget(ctx context.Context, arg dbgen.GetSlackDestinationTargetParams) (
 		dbgen.GetSlackDestinationTargetRow, error)
 	bridgeEventQueries
+	slackSocketQueries
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or transaction the queries run in, which the Abandon hook writes through.
@@ -1311,6 +1314,7 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 		at := r.BridgeInfoReadAt.Time.UTC()
 		c.BridgeInfo, c.BridgeInfoReadAt = json.RawMessage(r.BridgeInfo), &at
 	}
+	c.SlackSocket = slackSocketOf(r)
 	return c, nil
 }
 

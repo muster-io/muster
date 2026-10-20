@@ -22,6 +22,7 @@ import type { PublicId } from './publicId';
 import type { SecretStatus } from './secretStatus';
 import type { SlackConnectionBase } from './slackConnectionBase';
 import type { SlackConnectionType } from './slackConnectionType';
+import type { SlackSocketStatus } from './slackSocketStatus';
 
 export type SlackConnection = SlackConnectionBase & ({
   type: SlackConnectionType;
@@ -56,6 +57,8 @@ export type SlackConnection = SlackConnectionBase & ({
      * @nullable
      */
   readonly app_id: string | null;
+  /** Socket Mode only. What the last `hello` of the Leader's Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved. */
+  readonly socket?: SlackSocketStatus | null;
   proxy: ProxyConfig;
   /** A Connection used by Destinations cannot be deleted. */
   destination_count: number;

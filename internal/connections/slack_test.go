@@ -6,6 +6,7 @@ package connections_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -15,7 +16,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/connections"
+	"github.com/muster-io/muster/internal/connections/dbgen"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
@@ -23,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -941,4 +946,296 @@ func TestSlackPressConnection(t *testing.T) {
 	if _, _, err := e.svc.SlackPressConnection(ctx, h.PublicID); err == nil || errors.Is(err, slack.ErrNoConnection) {
 		t.Errorf("a failed read = %v", err)
 	}
+}
+
+// ListSocketConnections lists the Slack Connections in socket mode that are not deleted, as the query does.
+func (s *memStore) ListSocketConnections(_ context.Context, org int64) ([]dbgen.ListSocketConnectionsRow, error) {
+	if err := s.fail["ListSocketConnections"]; err != nil || org != 1 {
+		return nil, err
+	}
+	var out []dbgen.ListSocketConnectionsRow
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		r := s.rows[id]
+		if r.deleted || r.row.Type != connections.TypeSlack ||
+			r.row.SlackEventMode.String != connections.EventModeSocket {
+			continue
+		}
+		c := r.row
+		out = append(out, dbgen.ListSocketConnectionsRow{ID: c.ID, PublicID: c.PublicID,
+			BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID,
+			BotTokenUpdatedAt: c.BotTokenUpdatedAt, SlackAppTokenCiphertext: c.SlackAppTokenCiphertext,
+			SlackAppTokenKeyID: c.SlackAppTokenKeyID, SlackAppTokenUpdatedAt: c.SlackAppTokenUpdatedAt,
+			SlackSigningSecretCiphertext: c.SlackSigningSecretCiphertext, Proxy: c.Proxy,
+			SlackSigningSecretKeyID: c.SlackSigningSecretKeyID, Version: c.Version,
+			SlackSigningSecretUpdatedAt: c.SlackSigningSecretUpdatedAt, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
+			ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt})
+	}
+	return out, nil
+}
+
+// RecordSocketHello stores what a hello counted on a Slack Connection in socket mode of the version, as the query does.
+func (s *memStore) RecordSocketHello(_ context.Context, a dbgen.RecordSocketHelloParams) (int64, error) {
+	if err := s.fail["RecordSocketHello"]; err != nil {
+		return 0, err
+	}
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || a.OrgID != 1 || r.row.Type != connections.TypeSlack ||
+		r.row.SlackEventMode.String != connections.EventModeSocket || r.row.Version != a.Version {
+		return 0, nil
+	}
+	r.row.SlackSocketHelloAt = pgtype.Timestamptz{Time: a.HelloAt, Valid: true}
+	r.row.SlackSocketOtherConnections = pgtype.Int4{Int32: a.OtherConnections, Valid: true}
+	return 1, nil
+}
+
+// recordingSlackService is a Service over the store, keyring and interactive path of e, with e's route to the fake
+// Slack server, whose clients record into a capture.
+func recordingSlackService(t *testing.T, e *env) (*connections.Service, *capture) {
+	t.Helper()
+	logger := logging.New(e.log, logging.LevelInfo)
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &capture{}
+	clocks := clock.Clocks{Business: e.business, Real: &ticking{at: t0, step: 7 * time.Millisecond}}
+	return connections.New(connections.Config{OrgID: 1, Store: e.store, Keyring: e.keys,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
+		Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+			Recorder: rec},
+		Interactive: e.path, Log: logger, SlackRoute: func(logging.Secret) string { return e.slackBase }}), rec
+}
+
+// TestSocketConnections is C-24.FR-9 for the Leader's sockets: the Slack Connections in socket mode that are not
+// deleted, in id order, each with its version and its client, kept until the Connection changes, whose
+// apps.connections.open is recorded in the Request log of the Connection; one whose client cannot be built comes with
+// the error instead; a failed read is an error.
+func TestSocketConnections(t *testing.T) {
+	e, f := newSlackEnv(t)
+	ctx := t.Context()
+	svc, rec := recordingSlackService(t, e)
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	e.createSlack(t, slackInput("http", connections.EventModeHTTP))
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeSocket))
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.create(t, "mm")
+	second := slackInput("second", connections.EventModeSocket)
+	second.BotToken, second.AppToken = keyring.Replace(fakeslack.SecondBotToken),
+		keyring.Replace(fakeslack.SecondAppToken)
+	sc := e.createSlack(t, second)
+
+	list, err := svc.SocketConnections(ctx)
+	if err != nil || len(list) != 2 || list[0].ID != sl.ID || list[0].PublicID != sl.PublicID ||
+		list[0].Mode != slack.EventModeSocket || list[0].Version != 1 || list[0].Client == nil || list[0].Err != nil ||
+		list[1].ID != sc.ID || list[1].Client == nil || list[1].Client == list[0].Client {
+		t.Fatalf("socket connections = %+v, %v", list, err)
+	}
+	again, err := svc.SocketConnections(ctx)
+	if err != nil || again[0].Client != list[0].Client || again[1].Client != list[1].Client {
+		t.Error("the clients are not cached")
+	}
+	address, res := list[0].Client.OpenSocket(ctx)
+	if !res.OK() || address == "" {
+		t.Fatalf("apps.connections.open = %+v", res)
+	}
+	reqs := f.Requests()
+	if last := reqs[len(reqs)-1]; last.Path != "/api/apps.connections.open" ||
+		last.Headers["Authorization"][0] != "Bearer "+fakeslack.AppToken {
+		t.Errorf("request %+v", last)
+	}
+	records := rec.take()
+	if len(records) != 1 || records[0].Operation != "apps.connections.open" ||
+		records[0].Owner != (outbound.Owner{Connection: sl.ID, PublicID: sl.PublicID}) {
+		t.Errorf("records %+v", records)
+	}
+
+	in := slackInput("sl", connections.EventModeSocket)
+	in.BotToken = keyring.Keep
+	if err := e.update(t, sl.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := svc.SocketConnections(ctx)
+	if err != nil || changed[0].Version != 2 || changed[0].Client == list[0].Client ||
+		changed[1].Client != list[1].Client {
+		t.Errorf("after a save = %+v, %v", changed, err)
+	}
+	e.store.rows[sc.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[sc.ID].row.Version++
+	broken, err := svc.SocketConnections(ctx)
+	if err != nil || len(broken) != 2 || broken[1].Client != nil || broken[1].Err == nil ||
+		!strings.Contains(broken[1].Err.Error(), "open the bot token") || broken[1].Version != 2 ||
+		broken[0].Err != nil {
+		t.Errorf("a client that cannot be built = %+v, %v", broken, err)
+	}
+	e.store.fail["ListSocketConnections"] = errors.New("down")
+	if _, err := svc.SocketConnections(ctx); err == nil || !strings.Contains(err.Error(), "down") {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// TestRecordSocketHello is C-24.FR-2 and FR-9: a hello records, on the business clock, the connections of the app
+// beyond the Leader's for the version its socket read, and sends the live hint; it is not a change of the
+// configuration — no new version, no Audit log entry; a socket of an earlier version, a Connection in http mode or
+// deleted record nothing and send no hint; a failed write records nothing.
+func TestRecordSocketHello(t *testing.T) {
+	e, _ := newSlackEnv(t)
+	ctx := t.Context()
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	list, err := e.svc.SocketConnections(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("socket connections = %+v, %v", list, err)
+	}
+	c := list[0]
+	e.business.Advance(90 * time.Second)
+	hints, audits := len(e.store.hints), len(e.store.audit)
+	if err := e.svc.RecordSocketHello(ctx, c, 2); err != nil {
+		t.Fatal(err)
+	}
+	row := e.store.rows[sl.ID].row
+	if !row.SlackSocketHelloAt.Valid || !row.SlackSocketHelloAt.Time.Equal(t0.Add(90*time.Second)) ||
+		row.SlackSocketOtherConnections.Int32 != 2 || row.Version != 1 {
+		t.Errorf("row %+v", row)
+	}
+	if len(e.store.hints) != hints+1 || e.store.hints[hints] != (db.Hint{OrgID: 1, Type: connections.Hint,
+		ID: sl.PublicID}) || len(e.store.audit) != audits {
+		t.Errorf("hints %+v, %d audit entries", e.store.hints[hints:], len(e.store.audit)-audits)
+	}
+	got, err := e.svc.Get(ctx, sl.PublicID)
+	if err != nil || got.Version != 1 || got.SlackSocket == nil ||
+		*got.SlackSocket != (connections.SlackSocket{HelloAt: t0.Add(90 * time.Second), OtherConnections: 2}) {
+		t.Errorf("read %+v, %v", got.SlackSocket, err)
+	}
+	if err := e.svc.RecordSocketHello(ctx, c, -1); err != nil ||
+		e.store.rows[sl.ID].row.SlackSocketOtherConnections.Int32 != 0 {
+		t.Errorf("a negative count = %v, %+v", err, e.store.rows[sl.ID].row.SlackSocketOtherConnections)
+	}
+
+	hints = len(e.store.hints)
+	stale := c
+	stale.Version = 0
+	if err := e.svc.RecordSocketHello(ctx, stale, 5); err != nil || len(e.store.hints) != hints ||
+		e.store.rows[sl.ID].row.SlackSocketOtherConnections.Int32 != 0 {
+		t.Errorf("an earlier version = %v, %d hints", err, len(e.store.hints)-hints)
+	}
+	h := e.createSlack(t, slackInput("http", connections.EventModeHTTP))
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeSocket))
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	hints = len(e.store.hints)
+	for _, other := range []connections.Connection{h, gone} {
+		sc := slack.SocketConn{Conn: slack.Conn{ID: other.ID, PublicID: other.PublicID}, Version: other.Version}
+		if err := e.svc.RecordSocketHello(ctx, sc, 1); err != nil ||
+			e.store.rows[other.ID].row.SlackSocketHelloAt.Valid || len(e.store.hints) != hints {
+			t.Errorf("%s = %v", other.Name, err)
+		}
+	}
+
+	e.store.fail["RecordSocketHello"] = errors.New("down")
+	if err := e.svc.RecordSocketHello(ctx, c, 3); err == nil || !strings.Contains(err.Error(), "record the hello") ||
+		len(e.store.hints) != hints {
+		t.Errorf("a failed write = %v", err)
+	}
+	delete(e.store.fail, "RecordSocketHello")
+	e.store.fail["Notify"] = errors.New("down")
+	if err := e.svc.RecordSocketHello(ctx, c, 3); err == nil ||
+		e.store.rows[sl.ID].row.SlackSocketOtherConnections.Int32 != 0 {
+		t.Errorf("a failed hint = %v, %+v", err, e.store.rows[sl.ID].row.SlackSocketOtherConnections)
+	}
+}
+
+// TestSlackSocketRead is the read of C-24.FR-2: socket is what the last hello counted, in the read and the list of a
+// Slack Connection in socket mode; null before the first hello, in http mode and for another type; a save forgets it,
+// so that the socket counts again at its next hello.
+func TestSlackSocketRead(t *testing.T) {
+	e, _ := newSlackEnv(t)
+	ctx := t.Context()
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	if sl.SlackSocket != nil {
+		t.Errorf("created with %+v", sl.SlackSocket)
+	}
+	if err := e.svc.RecordSocketHello(ctx, slack.SocketConn{Conn: slack.Conn{ID: sl.ID, PublicID: sl.PublicID},
+		Version: 1}, 1); err != nil {
+		t.Fatal(err)
+	}
+	want := connections.SlackSocket{HelloAt: t0, OtherConnections: 1}
+	got, err := e.svc.Get(ctx, sl.PublicID)
+	if err != nil || got.SlackSocket == nil || *got.SlackSocket != want {
+		t.Fatalf("read %+v, %v", got.SlackSocket, err)
+	}
+	mm := e.create(t, "mm")
+	page, err := e.svc.List(ctx, connections.ListFilter{Limit: 10})
+	if err != nil || len(page.Connections) != 2 || page.Connections[0].SlackSocket == nil ||
+		*page.Connections[0].SlackSocket != want || page.Connections[1].ID != mm.ID ||
+		page.Connections[1].SlackSocket != nil {
+		t.Errorf("list %+v, %v", page.Connections, err)
+	}
+
+	in := slackInput("sl", connections.EventModeSocket)
+	in.BotToken = keyring.Keep
+	if err := e.update(t, sl.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	row := e.store.rows[sl.ID].row
+	got, _ = e.svc.Get(ctx, sl.PublicID)
+	if row.SlackSocketHelloAt.Valid || row.SlackSocketOtherConnections.Valid || got.SlackSocket != nil {
+		t.Errorf("a save kept %+v, %+v", row.SlackSocketHelloAt, got.SlackSocket)
+	}
+	r := &e.store.rows[sl.ID].row
+	r.SlackSocketHelloAt = pgtype.Timestamptz{Time: t0, Valid: true}
+	r.SlackSocketOtherConnections = pgtype.Int4{Int32: 1, Valid: true}
+	r.SlackEventMode = pgtype.Text{String: connections.EventModeHTTP, Valid: true}
+	if got, _ := e.svc.Get(ctx, sl.PublicID); got.SlackSocket != nil {
+		t.Errorf("http mode = %+v", got.SlackSocket)
+	}
+}
+
+// TestSlackCheckWarnsAnotherClient is C-24.FR-2 and AC-10: the check of a Slack Connection in socket mode passes with
+// the warning another_client_connected while its last hello counted another connection of the app than the Leader's;
+// none for a count of 0, before a hello, in http mode or for a check that failed.
+func TestSlackCheckWarnsAnotherClient(t *testing.T) {
+	e, f := newSlackEnv(t)
+	ctx := t.Context()
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	hello := func(other int) {
+		t.Helper()
+		v := e.store.rows[sl.ID].row.Version
+		if err := e.svc.RecordSocketHello(ctx, slack.SocketConn{Conn: slack.Conn{ID: sl.ID, PublicID: sl.PublicID},
+			Version: v}, other); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(name string, ok bool, warnings ...string) {
+		t.Helper()
+		res, err := e.svc.Check(ctx, sl.PublicID, nil)
+		if err != nil || res.OK != ok || !slices.Equal(res.Warnings, warnings) {
+			t.Errorf("%s = ok %v, warnings %q, %v", name, res.OK, res.Warnings, err)
+		}
+	}
+	check("before a hello", true)
+	hello(1)
+	check("shared", true, connections.WarningAnotherClientConnected)
+	cfg := fakeslack.DefaultConfig()
+	cfg.Revoked = []string{fakeslack.BotToken}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	check("a failed check", false)
+	if err := f.SetConfig(fakeslack.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	hello(0)
+	check("alone", true)
+	hello(2)
+	in := slackInput("sl", connections.EventModeHTTP)
+	in.BotToken = keyring.Keep
+	if err := e.update(t, sl.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	r := &e.store.rows[sl.ID].row
+	r.SlackSocketHelloAt = pgtype.Timestamptz{Time: t0, Valid: true}
+	r.SlackSocketOtherConnections = pgtype.Int4{Int32: 2, Valid: true}
+	check("http mode", true)
 }

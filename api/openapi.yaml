@@ -5931,7 +5931,7 @@ paths:
       - name: status_class
         in: query
         description: Only the records whose answer has a status of this class, or, with `none`, those that got no
-          answer.
+          answer or are a Socket Mode envelope, whose confirmation has no status.
         schema:
           type: string
           enum:
@@ -12184,6 +12184,13 @@ components:
             readOnly: true
             description: The Slack app's id (`A…`), found by the step `app_token` of a check in `socket` mode; null
               before one and after the bot token changed.
+          socket:
+            readOnly: true
+            description: Socket Mode only. What the last `hello` of the Leader's Socket Mode connection counted
+              (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.
+            oneOf:
+            - $ref: '#/components/schemas/SlackSocketStatus'
+            - type: 'null'
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:
@@ -12197,6 +12204,22 @@ components:
             readOnly: true
             description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
               an item of a list without reading it again.
+    SlackSocketStatus:
+      type: object
+      description: What a `hello` of the Leader's Socket Mode connection of a Slack Connection counted.
+      required:
+      - hello_at
+      - other_connections
+      properties:
+        hello_at:
+          type: string
+          format: date-time
+          description: When the Leader's Socket Mode connection last received `hello`, on the business clock.
+        other_connections:
+          type: integer
+          minimum: 0
+          description: The connections of the Slack app that `hello` counted beyond those the Leader holds; more than
+            0 means another program, usually a second installation, takes some of the presses.
     SlackConnectionInput:
       allOf:
       - $ref: '#/components/schemas/SlackConnectionBase'
@@ -12823,11 +12846,14 @@ components:
           description: 'Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot''s roles do not
             grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses
             show in the Thread of the Root message instead of the channel view; granting that permission, for example
-            with the system admin role, shows them in the channel.'
+            with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode):
+            the last `hello` counted another connection of the Slack app than the Leader''s; presses are shared between
+            them at random — use one Slack app for each installation.'
           items:
             type: string
             enum:
             - press_answers_in_thread
+            - another_client_connected
         bot_name:
           type:
           - string
@@ -14616,6 +14642,7 @@ components:
             template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
         method:
           type: string
+          description: The HTTP method, `WEBSOCKET` for an envelope received over a Slack Socket Mode connection.
         url:
           type: string
           description: The URL as errors show it, masked; untrusted text. Without user information, with the path prefix
@@ -14624,7 +14651,8 @@ components:
           type:
           - integer
           - 'null'
-          description: The status of the answer, null when the attempt got no answer.
+          description: The status of the answer, null when the attempt got no answer, and for a Socket Mode envelope,
+            whose confirmation has no status.
         latency_ms:
           type: integer
           minimum: 0
@@ -14687,12 +14715,15 @@ components:
             description: The length in bytes of the request body after Secrets are masked and before signed action ids
               and tokens are masked, bytes that are not UTF-8 replaced and the body cut.
           response_headers:
+            description: The answer's headers, masked; null without an answer and for a Socket Mode envelope, whose
+              confirmation has none.
             $ref: '#/components/schemas/NullableHttpHeaders'
           response_body:
             type:
             - string
             - 'null'
-            description: The answer's body, masked and cut as the request body; null without an answer; untrusted text.
+            description: The answer's body, masked and cut as the request body — for a Socket Mode envelope Muster's
+              confirmation; null without an answer; untrusted text.
           response_body_bytes:
             type: integer
             minimum: 0
