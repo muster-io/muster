@@ -2051,3 +2051,181 @@ func TestExtraConnectionsConfig(t *testing.T) {
 		t.Errorf("SetConfig without extra_connections: %v %v", err, f.Config().ExtraConnections)
 	}
 }
+
+// members are the members of a users.list page, by id: each as an object.
+func members(t *testing.T, a answer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	list, _ := a.body["members"].([]any)
+	for _, m := range list {
+		out = append(out, m.(map[string]any))
+	}
+	return out
+}
+
+// TestUsersList covers F-095: users.list pages the directory of the token's app, UsersPageSize accounts a page
+// whatever limit asks for and fewer when it asks for fewer, with next_cursor naming the rest and empty on the last
+// page; Slackbot, the bots and the deleted account are among them; the email shows only with users:read.email; a
+// cursor the fake did not give is invalid_cursor, an app-level token the wrong kind, and a token without users:read
+// lacks the scope.
+func TestUsersList(t *testing.T) {
+	f := start(t)
+	var ids []string
+	cursor := ""
+	for page := 1; ; page++ {
+		args := map[string]string{"limit": "200"}
+		if cursor != "" {
+			args["cursor"] = cursor
+		}
+		a := call(t, f, "users.list", botB, args, false)
+		ms := members(t, a)
+		if a.body["ok"] != true || len(ms) > fakeslack.UsersPageSize || len(ms) == 0 ||
+			a.header.Get("X-Accepted-OAuth-Scopes") != "users:read" {
+			t.Fatalf("page %d = %s", page, a.raw)
+		}
+		for _, m := range ms {
+			ids = append(ids, m["id"].(string))
+		}
+		cursor = a.body["response_metadata"].(map[string]any)["next_cursor"].(string)
+		if cursor == "" {
+			if page != 3 {
+				t.Errorf("%d pages", page)
+			}
+			break
+		}
+	}
+	if want := []string{"USLACKBOT", fakeslack.UserSam1, fakeslack.UserCarol, fakeslack.UserHelper, fakeslack.UserAlice,
+		fakeslack.UserBob, fakeslack.UserDora, botUserB, fakeslack.UserBobOld, fakeslack.UserSam2}; !slices.Equal(ids,
+		want) {
+		t.Errorf("ids %q, want %q", ids, want)
+	}
+	a := call(t, f, "users.list", botB, map[string]string{"limit": "2"}, false)
+	ms := members(t, a)
+	profile := ms[1]["profile"].(map[string]any)
+	if len(ms) != 2 || ms[1]["name"] != "sam.one" || profile["display_name"] != "Sam" || profile["real_name"] != "Sam One" ||
+		profile["email"] != "sam.one@example.org" || ms[0]["is_bot"] != false || ms[1]["deleted"] != false {
+		t.Errorf("two members %s", a.raw)
+	}
+	last := members(t, call(t, f, "users.list", fakeslack.BotToken, nil, false))
+	if len(last) != fakeslack.UsersPageSize || last[3]["id"] != fakeslack.UserHelper || last[3]["is_bot"] != true {
+		t.Errorf("app a's first page %v", last)
+	}
+	putConfig(t, f, `{"scopes":{"b":"users:read,chat:write"}}`)
+	for _, m := range members(t, call(t, f, "users.list", botB, nil, false)) {
+		if _, has := m["profile"].(map[string]any)["email"]; has {
+			t.Errorf("an email without users:read.email: %v", m)
+		}
+	}
+	slackError(t, call(t, f, "users.list", botB, map[string]string{"cursor": "bm9wZQ=="}, false), "invalid_cursor")
+	slackError(t, call(t, f, "users.list", botB, map[string]string{"cursor": "%%%"}, false), "invalid_cursor")
+	slackError(t, call(t, f, "users.list", fakeslack.SecondAppToken, nil, false), "not_allowed_token_type")
+	putConfig(t, f, `{"scopes":{"b":"chat:write"}}`)
+	a = call(t, f, "users.list", botB, nil, false)
+	slackError(t, a, "missing_scope")
+	if a.body["needed"] != "users:read" {
+		t.Errorf("needed %v", a.body["needed"])
+	}
+}
+
+// TestUsersLookupByEmail covers F-095: users.lookupByEmail finds an account by its email in any letter case, a deleted
+// one included with deleted true, and answers users_not_found for any other address; it needs users:read.email.
+func TestUsersLookupByEmail(t *testing.T) {
+	f := start(t)
+	a := call(t, f, "users.lookupByEmail", botB, map[string]string{"email": "Alice@EXAMPLE.org"}, false)
+	u, _ := a.body["user"].(map[string]any)
+	if a.body["ok"] != true || u["id"] != fakeslack.UserAlice || u["name"] != "alice" ||
+		u["profile"].(map[string]any)["display_name"] != "Alice Smith" ||
+		a.header.Get("X-Accepted-OAuth-Scopes") != "users:read.email" {
+		t.Fatalf("alice = %s", a.raw)
+	}
+	a = call(t, f, "users.lookupByEmail", botB, map[string]string{"email": "bob.old@example.org"}, false)
+	if u, _ := a.body["user"].(map[string]any); u["id"] != fakeslack.UserBobOld || u["deleted"] != true {
+		t.Errorf("a deleted account = %s", a.raw)
+	}
+	slackError(t, call(t, f, "users.lookupByEmail", botB, map[string]string{"email": "nobody@example.org"}, false),
+		"users_not_found")
+	putConfig(t, f, `{"scopes":{"b":"users:read,chat:write"}}`)
+	slackError(t, call(t, f, "users.lookupByEmail", botB, map[string]string{"email": "alice@example.org"}, false),
+		"missing_scope")
+}
+
+// TestUsersInfo covers F-095: users.info answers the account of a user id with its time zone, and user_not_found for
+// any other id.
+func TestUsersInfo(t *testing.T) {
+	f := start(t)
+	a := call(t, f, "users.info", botB, map[string]string{"user": fakeslack.UserDora}, false)
+	if u, _ := a.body["user"].(map[string]any); a.body["ok"] != true || u["name"] != "dora" || u["tz"] == "" ||
+		u["profile"].(map[string]any)["email"] != "dora@example.org" {
+		t.Errorf("dora = %s", a.raw)
+	}
+	slackError(t, call(t, f, "users.info", botB, map[string]string{"user": "U0NOBODY"}, false), "user_not_found")
+}
+
+// TestConversationsOpen covers F-096: conversations.open answers the bot's direct chat with a person, already open;
+// a bot, the app's own bot user included, is cannot_dm_bot, an unknown or deleted account user_not_found; it needs
+// im:write.
+func TestConversationsOpen(t *testing.T) {
+	f := start(t)
+	a := chat(t, f, "conversations.open", botB, map[string]any{"users": fakeslack.UserAlice})
+	if a.body["ok"] != true || a.body["already_open"] != true ||
+		a.body["channel"].(map[string]any)["id"] != fakeslack.DMChannel(fakeslack.UserAlice) ||
+		fakeslack.DMChannel(fakeslack.UserAlice) != "D0FAKEALICE" || fakeslack.DMChannel("") != "D" {
+		t.Errorf("alice = %s", a.raw)
+	}
+	for user, code := range map[string]string{fakeslack.UserHelper: "cannot_dm_bot", botUserB: "cannot_dm_bot",
+		fakeslack.UserBobOld: "user_not_found", "U0NOBODY": "user_not_found"} {
+		slackError(t, chat(t, f, "conversations.open", botB, map[string]any{"users": user}), code)
+	}
+	putConfig(t, f, `{"scopes":{"b":"chat:write"}}`)
+	slackError(t, chat(t, f, "conversations.open", botB, map[string]any{"users": fakeslack.UserAlice}), "missing_scope")
+}
+
+// TestDirectMessages covers F-096: chat.postMessage to a person's user id posts into the bot's direct chat with them,
+// which the answer names, and GET /_fake/dms lists them by person and app; a bot is cannot_dm_bot, a deleted account
+// user_not_found, an id that is no person channel_not_found; the content is checked as in a channel.
+func TestDirectMessages(t *testing.T) {
+	f := start(t)
+	a := post(t, f, map[string]any{"channel": fakeslack.UserAlice, "text": "code 1", "unfurl_links": false})
+	if ok(t, a) == "" || a.body["channel"] != "D0FAKEALICE" ||
+		a.body["message"].(map[string]any)["text"] != "code 1" {
+		t.Fatalf("a direct message = %s", a.raw)
+	}
+	ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": fakeslack.UserAlice,
+		"text": "from a"}))
+	if dms := f.DirectMessages(fakeslack.AppB, fakeslack.UserAlice); len(dms) != 1 || dms[0].Text != "code 1" ||
+		dms[0].User != botUserB || dms[0].UnfurlLinks == nil || *dms[0].UnfurlLinks {
+		t.Errorf("app b's direct messages %+v", dms)
+	}
+	if dms := f.DirectMessages("", fakeslack.UserAlice); len(dms) != 2 {
+		t.Errorf("both apps' direct messages %+v", dms)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/_fake/dms?app=b&user="+
+		fakeslack.UserAlice, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := do(t, req)
+	var listed []fakeslack.Message
+	if err := json.Unmarshal([]byte(got.raw), &listed); err != nil || len(listed) != 1 || listed[0].Text != "code 1" {
+		t.Errorf("GET /_fake/dms = %d %s", got.status, got.raw)
+	}
+	req, err = http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/_fake/dms", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := do(t, req); got.status != http.StatusBadRequest {
+		t.Errorf("GET /_fake/dms without a user = %d", got.status)
+	}
+	for user, code := range map[string]string{fakeslack.UserHelper: "cannot_dm_bot", botUserB: "cannot_dm_bot",
+		fakeslack.UserBobOld: "user_not_found", "U0NOBODY": "channel_not_found", "W0NOBODY": "channel_not_found"} {
+		slackError(t, post(t, f, map[string]any{"channel": user, "text": "x"}), code)
+	}
+	slackError(t, post(t, f, map[string]any{"channel": fakeslack.UserBob}), "no_text")
+	slackError(t, post(t, f, map[string]any{"channel": fakeslack.UserBob, "text": "x", "blocks": "nope"}),
+		"invalid_blocks")
+	slackError(t, chat(t, f, "chat.postMessage", fakeslack.SecondAppToken, map[string]any{
+		"channel": fakeslack.UserBob, "text": "x"}), "not_allowed_token_type")
+	if dms := f.DirectMessages(fakeslack.AppB, fakeslack.UserBob); len(dms) != 0 {
+		t.Errorf("a refused direct message was kept: %+v", dms)
+	}
+}

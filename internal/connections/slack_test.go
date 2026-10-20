@@ -948,6 +948,48 @@ func TestSlackPressConnection(t *testing.T) {
 	}
 }
 
+// TestSlackLinkConnection is the read of an Account link's calls (C-24.FR-12): a Slack Connection in either event mode
+// with its client, kept until the Connection changes; one that is unknown, not a well-formed public_id, of another
+// type or deleted is slack.ErrNoConnection; a failed read or a client that cannot be built is an error of its own.
+func TestSlackLinkConnection(t *testing.T) {
+	e, _ := newSlackEnv(t)
+	ctx := t.Context()
+	s := e.createSlack(t, slackInput("socket", connections.EventModeSocket))
+	conn, err := e.svc.SlackLinkConnection(ctx, s.PublicID)
+	if err != nil || conn.ID != s.ID || conn.PublicID != s.PublicID || conn.Mode != slack.EventModeSocket ||
+		conn.Client == nil {
+		t.Fatalf("socket = %+v, %v", conn, err)
+	}
+	if again, _ := e.svc.SlackLinkConnection(ctx, s.PublicID); again.Client != conn.Client {
+		t.Error("the client is not cached")
+	}
+	h := e.createSlack(t, slackInput("http", connections.EventModeHTTP))
+	if hc, err := e.svc.SlackLinkConnection(ctx, h.PublicID); err != nil || hc.Mode != slack.EventModeHTTP ||
+		hc.Client == nil {
+		t.Fatalf("http = %+v, %v", hc, err)
+	}
+	mm := e.create(t, "mm")
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeSocket))
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"CN000000000000", "bad", mm.PublicID, gone.PublicID} {
+		if _, err := e.svc.SlackLinkConnection(ctx, id); !errors.Is(err, slack.ErrNoConnection) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	e.store.rows[s.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[s.ID].row.Version++
+	if _, err := e.svc.SlackLinkConnection(ctx, s.PublicID); err == nil || errors.Is(err, slack.ErrNoConnection) ||
+		!strings.Contains(err.Error(), "open the bot token") {
+		t.Errorf("a client that cannot be built = %v", err)
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.SlackLinkConnection(ctx, h.PublicID); err == nil || errors.Is(err, slack.ErrNoConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
 // ListSocketConnections lists the Slack Connections in socket mode that are not deleted, as the query does.
 func (s *memStore) ListSocketConnections(_ context.Context, org int64) ([]dbgen.ListSocketConnectionsRow, error) {
 	if err := s.fail["ListSocketConnections"]; err != nil || org != 1 {

@@ -129,6 +129,7 @@ var registry = []Probe{
 	{Name: "slack_connections", Run: probeSlack},
 	{Name: "slack_presses", Run: probeSlackPresses},
 	{Name: "slack_socket", Run: probeSlackSocket},
+	{Name: "slack_links", Run: probeSlackLinks},
 	{Name: "connection_drafts", Run: probeConnectionDrafts},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
@@ -3312,9 +3313,9 @@ func (p *probeMMConn) Connection(context.Context, string) (mattermost.Connection
 	return p.conn, nil
 }
 
-// probeLinkStore is the Account links of probeAccountLinks and probeBridgeLinks in memory: the User 1, the Telegram
-// Connection 1 without a stored bot username and the Mattermost Connection 2, or the Bridge Connection bridge, the
-// link requests and the links.
+// probeLinkStore is the Account links of probeAccountLinks, probeBridgeLinks and probeSlackLinks in memory: the User
+// 1, the Telegram Connection 1 without a stored bot username and the Mattermost Connection 2, or the Connection bridge
+// — a Bridge or a Slack one — the link requests and the links.
 type probeLinkStore struct {
 	accountlinks.Queries
 	reqs   []probeLinkRequest
@@ -3458,6 +3459,21 @@ func (s *probeLinkStore) void(match func(probeLinkRequest) bool, now time.Time) 
 		}
 	}
 	return n
+}
+
+func (s *probeLinkStore) CountUserSlackCodeRequests(context.Context, alinkdb.CountUserSlackCodeRequestsParams) (
+	alinkdb.CountUserSlackCodeRequestsRow, error) {
+	return alinkdb.CountUserSlackCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) CountTargetSlackCodeRequests(context.Context, alinkdb.CountTargetSlackCodeRequestsParams) (
+	alinkdb.CountTargetSlackCodeRequestsRow, error) {
+	return alinkdb.CountTargetSlackCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) VoidPendingSlackRequests(_ context.Context, a alinkdb.VoidPendingSlackRequestsParams) (int64,
+	error) {
+	return s.void(func(r probeLinkRequest) bool { return r.messenger == "slack" }, a.Now), nil
 }
 
 func (s *probeLinkStore) VoidPendingMattermostRequests(_ context.Context,
@@ -5705,4 +5721,222 @@ func (probeSlackBindings) SlackPressBinding(_ context.Context, conn int64, _, _ 
 func (probeSlackBindings) SlackTestDestination(context.Context, int64, string, string) (delivery.Destination, bool,
 	error) {
 	return delivery.Destination{}, false, nil
+}
+
+// probeSlackLinks pushes the secrets through Account links of a Slack Connection (C-24.FR-12, C-23.FR-3), whose
+// requests a requestlog.Writer records into the in-memory probeRLRows: the first as the bot token, the second as the
+// app-level token and the third as the wrong code typed into the confirmations. The stand-in Slack refuses the first
+// users.lookupByEmail with internal_error and a warning that echoes the request and its Authorization header, then
+// finds bob; it refuses the first direct message with cannot_dm_bot and the second with a 500, both echoing the
+// request, which holds the code, answers the later ones with the message repeated, as Slack does, and refuses every
+// confirmation with the echo. Through the API: a start whose lookup fails, one whose direct message is refused, one
+// whose direct message fails, two that send, each confirmed five times with the wrong code and then with the right
+// one, and a start whose right code links, whose confirmation fails and is only logged. Neither the log, the errors, the
+// API's answers nor the records may carry a secret or a code; the codes come from crypto/rand, so the probe looks for
+// them itself and reports a leak as the first secret. It is incomplete unless the stand-in saw two lookups, two
+// refused and three sent codes and a confirmation, the last confirmation linked, the link was logged with the error
+// of its confirmation and the records hold every direct message.
+func probeSlackLinks(ctx context.Context, secrets []string, log io.Writer) error {
+	var seen bytes.Buffer
+	var seenMu sync.Mutex
+	logger := logging.New(io.MultiWriter(log, &lockedWriter{w: &seen, mu: &seenMu}), logging.LevelInfo)
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	clocks := clock.Clocks{Business: business, Real: clock.Real{}}
+	botToken, appToken := "xoxb-"+secrets[0], "xapp-"+secrets[1]
+	stand := &probeSlackPeople{}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: stand}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	base := "http://" + ln.Addr().String()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	rows := &probeRLRows{}
+	writer := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
+	client, err := slack.NewClient(slack.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clocks.Real,
+		Recorder: writer}, slack.Settings{BotToken: logging.Secret(botToken), AppToken: logging.Secret(appToken),
+		Owner: outbound.Owner{Connection: 5, PublicID: "CNAAAAAAAAAAA5"},
+		Route: func(logging.Secret) string { return base + "/api/" }})
+	if err != nil {
+		return err
+	}
+	conn := slack.Conn{ID: 5, PublicID: "CNAAAAAAAAAAA5", Mode: slack.EventModeSocket, Client: client}
+	links := accountlinks.New(accountlinks.Config{OrgID: 1, Store: &probeLinkStore{bridge: &alinkdb.GetLinkConnectionRow{
+		ID: conn.ID, PublicID: conn.PublicID, Type: "slack", Name: "probe"}}, Audit: audit.NewWriter(logger, business),
+		Business: business, Log: logger,
+		Slack: slack.LinkBots{Conns: probeSlackLinkConn{conn: conn}, Path: deliverytest.Unlimited(1, clocks)}})
+	sess := auth.Session{ID: 1, PublicID: "SNAAAAAAAAAAA1", State: auth.StateActive,
+		User: auth.Principal{ID: 1, PublicID: "SRAAAAAAAAAAA1", Name: "Bob", Role: auth.RoleResponder}}
+	h, err := api.New(api.Config{Sessions: probeSessions{sess: sess}, AccountLinks: links, Log: logger,
+		Real: clock.Real{}})
+	if err != nil {
+		return err
+	}
+	send := func(path, body string) string {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+		if err != nil {
+			return err.Error()
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cookie", auth.CookieName+"=probe")
+		r.Header.Set(auth.CSRFHeader, "probe")
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		return rec.body.String()
+	}
+	const start, confirm = "/api/v1/me/account-links/slack", "/api/v1/me/account-links/slack/confirmation"
+	handle := `{"connection_id":"` + conn.PublicID + `","handle":"bob@example.org"}`
+	var answers []string
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	for range 3 {
+		answers = append(answers, send(start, handle))
+	}
+	for range 2 {
+		a := send(start, handle)
+		answers = append(answers, a)
+		_ = json.Unmarshal([]byte(a), &req)
+		for _, code := range []string{secrets[2], secrets[2], secrets[2], secrets[2], secrets[2], stand.code()} {
+			answers = append(answers, send(confirm, `{"request_id":"`+req.RequestID+`","code":"`+code+`"}`))
+		}
+	}
+	a := send(start, handle)
+	_ = json.Unmarshal([]byte(a), &req)
+	linked := send(confirm, `{"request_id":"`+req.RequestID+`","code":"`+stand.code()+`"}`)
+	answers = append(answers, a, linked)
+	errs := []error{fmt.Errorf("answers: %s", strings.Join(answers, " | "))}
+	seenMu.Lock()
+	logged := seen.String()
+	seenMu.Unlock()
+	rows.mu.Lock()
+	stored := slices.Clone(rows.rows)
+	rows.mu.Unlock()
+	var values []string
+	posts := 0
+	for _, r := range stored {
+		if r.operation == "chat.postMessage" {
+			posts++
+		}
+		values = append(values, r.values...)
+	}
+	refused, sent, confirmations, searched := stand.counts()
+	logLinked := strings.Contains(logged, `"event":"account_link_linked","messenger":"slack","connection":"`+
+		conn.PublicID+`","user":"SRAAAAAAAAAAA1","error":`)
+	if refused < 2 || sent < 3 || confirmations < 1 || searched < 2 || posts < 6 || !logLinked ||
+		!strings.Contains(answers[1], `"code":"direct_message_refused"`) ||
+		!strings.Contains(linked, `"messenger":"slack"`) {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d refused and %d sent codes, %d confirmations, %d lookups, "+
+			"%d records of chat.postMessage, the link logged with its error: %v, a refused direct message answered: %v, "+
+			"the last confirmation linked: %v", refused, sent, confirmations, searched, posts, logLinked,
+			strings.Contains(answers[1], `"code":"direct_message_refused"`), strings.Contains(linked,
+				`"messenger":"slack"`))})
+	}
+	codes := stand.allCodes()
+	var leaks []probeRLValue
+	text := logged + strings.Join(answers, "") + errors.Join(errs...).Error()
+	for _, c := range codes {
+		leaks = append(leaks, probeRLValue{"a link code", c})
+		if c != "" && strings.Contains(text, c) {
+			errs = append(errs, errors.New("a link token or code leaked: "+secrets[0]))
+		}
+	}
+	return errors.Join(append(errs, probeRLLeaks(stored, leaks),
+		fmt.Errorf("request_log rows: %s", strings.Join(values, "\n")))...)
+}
+
+// probeSlackLinkConn is the Slack Connection of probeSlackLinks.
+type probeSlackLinkConn struct{ conn slack.Conn }
+
+func (p probeSlackLinkConn) SlackLinkConnection(_ context.Context, publicID string) (slack.Conn, error) {
+	if publicID != p.conn.PublicID {
+		return slack.Conn{}, slack.ErrNoConnection
+	}
+	return p.conn, nil
+}
+
+// probeSlackPeople is the stand-in Slack of probeSlackLinks: it refuses the first users.lookupByEmail and then finds
+// bob; it refuses the first direct message with a code as cannot_dm_bot and the second with a 500, answers the later
+// ones with the message repeated and keeps their codes, and refuses every confirmation; each refusal echoes the
+// request and its Authorization header.
+type probeSlackPeople struct {
+	mu            sync.Mutex
+	searched      int
+	refused       []string
+	sent          []string
+	confirmations int
+}
+
+// code is the code of the last direct message sent.
+func (p *probeSlackPeople) code() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.sent) == 0 {
+		return ""
+	}
+	return p.sent[len(p.sent)-1]
+}
+
+// allCodes are the codes of every direct message, refused or sent.
+func (p *probeSlackPeople) allCodes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append(slices.Clone(p.refused), p.sent...)
+}
+
+func (p *probeSlackPeople) counts() (refused, sent, confirmations, searched int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.refused), len(p.sent), p.confirmations, p.searched
+}
+
+func (p *probeSlackPeople) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	echo := "refused " + r.Header.Get("Authorization") + " " + string(body)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	answer := func(status int, v map[string]any) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	switch r.URL.Path {
+	case "/api/users.lookupByEmail":
+		if p.searched++; p.searched == 1 {
+			answer(http.StatusOK, map[string]any{"ok": false, "error": "internal_error", "warning": echo})
+			return
+		}
+		answer(http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"id": "U0PROBEBOB", "name": "bob",
+			"profile": map[string]any{"display_name": "Bob", "real_name": "Bob Brown"}}})
+	case "/api/chat.postMessage":
+		var msg struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		code := probeCodeRe.FindString(msg.Text)
+		switch {
+		case code == "":
+			p.confirmations++
+			answer(http.StatusOK, map[string]any{"ok": false, "error": "internal_error", "warning": echo})
+		case len(p.refused) == 0:
+			p.refused = append(p.refused, code)
+			answer(http.StatusOK, map[string]any{"ok": false, "error": "cannot_dm_bot", "warning": echo})
+		case len(p.refused) == 1:
+			p.refused = append(p.refused, code)
+			answer(http.StatusInternalServerError, map[string]any{"ok": false, "error": echo})
+		default:
+			p.sent = append(p.sent, code)
+			answer(http.StatusOK, map[string]any{"ok": true, "channel": "D0PROBEBOB", "ts": "1.000001",
+				"message": map[string]any{"type": "message", "text": msg.Text, "ts": "1.000001"}})
+		}
+	default:
+		answer(http.StatusOK, map[string]any{"ok": false, "error": "unknown_method", "warning": echo})
+	}
 }
