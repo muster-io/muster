@@ -27,6 +27,8 @@ export function destinationTypeName(t: TFunction, type: DestinationType): string
       return "Telegram";
     case "bridge":
       return t("destinations.types.bridge");
+    case "slack":
+      return t("destinations.types.slack");
     default:
       return t("destinations.types.webhook");
   }

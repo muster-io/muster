@@ -32,7 +32,7 @@ const getDestination = `-- name: GetDestination :one
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
        d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
-       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
+       d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -65,6 +65,8 @@ type GetDestinationRow struct {
 	TelegramDiscussionGroupTitle pgtype.Text
 	BridgeChannelID              pgtype.Text
 	BridgeChannelName            pgtype.Text
+	SlackChannelID               pgtype.Text
+	SlackChannelName             pgtype.Text
 	WebhookMode                  pgtype.Text
 	WebhookEventsConfig          []byte
 	WebhookTemplateConfig        []byte
@@ -107,6 +109,8 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.TelegramDiscussionGroupTitle,
 		&i.BridgeChannelID,
 		&i.BridgeChannelName,
+		&i.SlackChannelID,
+		&i.SlackChannelName,
 		&i.WebhookMode,
 		&i.WebhookEventsConfig,
 		&i.WebhookTemplateConfig,
@@ -213,6 +217,51 @@ func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMat
 		arg.TeamID,
 		arg.ChannelID,
 		arg.TeamName,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertSlackDestination = `-- name: InsertSlackDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, slack_channel_id, slack_channel_name, mentions, limiter_limit,
+    limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    $1, $2, 'slack', $3, $4, $5, $6, $7, $8,
+    $9, 'healthy', $10::timestamptz, $10::timestamptz
+)
+RETURNING id
+`
+
+type InsertSlackDestinationParams struct {
+	OrgID             int64
+	PublicID          string
+	Name              string
+	ConnectionID      pgtype.Int8
+	ChannelID         pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+}
+
+// InsertSlackDestination creates a healthy Slack Destination with its channel id as entered and the channel's name its
+// Destination check read (C-24.FR-3).
+func (q *Queries) InsertSlackDestination(ctx context.Context, arg InsertSlackDestinationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertSlackDestination,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
 		arg.ChannelName,
 		arg.Mentions,
 		arg.LimiterLimit,
@@ -420,7 +469,7 @@ const listDestinations = `-- name: ListDestinations :many
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
        d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
-       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
+       d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -468,6 +517,8 @@ type ListDestinationsRow struct {
 	TelegramDiscussionGroupTitle pgtype.Text
 	BridgeChannelID              pgtype.Text
 	BridgeChannelName            pgtype.Text
+	SlackChannelID               pgtype.Text
+	SlackChannelName             pgtype.Text
 	WebhookMode                  pgtype.Text
 	WebhookEventsConfig          []byte
 	WebhookTemplateConfig        []byte
@@ -527,6 +578,8 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.TelegramDiscussionGroupTitle,
 			&i.BridgeChannelID,
 			&i.BridgeChannelName,
+			&i.SlackChannelID,
+			&i.SlackChannelName,
 			&i.WebhookMode,
 			&i.WebhookEventsConfig,
 			&i.WebhookTemplateConfig,
@@ -683,6 +736,27 @@ func (q *Queries) LockMattermostConnection(ctx context.Context, arg LockMattermo
 	return id, err
 }
 
+const lockSlackConnection = `-- name: LockSlackConnection :one
+SELECT id
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'slack' AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockSlackConnectionParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockSlackConnection takes the Slack Connection that is not deleted in share mode for the save of one of its
+// Destinations, as LockMattermostConnection does.
+func (q *Queries) LockSlackConnection(ctx context.Context, arg LockSlackConnectionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSlackConnection, arg.OrgID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockTelegramConnection = `-- name: LockTelegramConnection :one
 SELECT id
 FROM connections
@@ -794,6 +868,45 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 		arg.TeamID,
 		arg.ChannelID,
 		arg.TeamName,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const updateSlackDestination = `-- name: UpdateSlackDestination :exec
+UPDATE destinations
+SET name = $1, connection_id = $2, slack_channel_id = $3,
+    slack_channel_name = $4, mentions = $5, limiter_limit = $6,
+    limiter_per_seconds = $7, updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $9 AND id = $10 AND type = 'slack'
+`
+
+type UpdateSlackDestinationParams struct {
+	Name              string
+	ConnectionID      pgtype.Int8
+	ChannelID         pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+	OrgID             int64
+	ID                int64
+}
+
+// UpdateSlackDestination replaces the configured fields of a Slack Destination and the channel's name its Destination
+// check read; its health is left alone.
+func (q *Queries) UpdateSlackDestination(ctx context.Context, arg UpdateSlackDestinationParams) error {
+	_, err := q.db.Exec(ctx, updateSlackDestination,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
 		arg.ChannelName,
 		arg.Mentions,
 		arg.LimiterLimit,

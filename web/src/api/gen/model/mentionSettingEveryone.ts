@@ -19,7 +19,7 @@
  */
 
 /**
- * `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
+ * `none`, or the chat-wide mention the messenger supports: Mattermost takes `channel`, `all` and `here`, Slack `channel` and `here` but not `all`; Telegram and Bridges have none of them; an outgoing webhook takes each as data.
  */
 export type MentionSettingEveryone = typeof MentionSettingEveryone[keyof typeof MentionSettingEveryone];
 

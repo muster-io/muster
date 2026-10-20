@@ -959,6 +959,7 @@
     "title": "Destinations",
     "types": {
       "bridge": "Bridge",
+      "slack": "Slack",
       "webhook": "Outgoing webhook"
     },
     "webhook": {
@@ -1049,6 +1050,7 @@
       "bridge": "Sends one test message, marked 🧪, through the bridge with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers that it is a test message.",
       "broken": "A test that succeeds in every step ends the Broken state.",
       "mattermost": "Sends one test message, marked 🧪, with the saved settings, then presses its first button through the bot to check that button presses reach Muster. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
+      "slack": "Sends one test message, marked 🧪, to Slack with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers that it is a test message.",
       "telegram": "Sends one test message, marked 🧪, with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
       "webhook": "Sends the test event, the “Create” request, or both, as the mode of this outgoing webhook says, with the saved settings. No Alert Group changes."
     },

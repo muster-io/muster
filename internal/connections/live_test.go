@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -39,6 +40,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 )
 
@@ -47,15 +49,17 @@ func TestMain(m *testing.M) {
 }
 
 // liveEnv is the Connections, the Destination write path and delivery against PostgreSQL, with the fake Mattermost
-// server and the real interactive path.
+// server and the real interactive path; slackBase is where Slack Connections' requests go, the fake Slack server once
+// a test starts one.
 type liveEnv struct {
-	d        *db.DB
-	orgID    int64
-	log      *bytes.Buffer
-	fake     *fakemattermost.Fake
-	business *clock.Manual
-	conns    *connections.Service
-	dests    *destinations.Service
+	d         *db.DB
+	orgID     int64
+	log       *bytes.Buffer
+	fake      *fakemattermost.Fake
+	business  *clock.Manual
+	conns     *connections.Service
+	dests     *destinations.Service
+	slackBase string
 }
 
 func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
@@ -118,12 +122,13 @@ func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
 		Audit: w, Clocks: clocks, Log: logger, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
 		Network:     mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
 		Interactive: &delivery.Interactive{OrgID: org.ID, Store: delivery.NewStore(d.Pool, d.Pool), Clocks: clocks},
+		SlackRoute:  func(logging.Secret) string { return e.slackBase },
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return svc.AbandonConnection(ctx, tx, id)
 		}})
 	e.dests = destinations.New(org.ID, destinations.NewStore(d.Pool))
 	e.dests.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: business,
-		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns, Telegram: e.conns})
+		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns, Telegram: e.conns, Slack: e.conns})
 	return e
 }
 
@@ -160,7 +165,95 @@ func TestLive(t *testing.T) {
 		t.Run("telegram", e.telegram)
 		t.Run("telegramDestinations", e.telegramDestinations)
 		t.Run("bridge_event_claim", e.bridgeEventClaim)
+		t.Run("slack", e.slack)
 	})
+}
+
+// slack is C-24.FR-3 on the real store against the fake Slack server: a checked Slack Connection's Destination is
+// refused for a channel without the bot, with the bot's stored name, and saved for one with it, with the channel id as
+// entered and the channel's name, which the reads return; an update stores a new name; checkDestination, the channel
+// list and muster doctor find the Destination; the Destination keeps its Connection in use until it is deleted.
+func (e *liveEnv) slack(t *testing.T) {
+	ctx := t.Context()
+	f := fakeslack.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	e.slackBase = f.URL() + "/api/"
+	t.Cleanup(func() { e.slackBase = "" })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeSlack, Name: "live-sl",
+		EventMode: connections.EventModeSocket, BotToken: keyring.Replace(fakeslack.SecondBotToken),
+		AppToken: keyring.Replace(fakeslack.SecondAppToken), Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.conns.Check(ctx, c.PublicID, nil); err != nil || !res.OK {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	dby := destinations.Requester{Actor: by.Actor, Transport: by.Transport}
+	in := destinations.Input{Type: destinations.TypeSlack, Name: "live-sl", Mentions: quiet(),
+		Limiter: destinations.Limiter{Limit: 30, PerSeconds: 60},
+		Slack:   &destinations.SlackInput{Connection: c.PublicID, ChannelID: fakeslack.ChannelOther}}
+	_, err = e.dests.Create(ctx, dby, in)
+	if failed, ok := errors.AsType[*destinations.CheckFailedError](err); !ok ||
+		failed.Items[0].Code != slack.CodeBotNotInChannel ||
+		failed.Items[0].Message != "Invite the bot to the channel: /invite @muster-dev-bot-b" {
+		t.Fatalf("a channel without the bot = %v", err)
+	}
+	in.Slack.ChannelID = fakeslack.ChannelAlerts
+	d, err := e.dests.Create(ctx, dby, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.dests.Get(ctx, d.PublicID)
+	if err != nil || got.Type != destinations.TypeSlack || *got.SlackChannelID != fakeslack.ChannelAlerts ||
+		*got.SlackChannelName != "alerts" || *got.Connection != c.PublicID || got.MattermostChannelID != nil ||
+		e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND type = 'slack' AND slack_channel_id = $2
+			AND slack_channel_name = 'alerts' AND connection_id = $3`, d.ID, fakeslack.ChannelAlerts, c.ID) != 1 {
+		t.Fatalf("stored %+v, %v", got, err)
+	}
+	typ := destinations.TypeSlack
+	page, err := e.dests.List(ctx, destinations.ListFilter{Type: &typ, Limit: 10})
+	if err != nil || len(page.Destinations) != 1 || *page.Destinations[0].SlackChannelName != "alerts" {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+	cfg := fakeslack.DefaultConfig()
+	cfg.Channels[fakeslack.AppB][fakeslack.ChannelAlerts] = fakeslack.Channel{Name: "alerts-renamed", Member: true}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	in.Name = "live-sl-renamed"
+	if d, err := e.dests.Update(ctx, dby, d.PublicID, nil, in); err != nil || *d.SlackChannelName != "alerts-renamed" ||
+		e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND name = 'live-sl-renamed'
+			AND slack_channel_name = 'alerts-renamed'`, d.ID) != 1 {
+		t.Fatalf("update = %+v, %v", d, err)
+	}
+	if res, err := e.dests.Check(ctx, d.PublicID); err != nil || !res.OK || len(res.Items) != 1 ||
+		res.Items[0].Name != slack.ItemChannel {
+		t.Fatalf("checkDestination = %+v, %v", res, err)
+	}
+	if list, err := e.conns.SlackChannels(ctx, c.PublicID, ""); err != nil || len(list.Channels) != 1 ||
+		list.Channels[0].Name != "alerts-renamed" {
+		t.Fatalf("channels = %+v, %v", list, err)
+	}
+	found, err := e.conns.Doctor(ctx, connectionsdb.New(e.d.Pool), 2*time.Second)
+	if err != nil || !slices.ContainsFunc(found, func(f connections.Finding) bool {
+		return f.Kind == connections.FindingDestination && f.Name == "live-sl-renamed" && f.OK()
+	}) || !slices.ContainsFunc(found, func(f connections.Finding) bool {
+		return f.Kind == connections.FindingConnection && f.Name == "live-sl" && f.OK()
+	}) {
+		t.Fatalf("doctor = %+v, %v", found, err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, nil); !errors.Is(err, connections.ErrInUse) {
+		t.Fatalf("delete in use = %v", err)
+	}
+	if err := e.dests.Delete(ctx, dby, d.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, nil); err != nil {
+		t.Fatalf("delete = %v", err)
+	}
 }
 
 // bridgeEventClaim is the claim of Bridge events on the real store (C-22.FR-11): two copies of one event handled at

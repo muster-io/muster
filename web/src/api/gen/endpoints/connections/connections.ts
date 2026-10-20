@@ -40,6 +40,7 @@ import type {
   BadRequestResponse,
   ConflictResponse,
   Connection,
+  ConnectionChannelList,
   ConnectionCheckRequest,
   ConnectionCheckResult,
   ConnectionDraft,
@@ -49,7 +50,6 @@ import type {
   LimitedResponse,
   ListConnectionChannelsParams,
   ListConnectionsParams,
-  MattermostChannelList,
   NotFoundResponse,
   PreconditionFailedResponse,
   PreconditionRequiredResponse,
@@ -732,13 +732,13 @@ export const useCheckConnection = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * The channels of a Connection's bot for the channel picker of the Destination form. A Mattermost Connection answers `MattermostChannelList`: the bot's teams, `team_id` alone when given, and its channels in each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and that are not archived, read with `conversations.list` (`types=public_channel,private_channel`, `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one, and nothing more is read.
  * @summary List channels visible to the bot
  */
 export const listConnectionChannels = async (connectionId: string,
-    params?: ListConnectionChannelsParams, options?: Parameters<typeof apiFetch>[1]): Promise<MattermostChannelList> => {
+    params?: ListConnectionChannelsParams, options?: Parameters<typeof apiFetch>[1]): Promise<ConnectionChannelList> => {
 
-  return apiFetch<MattermostChannelList>(getListConnectionChannelsUrl(connectionId,params),
+  return apiFetch<ConnectionChannelList>(getListConnectionChannelsUrl(connectionId,params),
   {
     ...options,
     method: 'GET'

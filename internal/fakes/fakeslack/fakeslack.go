@@ -10,12 +10,15 @@
 // method accepts in x-accepted-oauth-scopes and, for a valid token, the token's scopes in x-oauth-scopes. auth.test
 // answers the bot and its workspace for a bot token, the person alice for a token configured as a person's, and the
 // app's id alone for an app-level token; bots.info answers the bot of the token's app; apps.connections.open answers a
-// Socket Mode address with a new ticket for an app-level token. Any other method is unknown_method; any other path
-// 404.
+// Socket Mode address with a new ticket for an app-level token; conversations.info answers a channel of the token's
+// app and conversations.list its channels page by page (F-098, channels.go). Any other method is unknown_method; any
+// other path 404.
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests; faults, such as an error answer, a
 // 429 with Retry-After or a delay) and add GET and PUT /_fake/config: the scopes of each app's bot token, the revoked
-// tokens, the tokens answered as a person's and the app of each token, over the published pairing.
+// tokens, the tokens answered as a person's and the app of each token, over the published pairing; the channels of
+// each app, by id, with their name, the bot's membership and whether they are archived or private; and a page size
+// that makes conversations.list answer smaller pages.
 package fakeslack
 
 import (
@@ -110,28 +113,36 @@ func PublishedBotToken(token string) bool {
 // bot token, by app key, comma-separated as x-oauth-scopes names them. Revoked tokens are answered token_revoked.
 // UserTokens are answered as tokens of the person alice: auth.test names no bot_id. AppOf names the app of a token by
 // its key, over the published pairing; a token it names that the fake did not publish is an app-level token when it
-// starts with xapp- and a bot token otherwise.
+// starts with xapp- and a bot token otherwise. Channels are the channels of each app's workspace, by app key and
+// channel id. PageSize, when positive, is the most channels a page of conversations.list holds.
 type Config struct {
-	Scopes     map[string]string `json:"scopes"`
-	Revoked    []string          `json:"revoked"`
-	UserTokens []string          `json:"user_tokens"`
-	AppOf      map[string]string `json:"app_of"`
+	Scopes     map[string]string             `json:"scopes"`
+	Revoked    []string                      `json:"revoked"`
+	UserTokens []string                      `json:"user_tokens"`
+	AppOf      map[string]string             `json:"app_of"`
+	Channels   map[string]map[string]Channel `json:"channels"`
+	PageSize   int                           `json:"page_size"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
-// scopes, whose entries are set one by one: a text sets an app's scopes and null restores DefaultScopes.
+// scopes, whose entries are set one by one: a text sets an app's scopes and null restores DefaultScopes; and channels,
+// merged by id within each app: a channel replaces the one of its id, null deletes it, and an app given as null gets
+// its default channels again.
 type configPatch struct {
-	Scopes     map[string]*string `json:"scopes"`
-	Revoked    *[]string          `json:"revoked"`
-	UserTokens *[]string          `json:"user_tokens"`
-	AppOf      *map[string]string `json:"app_of"`
+	Scopes     map[string]*string             `json:"scopes"`
+	Revoked    *[]string                      `json:"revoked"`
+	UserTokens *[]string                      `json:"user_tokens"`
+	AppOf      *map[string]string             `json:"app_of"`
+	Channels   map[string]map[string]*Channel `json:"channels"`
+	PageSize   *int                           `json:"page_size"`
 }
 
-// DefaultConfig is the configuration of a new fake: both apps with DefaultScopes, nothing revoked, no person's token
-// and the published pairing of tokens and apps.
+// DefaultConfig is the configuration of a new fake: both apps with DefaultScopes and the default channels, nothing
+// revoked, no person's token, the published pairing of tokens and apps, and pages of the size conversations.list asks.
 func DefaultConfig() Config {
 	return Config{Scopes: map[string]string{AppA: DefaultScopes, AppB: DefaultScopes}, Revoked: []string{},
-		UserTokens: []string{}, AppOf: map[string]string{}}
+		UserTokens: []string{}, AppOf: map[string]string{},
+		Channels: map[string]map[string]Channel{AppA: defaultChannels(), AppB: defaultChannels()}}
 }
 
 // Fake is the fake Slack Web API server.
@@ -160,13 +171,16 @@ func (f *Fake) Config() Config {
 	return clone(f.config)
 }
 
-// SetConfig replaces the whole configuration; it fails on an app key other than a and b, and an app without scopes
-// gets DefaultScopes.
+// SetConfig replaces the whole configuration; it fails on an app key other than a and b, an empty channel id and a
+// negative page size, and an app without scopes gets DefaultScopes, one without channels the default channels.
 func (f *Fake) SetConfig(c Config) error {
 	c = clone(c)
 	for _, a := range apps {
 		if _, ok := c.Scopes[a.Key]; !ok {
 			c.Scopes[a.Key] = DefaultScopes
+		}
+		if _, ok := c.Channels[a.Key]; !ok {
+			c.Channels[a.Key] = defaultChannels()
 		}
 	}
 	if err := check(c); err != nil {
@@ -178,7 +192,8 @@ func (f *Fake) SetConfig(c Config) error {
 	return nil
 }
 
-// check refuses a configuration that names an app the fake does not have.
+// check refuses a configuration that names an app the fake does not have, a channel without an id or a negative page
+// size.
 func check(c Config) error {
 	for key := range c.Scopes {
 		if _, ok := appByKey(key); !ok {
@@ -190,13 +205,25 @@ func check(c Config) error {
 			return fmt.Errorf("app_of: the app %q of the token %q is not a or b", key, token)
 		}
 	}
+	for key, chans := range c.Channels {
+		if _, ok := appByKey(key); !ok {
+			return fmt.Errorf("channels: the app %q is not a or b", key)
+		}
+		if _, ok := chans[""]; ok {
+			return fmt.Errorf("channels: a channel of the app %q has no id", key)
+		}
+	}
+	if c.PageSize < 0 {
+		return fmt.Errorf("page_size: %d is negative", c.PageSize)
+	}
 	return nil
 }
 
 // clone copies c, with empty lists and maps rather than none.
 func clone(c Config) Config {
 	out := Config{Scopes: maps.Clone(c.Scopes), Revoked: slices.Clone(c.Revoked),
-		UserTokens: slices.Clone(c.UserTokens), AppOf: maps.Clone(c.AppOf)}
+		UserTokens: slices.Clone(c.UserTokens), AppOf: maps.Clone(c.AppOf), Channels: cloneChannels(c.Channels),
+		PageSize: c.PageSize}
 	if out.Scopes == nil {
 		out.Scopes = map[string]string{}
 	}
@@ -235,6 +262,25 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.AppOf != nil {
 		c.AppOf = *p.AppOf
+	}
+	for key, chans := range p.Channels {
+		if chans == nil {
+			c.Channels[key] = defaultChannels()
+			continue
+		}
+		if c.Channels[key] == nil {
+			c.Channels[key] = map[string]Channel{}
+		}
+		for id, ch := range chans {
+			if ch == nil {
+				delete(c.Channels[key], id)
+				continue
+			}
+			c.Channels[key][id] = *ch
+		}
+	}
+	if p.PageSize != nil {
+		c.PageSize = *p.PageSize
 	}
 	c = clone(c)
 	err := check(c)
@@ -303,7 +349,12 @@ var acceptedScopes = map[string]string{
 	"auth.test":             "",
 	"bots.info":             "users:read",
 	"apps.connections.open": "connections:write",
+	"conversations.info":    conversationScopes,
+	"conversations.list":    conversationScopes,
 }
+
+// conversationScopes are the scopes the methods that read conversations accept (F-071).
+const conversationScopes = "channels:read,groups:read,mpim:read,im:read,read"
 
 // serve answers `/api/<method>` as Slack does; any other path is 404.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +399,10 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		botsInfo(w, c, scopes, args["bot"])
 	case "apps.connections.open":
 		f.connectionsOpen(w, c)
+	case "conversations.info":
+		conversationsInfo(w, c, cfg, scopes, args["channel"])
+	case "conversations.list":
+		conversationsList(w, c, cfg, scopes, args)
 	}
 }
 

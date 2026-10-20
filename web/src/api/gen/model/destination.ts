@@ -19,10 +19,11 @@
  */
 import type { BridgeDestination } from './bridgeDestination';
 import type { MattermostDestination } from './mattermostDestination';
+import type { SlackDestination } from './slackDestination';
 import type { TelegramDestination } from './telegramDestination';
 import type { WebhookDestination } from './webhookDestination';
 
 /**
  * A Destination; `type` selects the variant.
  */
-export type Destination = MattermostDestination | TelegramDestination | WebhookDestination | BridgeDestination;
+export type Destination = MattermostDestination | TelegramDestination | WebhookDestination | BridgeDestination | SlackDestination;

@@ -19,10 +19,11 @@
  */
 import type { BridgeDestinationInput } from './bridgeDestinationInput';
 import type { MattermostDestinationInput } from './mattermostDestinationInput';
+import type { SlackDestinationInput } from './slackDestinationInput';
 import type { TelegramDestinationInput } from './telegramDestinationInput';
 import type { WebhookDestinationInput } from './webhookDestinationInput';
 
 /**
  * A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through the Route's `destination_ids`.
  */
-export type DestinationInput = MattermostDestinationInput | TelegramDestinationInput | WebhookDestinationInput | BridgeDestinationInput;
+export type DestinationInput = MattermostDestinationInput | TelegramDestinationInput | WebhookDestinationInput | BridgeDestinationInput | SlackDestinationInput;

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/delivery"
@@ -126,8 +127,8 @@ func destinationRequester(ctx context.Context) (destinations.Requester, error) {
 	return destinations.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
 }
 
-// CreateDestination is createDestination (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3): a Mattermost, Telegram or Bridge
-// Destination, saved once its Destination check passed on the interactive path, or an outgoing webhook.
+// CreateDestination is createDestination (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3, C-24.FR-3): a Mattermost, Telegram,
+// Bridge or Slack Destination, saved once its Destination check passed on the interactive path, or an outgoing webhook.
 func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinationRequestObject) (
 	gen.CreateDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -159,8 +160,8 @@ func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinatio
 		Headers: gen.CreateDestination201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
 
-// UpdateDestination is updateDestination, with If-Match: saving a Mattermost, Telegram or Bridge Destination runs its
-// Destination check as createDestination does.
+// UpdateDestination is updateDestination, with If-Match: saving a Mattermost, Telegram, Bridge or Slack Destination runs
+// its Destination check as createDestination does.
 func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinationRequestObject) (
 	gen.UpdateDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -194,9 +195,9 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 		nil
 }
 
-// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14, C-22.FR-3) on the interactive path: each check with
-// its result, its English message and the code clients translate, and the health after it; a passing check ends a
-// Broken state.
+// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14, C-22.FR-3, C-24.FR-3) on the interactive path: each
+// check with its result, its English message, the code clients translate and the scopes a missing_scope names (D396),
+// and the health after it; a passing check ends a Broken state.
 func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
 	gen.CheckDestinationResponseObject, error) {
 	res, err := s.destinations.Check(ctx, req.DestinationId)
@@ -216,6 +217,10 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 			item.Code.Set(gen.NullableDestinationCheckCode(it.Code))
 		} else {
 			item.Code.SetNull()
+		}
+		if len(it.MissingScopes) > 0 {
+			scopes := slices.Clone(it.MissingScopes)
+			item.MissingScopes = &scopes
 		}
 		out.Checks = append(out.Checks, item)
 	}
@@ -348,7 +353,7 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
-			"The type is not mattermost, telegram, webhook or bridge.")
+			"The type is not mattermost, telegram, webhook, bridge or slack.")
 	}
 	switch kind {
 	case destinations.TypeWebhook:
@@ -357,6 +362,8 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 		return telegramDestinationInputOf(body)
 	case destinations.TypeBridge:
 		return bridgeDestinationInputOf(body)
+	case destinations.TypeSlack:
+		return slackDestinationInputOf(body)
 	case destinations.TypeMattermost:
 	default:
 		return destinations.Input{Type: kind}, nil
@@ -407,6 +414,22 @@ func bridgeDestinationInputOf(body gen.DestinationInput) (destinations.Input, er
 	return destinations.Input{Type: destinations.TypeBridge, Name: b.Name, Mentions: set,
 		Limiter: destinations.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)},
 		Bridge:  &destinations.BridgeInput{Connection: b.ConnectionId, ChannelID: b.ChannelId}}, nil
+}
+
+// slackDestinationInputOf is the Input of a Slack Destination's body: its Connection and its channel id (C-24.FR-3).
+func slackDestinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
+	sl, err := body.AsSlackDestinationInput()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Slack Destination.")
+	}
+	set, err := mentionSettingsOf(sl.Mentions)
+	if err != nil {
+		return destinations.Input{}, err
+	}
+	return destinations.Input{Type: destinations.TypeSlack, Name: sl.Name, Mentions: set,
+		Limiter: destinations.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)},
+		Slack:   &destinations.SlackInput{Connection: sl.ConnectionId, ChannelID: sl.ChannelId}}, nil
 }
 
 // webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode, the requests of
@@ -556,6 +579,12 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
+			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
+	case destinations.TypeSlack:
+		err = out.FromSlackDestination(gen.SlackDestination{Id: d.PublicID, Name: d.Name,
+			Type: gen.SlackDestinationTypeSlack, ConnectionId: deref(d.Connection),
+			ChannelId: deref(d.SlackChannelID), ChannelName: nullableString(d.SlackChannelName),
 			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
 	case destinations.TypeWebhook:

@@ -4414,11 +4414,15 @@ paths:
       tags:
       - Connections
       summary: List channels visible to the bot
-      description: 'Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or
-        Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the
-        channel list of a Slack Connection is not there yet. Requires `connections:write`
-        because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`,
-        the answer is `503` with `Retry-After`.'
+      description: 'The channels of a Connection''s bot for the channel picker of the Destination form. A Mattermost
+        Connection answers `MattermostChannelList`: the bot''s teams, `team_id` alone when given, and its channels in
+        each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and
+        that are not archived, read with `conversations.list` (`types=public_channel,private_channel`,
+        `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores
+        `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires
+        `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token
+        is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with
+        `Retry-After`, Slack''s own when it sent one, and nothing more is read.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -4428,12 +4432,13 @@ paths:
       - $ref: '#/components/parameters/ConnectionId'
       - name: team_id
         in: query
-        description: Only this team.
+        description: Only this team (Mattermost); a Slack Connection ignores it.
         schema:
           type: string
       - name: q
         in: query
-        description: Match on channel name.
+        description: Only channels whose name, or a Mattermost channel's display name, contains this text, regardless of
+          case.
         schema:
           type: string
       responses:
@@ -4442,7 +4447,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MattermostChannelList'
+                $ref: '#/components/schemas/ConnectionChannelList'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4507,9 +4512,9 @@ paths:
       tags:
       - Destinations
       summary: Create Destination
-      description: '`type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or
-        Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with
-        `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also
+      description: '`type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost,
+        Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one
+        that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also
         generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach
         Destinations through `destination_ids`.'
       x-permission: destinations:write
@@ -4588,8 +4593,8 @@ paths:
       summary: Update Destination
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
         its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null`
-        on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check
-        as `createDestination` does and refuses a failing one with `destination_check_failed`.
+        on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination
+        check as `createDestination` does and refuses a failing one with `destination_check_failed`.
       x-permission: destinations:write
       x-listener: app
       security:
@@ -4676,9 +4681,10 @@ paths:
       summary: Run the Destination check
       description: 'Verifies that Muster can still reach and post to the Destination without sending a message:
         Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from
-        `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken
-        state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path:
-        when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
+        `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info`
+        (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with
+        `check_not_supported`). Runs on the interactive path: when no limiter token is free within
+        `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4717,7 +4723,8 @@ paths:
         mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked
         in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination
         ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`.
-        A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+        A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a
+        Slack Destination yet and answers `501`.
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4761,7 +4768,7 @@ paths:
       summary: Preview a message or request
       description: Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending
         anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format
-        `json`).
+        `json`). This build cannot preview a Slack Destination yet and answers `501`.
       x-permission: destinations:test
       x-listener: app
       security:
@@ -7980,10 +7987,10 @@ components:
           description: The Destination type has no Destination check (outgoing webhooks); the pointer is
             `/path/destination_id`.
         - code: destination_check_failed
-          description: Saving a Mattermost, Telegram or Bridge Destination ran its Destination check, a check failed and
-            nothing was saved. One item per failing check, at the field the check concerns — `/connection_id` for
-            `token` and for the code `token_invalid`, `/channel_id` for the others (see `DestinationCheckItem`) — with
-            the check's message as `detail` and its code as `check_code`.
+          description: Saving a Mattermost, Telegram, Bridge or Slack Destination ran its Destination check, a check
+            failed and nothing was saved. One item per failing check, at the field the check concerns — `/connection_id`
+            for `token` and for the codes `token_invalid` and `missing_scope`, `/channel_id` for the others (see
+            `DestinationCheckItem`) — with the check's message as `detail` and its code as `check_code`.
         - code: link_code_invalid
           description: The Mattermost or Bridge link code is wrong, or its request is void, used or expired; never says
             which. The pointer is `/code` (`confirmMattermostLink`, `confirmBridgeLink`), and `attempts_remaining` says
@@ -12675,6 +12682,13 @@ components:
             `code` and show this text as its detail where it says more than the code's text.
         code:
           $ref: '#/components/schemas/NullableConnectionCheckCode'
+        missing_scopes:
+          type: array
+          description: Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot
+            token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in
+            English.
+          items:
+            type: string
     NullableConnectionCheckCode:
       type:
       - string
@@ -12685,7 +12699,7 @@ components:
         (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`,
         `app_token`), `wrong_token_type` — the bot token is not a bot''s: Slack answered `not_allowed_token_type`, or
         `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which
-        `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token
+        `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token
         (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack''s JSON; for the dry
         probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET
         <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a
@@ -12835,6 +12849,9 @@ components:
           type: boolean
     MattermostChannelList:
       type: object
+      description: The channels of a Mattermost Connection's bot; it has no other member, so that no Slack list reads as
+        one.
+      additionalProperties: false
       required:
       - items
       properties:
@@ -12842,6 +12859,42 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MattermostChannel'
+    SlackChannel:
+      type: object
+      description: A channel of a Slack Connection's workspace that the bot is a member of.
+      required:
+      - id
+      - name
+      - is_private
+      properties:
+        id:
+          type: string
+          description: The channel's id, `C…` or `G…`, as a Slack Destination takes it.
+        name:
+          type: string
+          description: The channel's name without `#`. Untrusted text from Slack.
+        is_private:
+          type: boolean
+    SlackChannelList:
+      type: object
+      required:
+      - items
+      - truncated
+      properties:
+        items:
+          type: array
+          description: By name.
+          items:
+            $ref: '#/components/schemas/SlackChannel'
+        truncated:
+          type: boolean
+          description: More channels were left after the fifth page of `conversations.list`; a channel that is not
+            listed is still saved by its id.
+    ConnectionChannelList:
+      description: The channels of a Connection's bot, by the Connection's type; only `SlackChannelList` has `truncated`.
+      oneOf:
+      - $ref: '#/components/schemas/MattermostChannelList'
+      - $ref: '#/components/schemas/SlackChannelList'
     DestinationType:
       type: string
       enum:
@@ -12849,6 +12902,7 @@ components:
       - telegram
       - webhook
       - bridge
+      - slack
     DestinationHealth:
       type: object
       required:
@@ -12898,8 +12952,9 @@ components:
       properties:
         everyone:
           type: string
-          description: '`none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of
-            them.'
+          description: '`none`, or the chat-wide mention the messenger supports: Mattermost takes `channel`, `all` and
+            `here`, Slack `channel` and `here` but not `all`; Telegram and Bridges have none of them; an outgoing webhook
+            takes each as data.'
           enum:
           - none
           - channel
@@ -12912,7 +12967,7 @@ components:
             $ref: '#/components/schemas/PublicId'
         groups:
           type: array
-          description: Messenger groups; Telegram and Bridges have none.
+          description: 'Messenger groups: Mattermost group names; Telegram, Bridges and Slack have none.'
           items:
             type: string
     MentionSettings:
@@ -13132,6 +13187,41 @@ components:
           description: '`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits
             together, or half of the Connection''s `info.limits.send_per_second_per_channel` when its info has it.'
           $ref: '#/components/schemas/Limiter'
+    SlackDestinationInput:
+      type: object
+      description: A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection's workspace,
+        named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel
+        and one without the bot, and keeps the channel's name.
+      required:
+      - type
+      - name
+      - connection_id
+      - channel_id
+      - mentions
+      - limiter
+      properties:
+        type:
+          type: string
+          enum:
+          - slack
+        name:
+          type: string
+          minLength: 1
+        connection_id:
+          description: A Slack Connection.
+          $ref: '#/components/schemas/PublicId'
+        channel_id:
+          type: string
+          description: The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel
+            of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space.
+            Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
+        mentions:
+          description: Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with
+            `unsupported`.
+          $ref: '#/components/schemas/MentionSettings'
+        limiter:
+          description: '`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'
+          $ref: '#/components/schemas/Limiter'
     WebhookDestinationBase:
       type: object
       required:
@@ -13247,6 +13337,19 @@ components:
             readOnly: true
             description: The channel's name as the bridge's `checkChannel` answered it when the Destination was last
               saved. Untrusted text from the bridge.
+    SlackDestination:
+      allOf:
+      - $ref: '#/components/schemas/SlackDestinationInput'
+      - $ref: '#/components/schemas/DestinationReadFields'
+      - type: object
+        properties:
+          channel_name:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The channel's name without `#`, as `conversations.info` answered it when the Destination was
+              last saved. Untrusted text from Slack.
     WebhookDestination:
       allOf:
       - $ref: '#/components/schemas/WebhookDestinationBase'
@@ -13281,6 +13384,7 @@ components:
       - $ref: '#/components/schemas/TelegramDestination'
       - $ref: '#/components/schemas/WebhookDestination'
       - $ref: '#/components/schemas/BridgeDestination'
+      - $ref: '#/components/schemas/SlackDestination'
       discriminator:
         propertyName: type
         mapping:
@@ -13288,6 +13392,7 @@ components:
           telegram: '#/components/schemas/TelegramDestination'
           webhook: '#/components/schemas/WebhookDestination'
           bridge: '#/components/schemas/BridgeDestination'
+          slack: '#/components/schemas/SlackDestination'
     DestinationInput:
       description: A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through
         the Route's `destination_ids`.
@@ -13296,6 +13401,7 @@ components:
       - $ref: '#/components/schemas/TelegramDestinationInput'
       - $ref: '#/components/schemas/WebhookDestinationInput'
       - $ref: '#/components/schemas/BridgeDestinationInput'
+      - $ref: '#/components/schemas/SlackDestinationInput'
       discriminator:
         propertyName: type
         mapping:
@@ -13303,6 +13409,7 @@ components:
           telegram: '#/components/schemas/TelegramDestinationInput'
           webhook: '#/components/schemas/WebhookDestinationInput'
           bridge: '#/components/schemas/BridgeDestinationInput'
+          slack: '#/components/schemas/SlackDestinationInput'
     DestinationList:
       type: object
       required:
@@ -13586,7 +13693,8 @@ components:
             linked discussion group, that is, comments are not enabled for the channel (the message says to enable them);
             `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message
             says to make the bot an admin there). Bridge: `channel`, the bridge''s `checkChannel` — whether the bot can
-            post, edit and reply in the channel.'
+            post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is
+            not archived and has the bot as a member.'
           enum:
           - token
           - bot_in_channel
@@ -13605,6 +13713,12 @@ components:
             translate `code` and show this text as its detail where it says more than the code's text.
         code:
           $ref: '#/components/schemas/NullableDestinationCheckCode'
+        missing_scopes:
+          type: array
+          description: Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as
+            needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
+          items:
+            type: string
     NullableDestinationCheckCode:
       type:
       - string
@@ -13620,7 +13734,11 @@ components:
         `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the
         group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or
         the bot cannot use it, with the bridge''s `detail` as `message`, and `request_failed` for any other error class
-        of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`,
+        of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token,
+        `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists,
+        `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in,
+        `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and
+        `request_failed` for any other error of Slack''s, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`,
         `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.'
       enum:
       - token_invalid
@@ -13636,6 +13754,7 @@ components:
       - bot_may_not_edit
       - bot_not_group_admin
       - channel_forbidden
+      - missing_scope
       - dns_failed
       - connect_failed
       - tls_failed

@@ -279,8 +279,11 @@ func TestConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	channels := `{"C0FAKEALERTS":{"name":"alerts","member":true,"archived":false,"private":false},` +
+		`"C0FAKEOTHER":{"name":"other","member":false,"archived":false,"private":false}}`
 	if got := do(t, req); got.raw != `{"scopes":{"a":"`+fakeslack.DefaultScopes+`","b":"`+fakeslack.DefaultScopes+
-		`"},"revoked":[],"user_tokens":[],"app_of":{}}`+"\n" {
+		`"},"revoked":[],"user_tokens":[],"app_of":{},"channels":{"a":`+channels+`,"b":`+channels+
+		`},"page_size":0}`+"\n" {
 		t.Fatalf("default config %s", got.raw)
 	}
 	five := "chat:write,channels:read,groups:read,im:write,users:read"
@@ -418,5 +421,222 @@ func TestPublishedTokens(t *testing.T) {
 	apps[0].AppID = "changed"
 	if fakeslack.Apps()[0].AppID != "A0MUSTERDEVA" {
 		t.Fatal("Apps returned the fake's own list")
+	}
+}
+
+// TestConversationsInfo covers F-098: conversations.info answers a channel of the token's app with its id, name and the
+// bot's membership, ok also for a channel without the bot and for an archived one; an unknown id, a direct chat's and a
+// private channel the bot is not in are channel_not_found; a token without the scope of the channel's type lacks it,
+// with needed and provided (F-070); an app-level token is the wrong kind; F-071: x-accepted-oauth-scopes names the
+// scopes that read conversations.
+func TestConversationsInfo(t *testing.T) {
+	f := start(t)
+	cfg := fakeslack.DefaultConfig()
+	cfg.Channels[fakeslack.AppB]["C0FAKEARCH"] = fakeslack.Channel{Name: "old", Member: true, Archived: true}
+	cfg.Channels[fakeslack.AppB]["C0FAKEPRIV"] = fakeslack.Channel{Name: "private-ops", Member: true, Private: true}
+	cfg.Channels[fakeslack.AppB]["G0FAKESECRET"] = fakeslack.Channel{Name: "secret", Private: true}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	info := func(token, id string) answer {
+		t.Helper()
+		return call(t, f, "conversations.info", token, map[string]string{"channel": id}, false)
+	}
+	for _, tc := range []struct {
+		id, name                    string
+		member, archived, isPrivate bool
+	}{
+		{fakeslack.ChannelAlerts, "alerts", true, false, false},
+		{fakeslack.ChannelOther, "other", false, false, false},
+		{"C0FAKEARCH", "old", true, true, false},
+		{"C0FAKEPRIV", "private-ops", true, false, true},
+	} {
+		got := info(fakeslack.SecondBotToken, tc.id)
+		ch, _ := got.body["channel"].(map[string]any)
+		if got.body["ok"] != true || ch["id"] != tc.id || ch["name"] != tc.name || ch["is_member"] != tc.member ||
+			ch["is_archived"] != tc.archived || ch["is_private"] != tc.isPrivate || ch["is_channel"] != true ||
+			got.header.Get("X-Accepted-OAuth-Scopes") != "channels:read,groups:read,mpim:read,im:read,read" {
+			t.Errorf("%s = %s %v", tc.id, got.raw, got.header)
+		}
+	}
+	for _, id := range []string{"C0FAKEGONE", "D0FAKEDM", "G0FAKESECRET", ""} {
+		slackError(t, info(fakeslack.SecondBotToken, id), "channel_not_found")
+	}
+	slackError(t, info(fakeslack.BotToken, "C0FAKEARCH"), "channel_not_found")
+	slackError(t, info(fakeslack.SecondAppToken, fakeslack.ChannelAlerts), "not_allowed_token_type")
+	for _, tc := range []struct{ scopes, id, needed string }{
+		{"chat:write,groups:read", fakeslack.ChannelAlerts, "channels:read"},
+		{"chat:write,channels:read", "C0FAKEPRIV", "groups:read"},
+	} {
+		if err := f.SetConfig(fakeslack.Config{Scopes: map[string]string{fakeslack.AppB: tc.scopes},
+			Channels: cfg.Channels}); err != nil {
+			t.Fatal(err)
+		}
+		got := info(fakeslack.SecondBotToken, tc.id)
+		slackError(t, got, "missing_scope")
+		if got.body["needed"] != tc.needed || got.body["provided"] != tc.scopes {
+			t.Errorf("missing %s = %s", tc.needed, got.raw)
+		}
+	}
+	if err := f.SetConfig(fakeslack.Config{UserTokens: []string{fakeslack.BotToken}}); err != nil {
+		t.Fatal(err)
+	}
+	slackError(t, info(fakeslack.BotToken, fakeslack.ChannelAlerts), "missing_scope")
+}
+
+// list calls conversations.list with token and args, and returns the answer with the ids of its channels.
+func list(t *testing.T, f *fakeslack.Fake, token string, args map[string]string) (answer, []string) {
+	t.Helper()
+	got := call(t, f, "conversations.list", token, args, false)
+	var ids []string
+	chans, _ := got.body["channels"].([]any)
+	for _, c := range chans {
+		ids = append(ids, c.(map[string]any)["id"].(string))
+	}
+	return got, ids
+}
+
+// next is the next_cursor of an answer of conversations.list.
+func next(a answer) string {
+	meta, _ := a.body["response_metadata"].(map[string]any)
+	cursor, _ := meta["next_cursor"].(string)
+	return cursor
+}
+
+// TestConversationsList covers F-098 and F-099: conversations.list answers the public channels of the token's app,
+// members or not, by default; private ones only where the bot is a member and when asked; without the archived ones
+// when exclude_archived is true; in pages of limit, and of page_size when the configuration sets it, with next_cursor
+// naming the rest; a cursor it did not give is invalid_cursor; im, mpim and private_channel need their scopes
+// (missing_scope, F-070), an unknown type is invalid_types and an app-level token the wrong kind.
+func TestConversationsList(t *testing.T) {
+	f := start(t)
+	cfg := fakeslack.DefaultConfig()
+	cfg.Channels[fakeslack.AppB]["C0FAKEARCH"] = fakeslack.Channel{Name: "old", Member: true, Archived: true}
+	cfg.Channels[fakeslack.AppB]["C0FAKEPRIV"] = fakeslack.Channel{Name: "private-ops", Member: true, Private: true}
+	cfg.Channels[fakeslack.AppB]["G0FAKESECRET"] = fakeslack.Channel{Name: "secret", Private: true}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	all := map[string]string{"types": "public_channel,private_channel", "exclude_archived": "true", "limit": "200"}
+	got, ids := list(t, f, fakeslack.SecondBotToken, all)
+	if got.body["ok"] != true || !slices.Equal(ids, []string{fakeslack.ChannelAlerts, fakeslack.ChannelOther,
+		"C0FAKEPRIV"}) || next(got) != "" ||
+		got.header.Get("X-Accepted-OAuth-Scopes") != "channels:read,groups:read,mpim:read,im:read,read" {
+		t.Fatalf("all = %s %v", got.raw, ids)
+	}
+	first := got.body["channels"].([]any)[0].(map[string]any)
+	if first["name"] != "alerts" || first["is_member"] != true || first["is_private"] != false ||
+		first["is_archived"] != false {
+		t.Errorf("a channel = %v", first)
+	}
+	if _, ids := list(t, f, fakeslack.SecondBotToken, nil); !slices.Equal(ids, []string{fakeslack.ChannelAlerts,
+		"C0FAKEARCH", fakeslack.ChannelOther}) {
+		t.Errorf("the default types = %v", ids)
+	}
+	if _, ids := list(t, f, fakeslack.SecondBotToken, map[string]string{"exclude_archived": "1"}); !slices.Equal(ids,
+		[]string{fakeslack.ChannelAlerts, fakeslack.ChannelOther}) {
+		t.Errorf("exclude_archived=1 = %v", ids)
+	}
+	if _, ids := list(t, f, fakeslack.BotToken, map[string]string{"types": "private_channel"}); len(ids) != 0 {
+		t.Errorf("app a's private channels = %v", ids)
+	}
+
+	var pages [][]string
+	args := map[string]string{"types": "public_channel,private_channel", "limit": "2"}
+	for {
+		got, ids := list(t, f, fakeslack.SecondBotToken, args)
+		if got.body["ok"] != true {
+			t.Fatalf("page = %s", got.raw)
+		}
+		pages = append(pages, ids)
+		if args["cursor"] = next(got); args["cursor"] == "" {
+			break
+		}
+	}
+	if len(pages) != 2 || !slices.Equal(pages[0], []string{fakeslack.ChannelAlerts, "C0FAKEARCH"}) ||
+		!slices.Equal(pages[1], []string{fakeslack.ChannelOther, "C0FAKEPRIV"}) {
+		t.Errorf("limit 2 = %v", pages)
+	}
+	cfg.PageSize = 1
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, ids = list(t, f, fakeslack.SecondBotToken, all)
+	if !slices.Equal(ids, []string{fakeslack.ChannelAlerts}) || next(got) == "" {
+		t.Errorf("page_size 1 = %s", got.raw)
+	}
+	all["cursor"] = next(got)
+	if _, ids := list(t, f, fakeslack.SecondBotToken, all); !slices.Equal(ids, []string{fakeslack.ChannelOther}) {
+		t.Errorf("the second page = %v", ids)
+	}
+	for _, cursor := range []string{"bm9wZQ==", "%%%", "bmV4dDo="} {
+		all["cursor"] = cursor
+		slackError(t, call(t, f, "conversations.list", fakeslack.SecondBotToken, all, false), "invalid_cursor")
+	}
+	for _, tc := range []struct{ types, code string }{
+		{"im", "missing_scope"}, {"mpim", "missing_scope"}, {"public_channel,dm", "invalid_types"},
+	} {
+		slackError(t, call(t, f, "conversations.list", fakeslack.SecondBotToken,
+			map[string]string{"types": tc.types}, false), tc.code)
+	}
+	if err := f.SetConfig(fakeslack.Config{Scopes: map[string]string{fakeslack.AppB: "chat:write,channels:read"}}); err != nil {
+		t.Fatal(err)
+	}
+	got = call(t, f, "conversations.list", fakeslack.SecondBotToken, map[string]string{"types": "private_channel"}, false)
+	slackError(t, got, "missing_scope")
+	if got.body["needed"] != "groups:read" {
+		t.Errorf("needed = %s", got.raw)
+	}
+	slackError(t, call(t, f, "conversations.list", fakeslack.AppToken, nil, false), "not_allowed_token_type")
+}
+
+// TestChannelsConfig covers the channels of /_fake/config: both apps start with alerts, with the bot, and other,
+// without it; a PUT merges by id within one app — a channel replaces the one of its id, null deletes it, an app given as
+// null gets its default channels again — and sets and resets page_size; a refused patch changes nothing; SetConfig
+// gives an app without channels the default ones.
+func TestChannelsConfig(t *testing.T) {
+	f := start(t)
+	c := f.Config()
+	for _, key := range []string{fakeslack.AppA, fakeslack.AppB} {
+		if !reflect.DeepEqual(c.Channels[key], map[string]fakeslack.Channel{
+			fakeslack.ChannelAlerts: {Name: "alerts", Member: true}, fakeslack.ChannelOther: {Name: "other"}}) {
+			t.Fatalf("channels of %s = %+v", key, c.Channels[key])
+		}
+	}
+	if got := putConfig(t, f, `{"page_size":1,"channels":{"b":{"C0FAKEPRIV":{"name":"private-ops","member":true,`+
+		`"private":true},"C0FAKEALERTS":{"name":"alerts","member":false}}}}`); got.status != http.StatusOK {
+		t.Fatalf("put = %d %s", got.status, got.raw)
+	}
+	c = f.Config()
+	if c.PageSize != 1 || len(c.Channels[fakeslack.AppB]) != 3 || c.Channels[fakeslack.AppB][fakeslack.ChannelAlerts].Member ||
+		!c.Channels[fakeslack.AppB]["C0FAKEPRIV"].Private || !c.Channels[fakeslack.AppA][fakeslack.ChannelAlerts].Member {
+		t.Fatalf("merged %+v", c)
+	}
+	putConfig(t, f, `{"channels":{"b":{"C0FAKEOTHER":null}}}`)
+	if _, ok := f.Config().Channels[fakeslack.AppB][fakeslack.ChannelOther]; ok {
+		t.Error("null kept the channel")
+	}
+	putConfig(t, f, `{"page_size":0,"channels":{"b":null}}`)
+	if !reflect.DeepEqual(f.Config(), fakeslack.DefaultConfig()) {
+		t.Fatalf("reset %+v", f.Config())
+	}
+	for _, body := range []string{`{"channels":{"c":{"C1":{"name":"x"}}}}`, `{"channels":{"a":{"":{"name":"x"}}}}`,
+		`{"page_size":-1}`, `{"channels":{"a":{"C1":{"name":1}}}}`} {
+		if got := putConfig(t, f, body); got.status != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, got.status, got.raw)
+		}
+	}
+	if !reflect.DeepEqual(f.Config(), fakeslack.DefaultConfig()) {
+		t.Fatalf("a refused patch changed the config: %+v", f.Config())
+	}
+	if err := f.SetConfig(fakeslack.Config{Channels: map[string]map[string]fakeslack.Channel{
+		fakeslack.AppA: {"C1": {Name: "one"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.Config(); len(c.Channels[fakeslack.AppA]) != 1 || len(c.Channels[fakeslack.AppB]) != 2 {
+		t.Errorf("SetConfig channels %+v", c.Channels)
+	}
+	if err := f.SetConfig(fakeslack.Config{PageSize: -2}); err == nil {
+		t.Error("SetConfig took a negative page size")
 	}
 }

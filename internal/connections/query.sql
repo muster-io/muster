@@ -236,6 +236,14 @@ FROM destinations
 WHERE org_id = @org_id AND type = 'bridge' AND deleted_at IS NULL
 ORDER BY id;
 
+-- ListSlackDestinations lists the Slack Destinations that are not deleted, in id order, with their Connection and
+-- channel id, for muster doctor.
+-- name: ListSlackDestinations :many
+SELECT id, public_id, name, connection_id, slack_channel_id
+FROM destinations
+WHERE org_id = @org_id AND type = 'slack' AND deleted_at IS NULL
+ORDER BY id;
+
 -- ListPollingConnections lists the Telegram Connections that are not deleted and are in the long-polling mode, with
 -- their secrets as stored and their telegram_update_offset, for the Leader's poller.
 -- name: ListPollingConnections :many

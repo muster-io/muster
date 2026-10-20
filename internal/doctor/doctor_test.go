@@ -23,8 +23,10 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	cdb "github.com/muster-io/muster/internal/connections/dbgen"
+	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
@@ -32,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 )
 
@@ -72,11 +75,13 @@ func (r *rows) Scan(dest ...any) error {
 	return nil
 }
 
-// fakeDB answers the doctor's statements; each answer can be replaced or failed by the SQL it matches.
+// fakeDB answers the doctor's statements; each answer can be replaced or failed by the SQL it matches. slackRoute is
+// where the doctor's Slack requests go, nil for none.
 type fakeDB struct {
-	answers map[string]*rows
-	execs   []string
-	listen  bool
+	answers    map[string]*rows
+	execs      []string
+	listen     bool
+	slackRoute slack.Route
 }
 
 // conn is one connection of the database; notify is set on the session connection.
@@ -102,6 +107,7 @@ func newFakeDB(ssl bool) *fakeDB {
 		"ListMattermostDestinations": {values: [][]any{}},
 		"ListTelegramDestinations":   {values: [][]any{}},
 		"ListBridgeDestinations":     {values: [][]any{}},
+		"ListSlackDestinations":      {values: [][]any{}},
 	}}
 }
 
@@ -211,7 +217,7 @@ func run(t *testing.T, d *fakeDB, env []string) (string, bool) {
 	var out bytes.Buffer
 	ok, err := Run(t.Context(), Options{Environ: env, Out: &out,
 		open: func(context.Context, config.Config) (Connections, error) { return d.connections(), nil },
-		real: clock.Real{}})
+		real: clock.Real{}, slackRoute: d.slackRoute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,8 +475,10 @@ func TestReadOnly(t *testing.T) {
 
 // messengerDB is a fake database with the Mattermost Connection "Dev Mattermost" of the fake server, its bot token
 // sealed with key, and its Destinations "alerts" and "no-bot", the Telegram Connection "Dev Telegram" of the fake
-// Bot API with its Destinations "tg-alerts" and "tg-no-comments", and the Bridge Connection "Dev Bridge" of the fake
-// bridge with its Destinations "br-alerts" and "br-no-bot", under an outbound policy that allows the loopback network.
+// Bot API with its Destinations "tg-alerts" and "tg-no-comments", the Bridge Connection "Dev Bridge" of the fake
+// bridge with its Destinations "br-alerts" and "br-no-bot", and the Slack Connection "Dev Slack" of the fake Slack
+// server in socket mode, which the doctor reaches through the route of `muster dev`, with its Destinations "sl-alerts"
+// and "sl-no-bot", under an outbound policy that allows the loopback network.
 func messengerDB(t *testing.T, key string) *fakeDB {
 	t.Helper()
 	f := fakemattermost.New()
@@ -488,6 +496,11 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = br.Close(context.WithoutCancel(t.Context())) })
+	sl := fakeslack.New()
+	if err := sl.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sl.Close(context.WithoutCancel(t.Context())) })
 	k, err := keyring.Load(t.Context(), keyring.Env{Keys: logging.Secret(key), Source: keyring.SecretKeysVar}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +527,16 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slCiphertext, slKeyID, err := k.Encrypt("connections.bot_token", []byte(fakeslack.BotToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appCiphertext, appKeyID, err := k.Encrypt("connections.slack_app_token", []byte(fakeslack.AppToken))
+	if err != nil {
+		t.Fatal(err)
+	}
 	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	d.answers["ListConnections"] = &rows{values: [][]any{
 		connectionRow(cdb.ListConnectionsRow{ID: 1, PublicID: "CNAAAAAAAAAAA1", Type: "mattermost",
 			Name: "Dev Mattermost", MattermostServerUrl: text(f.URL()), BotTokenCiphertext: ciphertext,
@@ -529,6 +551,11 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 			BridgeBaseUrl: text(br.URL()), BridgeEventDelivery: text("poll"), BotTokenCiphertext: brCiphertext,
 			BotTokenKeyID: text(brKeyID), BotTokenUpdatedAt: time.Now(), Proxy: []byte(`{"enabled":false}`),
 			LimiterLimit: 10, LimiterPerSeconds: 1, CreatedAt: time.Now(), Version: 1}),
+		connectionRow(cdb.ListConnectionsRow{ID: 4, PublicID: "CNAAAAAAAAAAS1", Type: "slack", Name: "Dev Slack",
+			SlackEventMode: text("socket"), BotTokenCiphertext: slCiphertext, BotTokenKeyID: text(slKeyID),
+			BotTokenUpdatedAt: time.Now(), SlackAppTokenCiphertext: appCiphertext, SlackAppTokenKeyID: text(appKeyID),
+			SlackAppTokenUpdatedAt: now, Proxy: []byte(`{"enabled":false}`), LimiterLimit: 50, LimiterPerSeconds: 60,
+			CreatedAt: time.Now(), Version: 1}),
 	}}
 	d.answers["ListMattermostDestinations"] = &rows{values: [][]any{
 		{int64(7), "DSAAAAAAAAAAA1", "alerts", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
@@ -544,7 +571,17 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 		{int64(11), "DSAAAAAAAAAAA5", "br-alerts", pgtype.Int8{Int64: 3, Valid: true}, text(fakebridge.ChannelAlerts)},
 		{int64(12), "DSAAAAAAAAAAA6", "br-no-bot", pgtype.Int8{Int64: 3, Valid: true}, text(fakebridge.ChannelNoBot)},
 	}}
+	d.answers["ListSlackDestinations"] = &rows{values: [][]any{
+		{int64(13), "DSAAAAAAAAAAA7", "sl-alerts", pgtype.Int8{Int64: 4, Valid: true}, text(fakeslack.ChannelAlerts)},
+		{int64(14), "DSAAAAAAAAAAA8", "sl-no-bot", pgtype.Int8{Int64: 4, Valid: true}, text(fakeslack.ChannelOther)},
+	}}
 	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string{"127.0.0.0/8"}, []string(nil)}}}
+	d.slackRoute = func(token logging.Secret) string {
+		if fakeslack.PublishedBotToken(string(token)) {
+			return sl.URL() + "/api/"
+		}
+		return ""
+	}
 	return d
 }
 
@@ -563,11 +600,11 @@ const (
 	doctorTelegramToken = "777001:doctor-telegram-token"
 )
 
-// TestMessengerChecks is C-02.FR-14 and C-22.FR-3: one line per Connection and per Mattermost, Telegram and Bridge
-// Destination, ok, the message of the step that failed — for a Telegram Connection or Destination and a Bridge
-// Destination with the step's or the item's name — or, as a WARN that fails nothing, the hint that the bot may not
-// make ephemeral posts (D284), made in the background class; a failure fails the doctor, and the bot tokens are never
-// printed.
+// TestMessengerChecks is C-02.FR-14, C-22.FR-3 and C-24.FR-2, FR-3: one line per Connection and per Mattermost,
+// Telegram, Bridge and Slack Destination, ok, the message of the step that failed — for a Telegram Connection or
+// Destination and a Bridge or Slack Destination with the step's or the item's name — or, as a WARN that fails nothing,
+// the hint that the bot may not make ephemeral posts (D284), made in the background class; a Slack Connection's
+// requests take the route the doctor is given; a failure fails the doctor, and the bot tokens are never printed.
 func TestMessengerChecks(t *testing.T) {
 	key, _ := keys('a')
 	d := messengerDB(t, key)
@@ -577,14 +614,18 @@ func TestMessengerChecks(t *testing.T) {
 	want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
 		"OK   connection Dev Telegram: ok\n" +
 		"OK   connection Dev Bridge: ok\n" +
+		"OK   connection Dev Slack: ok\n" +
 		"OK   destination alerts: ok\n" +
 		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n" +
 		"OK   destination tg-alerts: ok\n" +
 		"FAIL destination tg-no-comments: discussion_group: " + telegram.MessageNoComments + "\n" +
 		"OK   destination br-alerts: ok\n" +
-		"FAIL destination br-no-bot: channel: " + fakebridge.MessageNotMember + "\n"
-	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 17 || strings.Contains(out, doctorToken) ||
-		strings.Contains(out, doctorTelegramToken) || strings.Contains(out, fakebridge.Token) {
+		"FAIL destination br-no-bot: channel: " + fakebridge.MessageNotMember + "\n" +
+		"OK   destination sl-alerts: ok\n" +
+		"FAIL destination sl-no-bot: channel: Invite the bot to the channel: /invite @muster-dev-bot\n"
+	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 20 || strings.Contains(out, doctorToken) ||
+		strings.Contains(out, doctorTelegramToken) || strings.Contains(out, fakebridge.Token) ||
+		strings.Contains(out, fakeslack.BotToken) || strings.Contains(out, fakeslack.AppToken) {
 		t.Errorf("ok %v, output:\n%s\nwant the end:\n%s", ok, out, want)
 	}
 	if n := background.Get() - before; n < 5 {
@@ -603,7 +644,27 @@ func TestMessengerChecks(t *testing.T) {
 		!strings.Contains(out, "FAIL connection Dev Telegram: the bot token cannot be opened") ||
 		!strings.Contains(out, "FAIL destination tg-alerts: its Connection failed its check") ||
 		!strings.Contains(out, "FAIL connection Dev Bridge: the bot token cannot be opened") ||
-		!strings.Contains(out, "FAIL destination br-alerts: its Connection failed its check") {
+		!strings.Contains(out, "FAIL destination br-alerts: its Connection failed its check") ||
+		!strings.Contains(out, "FAIL connection Dev Slack: the bot token cannot be opened") ||
+		!strings.Contains(out, "FAIL destination sl-alerts: its Connection failed its check") {
 		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
+	}
+}
+
+// TestSlackRoute: `muster dev doctor` sends a Slack Connection's requests where `muster dev` sends them, so that the
+// fake Slack server's published tokens never reach slack.com; `muster doctor` sends them to Slack, and a test's route
+// wins over both.
+func TestSlackRoute(t *testing.T) {
+	ptr := func(r slack.Route) uintptr { return reflect.ValueOf(r).Pointer() }
+	if r := slackRouteOf(Options{Development: true}); r == nil || ptr(r) != ptr(devmode.SlackRoute) ||
+		r(logging.Secret(fakeslack.BotToken)) != devmode.SlackBaseURL {
+		t.Error("muster dev doctor does not take the route of muster dev")
+	}
+	if r := slackRouteOf(Options{}); r != nil {
+		t.Error("muster doctor has a route")
+	}
+	own := func(logging.Secret) string { return "http://127.0.0.1:1/api/" }
+	if r := slackRouteOf(Options{Development: true, slackRoute: own}); ptr(r) != ptr(own) {
+		t.Error("the test's route lost")
 	}
 }

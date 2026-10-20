@@ -33,7 +33,9 @@
   [`0015_snooze_presets`](../../internal/db/migrations/0015_snooze_presets.up.sql)
   (`organizations.workday_start` and `organizations.week_start` for the Snooze presets, S-092) and
   [`0016_slack_connections`](../../internal/db/migrations/0016_slack_connections.up.sql)
-  (Slack Connections, S-097), in
+  (Slack Connections, S-097) and
+  [`0017_slack_destinations`](../../internal/db/migrations/0017_slack_destinations.up.sql)
+  (Slack Destinations, S-098), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -457,11 +459,12 @@ erDiagram
     }
     destinations {
         bigint id PK
-        text type "mattermost telegram webhook bridge"
+        text type "mattermost telegram webhook bridge slack"
         bigint connection_id FK "type-checked"
         text telegram_channel_id "the only Telegram setting"
         bigint telegram_discussion_chat_id "found by the check"
         text bridge_channel_id "as its messenger names it"
+        text slack_channel_id "C… or G…, as entered"
         text webhook_mode "events template both"
         bytea signing_secret_ciphertext "Secret"
         jsonb mentions
@@ -738,18 +741,21 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   hold what the last Socket Mode `hello` counted, written by the Leader from S-101. `UNIQUE (id, type)` is the target of
   type-checked foreign keys. A Connection cannot be deleted while a Destination that is not deleted uses it; deleting
   it abandons the final edits still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
-- **`destinations`** — one table for the four types, with type-specific nullable columns and a `CHECK` per type. The
+- **`destinations`** — one table for the five types, with type-specific nullable columns and a `CHECK` per type. The
   composite foreign key `(connection_id, type) REFERENCES connections (id, type)` guarantees that a Mattermost
-  Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection and a Bridge one
-  through a Bridge Connection; an outgoing webhook has no Connection. Outgoing webhooks keep their request templates as
-  `jsonb` (`webhook_events_config`, `webhook_template_config`, matching `WebhookEventsConfig` and
-  `WebhookTemplateConfig`), their own proxy, and the current and previous Signing secrets (the previous one with
-  `previous_signing_secret_since`, shown as "still signs since"); a `CHECK` requires a Signing secret on every outgoing
-  webhook that is not deleted, because it is generated at creation. A Telegram Destination stores only its channel as
-  entered (`telegram_channel_id`); the numeric channel id, the channel's linked discussion group (`getChat` →
-  `linked_chat_id`, in `telegram_discussion_chat_id`) and their titles are learned by the Destination check. A Bridge
-  Destination stores its channel id as its messenger names it (`bridge_channel_id`, an opaque string of up to 512
-  characters) and the channel's name its Destination check (`checkChannel`) answered (`bridge_channel_name`).
+  Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection, a Bridge one
+  through a Bridge Connection and a Slack one through a Slack Connection; an outgoing webhook has no Connection.
+  Outgoing webhooks keep their request templates as `jsonb` (`webhook_events_config`, `webhook_template_config`,
+  matching `WebhookEventsConfig` and `WebhookTemplateConfig`), their own proxy, and the current and previous Signing
+  secrets (the previous one with `previous_signing_secret_since`, shown as "still signs since"); a `CHECK` requires a
+  Signing secret on every outgoing webhook that is not deleted, because it is generated at creation. A Telegram
+  Destination stores only its channel as entered (`telegram_channel_id`); the numeric channel id, the channel's linked
+  discussion group (`getChat` → `linked_chat_id`, in `telegram_discussion_chat_id`) and their titles are learned by the
+  Destination check. A Bridge Destination stores its channel id as its messenger names it (`bridge_channel_id`, an
+  opaque string of up to 512 characters) and the channel's name its Destination check (`checkChannel`) answered
+  (`bridge_channel_name`). A Slack Destination stores its channel id as entered (`slack_channel_id`, `C…` or `G…`) and
+  the channel's name its Destination check (`conversations.info`) answered (`slack_channel_name`); its `CHECK` leaves
+  every other type's column null, and theirs leave the Slack columns null.
   **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or `unavailable`), `broken_reason` (masked) and
   `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event. The
   template error state of an outgoing webhook request is kept here (`MusterTemplateError`). **Deletion** is soft:

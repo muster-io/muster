@@ -84,7 +84,9 @@ issue: 312
   "more channels than shown" note when `truncated`, the id field, Mention settings without `all` and groups, the
   limiter); `link-slack-dialog.tsx`; the narrowing branches of S-097 and S-098 replaced by the real forms; the check
   panels show the new steps and codes; the test panel's note; the preview panel's Slack message drawn element by
-  element from the request body, never as markup.
+  element from the request body, never as markup. `destination-check.tsx` passes an item's `missing_scopes` to
+  `checkCodeText` and `CheckDetail` (D396), with a component test; a refused save names the scopes only in the problem's
+  English `detail` unless this story adds `missing_scopes` to the problem's error items.
 - **Texts**: every string through i18next in `en.json` and `ru.json`, the texts of reference.md among them.
 - **End-to-end** (`web/e2e/`): `slack-connection.spec.ts` (create in both modes, check, the shared warning by the fake's
   `extra_connections`, the check before saving), `slack-destination.spec.ts` (picker, refusal, save, Check, test with
@@ -105,18 +107,18 @@ issue: 312
 Playwright against `muster dev` at 1280 and 360 px wide, signed in as the Admin:
 
 1. Connections → New → Slack: name "ui", bot token `xoxb-muster-dev-slack-token-b`, Socket Mode, app-level token
-   `xapp-muster-dev-slack-token-b`; "Check connection" shows "token ✓ · scopes ✓ · app_token ✓" and "Fake bot B",
-   "Fake workspace B"; Save. Switch to HTTP: the app-level token field is gone, "Slack signing secret" and "Slack sends
-   button presses to http://localhost:8081/api/v1/callbacks/slack/CN…" appear. Expected visible text in Russian with
-   the language switched: «Проверить подключение», «Режим событий».
+   `xapp-muster-dev-slack-token-b`; "Check connection" shows "token ✓ · scopes ✓ · app_token ✓" and
+   "muster-dev-bot-b", "Fake workspace B"; Save. Switch to HTTP: the app-level token field is gone, "Slack signing
+   secret" and "Slack sends button presses to http://localhost:8081/api/v1/callbacks/slack/CN…" appear. Expected
+   visible text in Russian with the language switched: «Проверить подключение», «Режим событий».
 2. With `extra_connections` 1 on the fake server and a refresh of the socket, the page of "ui" in Socket Mode shows
    "Another program is connected to this Slack app through Socket Mode".
 3. The edit form with only the proxy changed to the fake HTTP proxy: "Check connection" shows the step "dry_probe ✓"
    alone; the fake records no request with `xoxb-muster-dev-slack-token-b` (S-087's pattern).
 4. Destinations → New → Slack, Connection "ui": the picker lists "alerts" and not "other"; typing `C0FAKEOTHER` and
-   Save shows "Invite the bot to the channel: /invite @Fake bot B"; picking "alerts" saves "#alerts"; "Check" shows
-   the item channel ✓; "Send test message" shows the step message and "Slack does not let a bot press its own button,
-   so this test does not check presses."; Preview shows a red bar, "Ack" in green, "Resolve" and "Snooze…".
+   Save shows "Invite the bot to the channel: /invite @muster-dev-bot-b"; picking "alerts" saves "#alerts"; "Check"
+   shows the item channel ✓; "Send test message" shows the step message and "Slack does not let a bot press its own
+   button, so this test does not check presses."; Preview shows a red bar, "Ack" in green, "Resolve" and "Snooze…".
 5. Profile → Messenger accounts → Link Slack → "ui": `alice@example.org`, "Send code"; the code from
    `/_fake/dms?user=U0FAKEALICE`; the list shows "Slack · ui · Alice Smith"; Unlink removes it. "nobody" shows "No
    Slack account with this email or name was found."

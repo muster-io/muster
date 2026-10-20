@@ -901,6 +901,49 @@ func (q *Queries) ListPollingConnections(ctx context.Context, orgID int64) ([]Li
 	return items, nil
 }
 
+const listSlackDestinations = `-- name: ListSlackDestinations :many
+SELECT id, public_id, name, connection_id, slack_channel_id
+FROM destinations
+WHERE org_id = $1 AND type = 'slack' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListSlackDestinationsRow struct {
+	ID             int64
+	PublicID       string
+	Name           string
+	ConnectionID   pgtype.Int8
+	SlackChannelID pgtype.Text
+}
+
+// ListSlackDestinations lists the Slack Destinations that are not deleted, in id order, with their Connection and
+// channel id, for muster doctor.
+func (q *Queries) ListSlackDestinations(ctx context.Context, orgID int64) ([]ListSlackDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listSlackDestinations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSlackDestinationsRow{}
+	for rows.Next() {
+		var i ListSlackDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.ConnectionID,
+			&i.SlackChannelID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTelegramDestinations = `-- name: ListTelegramDestinations :many
 SELECT id, public_id, name, connection_id, telegram_channel_id
 FROM destinations

@@ -37,4 +37,6 @@ export interface ConnectionCheckStep {
      */
   message?: string | null;
   code?: NullableConnectionCheckCode | null;
+  /** Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English. */
+  missing_scopes?: string[];
 }

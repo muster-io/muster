@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -197,17 +197,22 @@ func TestCheckUserToken(t *testing.T) {
 }
 
 // TestCheckMissingScope covers C-24.FR-2 and AC-1: scopes fails with missing_scope naming the scopes the bot token
-// lacks in the order of C-24.FR-1, and app_token is skipped.
+// lacks in the order of C-24.FR-1, and app_token is skipped; D396: the step carries those scopes as MissingScopes, which
+// its English message names, and a step that passed or failed otherwise carries none.
 func TestCheckMissingScope(t *testing.T) {
 	f := startFake(t)
 	c := fakeClient(t, f, true)
-	for _, tc := range []struct{ scopes, want string }{
+	for _, tc := range []struct {
+		scopes, want string
+		missing      []string
+	}{
 		{"chat:write,channels:read,groups:read,im:write,users:read",
-			"scopes missing_scope: The bot token lacks the scopes users:read.email."},
+			"scopes missing_scope: The bot token lacks the scopes users:read.email.", []string{"users:read.email"}},
 		{"users:read,im:write,groups:read,channels:read",
-			"scopes missing_scope: The bot token lacks the scopes chat:write, users:read.email."},
+			"scopes missing_scope: The bot token lacks the scopes chat:write, users:read.email.",
+			[]string{"chat:write", "users:read.email"}},
 		{"", "scopes missing_scope: The bot token lacks the scopes chat:write, channels:read, groups:read, im:write, " +
-			"users:read, users:read.email."},
+			"users:read, users:read.email.", RequiredScopes},
 	} {
 		if err := f.SetConfig(fakeslack.Config{Scopes: map[string]string{fakeslack.AppB: tc.scopes}}); err != nil {
 			t.Fatal(err)
@@ -217,26 +222,18 @@ func TestCheckMissingScope(t *testing.T) {
 			res.Identity == nil || res.Steps[1].Latency != 0 {
 			t.Fatalf("%q: check = %+v, %v", tc.scopes, res, err)
 		}
+		st := res.Steps[1]
+		if !slices.Equal(st.MissingScopes, tc.missing) || st.Message != MissingScopesMessage(st.MissingScopes) ||
+			res.Steps[0].MissingScopes != nil || res.Steps[2].MissingScopes != nil {
+			t.Fatalf("%q: missing scopes %q, steps %+v", tc.scopes, st.MissingScopes, res.Steps)
+		}
 	}
-}
-
-func TestMissingScopesMessageIsWhatTheSPAReads(t *testing.T) {
-	spa := regexp.MustCompile(`^The bot token lacks the scopes (.+)\.$`)
-	for _, tc := range []struct {
-		missing     []string
-		want, named string
-	}{
-		{[]string{"users:read.email"}, "The bot token lacks the scopes users:read.email.", "users:read.email"},
-		{[]string{"chat:write", "users:read.email"}, "The bot token lacks the scopes chat:write, users:read.email.",
-			"chat:write, users:read.email"},
-	} {
-		got := MissingScopesMessage(tc.missing)
-		if got != tc.want {
-			t.Fatalf("MissingScopesMessage(%q) = %q, want %q", tc.missing, got, tc.want)
-		}
-		if m := spa.FindStringSubmatch(got); m == nil || m[1] != tc.named {
-			t.Fatalf("the SPA reads %q from %q, want %q", m, got, tc.named)
-		}
+	if err := f.SetConfig(fakeslack.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RunCheck(t.Context(), c, direct, tick(), EventModeSocket)
+	if err != nil || !res.OK() || slices.ContainsFunc(res.Steps, func(s Step) bool { return s.MissingScopes != nil }) {
+		t.Fatalf("a passing check carries missing scopes: %+v, %v", res, err)
 	}
 }
 

@@ -3,7 +3,8 @@
 
 // Package mentions holds the Mention settings of C-12.FR-8 and FR-12: whom a Destination mentions for each kind of
 // Loud event — nobody, everyone in the chat with the word its messenger offers, chosen Users or messenger groups —
-// validated per Destination type, Telegram and Bridges taking nobody and chosen Users only (C-22.FR-3), and the
+// validated per Destination type, Telegram and Bridges taking nobody and chosen Users only (C-22.FR-3), Slack no
+// Mention of all and no messenger groups (C-24.FR-6), and the
 // resolution of a Loud message's symbolic Mentions into targets: the Destination's setting for a kind, the Owner the
 // lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
 // Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16) —
@@ -64,6 +65,7 @@ const (
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
 	TypeBridge     = "bridge"
+	TypeSlack      = "slack"
 )
 
 // The kinds of a Target.
@@ -143,9 +145,23 @@ func (s *Service) q(db DBTX) Queries {
 }
 
 // everyoneOffered reports whether a Destination type takes a choice of everyone: Mattermost and outgoing webhooks take
-// every one, Telegram and Bridges only nobody.
+// every one, Slack every one but all, which it has no Mention for (C-24.FR-6), Telegram and Bridges only nobody.
 func everyoneOffered(destinationType, everyone string) bool {
-	return everyone == EveryoneNone || !usersOnly(destinationType)
+	switch {
+	case everyone == EveryoneNone:
+		return true
+	case usersOnly(destinationType):
+		return false
+	case destinationType == TypeSlack:
+		return everyone != EveryoneAll
+	}
+	return true
+}
+
+// groupsOffered reports whether a Destination type takes messenger groups: Mattermost and outgoing webhooks do;
+// Telegram and Bridges have none, and Slack's user groups are not named by the bot's scopes (C-24.FR-6).
+func groupsOffered(destinationType string) bool {
+	return !usersOnly(destinationType) && destinationType != TypeSlack
 }
 
 // usersOnly reports whether a Destination type takes nobody and chosen Users only: Telegram, and a Bridge (C-22.FR-3),
@@ -154,9 +170,13 @@ func usersOnly(destinationType string) bool {
 	return destinationType == TypeTelegram || destinationType == TypeBridge
 }
 
-// refusal is the detail of a choice that the users-only Destination type refuses: everyone in the chat, or groups.
+// refusal is the detail of a choice that the Destination type refuses: everyone in the chat, or groups.
 func refusal(destinationType string, groups bool) string {
 	switch {
+	case destinationType == TypeSlack && groups:
+		return "Slack has no messenger groups that Muster can name."
+	case destinationType == TypeSlack:
+		return "Slack has no Mention of all; choose channel or here."
 	case destinationType == TypeBridge && groups:
 		return "A Bridge has no messenger groups."
 	case destinationType == TypeBridge:
@@ -167,10 +187,10 @@ func refusal(destinationType string, groups bool) string {
 	return "Telegram has no Mention of everyone in the chat."
 }
 
-// Validate refuses Mention settings that a Destination of the type cannot take (C-12.FR-8, C-22.FR-3): every kind is
-// present; everyone is none, channel, all or here, and only none for Telegram and Bridges; user_ids name Users that
-// exist and are not deleted; groups are Mattermost group names, and none for Telegram and Bridges. Outgoing webhooks
-// take every choice, as data.
+// Validate refuses Mention settings that a Destination of the type cannot take (C-12.FR-8, C-22.FR-3, C-24.FR-6): every
+// kind is present; everyone is none, channel, all or here, only none for Telegram and Bridges, and not all for Slack;
+// user_ids name Users that exist and are not deleted; groups are Mattermost group names, and none for Telegram,
+// Bridges and Slack. Outgoing webhooks take every choice, as data.
 func (s *Service) Validate(ctx context.Context, destinationType string, set Settings) error {
 	for name := range set {
 		if !slices.Contains(Kinds, name) {
@@ -211,7 +231,7 @@ func (s *Service) Validate(ctx context.Context, destinationType string, set Sett
 			seen[n] = true
 			refs = append(refs, ref{pointer: pointer, id: n})
 		}
-		if usersOnly(destinationType) && len(m.Groups) > 0 {
+		if !groupsOffered(destinationType) && len(m.Groups) > 0 {
 			return &FieldError{Pointer: base + "/groups", Code: CodeUnsupported, Detail: refusal(destinationType, true)}
 		}
 		for i, g := range m.Groups {
@@ -371,7 +391,7 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 		if st.Everyone != "" && st.Everyone != EveryoneNone && everyoneOffered(r.DestinationType, st.Everyone) {
 			add(Target{Kind: TargetEveryone, Everyone: st.Everyone})
 		}
-		if !usersOnly(r.DestinationType) {
+		if groupsOffered(r.DestinationType) {
 			for _, g := range st.Groups {
 				add(Target{Kind: TargetGroup, Group: g})
 			}

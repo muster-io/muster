@@ -6,7 +6,8 @@
 // — Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge, which shows the
 // channel's name it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
 // destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
-// destinations:write.
+// destinations:write. A Slack Destination shows its name, health with the Broken banner and its Routes, but no form,
+// check, test or preview yet.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -392,10 +393,10 @@ function DestinationView({ destinationId }: { destinationId: string }) {
                 <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
               ) : destination.type === "telegram" ? (
                 <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
-              ) : (
+              ) : destination.type === "bridge" ? (
                 <EditForm current={destination} kind={BRIDGE_KIND} onDirtyChange={setDirty} />
-              )}
-              {canTest && (
+              ) : null}
+              {canTest && destination.type !== "slack" && (
                 <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
               )}
             </>

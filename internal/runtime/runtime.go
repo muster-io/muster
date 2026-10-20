@@ -981,7 +981,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Renamed: func(ctx context.Context, tx destinationsdb.DBTX, publicID, name string) error {
 			return p.delivery.DestinationRenamed(ctx, tx, publicID, name)
 		},
-		Mentions: p.mentions, Mattermost: conns, Telegram: conns, Bridge: conns,
+		Mentions: p.mentions, Mattermost: conns, Telegram: conns, Bridge: conns, Slack: conns,
 		Healthy: p.delivery.EndBroken, Probe: p.delivery.ProbeNow, Keyring: p.keyring, Templates: p.sandbox,
 		// Destination tests and previews of every type go through the interactive path (C-16).
 		Samples: p.renderer, Log: p.log, Testers: map[string]destinations.Tester{
