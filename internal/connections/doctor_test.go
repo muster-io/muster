@@ -326,8 +326,8 @@ func TestDoctorSlack(t *testing.T) {
 	for _, r := range f.Requests() {
 		paths = append(paths, r.Path)
 	}
-	wantPaths := []string{"/api/auth.test", "/api/auth.test", "/api/bots.info", "/api/auth.test",
-		"/api/conversations.info", "/api/conversations.info", "/api/conversations.info"}
+	wantPaths := []string{"/api/auth.test", "/api/apps.connections.open", "/api/auth.test", "/api/bots.info",
+		"/api/auth.test", "/api/conversations.info", "/api/conversations.info", "/api/conversations.info"}
 	if !slices.Equal(paths, wantPaths) {
 		t.Errorf("requests %q, want %q", paths, wantPaths)
 	}

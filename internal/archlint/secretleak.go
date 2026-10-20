@@ -2424,6 +2424,9 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		body = map[string]any{"ok": false, "error": "ratelimited", "warning": echo}
+	case method == "apps.connections.open":
+		body = map[string]any{"ok": true, "url": "wss://wss-primary.slack.com/link/?ticket=" +
+			"0123456789abcdef0123456789abcdef&app_id=" + appID, "warning": echo}
 	case method == "auth.test" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer xapp-"):
 		body = map[string]any{"ok": true, "app_id": appID}
 	case method == "auth.test":

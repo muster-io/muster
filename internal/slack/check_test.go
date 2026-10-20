@@ -96,8 +96,9 @@ func failed(c Check) string {
 }
 
 // TestCheckSocket covers C-24.FR-2 and AC-1: in socket mode the steps token, scopes and app_token pass against the
-// fake; token finds the bot and the workspace, scopes makes no request and has no latency, app_token finds the app;
-// each step names its path.
+// fake; token finds the bot and the workspace, scopes makes no request and has no latency, app_token calls
+// apps.connections.open with the app-level token first, then finds the app, and opens no socket; each step names its
+// path.
 func TestCheckSocket(t *testing.T) {
 	f := startFake(t)
 	b := fakeslack.Apps()[1]
@@ -111,7 +112,7 @@ func TestCheckSocket(t *testing.T) {
 		t.Fatalf("identity %+v", res.Identity)
 	}
 	if lat := []time.Duration{res.Steps[0].Latency, res.Steps[1].Latency, res.Steps[2].Latency}; lat[0] !=
-		time.Millisecond || lat[1] != 0 || lat[2] != 2*time.Millisecond {
+		time.Millisecond || lat[1] != 0 || lat[2] != 3*time.Millisecond {
 		t.Fatalf("latencies %v", lat)
 	}
 	for _, s := range res.Steps {
@@ -123,9 +124,13 @@ func TestCheckSocket(t *testing.T) {
 	for _, r := range f.Requests() {
 		paths = append(paths, r.Path+" "+r.Headers["Authorization"][0])
 	}
-	if fmt.Sprint(paths) != "[/api/auth.test Bearer "+fakeslack.SecondBotToken+" /api/auth.test Bearer "+
-		fakeslack.SecondAppToken+" /api/bots.info Bearer "+fakeslack.SecondBotToken+"]" {
+	if fmt.Sprint(paths) != "[/api/auth.test Bearer "+fakeslack.SecondBotToken+" /api/apps.connections.open Bearer "+
+		fakeslack.SecondAppToken+" /api/auth.test Bearer "+fakeslack.SecondAppToken+" /api/bots.info Bearer "+
+		fakeslack.SecondBotToken+"]" {
 		t.Fatalf("requests %v", paths)
+	}
+	if st := f.Sockets(); st.Apps[fakeslack.AppB].Opened != 0 {
+		t.Fatalf("the check opened a socket: %+v", st)
 	}
 	if (Check{}).OK() {
 		t.Fatal("a check without steps passed")
@@ -309,7 +314,7 @@ func TestCheckFailures(t *testing.T) {
 	} {
 		fault("/api/bots.info", http.StatusOK, 0, body)
 		if res, _ := RunCheck(t.Context(), c, direct, tick(), EventModeSocket); failed(res) != want ||
-			res.Steps[2].Latency != 2*time.Millisecond {
+			res.Steps[2].Latency != 3*time.Millisecond {
 			t.Errorf("bots.info %s = %q %+v", body, failed(res), res.Steps)
 		}
 	}
@@ -322,7 +327,8 @@ func TestCheckFailures(t *testing.T) {
 	}
 }
 
-// TestCheckAppTokenAnswers: an app-level token whose auth.test fails, or names no app, fails app_token before bots.info.
+// TestCheckAppTokenAnswers: an app-level token whose auth.test fails, or names no app, fails app_token before bots.info;
+// the address apps.connections.open answers is not read, whatever it is.
 func TestCheckAppTokenAnswers(t *testing.T) {
 	for _, tc := range []struct{ answer, want string }{
 		{`{"ok":true}`, "app_token request_failed: Slack's answer names no app."},
@@ -330,6 +336,10 @@ func TestCheckAppTokenAnswers(t *testing.T) {
 		{`{"ok":false,"error":"token_expired"}`, "app_token token_invalid: Slack refused the token."},
 	} {
 		s := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/apps.connections.open" {
+				answerJSON(http.StatusOK, `{"ok":true,"url":"wss://evil.example/link/?ticket=t"}`)(w, r)
+				return
+			}
 			if r.Header.Get("Authorization") == "Bearer "+testApp {
 				answerJSON(http.StatusOK, tc.answer)(w, r)
 				return
@@ -339,7 +349,7 @@ func TestCheckAppTokenAnswers(t *testing.T) {
 		})
 		res, err := RunCheck(t.Context(), newClient(t, network(t, nil), settings(s.base())), direct, tick(),
 			EventModeSocket)
-		if err != nil || failed(res) != tc.want || len(s.seen()) != 2 {
+		if err != nil || failed(res) != tc.want || len(s.seen()) != 3 {
 			t.Errorf("%s: %q, %d requests, %v", tc.answer, failed(res), len(s.seen()), err)
 		}
 	}
@@ -436,11 +446,56 @@ func TestCheckThroughProxy(t *testing.T) {
 				t.Errorf("step %+v", st)
 			}
 		}
-		if tc.want == "" && (!res.OK() || len(f.Requests()) != 3 || len(proxy.Connections()) == 0) {
+		if tc.want == "" && (!res.OK() || len(f.Requests()) != 4 || len(proxy.Connections()) == 0) {
 			t.Fatalf("through the proxy: %+v, %d requests, %+v", res, len(f.Requests()), proxy.Connections())
 		}
 		if tc.want != "" && len(f.Requests()) != 0 {
 			t.Fatalf("a refused proxy passed %d requests", len(f.Requests()))
 		}
+	}
+}
+
+// TestCheckAppTokenOpen covers C-24.FR-2: apps.connections.open is the first call of app_token, so that a bot token
+// typed as the app-level token fails it with wrong_token_type; a refused token is token_invalid and any other failure
+// request_failed; no request ever goes to a socket address, and http mode calls no apps.connections.open.
+func TestCheckAppTokenOpen(t *testing.T) {
+	f := startFake(t)
+	bot := Settings{BotToken: fakeslack.SecondBotToken, AppToken: fakeslack.SecondBotToken, Route: devRoute(f)}
+	res, err := RunCheck(t.Context(), newClient(t, network(t, nil), bot), direct, tick(), EventModeSocket)
+	if err != nil || failed(res) != "app_token wrong_token_type: This is not an app-level token." ||
+		res.Identity.AppID != "" || res.Steps[2].Latency != time.Millisecond {
+		t.Fatalf("a bot token as the app-level token = %+v, %v", res, err)
+	}
+	c := fakeClient(t, f, true)
+	for body, want := range map[string]string{
+		`{"ok":false,"error":"not_allowed_token_type"}`: "app_token wrong_token_type: " + MessageNotAppToken,
+		`{"ok":false,"error":"invalid_auth"}`:           "app_token token_invalid: Slack refused the token.",
+		`{"ok":false,"error":"internal_error"}`:         "app_token request_failed: internal_error",
+	} {
+		if err := f.SetFault(fakeserver.Fault{Path: "/api/apps.connections.open", Status: http.StatusOK, Body: body,
+			Times: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if res, _ := RunCheck(t.Context(), c, direct, tick(), EventModeSocket); failed(res) != want ||
+			names(res) != "token:ok scopes:ok app_token:fail" {
+			t.Errorf("%s: %q", body, failed(res))
+		}
+	}
+	for _, r := range f.Requests() {
+		if r.Path == "/link/" {
+			t.Errorf("the check requested %s", r.Path)
+		}
+	}
+	f.ResetRequests()
+	if res, _ := RunCheck(t.Context(), c, direct, tick(), EventModeHTTP); !res.OK() {
+		t.Fatalf("http = %+v", res)
+	}
+	for _, r := range f.Requests() {
+		if r.Path == "/api/apps.connections.open" {
+			t.Errorf("http mode called %s", r.Path)
+		}
+	}
+	if st := f.Sockets(); st.Apps[fakeslack.AppB].Opened != 0 || st.Apps[fakeslack.AppA].Opened != 0 {
+		t.Fatalf("a check opened a socket: %+v", st)
 	}
 }

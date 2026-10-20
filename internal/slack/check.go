@@ -34,13 +34,19 @@ const (
 
 // The messages of the steps that failed, in English (reference.md).
 const (
-	MessageTokenInvalid   = "Slack refused the token." //nolint:gosec // G101: a message, not a credential
-	MessageWrongTokenType = "This is not a bot token." //nolint:gosec // G101: a message, not a credential
+	MessageTokenInvalid   = "Slack refused the token."        //nolint:gosec // G101: a message, not a credential
+	MessageWrongTokenType = "This is not a bot token."        //nolint:gosec // G101: a message, not a credential
+	MessageNotAppToken    = "This is not an app-level token." //nolint:gosec // G101: a message, not a credential
 	messageMissingScope   = "The bot token lacks the scopes %s."
 	MessageAppMismatch    = "The app-level token belongs to another Slack app than the bot token."
 	messageNoApp          = "Slack's answer names no app."
 	checkFailed           = "The check failed."
 )
+
+// HintAnotherClientConnected is what muster doctor says of a Slack Connection in socket mode whose last hello counted
+// another connection of its Slack app than the Leader's (C-24.FR-2, F-102).
+const HintAnotherClientConnected = "another program is connected to this Slack app through Socket Mode: presses are " +
+	"shared between them at random; use one Slack app for each Muster installation"
 
 // RequiredScopes are the scopes the bot token needs, and no other (C-24.FR-1).
 var RequiredScopes = []string{"chat:write", "channels:read", "groups:read", "im:write", "users:read",
@@ -132,8 +138,10 @@ func (c Check) Failed() (Step, bool) {
 //     that is not a bot's — not_allowed_token_type, or an answer without bot_id — wrong_token_type;
 //  2. scopes — no request: the x-oauth-scopes of that answer must name every scope of RequiredScopes, else
 //     missing_scope names the missing ones in their order, in the message and in MissingScopes;
-//  3. app_token, in socket mode only — auth.test with the app-level token answers the app's id, which must equal the
-//     bot's app_id that bots.info answers, else app_mismatch.
+//  3. app_token, in socket mode only — apps.connections.open with the app-level token first, so that a token that is
+//     not an app-level one, not_allowed_token_type, is wrong_token_type; the check opens no WebSocket and drops the
+//     answer's url unread. Then auth.test with the app-level token answers the app's id, which must equal the bot's
+//     app_id that bots.info answers, else app_mismatch.
 //
 // A step that fails skips the steps after it. Any other failure has the code of delivery.FailureCode: without an answer
 // with the text of delivery.FailureMessage — the name of Slack's address, which is left out through a proxy whose own
@@ -207,21 +215,42 @@ func RunCheck(ctx context.Context, c *Client, run Runner, realClock clock.Clock,
 	return out, nil
 }
 
-// appStep is the step app_token: auth.test with the app-level token, then bots.info for the bot of the step token,
-// whose app ids must be equal; when they are, the app's id joins id.
+// appStep is the step app_token: apps.connections.open with the app-level token, whose answer is dropped unread, then
+// auth.test with it and bots.info for the bot of the step token, whose app ids must be equal; when they are, the app's
+// id joins id.
 func appStep(ctx context.Context, c *Client, run Runner, realClock clock.Clock, id *Identity, address string) (Step,
 	error) {
 	s := Step{Name: StepAppToken, Via: c.Via()}
-	var app AuthTest
 	var r Result
 	latency, err := timed(ctx, run, realClock, func(ctx context.Context, call delivery.Call) Result {
-		app, r = c.AppAuthTest(ctx, call.Class)
+		r = c.CallApp(ctx, call.Class, "apps.connections.open", nil)
+		r.Body = nil
 		return r
 	})
 	if err != nil {
 		return Step{}, err
 	}
 	s.Latency = latency
+	switch {
+	case !r.OK() && slices.Contains(tokenErrors, r.ErrorCode):
+		s.Code, s.Message = CodeTokenInvalid, MessageTokenInvalid
+		return s, nil
+	case !r.OK() && r.ErrorCode == "not_allowed_token_type":
+		s.Code, s.Message = CodeWrongTokenType, MessageNotAppToken
+		return s, nil
+	case !r.OK():
+		s.Code, s.Message = failure(r, address)
+		return s, nil
+	}
+	var app AuthTest
+	latency, err = timed(ctx, run, realClock, func(ctx context.Context, call delivery.Call) Result {
+		app, r = c.AppAuthTest(ctx, call.Class)
+		return r
+	})
+	if err != nil {
+		return Step{}, err
+	}
+	s.Latency += latency
 	switch {
 	case !r.OK() && slices.Contains(tokenErrors, r.ErrorCode):
 		s.Code, s.Message = CodeTokenInvalid, MessageTokenInvalid

@@ -536,6 +536,24 @@ WARN · fields: `connection`, `reason` · C-24
 
 A request to the callback of Slack presses in http mode was refused and changed nothing: connection is the public_id of the Connection when it is known; reason why — bad_signature (X-Slack-Signature is missing or is not the signature of the body under the Connection's Slack signing secret), stale (X-Slack-Request-Timestamp is missing or further than slack.request_tolerance from Muster's real clock, either way), unknown_connection (no Slack Connection with this id, or a deleted one) or wrong_mode (the Connection receives its presses through Socket Mode), each answered 401 with the same body; no_payload (the body has no payload that is a JSON object) or too_large (the body is over 1 MiB), each answered 400. Lines that keep coming with bad_signature mean a wrong Slack signing secret or someone else's requests. Never carries the signature, the Slack signing secret, the headers or the body.
 
+### `slack_socket_connected`
+
+INFO · fields: `connection`, `num_connections`, `held`, `error` · C-24
+
+The Leader's Socket Mode connection of a Slack Connection received its hello: connection is the public_id of the Connection, num_connections the connections of the Slack app that Slack counts, this one included, and held how many of them the Leader holds for the Connection — two while a planned refresh overlaps the next connection with the old one. The count beyond held is stored on the Connection for its check and page; error, when present, says that it could not be stored, and the next hello stores it again.
+
+### `slack_socket_failed`
+
+WARN · fields: `connection`, `reason`, `backoff_seconds`, `error` · C-24
+
+A Socket Mode connection of a Slack Connection could not be opened or ended without a planned refresh: connection is the public_id of the Connection; reason dial (apps.connections.open failed, the address it answered is not Slack's, the WebSocket handshake failed or the Connection's client could not be built), hello_timeout (no hello within slack.hello_timeout), link_disabled (Socket Mode was turned off in the app's settings), too_many_websockets (the app already has ten connections) or closed (the connection ended, a ping got no pong within 10 s or a confirmation could not be written); backoff_seconds the wait before the next connection, from 1 s doubling with jitter up to 5 min (slack.socket_backoff), reset by a hello; error what failed, with the tokens and the ticket masked, absent for hello_timeout, link_disabled and too_many_websockets. It counts against nothing and makes no Destination Broken; presses made until the next hello are lost.
+
+### `slack_socket_shared`
+
+WARN · fields: `connection`, `other_connections` · C-24
+
+A hello of a Slack Connection's Socket Mode connection counted more connections of the Slack app than the Leader holds: another program — usually a second Muster installation on the same app — is connected and takes some of its presses at random. connection is the public_id of the Connection and other_connections the connections beyond the Leader's. Right after a Leader change Slack may still count the old Leader's connection; a later hello clears the count. Use one Slack app for each installation.
+
 ### `snapshot_accepted`
 
 INFO · fields: `integration`, `stored_snapshot`, `size_bytes`, `route_pattern` · C-05

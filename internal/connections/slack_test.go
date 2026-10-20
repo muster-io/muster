@@ -344,17 +344,19 @@ func TestSlackCheck(t *testing.T) {
 			t.Errorf("step %d = %+v", i, st)
 		}
 	}
-	if res.Steps[0].Latency != 7*time.Millisecond || res.Steps[2].Latency != 14*time.Millisecond {
+	if res.Steps[0].Latency != 7*time.Millisecond || res.Steps[2].Latency != 21*time.Millisecond {
 		t.Errorf("latencies %v %v", res.Steps[0].Latency, res.Steps[2].Latency)
 	}
 	reqs := f.Requests()
-	if len(reqs) != 3 || reqs[0].Path != "/api/auth.test" ||
-		reqs[0].Headers["Authorization"][0] != "Bearer "+fakeslack.BotToken || reqs[1].Path != "/api/auth.test" ||
-		reqs[1].Headers["Authorization"][0] != "Bearer "+fakeslack.AppToken || reqs[2].Path != "/api/bots.info" ||
-		reqs[2].Headers["Authorization"][0] != "Bearer "+fakeslack.BotToken {
+	if len(reqs) != 4 || reqs[0].Path != "/api/auth.test" ||
+		reqs[0].Headers["Authorization"][0] != "Bearer "+fakeslack.BotToken ||
+		reqs[1].Path != "/api/apps.connections.open" ||
+		reqs[1].Headers["Authorization"][0] != "Bearer "+fakeslack.AppToken || reqs[2].Path != "/api/auth.test" ||
+		reqs[2].Headers["Authorization"][0] != "Bearer "+fakeslack.AppToken || reqs[3].Path != "/api/bots.info" ||
+		reqs[3].Headers["Authorization"][0] != "Bearer "+fakeslack.BotToken {
 		t.Errorf("requests %+v", reqs)
 	}
-	if len(e.path.subjects) != 3 || slices.ContainsFunc(e.path.subjects, func(s delivery.Subject) bool {
+	if len(e.path.subjects) != 4 || slices.ContainsFunc(e.path.subjects, func(s delivery.Subject) bool {
 		return s.Connection == nil || *s.Connection != c.ID || s.Destination != nil
 	}) {
 		t.Errorf("subjects %+v", e.path.subjects)
@@ -527,7 +529,7 @@ func TestSlackCheckThroughProxy(t *testing.T) {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	reqs, targets := f.Requests(), p.Targets()
-	if len(reqs) != 3 || len(targets) != len(reqs) || p.Refused() != 0 {
+	if len(reqs) != 4 || len(targets) != len(reqs) || p.Refused() != 0 {
 		t.Errorf("%d requests reached the fake, %d through the proxy, %d refused", len(reqs), len(targets),
 			p.Refused())
 	}
