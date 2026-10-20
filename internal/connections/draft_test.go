@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"reflect"
@@ -1016,12 +1017,16 @@ func TestCheckSlackDraft(t *testing.T) {
 				res.Slack.TeamID == "" || res.Slack.BotUserID == "") {
 				t.Errorf("ok %v, slack %+v, bot %q", res.OK, res.Slack, res.BotName)
 			}
-			for _, r := range rec.take() {
+			records := rec.take()
+			for _, r := range records {
 				if r.Links != (outbound.Links{Check: "draft_check", Run: res.Run}) || r.Owner.Connection != tc.owner ||
 					r.Owner.Draft != (tc.owner == 0) {
 					t.Errorf("a record of %+v, links %+v", r.Owner, r.Links)
 				}
 			}
+			checkSlackDraftRecords(t, records, slices.ContainsFunc(tc.calls, func(c string) bool {
+				return strings.Contains(c, bearer)
+			}))
 		})
 	}
 	res, err := svc.CheckDraft(t.Context(), slDraft("socket", "", fakeslack.SecondBotToken,
@@ -1035,6 +1040,41 @@ func TestCheckSlackDraft(t *testing.T) {
 		if r.Path == "/link/" {
 			t.Errorf("a draft opened a socket")
 		}
+	}
+}
+
+// checkSlackDraftRecords fails t when a draft_check record in records shows an Authorization that is not [redacted]
+// or carries a Slack token of the tests anywhere, and when sent, a draft that sent a token, recorded no masked
+// Authorization (C-23.FR-3).
+func checkSlackDraftRecords(t *testing.T, records []outbound.Record, sent bool) {
+	t.Helper()
+	tokens := []string{fakeslack.BotToken, fakeslack.AppToken, fakeslack.SecondBotToken, fakeslack.SecondAppToken,
+		unpublishedBot, unpublishedApp}
+	masked := 0
+	for _, r := range records {
+		for _, v := range r.RequestHeader.Values("Authorization") {
+			if v != "[redacted]" {
+				t.Errorf("%s recorded the Authorization %q", r.Operation, tokenNames.Replace(v))
+			}
+			masked++
+		}
+		var b strings.Builder
+		for _, h := range []http.Header{r.RequestHeader, r.ResponseHeader} {
+			for name, values := range h {
+				b.WriteString(name + ": " + strings.Join(values, ",") + "\n")
+			}
+		}
+		b.WriteString(r.URL + "\n" + r.Error + "\n" + r.Network + "\n")
+		b.Write(r.RequestBody)
+		b.Write(r.ResponseBody)
+		for _, tok := range tokens {
+			if strings.Contains(b.String(), tok) {
+				t.Errorf("%s recorded the token %s", r.Operation, tokenNames.Replace(tok))
+			}
+		}
+	}
+	if sent && masked == 0 {
+		t.Errorf("no masked Authorization in %d records of a draft that sent a token", len(records))
 	}
 }
 
