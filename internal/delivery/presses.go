@@ -259,14 +259,14 @@ type slackPressQueries interface {
 
 // SlackBinding is what a press on a message of a Slack Connection is bound to (C-24.FR-10): the kind of the message —
 // a Root message, buttons.SubjectRoot, or a sent Reminder, buttons.SubjectReply — the Alert Group, by public_id and by
-// its internal id for the Request log, the Destination the message was delivered to, its Route's language and Snooze
-// durations, and for a Reminder the ts of the Root message it replies to, whose Thread the answers go to.
+// its internal id for the Request log, the Destination the message was delivered to, its Route's Snooze durations, and
+// for a Reminder the ts of the Root message it replies to, whose Thread the answers go to. It has no language: a Slack
+// press is answered in the profile language of the person who pressed (C-24.FR-11).
 type SlackBinding struct {
 	Kind          buttons.Subject
 	GroupPublicID string
 	AlertGroup    int64
 	Destination   Destination
-	Language      string
 	SnoozeSeconds []int64
 	RootTS        string
 }
@@ -288,7 +288,7 @@ func (s *Service) SlackPressBinding(ctx context.Context, connectionID int64, cha
 	switch {
 	case err == nil:
 		return SlackBinding{Kind: buttons.SubjectRoot, GroupPublicID: r.GroupPublicID, AlertGroup: r.AlertGroupID,
-			Destination: dest(r.DestinationID, r.DestinationPublicID, r.DestinationName), Language: r.Language,
+			Destination:   dest(r.DestinationID, r.DestinationPublicID, r.DestinationName),
 			SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
 	case !errors.Is(err, pgx.ErrNoRows):
 		return SlackBinding{}, fmt.Errorf("read the binding of a press on a root message of the connection %d: %w",
@@ -304,7 +304,7 @@ func (s *Service) SlackPressBinding(ctx context.Context, connectionID int64, cha
 			connectionID, err)
 	}
 	return SlackBinding{Kind: buttons.SubjectReply, GroupPublicID: p.GroupPublicID, AlertGroup: p.AlertGroupID,
-		Destination: dest(p.DestinationID, p.DestinationPublicID, p.DestinationName), Language: p.Language,
+		Destination:   dest(p.DestinationID, p.DestinationPublicID, p.DestinationName),
 		SnoozeSeconds: p.SnoozeDurationsSeconds, RootTS: p.RootMessageID}, nil
 }
 

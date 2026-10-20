@@ -136,7 +136,7 @@ type pressBindings struct {
 
 func newPressBindings() *pressBindings {
 	root := delivery.SlackBinding{Kind: buttons.SubjectRoot, GroupPublicID: pressGroup, AlertGroup: pressAlertGroup,
-		Destination: pressDest, Language: "en", SnoozeSeconds: []int64{3600, 14400, 86400}}
+		Destination: pressDest, SnoozeSeconds: []int64{3600, 14400, 86400}}
 	reminder, other := root, root
 	reminder.Kind, reminder.RootTS = buttons.SubjectReply, pressRootTS
 	other.GroupPublicID, other.AlertGroup = otherGroup, 42

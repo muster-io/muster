@@ -5388,8 +5388,8 @@ type probeSlackBindings struct{}
 
 func (probeSlackBindings) SlackPressBinding(_ context.Context, conn int64, _, _ string) (delivery.SlackBinding, error) {
 	return delivery.SlackBinding{Kind: buttons.SubjectRoot, GroupPublicID: "AGAAAAAAAAAAA1", AlertGroup: 1,
-		Destination: delivery.Destination{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: delivery.TypeSlack, Connection: &conn},
-		Language:    "en"}, nil
+		Destination: delivery.Destination{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: delivery.TypeSlack,
+			Connection: &conn}}, nil
 }
 
 func (probeSlackBindings) SlackTestDestination(context.Context, int64, string, string) (delivery.Destination, bool,

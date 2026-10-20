@@ -914,7 +914,7 @@ func (f *fakeDB) GetSlackRootBinding(_ context.Context, arg dbgen.GetSlackRootBi
 		}
 		r := f.routes[g.route]
 		return dbgen.GetSlackRootBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
-			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID, Language: r.language,
+			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID,
 			SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
 	}
 	return dbgen.GetSlackRootBindingRow{}, pgx.ErrNoRows
@@ -941,7 +941,7 @@ func (f *fakeDB) GetSlackReminderBinding(_ context.Context, arg dbgen.GetSlackRe
 		}
 		rt := f.routes[g.route]
 		return dbgen.GetSlackReminderBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
-			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID, Language: rt.language,
+			DestinationName: ds.name, AlertGroupID: g.id, GroupPublicID: g.publicID,
 			SnoozeDurationsSeconds: slices.Clone(rt.snooze), RootMessageID: root}, nil
 	}
 	return dbgen.GetSlackReminderBindingRow{}, pgx.ErrNoRows
@@ -1011,7 +1011,7 @@ func TestSlackPressBinding(t *testing.T) {
 		if err != nil || b.Kind != tc.kind || b.GroupPublicID != "AGAAAAAAAAAA21" || b.AlertGroup != groupID ||
 			b.Destination.ID != want.ID || b.Destination.PublicID != want.PublicID ||
 			b.Destination.Name != want.Name || b.Destination.Type != want.Type || b.Destination.Connection == nil ||
-			*b.Destination.Connection != conn || b.Language != "ru" || b.RootTS != tc.root ||
+			*b.Destination.Connection != conn || b.RootTS != tc.root ||
 			!slices.Equal(b.SnoozeSeconds, []int64{3600, 14400}) {
 			t.Errorf("SlackPressBinding(%s) = %+v, %v", tc.ts, b, err)
 		}

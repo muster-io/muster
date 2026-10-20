@@ -1522,11 +1522,12 @@ FOR NO KEY UPDATE OF d;
 -- GetSlackRootBinding reads what a press on the message message_id of the channel channel_id of the Slack Connection
 -- is bound to when it is a Root message (C-24.FR-10): the delivery of an Alert Group to a Slack Destination of the
 -- Connection that is not deleted, whose channel is channel_id and whose Root message is message_id, with the
--- Destination, the Alert Group, and its Route's language and Snooze durations. A Slack ts is unique within its channel
--- only, so the channel is part of the lookup, through deliveries_message_idx.
+-- Destination, the Alert Group, and its Route's Snooze durations: the answers are in the profile language of the
+-- person who pressed, not the Route's (C-24.FR-11). A Slack ts is unique within its channel only, so the channel is
+-- part of the lookup, through deliveries_message_idx.
 -- name: GetSlackRootBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.id AS alert_group_id, g.public_id AS group_public_id, r.language, r.snooze_durations_seconds
+       g.id AS alert_group_id, g.public_id AS group_public_id, r.snooze_durations_seconds
 FROM destinations ds
 JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
 JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1542,7 +1543,7 @@ LIMIT 1;
 -- GetSlackRootBinding and the Root message it replies to, found through thread_replies_reminder_message_idx.
 -- name: GetSlackReminderBinding :one
 SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       g.id AS alert_group_id, g.public_id AS group_public_id, r.language, r.snooze_durations_seconds,
+       g.id AS alert_group_id, g.public_id AS group_public_id, r.snooze_durations_seconds,
        coalesce(d.message_id, '')::text AS root_message_id
 FROM destinations ds
 JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id

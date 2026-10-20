@@ -4245,7 +4245,7 @@ func (l *live) slackPressBinding(t *testing.T) {
 		if err != nil || b.Kind != c.kind || b.GroupPublicID != gid || b.AlertGroup != group ||
 			b.Destination.ID != dest || b.Destination.PublicID != "DSAAAAAAAAAAP1" ||
 			b.Destination.Type != delivery.TypeSlack || b.Destination.Connection == nil ||
-			*b.Destination.Connection != conn || b.Language != "en" || b.RootTS != c.root {
+			*b.Destination.Connection != conn || b.RootTS != c.root {
 			t.Fatalf("SlackPressBinding(%s) = %+v, %v", c.ts, b, err)
 		}
 	}
