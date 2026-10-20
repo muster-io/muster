@@ -839,6 +839,7 @@ func (e DestinationPreviewItemName) Valid() bool {
 const (
 	DestinationTypeBridge     DestinationType = "bridge"
 	DestinationTypeMattermost DestinationType = "mattermost"
+	DestinationTypeSlack      DestinationType = "slack"
 	DestinationTypeTelegram   DestinationType = "telegram"
 	DestinationTypeWebhook    DestinationType = "webhook"
 )
@@ -849,6 +850,8 @@ func (e DestinationType) Valid() bool {
 	case DestinationTypeBridge:
 		return true
 	case DestinationTypeMattermost:
+		return true
+	case DestinationTypeSlack:
 		return true
 	case DestinationTypeTelegram:
 		return true
@@ -1650,6 +1653,7 @@ const (
 	NullableDestinationCheckCodeConnectFailed      NullableDestinationCheckCode = "connect_failed"
 	NullableDestinationCheckCodeDnsFailed          NullableDestinationCheckCode = "dns_failed"
 	NullableDestinationCheckCodeLessThannil        NullableDestinationCheckCode = "<nil>"
+	NullableDestinationCheckCodeMissingScope       NullableDestinationCheckCode = "missing_scope"
 	NullableDestinationCheckCodeNotAChannel        NullableDestinationCheckCode = "not_a_channel"
 	NullableDestinationCheckCodeProxyRefused       NullableDestinationCheckCode = "proxy_refused"
 	NullableDestinationCheckCodeRequestFailed      NullableDestinationCheckCode = "request_failed"
@@ -1690,6 +1694,8 @@ func (e NullableDestinationCheckCode) Valid() bool {
 	case NullableDestinationCheckCodeDnsFailed:
 		return true
 	case NullableDestinationCheckCodeLessThannil:
+		return true
+	case NullableDestinationCheckCodeMissingScope:
 		return true
 	case NullableDestinationCheckCodeNotAChannel:
 		return true
@@ -2398,6 +2404,36 @@ const (
 func (e SlackConnectionInputType) Valid() bool {
 	switch e {
 	case SlackConnectionInputTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackDestinationType.
+const (
+	SlackDestinationTypeSlack SlackDestinationType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackDestinationType enum.
+func (e SlackDestinationType) Valid() bool {
+	switch e {
+	case SlackDestinationTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackDestinationInputType.
+const (
+	SlackDestinationInputTypeSlack SlackDestinationInputType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackDestinationInputType enum.
+func (e SlackDestinationInputType) Valid() bool {
+	switch e {
+	case SlackDestinationInputTypeSlack:
 		return true
 	default:
 		return false
@@ -4330,6 +4366,11 @@ type Connection struct {
 	union json.RawMessage
 }
 
+// ConnectionChannelList The channels of a Connection's bot, by the Connection's type; only `SlackChannelList` has `truncated`.
+type ConnectionChannelList struct {
+	union json.RawMessage
+}
+
 // ConnectionCheckRequest defines model for ConnectionCheckRequest.
 type ConnectionCheckRequest struct {
 	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.
@@ -4365,7 +4406,7 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 
 	// LatencyMs How long the step's request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.
@@ -4373,9 +4414,12 @@ type ConnectionCheckStep struct {
 
 	// Message What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code's text.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
-	Name    ConnectionCheckStepName   `json:"name"`
-	Ok      bool                      `json:"ok"`
-	Skipped *bool                     `json:"skipped,omitempty"`
+
+	// MissingScopes Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.
+	MissingScopes *[]string               `json:"missing_scopes,omitempty"`
+	Name          ConnectionCheckStepName `json:"name"`
+	Ok            bool                    `json:"ok"`
+	Skipped       *bool                   `json:"skipped,omitempty"`
 
 	// Via How the request travelled.
 	Via *ConnectionPath `json:"via,omitempty"`
@@ -4422,18 +4466,21 @@ type Destination struct {
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
-	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token, `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists, `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in, `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and `request_failed` for any other error of Slack's, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
 
 	// Message Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail where it says more than the code's text.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 
-	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
+	// MissingScopes Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
+	MissingScopes *[]string `json:"missing_scopes,omitempty"`
+
+	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
 	Name DestinationCheckItemName `json:"name"`
 	Ok   bool                     `json:"ok"`
 }
 
-// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
+// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member.
 type DestinationCheckItemName string
 
 // DestinationCheckResult defines model for DestinationCheckResult.
@@ -5101,7 +5148,7 @@ type MattermostChannel struct {
 // MattermostChannelType defines model for MattermostChannel.Type.
 type MattermostChannelType string
 
-// MattermostChannelList defines model for MattermostChannelList.
+// MattermostChannelList The channels of a Mattermost Connection's bot; it has no other member, so that no Slack list reads as one.
 type MattermostChannelList struct {
 	Items []MattermostChannel `json:"items"`
 }
@@ -5288,17 +5335,17 @@ type MentionName string
 
 // MentionSetting Whom to mention for one kind of Loud event. The default is nobody.
 type MentionSetting struct {
-	// Everyone `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
+	// Everyone `none`, or the chat-wide mention the messenger supports: Mattermost takes `channel`, `all` and `here`, Slack `channel` and `here` but not `all`; Telegram and Bridges have none of them; an outgoing webhook takes each as data.
 	Everyone MentionSettingEveryone `json:"everyone"`
 
-	// Groups Messenger groups; Telegram and Bridges have none.
+	// Groups Messenger groups: Mattermost group names; Telegram, Bridges and Slack have none.
 	Groups []string `json:"groups"`
 
 	// UserIds Muster users, rendered through their Account links.
 	UserIds []PublicId `json:"user_ids"`
 }
 
-// MentionSettingEveryone `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
+// MentionSettingEveryone `none`, or the chat-wide mention the messenger supports: Mattermost takes `channel`, `all` and `here`, Slack `channel` and `here` but not `all`; Telegram and Bridges have none of them; an outgoing webhook takes each as data.
 type MentionSettingEveryone string
 
 // MentionSettings Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
@@ -5372,10 +5419,10 @@ type NullableAlertGroupStatus string
 // NullableCheckKind The check or test a request belongs to, null for any other request.
 type NullableCheckKind string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
-// NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+// NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; Slack `channel`: `token_invalid` — Slack refused the bot token, `missing_scope` — the bot token lacks a scope `conversations.info` needs, which `missing_scopes` lists, `channel_not_found` — no such channel, a deleted one, or a private channel the bot is not in, `channel_archived`, `bot_not_in_channel` — `message` says "Invite the bot to the channel: /invite @{bot}", and `request_failed` for any other error of Slack's, which `message` names; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 type NullableDestinationCheckCode string
 
 // NullableHttpHeaders HTTP headers by name, each with its values, masked, or null. Untrusted text.
@@ -6492,6 +6539,25 @@ type SigningSecretStatus struct {
 	UpdatedAt           nullable.Nullable[time.Time] `json:"updated_at,omitempty"`
 }
 
+// SlackChannel A channel of a Slack Connection's workspace that the bot is a member of.
+type SlackChannel struct {
+	// Id The channel's id, `C…` or `G…`, as a Slack Destination takes it.
+	Id        string `json:"id"`
+	IsPrivate bool   `json:"is_private"`
+
+	// Name The channel's name without `#`. Untrusted text from Slack.
+	Name string `json:"name"`
+}
+
+// SlackChannelList defines model for SlackChannelList.
+type SlackChannelList struct {
+	// Items By name.
+	Items []SlackChannel `json:"items"`
+
+	// Truncated More channels were left after the fifth page of `conversations.list`; a channel that is not listed is still saved by its id.
+	Truncated bool `json:"truncated"`
+}
+
 // SlackCheckInfo What a check of a Slack Connection found.
 type SlackCheckInfo struct {
 	// AppId The Slack app's id (`A…`); null in `http` mode, which has no step `app_token`, and when that step failed.
@@ -6600,6 +6666,59 @@ type SlackConnectionInput struct {
 
 // SlackConnectionInputType defines model for SlackConnectionInput.Type.
 type SlackConnectionInputType string
+
+// SlackDestination defines model for SlackDestination.
+type SlackDestination struct {
+	// ChannelId The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
+	ChannelId string `json:"channel_id"`
+
+	// ChannelName The channel's name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.
+	ChannelName nullable.Nullable[string] `json:"channel_name,omitempty"`
+
+	// ConnectionId A Slack Connection.
+	ConnectionId PublicId  `json:"connection_id"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
+	Etag   *string           `json:"etag,omitempty"`
+	Health DestinationHealth `json:"health"`
+
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id PublicId `json:"id"`
+
+	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
+	Limiter Limiter `json:"limiter"`
+
+	// Mentions Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.
+	Mentions      MentionSettings      `json:"mentions"`
+	Name          string               `json:"name"`
+	Routes        []EntityRef          `json:"routes"`
+	TemplateError *TemplateErrorState  `json:"template_error,omitempty"`
+	Type          SlackDestinationType `json:"type"`
+}
+
+// SlackDestinationType defines model for SlackDestination.Type.
+type SlackDestinationType string
+
+// SlackDestinationInput A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection's workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel's name.
+type SlackDestinationInput struct {
+	// ChannelId The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
+	ChannelId string `json:"channel_id"`
+
+	// ConnectionId A Slack Connection.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
+	Limiter Limiter `json:"limiter"`
+
+	// Mentions Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.
+	Mentions MentionSettings           `json:"mentions"`
+	Name     string                    `json:"name"`
+	Type     SlackDestinationInputType `json:"type"`
+}
+
+// SlackDestinationInputType defines model for SlackDestinationInput.Type.
+type SlackDestinationInputType string
 
 // SlackEventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
 type SlackEventMode string
@@ -8019,10 +8138,10 @@ type UpdateConnectionParams struct {
 
 // ListConnectionChannelsParams defines parameters for ListConnectionChannels.
 type ListConnectionChannelsParams struct {
-	// TeamId Only this team.
+	// TeamId Only this team (Mattermost); a Slack Connection ignores it.
 	TeamId *string `form:"team_id,omitempty" json:"team_id,omitempty"`
 
-	// Q Match on channel name.
+	// Q Only channels whose name, or a Mattermost channel's display name, contains this text, regardless of case.
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 }
 
@@ -9491,6 +9610,68 @@ func (t *Connection) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsMattermostChannelList returns the union data inside the ConnectionChannelList as a MattermostChannelList
+func (t ConnectionChannelList) AsMattermostChannelList() (MattermostChannelList, error) {
+	var body MattermostChannelList
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMattermostChannelList overwrites any union data inside the ConnectionChannelList as the provided MattermostChannelList
+func (t *ConnectionChannelList) FromMattermostChannelList(v MattermostChannelList) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMattermostChannelList performs a merge with any union data inside the ConnectionChannelList, using the provided MattermostChannelList
+func (t *ConnectionChannelList) MergeMattermostChannelList(v MattermostChannelList) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsSlackChannelList returns the union data inside the ConnectionChannelList as a SlackChannelList
+func (t ConnectionChannelList) AsSlackChannelList() (SlackChannelList, error) {
+	var body SlackChannelList
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackChannelList overwrites any union data inside the ConnectionChannelList as the provided SlackChannelList
+func (t *ConnectionChannelList) FromSlackChannelList(v SlackChannelList) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSlackChannelList performs a merge with any union data inside the ConnectionChannelList, using the provided SlackChannelList
+func (t *ConnectionChannelList) MergeSlackChannelList(v SlackChannelList) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ConnectionChannelList) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ConnectionChannelList) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsMattermostConnectionDraft returns the union data inside the ConnectionDraft as a MattermostConnectionDraft
 func (t ConnectionDraft) AsMattermostConnectionDraft() (MattermostConnectionDraft, error) {
 	var body MattermostConnectionDraft
@@ -9937,6 +10118,40 @@ func (t *Destination) MergeBridgeDestination(v BridgeDestination) error {
 	return err
 }
 
+// AsSlackDestination returns the union data inside the Destination as a SlackDestination
+func (t Destination) AsSlackDestination() (SlackDestination, error) {
+	var body SlackDestination
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackDestination overwrites any union data inside the Destination as the provided SlackDestination
+func (t *Destination) FromSlackDestination(v SlackDestination) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	t.union = b
+	return err
+}
+
+// MergeSlackDestination performs a merge with any union data inside the Destination, using the provided SlackDestination
+func (t *Destination) MergeSlackDestination(v SlackDestination) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Destination) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -9955,6 +10170,8 @@ func (t Destination) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeDestination()
 	case "mattermost":
 		return t.AsMattermostDestination()
+	case "slack":
+		return t.AsSlackDestination()
 	case "telegram":
 		return t.AsTelegramDestination()
 	case "webhook":
@@ -10110,6 +10327,40 @@ func (t *DestinationInput) MergeBridgeDestinationInput(v BridgeDestinationInput)
 	return err
 }
 
+// AsSlackDestinationInput returns the union data inside the DestinationInput as a SlackDestinationInput
+func (t DestinationInput) AsSlackDestinationInput() (SlackDestinationInput, error) {
+	var body SlackDestinationInput
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackDestinationInput overwrites any union data inside the DestinationInput as the provided SlackDestinationInput
+func (t *DestinationInput) FromSlackDestinationInput(v SlackDestinationInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	t.union = b
+	return err
+}
+
+// MergeSlackDestinationInput performs a merge with any union data inside the DestinationInput, using the provided SlackDestinationInput
+func (t *DestinationInput) MergeSlackDestinationInput(v SlackDestinationInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t DestinationInput) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -10128,6 +10379,8 @@ func (t DestinationInput) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeDestinationInput()
 	case "mattermost":
 		return t.AsMattermostDestinationInput()
+	case "slack":
+		return t.AsSlackDestinationInput()
 	case "telegram":
 		return t.AsTelegramDestinationInput()
 	case "webhook":
@@ -10766,7 +11019,7 @@ type ClientInterface interface {
 
 	// ListConnectionChannels List channels visible to the bot
 	//
-	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// The channels of a Connection's bot for the channel picker of the Destination form. A Mattermost Connection answers `MattermostChannelList`: the bot's teams, `team_id` alone when given, and its channels in each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and that are not archived, read with `conversations.list` (`types=public_channel,private_channel`, `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one, and nothing more is read.
 	//
 	// Corresponds with GET /connections/{connection_id}/channels (the `ListConnectionChannels` operationId).
 	ListConnectionChannels(ctx context.Context, connectionId ConnectionId, params *ListConnectionChannelsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -10798,7 +11051,7 @@ type ClientInterface interface {
 
 	// CreateDestinationWithBody Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10807,7 +11060,7 @@ type ClientInterface interface {
 
 	// CreateDestination Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -10828,7 +11081,7 @@ type ClientInterface interface {
 
 	// UpdateDestinationWithBody Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10837,7 +11090,7 @@ type ClientInterface interface {
 
 	// UpdateDestination Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -10846,14 +11099,14 @@ type ClientInterface interface {
 
 	// CheckDestination Run the Destination check
 	//
-	// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info` (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Corresponds with POST /destinations/{destination_id}/checks (the `CheckDestination` operationId).
 	CheckDestination(ctx context.Context, destinationId DestinationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewDestinationWithBody Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10862,7 +11115,7 @@ type ClientInterface interface {
 
 	// PreviewDestination Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -10924,7 +11177,7 @@ type ClientInterface interface {
 
 	// TestDestinationWithBody Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10933,7 +11186,7 @@ type ClientInterface interface {
 
 	// TestDestination Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -12766,7 +13019,7 @@ func (c *Client) UpdateConnection(ctx context.Context, connectionId ConnectionId
 
 // ListConnectionChannels List channels visible to the bot
 //
-// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// The channels of a Connection's bot for the channel picker of the Destination form. A Mattermost Connection answers `MattermostChannelList`: the bot's teams, `team_id` alone when given, and its channels in each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and that are not archived, read with `conversations.list` (`types=public_channel,private_channel`, `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one, and nothing more is read.
 //
 // Corresponds with GET /connections/{connection_id}/channels (the `ListConnectionChannels` operationId).
 func (c *Client) ListConnectionChannels(ctx context.Context, connectionId ConnectionId, params *ListConnectionChannelsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12838,7 +13091,7 @@ func (c *Client) ListDestinations(ctx context.Context, params *ListDestinationsP
 
 // CreateDestinationWithBody Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12857,7 +13110,7 @@ func (c *Client) CreateDestinationWithBody(ctx context.Context, contentType stri
 
 // CreateDestination Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12908,7 +13161,7 @@ func (c *Client) GetDestination(ctx context.Context, destinationId DestinationId
 
 // UpdateDestinationWithBody Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12927,7 +13180,7 @@ func (c *Client) UpdateDestinationWithBody(ctx context.Context, destinationId De
 
 // UpdateDestination Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12946,7 +13199,7 @@ func (c *Client) UpdateDestination(ctx context.Context, destinationId Destinatio
 
 // CheckDestination Run the Destination check
 //
-// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info` (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Corresponds with POST /destinations/{destination_id}/checks (the `CheckDestination` operationId).
 func (c *Client) CheckDestination(ctx context.Context, destinationId DestinationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12963,7 +13216,7 @@ func (c *Client) CheckDestination(ctx context.Context, destinationId Destination
 
 // PreviewDestinationWithBody Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12982,7 +13235,7 @@ func (c *Client) PreviewDestinationWithBody(ctx context.Context, destinationId D
 
 // PreviewDestination Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -13124,7 +13377,7 @@ func (c *Client) RetirePreviousSigningSecret(ctx context.Context, destinationId 
 
 // TestDestinationWithBody Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -13143,7 +13396,7 @@ func (c *Client) TestDestinationWithBody(ctx context.Context, destinationId Dest
 
 // TestDestination Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -23775,7 +24028,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListConnectionChannelsWithResponse List channels visible to the bot
 	//
-	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// The channels of a Connection's bot for the channel picker of the Destination form. A Mattermost Connection answers `MattermostChannelList`: the bot's teams, `team_id` alone when given, and its channels in each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and that are not archived, read with `conversations.list` (`types=public_channel,private_channel`, `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one, and nothing more is read.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -23811,7 +24064,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDestinationWithBodyWithResponse Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23820,7 +24073,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDestinationWithResponse Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23845,7 +24098,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateDestinationWithBodyWithResponse Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23854,7 +24107,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateDestinationWithResponse Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23863,7 +24116,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckDestinationWithResponse Run the Destination check
 	//
-	// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info` (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -23872,7 +24125,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithBodyWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23881,7 +24134,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23953,7 +24206,7 @@ type ClientWithResponsesInterface interface {
 
 	// TestDestinationWithBodyWithResponse Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23962,7 +24215,7 @@ type ClientWithResponsesInterface interface {
 
 	// TestDestinationWithResponse Send a test message
 	//
-	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+	// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -27576,7 +27829,7 @@ type ListConnectionChannelsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *MattermostChannelList
+	JSON200 *ConnectionChannelList
 	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
 	ApplicationproblemJSON400 *BadRequest
 	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
@@ -27598,7 +27851,7 @@ type ListConnectionChannelsResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ListConnectionChannelsResponse) GetJSON200() *MattermostChannelList {
+func (r ListConnectionChannelsResponse) GetJSON200() *ConnectionChannelList {
 	return r.JSON200
 }
 
@@ -38694,7 +38947,7 @@ func (c *ClientWithResponses) UpdateConnectionWithResponse(ctx context.Context, 
 
 // ListConnectionChannelsWithResponse List channels visible to the bot
 //
-// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// The channels of a Connection's bot for the channel picker of the Destination form. A Mattermost Connection answers `MattermostChannelList`: the bot's teams, `team_id` alone when given, and its channels in each. A Slack Connection answers `SlackChannelList`: the public and private channels the bot is a member of and that are not archived, read with `conversations.list` (`types=public_channel,private_channel`, `exclude_archived=true`, `limit=200`) page by page, at most 5 pages, `truncated` when more were left; it ignores `team_id`. A Telegram or Bridge Connection answers `409`: the Admin enters the channel. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers a page with `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one, and nothing more is read.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -38754,7 +39007,7 @@ func (c *ClientWithResponses) ListDestinationsWithResponse(ctx context.Context, 
 
 // CreateDestinationWithBodyWithResponse Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38769,7 +39022,7 @@ func (c *ClientWithResponses) CreateDestinationWithBodyWithResponse(ctx context.
 
 // CreateDestinationWithResponse Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38812,7 +39065,7 @@ func (c *ClientWithResponses) GetDestinationWithResponse(ctx context.Context, de
 
 // UpdateDestinationWithBodyWithResponse Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38827,7 +39080,7 @@ func (c *ClientWithResponses) UpdateDestinationWithBodyWithResponse(ctx context.
 
 // UpdateDestinationWithResponse Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38842,7 +39095,7 @@ func (c *ClientWithResponses) UpdateDestinationWithResponse(ctx context.Context,
 
 // CheckDestinationWithResponse Run the Destination check
 //
-// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info` (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -38857,7 +39110,7 @@ func (c *ClientWithResponses) CheckDestinationWithResponse(ctx context.Context, 
 
 // PreviewDestinationWithBodyWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38872,7 +39125,7 @@ func (c *ClientWithResponses) PreviewDestinationWithBodyWithResponse(ctx context
 
 // PreviewDestinationWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38992,7 +39245,7 @@ func (c *ClientWithResponses) RetirePreviousSigningSecretWithResponse(ctx contex
 
 // TestDestinationWithBodyWithResponse Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -39007,7 +39260,7 @@ func (c *ClientWithResponses) TestDestinationWithBodyWithResponse(ctx context.Co
 
 // TestDestinationWithResponse Send a test message
 //
-// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+// One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -43278,7 +43531,7 @@ func ParseListConnectionChannelsResponse(rsp *http.Response) (*ListConnectionCha
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest MattermostChannelList
+		var dest ConnectionChannelList
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

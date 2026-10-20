@@ -22,6 +22,8 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
@@ -73,6 +75,34 @@ func (s *memStore) ListBridgeDestinations(_ context.Context, org int64) ([]dbgen
 			BridgeChannelID: pgtype.Text{String: d.channel, Valid: true}})
 	}
 	return out, nil
+}
+
+// ListSlackDestinations lists no Slack Destination; slackDoctorStore lists them for the tests of Slack.
+func (s *memStore) ListSlackDestinations(_ context.Context, org int64) ([]dbgen.ListSlackDestinationsRow, error) {
+	if err := s.fail["ListSlackDestinations"]; err != nil || org != 1 {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// slackDoctorStore is the memStore with the Slack Destinations that muster doctor lists.
+type slackDoctorStore struct {
+	*memStore
+	dests []dbgen.ListSlackDestinationsRow
+}
+
+func (s slackDoctorStore) ListSlackDestinations(ctx context.Context, org int64) ([]dbgen.ListSlackDestinationsRow,
+	error) {
+	if _, err := s.memStore.ListSlackDestinations(ctx, org); err != nil {
+		return nil, err
+	}
+	return s.dests, nil
+}
+
+// slackDest is the Slack Destination sl-dest-<id> on channel through the Connection connection.
+func slackDest(id, connection int64, channel string) dbgen.ListSlackDestinationsRow {
+	return dbgen.ListSlackDestinationsRow{ID: id, PublicID: fmt.Sprintf("DS%012d", id), Name: fmt.Sprintf("sl-dest-%d", id),
+		ConnectionID: pgtype.Int8{Int64: connection, Valid: true}, SlackChannelID: pgtype.Text{String: channel, Valid: true}}
 }
 
 func findings(t *testing.T, svc *connections.Service, q connections.DoctorQueries) string {
@@ -171,7 +201,7 @@ func TestDoctor(t *testing.T) {
 	}
 
 	for _, name := range []string{"ListConnections", "ListMattermostDestinations", "ListTelegramDestinations",
-		"ListBridgeDestinations"} {
+		"ListBridgeDestinations", "ListSlackDestinations"} {
 		e.store.fail[name] = errors.New("down")
 		if _, err := e.svc.Doctor(t.Context(), e.store, time.Second); err == nil || !strings.Contains(err.Error(), "down") {
 			t.Errorf("%s failing = %v", name, err)
@@ -257,6 +287,88 @@ func TestDoctorBridge(t *testing.T) {
 	noKeys := connections.New(connections.Config{OrgID: 1})
 	if got := findings(t, noKeys, e.store); !strings.HasPrefix(got,
 		"connection br: the bot token cannot be opened: the master keys could not be loaded\n") {
+		t.Errorf("without a keyring:\n%s", got)
+	}
+}
+
+// TestDoctorSlack is C-02.FR-14 and C-24.FR-2, FR-3 for Slack: muster doctor checks each Slack Connection with the
+// steps of its check — token, scopes and in socket mode app_token — and each Slack Destination with conversations.info,
+// in the background class at once, never on the interactive path; a failing one names the step or the item channel
+// with its message, the text of bot_not_in_channel naming the bot the check found; a Destination whose Connection
+// failed or is deleted says so. It stores nothing: no workspace, no Audit log entry, no transaction.
+func TestDoctorSlack(t *testing.T) {
+	e, f := newSlackEnv(t)
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	bad := slackInput("bad", connections.EventModeHTTP)
+	bad.BotToken = keyring.Replace("xoxb-muster-doctor-unknown")
+	revoked := e.createSlack(t, bad)
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeHTTP))
+	e.store.rows[gone.ID].deleted = true
+	q := slackDoctorStore{memStore: e.store, dests: []dbgen.ListSlackDestinationsRow{
+		slackDest(31, sl.ID, fakeslack.ChannelAlerts), slackDest(32, sl.ID, fakeslack.ChannelOther),
+		slackDest(33, revoked.ID, fakeslack.ChannelAlerts), slackDest(34, gone.ID, fakeslack.ChannelAlerts),
+		slackDest(35, sl.ID, "C0FAKEGONE")}}
+	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
+	before, audits, txs, ids := background.Get(), len(e.store.audit), e.store.tx, len(e.store.slackIDs)
+	subjects := len(e.path.subjects)
+
+	got := findings(t, e.svc, q)
+	want := []string{"connection sl: ok", "connection bad: token: Slack refused the token.",
+		"destination sl-dest-31: ok",
+		"destination sl-dest-32: channel: Invite the bot to the channel: /invite @muster-dev-bot",
+		"destination sl-dest-33: its Connection failed its check: token: Slack refused the token.",
+		"destination sl-dest-34: its Connection is deleted",
+		"destination sl-dest-35: channel: The channel was not found, or the bot cannot see it."}
+	if got != strings.Join(want, "\n") {
+		t.Fatalf("findings:\n%s\nwant:\n%s", got, strings.Join(want, "\n"))
+	}
+	var paths []string
+	for _, r := range f.Requests() {
+		paths = append(paths, r.Path)
+	}
+	wantPaths := []string{"/api/auth.test", "/api/auth.test", "/api/bots.info", "/api/auth.test",
+		"/api/conversations.info", "/api/conversations.info", "/api/conversations.info"}
+	if !slices.Equal(paths, wantPaths) {
+		t.Errorf("requests %q, want %q", paths, wantPaths)
+	}
+	if n := background.Get() - before; n < 5 {
+		t.Errorf("%d background requests", n)
+	}
+	if len(e.store.audit) != audits || e.store.tx != txs || len(e.store.slackIDs) != ids ||
+		len(e.path.subjects) != subjects {
+		t.Errorf("the doctor wrote: audit %d, transactions %d, identities %d, interactive %d",
+			len(e.store.audit)-audits, e.store.tx-txs, len(e.store.slackIDs)-ids, len(e.path.subjects)-subjects)
+	}
+
+	cfg := fakeslack.DefaultConfig()
+	cfg.Scopes[fakeslack.AppA] = "chat:write,channels:read,groups:read,im:write,users:read"
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := findings(t, e.svc, q); !strings.HasPrefix(got, "connection sl: scopes: The bot token lacks the scopes "+
+		"users:read.email.\n") || !strings.Contains(got, "destination sl-dest-31: its Connection failed its check: "+
+		"scopes:") {
+		t.Errorf("a missing scope:\n%s", got)
+	}
+	if err := f.SetConfig(fakeslack.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	row := &e.store.rows[sl.ID].row
+	v := row.SlackAppTokenCiphertext
+	row.SlackAppTokenCiphertext = []byte("garbage")
+	if got := findings(t, e.svc, q); !strings.HasPrefix(got, "connection sl: open the app-level token of the connection") {
+		t.Errorf("a secret that cannot be opened:\n%s", got)
+	}
+	row.SlackAppTokenCiphertext = v
+	e.store.fail["ListSlackDestinations"] = errors.New("down")
+	if _, err := e.svc.Doctor(t.Context(), q, time.Second); err == nil || !strings.Contains(err.Error(), "down") {
+		t.Errorf("ListSlackDestinations failing = %v", err)
+	}
+	delete(e.store.fail, "ListSlackDestinations")
+	noKeys := connections.New(connections.Config{OrgID: 1})
+	if got := findings(t, noKeys, q); !strings.HasPrefix(got,
+		"connection sl: the bot token cannot be opened: the master keys could not be loaded\n") ||
+		!strings.Contains(got, "destination sl-dest-31: its Connection failed its check: the bot token cannot be opened") {
 		t.Errorf("without a keyring:\n%s", got)
 	}
 }

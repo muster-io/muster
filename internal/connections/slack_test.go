@@ -6,6 +6,7 @@ package connections_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,9 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -533,9 +536,9 @@ func TestSlackCheckThroughProxy(t *testing.T) {
 	}
 }
 
-// TestSlackChannelsDoctorAndDelete: a Slack Connection has no channel list yet, muster doctor skips it, and its
-// deletion follows C-13.FR-6: it is marked deleted with its three secrets wiped and the Audit log entry
-// connection.deleted.
+// TestSlackChannelsDoctorAndDelete: a Slack Connection has no Mattermost channel list, muster doctor checks it as any
+// other Connection, and its deletion follows C-13.FR-6: it is marked deleted with its three secrets wiped and the Audit
+// log entry connection.deleted.
 func TestSlackChannelsDoctorAndDelete(t *testing.T) {
 	e, _ := newSlackEnv(t)
 	ctx := t.Context()
@@ -546,8 +549,8 @@ func TestSlackChannelsDoctorAndDelete(t *testing.T) {
 		t.Errorf("channels = %v", err)
 	}
 	e.create(t, "mm")
-	found, err := e.svc.Doctor(ctx, e.store, time.Second)
-	if err != nil || len(found) != 1 || found[0].Name != "mm" {
+	found, err := e.svc.Doctor(ctx, slackDoctorStore{memStore: e.store}, time.Second)
+	if err != nil || len(found) != 2 || found[0].Name != "sl" || !found[0].OK() || found[1].Name != "mm" {
 		t.Errorf("doctor = %+v, %v", found, err)
 	}
 	if err := e.svc.Delete(ctx, by, c.PublicID, new(int64(1))); err != nil {
@@ -564,6 +567,199 @@ func TestSlackChannelsDoctorAndDelete(t *testing.T) {
 	}
 	if _, err := e.svc.Get(ctx, c.PublicID); !errors.Is(err, connections.ErrNotFound) {
 		t.Errorf("get after delete = %v", err)
+	}
+}
+
+// TestCheckSlackChannel is C-24.FR-3 and AC-4 for the Destination write path: conversations.info through the Slack
+// Connection the check names, on the interactive path, limited by the Destination once it exists and by the Connection
+// before; the text of bot_not_in_channel names the bot by the name the Connection's last check stored, and by none
+// before one, with no extra request; a missing, deleted or other type of Connection is ErrUnknownConnection; no limiter
+// token in time is a *delivery.LimitedError; a secret that cannot be opened fails the check without showing it.
+func TestCheckSlackChannel(t *testing.T) {
+	e, f := newSlackEnv(t)
+	ctx := t.Context()
+	c := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	check := func(channel string, destination *int64) (destinations.SlackChannelChecked, error) {
+		return e.svc.CheckSlackChannel(ctx, destinations.SlackChannelCheck{Connection: strings.ToLower(c.PublicID),
+			Destination: destination, ChannelID: channel})
+	}
+	res, err := check(fakeslack.ChannelOther, nil)
+	if err != nil || res.ConnectionID != c.ID || res.Check.OK() || res.Check.Code != slack.CodeBotNotInChannel ||
+		res.Check.Message != "Invite the bot to the channel." {
+		t.Fatalf("a Connection never checked = %+v, %v", res, err)
+	}
+	reqs := f.Requests()
+	if len(reqs) != 1 || reqs[0].Path != "/api/conversations.info" ||
+		reqs[0].Headers["Authorization"][0] != "Bearer "+fakeslack.BotToken {
+		t.Errorf("requests %+v", reqs)
+	}
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Connection == nil || *s.Connection != c.ID || s.Destination != nil {
+		t.Errorf("subject %+v", s)
+	}
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	res, err = check(fakeslack.ChannelOther, new(int64(5)))
+	if err != nil || res.Check.Message != "Invite the bot to the channel: /invite @muster-dev-bot" {
+		t.Errorf("a checked Connection = %+v, %v", res, err)
+	}
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 5 ||
+		s.Destination.Type != connections.TypeSlack || s.Destination.Connection == nil ||
+		*s.Destination.Connection != c.ID {
+		t.Errorf("subject %+v", s)
+	}
+	if res, err := check(fakeslack.ChannelAlerts, nil); err != nil || !res.Check.OK() || res.Check.Name != "alerts" {
+		t.Errorf("a member = %+v, %v", res, err)
+	}
+	cfg := fakeslack.DefaultConfig()
+	cfg.Scopes[fakeslack.AppA] = "chat:write,groups:read,im:write,users:read,users:read.email"
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := check(fakeslack.ChannelAlerts, nil); err != nil || res.Check.Code != slack.CodeMissingScope ||
+		!slices.Equal(res.Check.MissingScopes, []string{"channels:read"}) {
+		t.Errorf("a missing scope = %+v, %v", res, err)
+	}
+	if err := f.SetConfig(fakeslack.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	mm := e.create(t, "mm")
+	for _, id := range []string{mm.PublicID, "CNZZZZZZZZZZZZ", "not-an-id"} {
+		if _, err := e.svc.CheckSlackChannel(ctx, destinations.SlackChannelCheck{Connection: id,
+			ChannelID: fakeslack.ChannelAlerts}); !errors.Is(err, destinations.ErrUnknownConnection) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	e.path.limited = true
+	if _, err := check(fakeslack.ChannelAlerts, nil); !isLimited(err) {
+		t.Errorf("limited = %v", err)
+	}
+	e.path.limited = false
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := check(fakeslack.ChannelAlerts, nil); err == nil || errors.Is(err, destinations.ErrUnknownConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	row := &e.store.rows[c.ID].row
+	v := row.BotTokenCiphertext
+	row.BotTokenCiphertext = []byte("garbage")
+	if _, err := check(fakeslack.ChannelAlerts, nil); err == nil || slices.ContainsFunc(slackSecrets,
+		func(s string) bool { return strings.Contains(err.Error(), s) }) {
+		t.Errorf("an unreadable token = %v", err)
+	}
+	row.BotTokenCiphertext = v
+	e.store.rows[c.ID].deleted = true
+	if _, err := check(fakeslack.ChannelAlerts, nil); !errors.Is(err, destinations.ErrUnknownConnection) {
+		t.Errorf("a deleted Connection = %v", err)
+	}
+}
+
+// TestSlackChannels is C-24.FR-3 and AC-4: the channel list of a Slack Connection reads conversations.list on the
+// interactive path, limited by the Connection, over several pages, and keeps the channels the bot is a member of by
+// name, filtered by q; a Slack 429 is a *delivery.LimitedError with its Retry-After; a page Slack refused is a
+// *MessengerError naming Slack; a Connection of another type or unknown is refused.
+func TestSlackChannels(t *testing.T) {
+	e, f := newSlackEnv(t)
+	ctx := t.Context()
+	c := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	cfg := fakeslack.DefaultConfig()
+	cfg.Channels[fakeslack.AppA]["C0FAKEPRIV"] = fakeslack.Channel{Name: "private-ops", Member: true, Private: true}
+	cfg.PageSize = 1
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	subjects := len(e.path.subjects)
+	list, err := e.svc.SlackChannels(ctx, c.PublicID, "")
+	if err != nil || list.Truncated || !slices.Equal(list.Channels, []slack.ListedChannel{
+		{ID: fakeslack.ChannelAlerts, Name: "alerts"}, {ID: "C0FAKEPRIV", Name: "private-ops", Private: true}}) {
+		t.Fatalf("channels = %+v, %v", list, err)
+	}
+	if n := len(f.Requests()); n != 3 || len(e.path.subjects)-subjects != 3 {
+		t.Errorf("%d pages, %d subjects", n, len(e.path.subjects)-subjects)
+	}
+	for _, s := range e.path.subjects[subjects:] {
+		if s.Connection == nil || *s.Connection != c.ID || s.Destination != nil {
+			t.Errorf("subject %+v", s)
+		}
+	}
+	if list, err := e.svc.SlackChannels(ctx, c.PublicID, "OPS"); err != nil || len(list.Channels) != 1 ||
+		list.Channels[0].Name != "private-ops" {
+		t.Errorf("q = %+v, %v", list, err)
+	}
+	if err := f.SetFault(fakeserver.Fault{Path: "/api/conversations.list", Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 30, Body: `{"ok":false,"error":"ratelimited"}`, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.svc.SlackChannels(ctx, c.PublicID, "")
+	if l, ok := errors.AsType[*delivery.LimitedError](err); !ok || l.RetryAfter != 30*time.Second {
+		t.Errorf("429 = %v", err)
+	}
+	if err := f.SetFault(fakeserver.Fault{Path: "/api/conversations.list", Status: http.StatusOK,
+		Body: `{"ok":false,"error":"invalid_cursor"}`, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.svc.SlackChannels(ctx, c.PublicID, "")
+	if m, ok := errors.AsType[*connections.MessengerError](err); !ok || m.Messenger != "Slack" ||
+		m.Text != "invalid_cursor" || m.Error() != "the messenger refused the call: invalid_cursor" {
+		t.Errorf("refused = %v", err)
+	}
+	mm := e.create(t, "mm")
+	if _, err := e.svc.SlackChannels(ctx, mm.PublicID, ""); err == nil ||
+		err.Error() != "the connection is not a slack connection" {
+		t.Errorf("a Mattermost Connection = %v", err)
+	}
+	if _, err := e.svc.SlackChannels(ctx, "CNZZZZZZZZZZZZ", ""); !errors.Is(err, connections.ErrNotFound) {
+		t.Errorf("unknown = %v", err)
+	}
+	e.path.limited = true
+	if _, err := e.svc.SlackChannels(ctx, c.PublicID, ""); !isLimited(err) {
+		t.Errorf("limited = %v", err)
+	}
+	e.path.limited = false
+	row := &e.store.rows[c.ID].row
+	row.BotTokenCiphertext = []byte("garbage")
+	if _, err := e.svc.SlackChannels(ctx, c.PublicID, ""); err == nil || slices.ContainsFunc(slackSecrets,
+		func(s string) bool { return strings.Contains(err.Error(), s) }) {
+		t.Errorf("an unreadable token = %v", err)
+	}
+}
+
+// TestSlackChannelCheckThroughProxy is C-24.AC-3: with an HTTP proxy on the Slack Connection, every request of the
+// Destination check and of the channel list reaches the fake Slack server only through the proxy.
+func TestSlackChannelCheckThroughProxy(t *testing.T) {
+	e, f := newSlackEnv(t)
+	p, err := fakeproxy.Start(t.Context(), fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "proxy-pass"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	in := slackInput("sl", connections.EventModeSocket)
+	in.Proxy = proxyconf.Input{Enabled: true, Type: new("http"), Address: new(p.Addr()), UsernameSet: true,
+		Username: new("muster"), Password: keyring.Replace("proxy-pass")}
+	c := e.createSlack(t, in)
+	cfg := fakeslack.DefaultConfig()
+	cfg.PageSize = 1
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CheckSlackChannel(t.Context(), destinations.SlackChannelCheck{Connection: c.PublicID,
+		ChannelID: fakeslack.ChannelAlerts})
+	if err != nil || !res.Check.OK() {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	if list, err := e.svc.SlackChannels(t.Context(), c.PublicID, ""); err != nil || len(list.Channels) != 1 {
+		t.Fatalf("channels = %+v, %v", list, err)
+	}
+	reqs, targets := f.Requests(), p.Targets()
+	if len(reqs) != 3 || len(targets) != len(reqs) || p.Refused() != 0 {
+		t.Errorf("%d requests reached the fake, %d through the proxy, %d refused", len(reqs), len(targets),
+			p.Refused())
+	}
+	for _, tg := range targets {
+		if "http://"+tg != f.URL() {
+			t.Errorf("the proxy connected to %s", tg)
+		}
 	}
 }
 

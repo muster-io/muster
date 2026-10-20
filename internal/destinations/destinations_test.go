@@ -147,6 +147,43 @@ func TestBridgeReadModel(t *testing.T) {
 	}
 }
 
+// slackRow is the Slack Destination DSAAAAAAAAAAA5 on C0FAKEALERTS through CNAAAAAAAAAAA8, whose check read the name
+// "alerts", Broken.
+func slackRow() dbgen.GetDestinationRow {
+	since := pgtype.Timestamptz{Time: t0.Add(-time.Hour), Valid: true}
+	return dbgen.GetDestinationRow{ID: 5, PublicID: "DSAAAAAAAAAAA5", Type: "slack", Name: "alerts-sl",
+		ConnectionPublicID: txt("CNAAAAAAAAAAA8"), SlackChannelID: txt("C0FAKEALERTS"), SlackChannelName: txt("alerts"),
+		Proxy: []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60,
+		Health: "broken", BrokenSince: since, BrokenReason: txt("not_in_channel"), CreatedAt: t0, Version: 1}
+}
+
+// TestSlackReadModel is getDestination and listDestinations of a Slack Destination (C-24.FR-3, AC-4): its Connection,
+// its channel id and the channel's name its check read, and none of the other types' fields; the list is filtered by
+// the type slack, and no other type has the Slack fields.
+func TestSlackReadModel(t *testing.T) {
+	f := newStore()
+	f.rows = append(f.rows, bridgeRow(), slackRow())
+	s := New(1, f)
+	d, err := s.Get(t.Context(), "DSAAAAAAAAAAA5")
+	if err != nil || d.Type != TypeSlack || *d.Connection != "CNAAAAAAAAAAA8" || *d.SlackChannelID != "C0FAKEALERTS" ||
+		*d.SlackChannelName != "alerts" || d.BridgeChannelID != nil || d.TelegramChannelID != nil ||
+		d.MattermostChannelID != nil || d.WebhookMode != nil || d.Health.State != "broken" || d.LimiterLimit != 30 ||
+		d.Routes == nil {
+		t.Fatalf("get = %+v, %v", d, err)
+	}
+	typ := TypeSlack
+	page, err := s.List(t.Context(), ListFilter{Type: &typ})
+	if err != nil || len(page.Destinations) != 1 || *page.Destinations[0].SlackChannelName != "alerts" ||
+		f.lists[len(f.lists)-1].Type.String != "slack" {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+	for _, r := range f.rows[:4] {
+		if d := destinationOf(r); d.SlackChannelID != nil || d.SlackChannelName != nil {
+			t.Errorf("a %s Destination has Slack fields: %+v", r.Type, d)
+		}
+	}
+}
+
 // TestList is listDestinations (C-11.FR-18): every type with its health and Routes, its own fields and Secrets as
 // their status only, in pages after a cursor, filtered as asked.
 func TestList(t *testing.T) {

@@ -78,16 +78,17 @@ func Interactive(in Path, s delivery.Subject) Runner {
 }
 
 // Step is one step of a check: whether it passed or was skipped, its latency on the real clock and path, and when it
-// failed what answered, in English, with its code, which clients translate. The step scopes makes no request and has
-// no latency.
+// failed what answered, in English, with its code, which clients translate, and with CodeMissingScope the scopes the
+// bot token lacks, which clients name in their own words (D396). The step scopes makes no request and has no latency.
 type Step struct {
-	Name    string
-	OK      bool
-	Skipped bool
-	Latency time.Duration
-	Via     string
-	Message string
-	Code    string
+	Name          string
+	OK            bool
+	Skipped       bool
+	Latency       time.Duration
+	Via           string
+	Message       string
+	Code          string
+	MissingScopes []string
 }
 
 // Identity is what a check found: the workspace's id, name and address, the bot's id, user id and name from the step
@@ -130,7 +131,7 @@ func (c Check) Failed() (Step, bool) {
 //  1. token — auth.test with the bot token: the bot and its workspace; a token Slack refuses is token_invalid, and one
 //     that is not a bot's — not_allowed_token_type, or an answer without bot_id — wrong_token_type;
 //  2. scopes — no request: the x-oauth-scopes of that answer must name every scope of RequiredScopes, else
-//     missing_scope names the missing ones in their order;
+//     missing_scope names the missing ones in their order, in the message and in MissingScopes;
 //  3. app_token, in socket mode only — auth.test with the app-level token answers the app's id, which must equal the
 //     bot's app_id that bots.info answers, else app_mismatch.
 //
@@ -188,6 +189,7 @@ func RunCheck(ctx context.Context, c *Client, run Runner, realClock clock.Clock,
 	}
 	if len(missing) > 0 {
 		scopes.OK, scopes.Code, scopes.Message = false, CodeMissingScope, MissingScopesMessage(missing)
+		scopes.MissingScopes = missing
 	}
 	out.Steps = append(out.Steps, scopes)
 	if !scopes.OK {

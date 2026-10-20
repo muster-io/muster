@@ -4,6 +4,7 @@
 package connections
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -240,7 +242,7 @@ func slackResultOf(res slack.Check) CheckResult {
 	out := CheckResult{OK: res.OK(), Steps: make([]Step, 0, len(res.Steps))}
 	for _, st := range res.Steps {
 		out.Steps = append(out.Steps, Step{Name: st.Name, OK: st.OK, Skipped: st.Skipped, Latency: st.Latency,
-			Via: st.Via, Message: st.Message, Code: st.Code})
+			Via: st.Via, Message: st.Message, Code: st.Code, MissingScopes: st.MissingScopes})
 	}
 	if id := res.Identity; id != nil {
 		out.BotName = id.BotName
@@ -260,4 +262,96 @@ func slackSecretsCreated(c Connection) []audit.Change {
 		diff = append(diff, audit.Change{Pointer: "/slack_signing_secret", SecretChanged: true})
 	}
 	return diff
+}
+
+// CheckSlackChannel runs the Destination check of a Slack Destination being saved or checked, for the Destination
+// write path (C-24.FR-3): conversations.info through the Slack Connection that the check names, on the interactive
+// path, limited by the Destination when it exists and by the Connection otherwise, with a client built for the check.
+// The text of bot_not_in_channel names the bot by the name the Connection's last passing check stored, and by none
+// before one. A Connection that is missing, deleted or not a Slack Connection is destinations.ErrUnknownConnection.
+func (s *Service) CheckSlackChannel(ctx context.Context, in destinations.SlackChannelCheck) (
+	destinations.SlackChannelChecked, error) {
+	row, err := s.row(ctx, s.cfg.Store, in.Connection)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeSlack) {
+		return destinations.SlackChannelChecked{}, destinations.ErrUnknownConnection
+	}
+	if err != nil {
+		return destinations.SlackChannelChecked{}, err
+	}
+	c, err := s.slackClient(row)
+	if err != nil {
+		return destinations.SlackChannelChecked{}, err
+	}
+	conn := row.ID
+	subject := delivery.Subject{Connection: &conn}
+	if in.Destination != nil {
+		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeSlack,
+			Connection: &conn}}
+	}
+	res, err := slack.CheckChannel(ctx, c, slack.Interactive(s.cfg.Interactive, subject), in.ChannelID,
+		row.BotUsername.String)
+	if err != nil {
+		return destinations.SlackChannelChecked{}, err
+	}
+	return destinations.SlackChannelChecked{ConnectionID: row.ID, Check: res}, nil
+}
+
+// SlackChannels lists the channels of the Slack Connection publicID for the channel picker (C-24.FR-3): those the bot
+// is a member of, public and private, not archived, whose name contains q, read with conversations.list on the
+// interactive path, limited by the Connection, at most five pages. A Slack 429 on a page, which holds the Connection's
+// limiter, is a *delivery.LimitedError with its Retry-After, as no token within the budget is; a page that failed
+// otherwise is a *MessengerError that names Slack. A deleted or unknown Connection is ErrNotFound; one of another type
+// is errNotSlack.
+func (s *Service) SlackChannels(ctx context.Context, publicID, q string) (slack.ChannelList, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if err != nil {
+		return slack.ChannelList{}, err
+	}
+	if row.Type != TypeSlack {
+		return slack.ChannelList{}, errNotSlack
+	}
+	c, err := s.slackClient(row)
+	if err != nil {
+		return slack.ChannelList{}, err
+	}
+	id := row.ID
+	list, err := slack.Channels(ctx, c, slack.Interactive(s.cfg.Interactive, delivery.Subject{Connection: &id}), q)
+	if rl, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+		return slack.ChannelList{}, &delivery.LimitedError{RetryAfter: rl.RetryAfter}
+	}
+	if lf, ok := errors.AsType[*slack.ListFailedError](err); ok {
+		return slack.ChannelList{}, &MessengerError{Messenger: "Slack", Text: string(lf.Text)}
+	}
+	if err != nil {
+		return slack.ChannelList{}, err
+	}
+	return list, nil
+}
+
+// doctorSlack runs the steps of the check of the Slack Connection row in the background class, bounded by each, at
+// once, waiting for no limiter token: token, scopes and, in socket mode, app_token. It returns the client and the bot's
+// name the step token found, with an empty message when every step passed, otherwise the failing step with its message.
+// It stores nothing it finds.
+func (s *Service) doctorSlack(ctx context.Context, row dbgen.GetConnectionRow, each time.Duration) (*slack.Client,
+	string, string) {
+	if s.cfg.Keyring == nil {
+		return nil, "", errNoKeyring.Error()
+	}
+	c, err := s.slackClient(row)
+	if err != nil {
+		return nil, "", err.Error()
+	}
+	ctx, cancel := context.WithTimeout(ctx, each)
+	defer cancel()
+	// The direct runner has no error of its own.
+	res, _ := slack.RunCheck(ctx, c, slack.Direct(delivery.Call{Class: outbound.ClassBackground}), s.cfg.Clocks.Real,
+		row.SlackEventMode.String)
+	if st, failed := res.Failed(); failed {
+		return nil, "", st.Name + ": " + cmp.Or(st.Message, checkFailed)
+	}
+	bot := ""
+	if res.Identity != nil {
+		bot = res.Identity.BotName
+	}
+	return c, bot, ""
 }

@@ -103,7 +103,8 @@ issue: 307
   `DestinationCheckItem.name` describes `channel` for Slack too; `NullableDestinationCheckCode` gains `missing_scope`;
   `listConnectionChannels` answers for a Slack Connection `SlackChannelList` (`items` of `id`, `name`, `is_private`, and
   `truncated`), its `200` the named `ConnectionChannelList`, a `oneOf` of `MattermostChannelList` and
-  `SlackChannelList`, and takes `q`; its `team_id`, which a Slack Connection ignores, and its `503`, which Slack's `429`
+  `SlackChannelList`, and takes `q`; `MattermostChannelList` takes no other member (`additionalProperties: false`), so
+  that an empty Slack list matches one branch of the `oneOf` only; its `team_id`, which a Slack Connection ignores, and its `503`, which Slack's `429`
   on a page also gives, say so; `destination_check_failed` puts `missing_scope` at `/connection_id`, as
   `token_invalid`; `MentionSetting.everyone` and `groups` describe what Slack takes.
 - **D396: structured scopes instead of parsing the message**: `ConnectionCheckStep` and `DestinationCheckItem` gain an
@@ -268,6 +269,8 @@ None.
   - The text of `bot_not_in_channel` in Verification reads `/invite @muster-dev-bot-b`, not `@Fake bot B`: the fake's
     `auth.test` answers the handle `muster-dev-bot-b`, as Slack answers a handle without spaces, and that is what the
     Connection check stores; S-103's Verification changes with it.
+  - `MattermostChannelList` gains `additionalProperties: false`: without it `{"items":[],"truncated":false}` matches
+    both branches of the `oneOf`, which the API tests' response validation refuses.
   - D396 replaces the proposed text "The bot token lacks a scope this check needs: {scope}." with the field
     `missing_scopes` and the existing text of `missing_scope`, so that the SPA never parses an English message.
   - `files_touched` adds `internal/slack/check.go` and `check_test.go` (D396), `internal/connections/connections.go`

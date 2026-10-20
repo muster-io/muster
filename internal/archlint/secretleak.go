@@ -2065,6 +2065,7 @@ const (
 	slackMissingScope
 	slackHTML500
 	slackRateLimited
+	slackNotMember
 	slackLate
 )
 
@@ -2075,11 +2076,14 @@ const (
 // Authorization header: as the workspace, the bot and a person, as the scopes of x-oauth-scopes, in ok:false answers
 // of an unknown error, of invalid_auth and of missing_scope (needed), in an HTML 500 and in a 429; then behind a
 // proxy that accepts the password, which every request of the check must cross, also with the stand-in answering only
-// after the check stopped waiting; then against a listener that drops the connection; then in http mode. Creations of
-// a bot token and an app-level token without their prefixes, of http mode without the Slack signing secret and of
-// socket mode without the app-level token are refused; muster doctor skips the Connection; it is deleted; and a client
-// is refused its proxy and its route. Neither the log nor any error, step message or what the check found and the
-// Connection shows may carry a secret.
+// after the check stopped waiting; then against a listener that drops the connection; then in http mode. After each
+// check the Destination check of a channel (conversations.info) and the channel list (conversations.list, whose
+// cursors echo the secrets too) run against the same answers, the channel echoing them as its name and, once, without
+// the bot; behind the accepting proxy every one of their requests must cross it (C-24.AC-3). Creations of a bot token
+// and an app-level token without their prefixes, of http mode without the Slack signing secret and of socket mode
+// without the app-level token are refused; muster doctor checks the Connection and its Destination; it is deleted;
+// and a client is refused its proxy and its route. Neither the log nor any error, step message, check item, channel or
+// what the check found and the Connection shows may carry a secret.
 func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
@@ -2189,6 +2193,23 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 		shown(svc.Get(ctx, store.row.PublicID))
 		return res
 	}
+	// dcheck is the Destination check of the stand-in's channel, and chans the channel list.
+	dcheck := func(ctx context.Context) slack.ChannelCheck {
+		res, err := svc.CheckSlackChannel(ctx, destinations.SlackChannelCheck{Connection: store.row.PublicID,
+			ChannelID: "C0PROBE01"})
+		c := res.Check
+		errs = append(errs, err, errors.New(c.Name+" "+c.Message+" "+c.Code+" "+strings.Join(c.MissingScopes, ",")),
+			errors.New(string(c.Outcome.Error)))
+		return c
+	}
+	chans := func(ctx context.Context) slack.ChannelList {
+		list, err := svc.SlackChannels(ctx, store.row.PublicID, "")
+		errs = append(errs, err)
+		for _, ch := range list.Channels {
+			errs = append(errs, errors.New(ch.ID+" "+ch.Name))
+		}
+		return list
+	}
 	c, err := svc.Create(ctx, by, in)
 	if err != nil {
 		return err
@@ -2201,11 +2222,22 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
 	errs = append(errs, err)
 	for _, a := range []int32{slackOK, slackEcho, slackUser, slackScopesEcho, slackMismatch, slackInvalidAuth,
-		slackError, slackMissingScope, slackHTML500, slackRateLimited} {
+		slackError, slackMissingScope, slackHTML500, slackRateLimited, slackNotMember} {
 		answer.Store(a)
 		res := check(ctx)
 		if a == slackOK && (!res.OK || len(res.Steps) != 3 || !store.row.SlackTeamID.Valid) {
 			errs = append(errs, &probeIncomplete{what: "the check against the stand-in Slack did not pass"})
+		}
+		dc, list := dcheck(ctx), chans(ctx)
+		switch {
+		case a == slackOK && (!dc.OK() || len(list.Channels) != 1):
+			errs = append(errs, &probeIncomplete{what: "the channel check or list against the stand-in Slack failed"})
+		case a == slackEcho && !list.Truncated:
+			errs = append(errs, &probeIncomplete{what: "the channel list did not send the echoed cursor back"})
+		case a == slackMissingScope && len(dc.MissingScopes) == 0:
+			errs = append(errs, &probeIncomplete{what: "the channel check named no missing scope"})
+		case a == slackNotMember && dc.Code != slack.CodeBotNotInChannel:
+			errs = append(errs, &probeIncomplete{what: "the channel check did not miss the bot"})
 		}
 	}
 	answer.Store(slackOK)
@@ -2220,21 +2252,34 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	if !viaProxy {
 		errs = append(errs, &probeIncomplete{what: "the check did not reach the stand-in Slack through the proxy"})
 	}
+	crossed := len(accepting.Targets())
+	if dc, list := dcheck(ctx), chans(ctx); !dc.OK() || len(list.Channels) != 1 ||
+		len(accepting.Targets()) != crossed+2 {
+		errs = append(errs, &probeIncomplete{
+			what: "the channel check and list did not reach the stand-in Slack through the proxy"})
+	}
 	answer.Store(slackLate)
 	late, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	if res := check(late); res.OK {
 		errs = append(errs, &probeIncomplete{what: "the check waited for the late answer"})
+	}
+	if dc, list := dcheck(late), chans(late); dc.OK() || len(list.Channels) != 0 {
+		errs = append(errs, &probeIncomplete{what: "the channel check or list waited for the late answer"})
 	}
 	cancel()
 	answer.Store(slackEcho)
 	cutBase := "http://" + cut.Addr().String() + "/api/"
 	base.Store(&cutBase)
 	check(ctx)
+	dcheck(ctx)
+	chans(ctx)
 	base.Store(&standIn)
 	in.EventMode, in.Proxy = connections.EventModeHTTP, proxyconf.Input{Enabled: false}
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
 	errs = append(errs, err)
 	check(ctx)
+	dcheck(ctx)
+	chans(ctx)
 	refused := []connections.Input{in, in, in, in}
 	refused[0].BotToken = keyring.Replace(logging.Secret("x" + secrets[0]))
 	refused[1].EventMode, refused[1].BotToken = connections.EventModeSocket, keyring.Replace(logging.Secret(botToken))
@@ -2251,11 +2296,22 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 		}
 		errs = append(errs, err)
 	}
-	found, err := svc.Doctor(ctx, store, 2*time.Second)
-	errs = append(errs, err)
-	for _, f := range found {
-		errs = append(errs, errors.New(f.Message))
+	for _, a := range []int32{slackOK, slackNotMember, slackEcho, slackMissingScope} {
+		answer.Store(a)
+		found, err := svc.Doctor(ctx, store, 2*time.Second)
+		errs = append(errs, err)
+		checked := 0
+		for _, f := range found {
+			errs = append(errs, errors.New(f.Name+" "+f.Message+" "+f.Warning))
+			if f.OK() && (f.Kind == connections.FindingConnection || f.Name == "probe-slack") {
+				checked++
+			}
+		}
+		if a == slackOK && checked != 2 {
+			errs = append(errs, &probeIncomplete{what: "muster doctor did not check the Connection and its Destination"})
+		}
 	}
+	answer.Store(slackOK)
 	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
 	_, err = slack.NewClient(slack.Network(network), slack.Settings{BotToken: logging.Secret(botToken),
 		AppToken: logging.Secret(appToken), SigningSecret: logging.Secret(signing), Proxy: &outbound.Proxy{Type: "ftp",
@@ -2276,8 +2332,12 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 	}
 	w.Header().Set("X-OAuth-Scopes", scopes)
 	name := "probe"
-	if a == slackEcho || a == slackUser {
+	if a == slackEcho || a == slackUser || a == slackNotMember {
 		name = echo
+	}
+	cursor := ""
+	if a == slackEcho {
+		cursor = echo
 	}
 	appID := "A0PROBE1"
 	if a == slackMismatch {
@@ -2312,6 +2372,13 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 	case method == "bots.info":
 		body = map[string]any{"ok": true, "bot": map[string]any{"id": "B0PROBE1", "app_id": "A0PROBE1",
 			"user_id": "U0PROBE1", "name": name}}
+	case method == "conversations.info":
+		body = map[string]any{"ok": true, "channel": map[string]any{"id": "C0PROBE01", "name": name,
+			"is_channel": true, "is_private": false, "is_archived": false, "is_member": a != slackNotMember}}
+	case method == "conversations.list":
+		body = map[string]any{"ok": true, "channels": []map[string]any{{"id": "C0PROBE01", "name": name,
+			"is_member": true, "is_archived": false, "is_private": false}},
+			"response_metadata": map[string]any{"next_cursor": cursor}}
 	default:
 		body = map[string]any{"ok": false, "error": "unknown_method", "warning": echo}
 	}
@@ -2472,6 +2539,14 @@ func (s *probeConnections) ListMattermostDestinations(context.Context, int64) ([
 	return []cdb.ListMattermostDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
 		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, MattermostTeamID: pgtype.Text{String: "t", Valid: true},
 		MattermostChannelID: pgtype.Text{String: "c", Valid: true}}}, nil
+}
+
+// ListSlackDestinations names the one Slack Destination of probeSlack, on the stand-in's channel, so that muster
+// doctor runs its Destination check.
+func (s *probeConnections) ListSlackDestinations(context.Context, int64) ([]cdb.ListSlackDestinationsRow, error) {
+	return []cdb.ListSlackDestinationsRow{{ID: 3, PublicID: "DSAAAAAAAAAAA3", Name: "probe-slack",
+		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, SlackChannelID: pgtype.Text{String: "C0PROBE01",
+			Valid: true}}}, nil
 }
 
 func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {

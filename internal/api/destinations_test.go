@@ -93,6 +93,15 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 		f.list = append(f.list, d)
 		return d, nil
 	}
+	if in.Slack != nil {
+		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA5", Type: in.Type,
+			Name: in.Name, Connection: &in.Slack.Connection, SlackChannelID: &in.Slack.ChannelID,
+			SlackChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
+			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		f.list = append(f.list, d)
+		return d, nil
+	}
 	if in.Telegram != nil {
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA7", Type: in.Type,
 			Name: in.Name, Connection: &in.Telegram.Connection, TelegramChannelID: &in.Telegram.ChannelID,
@@ -136,6 +145,8 @@ func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, i
 		d.TelegramChannelID = &in.Telegram.ChannelID
 	case in.Bridge != nil:
 		d.BridgeChannelID = &in.Bridge.ChannelID
+	case in.Slack != nil:
+		d.SlackChannelID = &in.Slack.ChannelID
 	}
 	d.Version++
 	return *d, nil
@@ -1104,6 +1115,128 @@ func TestBridgeDestinationAPI(t *testing.T) {
 			`{"source":{"kind":"example"}}`)
 		if a.status != http.StatusNotImplemented || !strings.HasSuffix(a.json(t)["type"].(string), "/not-implemented") ||
 			a.json(t)["detail"] != "This build cannot test or preview Destinations of this type yet." {
+			t.Errorf("%s = %d %s", op, a.status, a.body)
+		}
+	}
+}
+
+// TestSlackDestinationAPI covers C-24.FR-3 and AC-4 on the API: a Slack Destination is created with its Connection, its
+// channel id — a string the spec does not pattern, so that the domain refuses a D… or U… with 422 invalid_format, not
+// request validation with 400 — its Mention settings and limiter, and reads with channel_name; the type filter selects
+// it; a save its check refuses is 422 destination_check_failed with the check_code and the text that names the bot,
+// a missing scope at /connection_id; checkDestination answers its item channel with missing_scopes (D396); and its
+// test and preview answer 501 until S-099.
+func TestSlackDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	body := `{"type":"slack","name":"sl","connection_id":"CNAAAAAAAAAAS1","channel_id":"C0FAKEALERTS",` +
+		`"mentions":` + strings.Replace(noMentions, `"groups":["sre"]`, `"groups":[]`, 1) +
+		`,"limiter":{"limit":30,"per_seconds":60}}`
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	in := fd.saved[len(fd.saved)-1]
+	if in.Type != "slack" || in.Slack == nil || in.Slack.Connection != "CNAAAAAAAAAAS1" ||
+		in.Slack.ChannelID != "C0FAKEALERTS" || in.Mattermost != nil || in.Bridge != nil || in.Limiter.Limit != 30 ||
+		in.Limiter.PerSeconds != 60 || in.Mentions["rise_to_urgent"].Everyone != "here" {
+		t.Errorf("input %+v", in)
+	}
+	created := a.json(t)["destination"].(map[string]any)
+	if created["type"] != "slack" || created["connection_id"] != "CNAAAAAAAAAAS1" ||
+		created["channel_id"] != "C0FAKEALERTS" || created["channel_name"] != "alerts" || created["id"] != "DSAAAAAAAAAAA5" {
+		t.Errorf("created %s", a.body)
+	}
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DSAAAAAAAAAAA5", "")
+	var got gen.SlackDestination
+	decodeInto(t, a, &got)
+	if a.status != http.StatusOK || got.Type != gen.SlackDestinationTypeSlack || got.ConnectionId != "CNAAAAAAAAAAS1" ||
+		got.ChannelId != "C0FAKEALERTS" || got.ChannelName.MustGet() != "alerts" || got.Limiter.Limit != 30 ||
+		a.header.Get("ETag") != `"1"` {
+		t.Errorf("get = %d %s", a.status, a.body)
+	}
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations?type=slack", "")
+	items, _ := a.json(t)["items"].([]any)
+	if a.status != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["channel_name"] != "alerts" ||
+		*fd.filters[len(fd.filters)-1].Type != "slack" {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	fd.list[len(fd.list)-1].SlackChannelName = nil
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DSAAAAAAAAAAA5", "")
+	if m := a.json(t); a.status != http.StatusOK || m["channel_name"] != nil {
+		t.Errorf("without a name = %d %s", a.status, a.body)
+	}
+	update := strings.Replace(body, `"channel_id":"C0FAKEALERTS"`, `"channel_id":"G0FAKEOPS"`, 1)
+	a = x.as(t, destinationsWriter, http.MethodPut, "/api/v1/destinations/DSAAAAAAAAAAA5", update, "If-Match", `"1"`)
+	if a.status != http.StatusOK || a.json(t)["channel_id"] != "G0FAKEOPS" ||
+		fd.saved[len(fd.saved)-1].Slack.ChannelID != "G0FAKEOPS" || *fd.saveVers[len(fd.saveVers)-1] != 1 {
+		t.Errorf("update = %d %s", a.status, a.body)
+	}
+	for _, tc := range []struct {
+		item     destinations.CheckItem
+		checkErr string
+	}{
+		{destinations.CheckItem{Name: "channel", Pointer: "/channel_id", Code: "bot_not_in_channel",
+			Message: "Invite the bot to the channel: /invite @muster-dev-bot-b"}, "bot_not_in_channel"},
+		{destinations.CheckItem{Name: "channel", Pointer: "/channel_id", Code: "channel_archived",
+			Message: "The channel is archived."}, "channel_archived"},
+		{destinations.CheckItem{Name: "channel", Pointer: "/connection_id", Code: "missing_scope",
+			Message: "The bot token lacks the scopes channels:read.", MissingScopes: []string{"channels:read"}},
+			"missing_scope"},
+	} {
+		fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{tc.item}}
+		a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+		if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
+			errs[0]["code"] != "destination_check_failed" || errs[0]["pointer"] != tc.item.Pointer ||
+			errs[0]["detail"] != tc.item.Message || errs[0]["check_code"] != tc.checkErr {
+			t.Errorf("refused %s = %d %s", tc.checkErr, a.status, a.body)
+		}
+	}
+	for _, channel := range []string{"D0FAKEDM", "U0MUSTERUSR1", "#alerts"} {
+		fd.saveErr = &destinations.FieldError{Pointer: "/channel_id", Code: destinations.CodeInvalidFormat,
+			Detail: "A Slack channel id starts with C or G and has upper-case letters and digits, such as C0123456789."}
+		a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+			strings.Replace(body, "C0FAKEALERTS", channel, 1))
+		if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
+			errs[0]["code"] != "invalid_format" || errs[0]["pointer"] != "/channel_id" ||
+			fd.saved[len(fd.saved)-1].Slack.ChannelID != channel {
+			t.Errorf("%s = %d %s", channel, a.status, a.body)
+		}
+	}
+	fd.saveErr = nil
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		strings.Replace(body, `"channel_id":"C0FAKEALERTS",`, "", 1)); a.status != http.StatusBadRequest {
+		t.Errorf("without a channel = %d %s", a.status, a.body)
+	}
+	if _, err := slackDestinationInputOf(gen.DestinationInput{}); err == nil {
+		t.Error("a body that is not a Slack Destination")
+	}
+	fd.check = destinations.CheckResult{Health: destinations.Health{State: "healthy"}, Items: []destinations.CheckItem{
+		{Name: "channel", Message: "The bot token lacks the scopes channels:read.", Code: "missing_scope",
+			MissingScopes: []string{"channels:read"}}}}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/checks", "")
+	var res gen.DestinationCheckResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || res.Ok || len(res.Checks) != 1 ||
+		res.Checks[0].Name != gen.DestinationCheckItemNameChannel ||
+		res.Checks[0].Code.MustGet() != gen.NullableDestinationCheckCodeMissingScope ||
+		res.Checks[0].MissingScopes == nil || !slices.Equal(*res.Checks[0].MissingScopes, []string{"channels:read"}) {
+		t.Errorf("check = %d %s", a.status, a.body)
+	}
+	fd.check = destinations.CheckResult{OK: true, Health: destinations.Health{State: "healthy"},
+		Items: []destinations.CheckItem{{Name: "channel", OK: true}}}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/checks", "")
+	if a.status != http.StatusOK || strings.Contains(string(a.body), "missing_scopes") {
+		t.Errorf("a passing check = %d %s", a.status, a.body)
+	}
+	fd.testErr = errors.Join(destinations.ErrNoTester, errors.New("slack"))
+	for _, op := range []string{"tests", "previews"} {
+		a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/"+op,
+			`{"source":{"kind":"example"}}`)
+		if a.status != http.StatusNotImplemented || !strings.HasSuffix(a.json(t)["type"].(string), "/not-implemented") {
 			t.Errorf("%s = %d %s", op, a.status, a.body)
 		}
 	}

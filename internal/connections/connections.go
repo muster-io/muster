@@ -126,12 +126,16 @@ var (
 	ErrNotMattermost = errors.New("the connection is not a mattermost connection")
 	// errNotTelegram is a Telegram operation on a Mattermost Connection.
 	errNotTelegram = errors.New("the connection is not a telegram connection")
+	// errNotSlack is a Slack operation, such as the Slack channel list, on a Connection of another type.
+	errNotSlack = errors.New("the connection is not a slack connection")
 )
 
 // MessengerError is a call to the messenger that failed for a reason other than its limiter, such as a channel list
-// that the server refused; its text is masked of secrets and untrusted.
+// that the server refused: the messenger that refused it, Mattermost when it is empty, and its text, masked of secrets
+// and untrusted.
 type MessengerError struct {
-	Text string
+	Messenger string
+	Text      string
 }
 
 func (e *MessengerError) Error() string { return "the messenger refused the call: " + e.Text }
@@ -950,15 +954,17 @@ func (s *Service) cachedClient(r dbgen.GetConnectionRow) (*mattermost.Client, er
 }
 
 // Step is a step of a Connection check: whether it passed or was skipped, its latency and path, and when it failed
-// what answered, in English, with its code, which clients translate (ConnectionCheckStep.code).
+// what answered, in English, with its code, which clients translate (ConnectionCheckStep.code), and with missing_scope
+// the scopes the bot token lacks, which clients name in their own words (D396).
 type Step struct {
-	Name    string
-	OK      bool
-	Skipped bool
-	Latency time.Duration
-	Via     string
-	Message string
-	Code    string
+	Name          string
+	OK            bool
+	Skipped       bool
+	Latency       time.Duration
+	Via           string
+	Message       string
+	Code          string
+	MissingScopes []string
 }
 
 // Called reports whether the step made a call, so that its Latency is that call's: not when it was skipped, nor for

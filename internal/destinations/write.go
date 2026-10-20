@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/webhooks"
 )
@@ -38,6 +39,7 @@ const (
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
 	TypeBridge     = "bridge"
+	TypeSlack      = "slack"
 )
 
 // maxBridgeChannelLength is the longest channel id of a Bridge Destination (api/bridge.yaml ChannelId).
@@ -88,13 +90,15 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
 // CheckItem is one step of a Destination check with its result: when it failed, its message, in English, its code,
-// which clients translate (DestinationCheckItem.code), and, on a save, the field it concerns.
+// which clients translate (DestinationCheckItem.code), with missing_scope the scopes the bot token lacks, which clients
+// name in their own words (D396), and, on a save, the field it concerns.
 type CheckItem struct {
-	Name    string
-	OK      bool
-	Message string
-	Code    string
-	Pointer string
+	Name          string
+	OK            bool
+	Message       string
+	Code          string
+	MissingScopes []string
+	Pointer       string
 }
 
 // CheckFailedError is a save that its Destination check refused: nothing was saved. Items are the failing checks.
@@ -137,6 +141,13 @@ type BridgeInput struct {
 	ChannelID  string
 }
 
+// SlackInput are the fields of a Slack Destination (C-24.FR-3): its Connection by public_id and its channel id, C… or
+// G…, as entered.
+type SlackInput struct {
+	Connection string
+	ChannelID  string
+}
+
 // WebhookInput are the fields of an outgoing webhook Destination (C-15.FR-1): its mode, the request of the events
 // mode, the requests of the template mode and its proxy. Only the requests of the mode are stored: the events request
 // in the modes events and both, the request templates in the modes template and both.
@@ -157,6 +168,7 @@ type Input struct {
 	Telegram   *TelegramInput
 	Webhook    *WebhookInput
 	Bridge     *BridgeInput
+	Slack      *SlackInput
 }
 
 // ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id): of the
@@ -224,6 +236,27 @@ type BridgeChecker interface {
 	CheckBridgeChannel(ctx context.Context, c BridgeChannelCheck) (BridgeChannelChecked, error)
 }
 
+// SlackChannelCheck is the Destination check of a Slack channel through the Connection Connection (public_id): of the
+// saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection alone.
+type SlackChannelCheck struct {
+	Connection  string
+	Destination *int64
+	ChannelID   string
+}
+
+// SlackChannelChecked is the result of a SlackChannelCheck: the id of the Connection and the check.
+type SlackChannelChecked struct {
+	ConnectionID int64
+	Check        slack.ChannelCheck
+}
+
+// SlackChecker runs the Destination check of a Slack channel on the interactive path (C-24.FR-3), declared by its
+// consumer next to BridgeChecker; *connections.Service implements it. A Connection that is not a Slack Connection that
+// is not deleted is ErrUnknownConnection; no limiter token within the budget is a *delivery.LimitedError.
+type SlackChecker interface {
+	CheckSlackChannel(ctx context.Context, c SlackChannelCheck) (SlackChannelChecked, error)
+}
+
 // MentionValidator validates the Mention settings of a Destination type (C-12.FR-8), declared by its consumer;
 // *mentions.Service implements it.
 type MentionValidator interface {
@@ -251,6 +284,9 @@ type writeQueries interface {
 	LockBridgeConnection(ctx context.Context, arg dbgen.LockBridgeConnectionParams) (int64, error)
 	InsertBridgeDestination(ctx context.Context, arg dbgen.InsertBridgeDestinationParams) (int64, error)
 	UpdateBridgeDestination(ctx context.Context, arg dbgen.UpdateBridgeDestinationParams) error
+	LockSlackConnection(ctx context.Context, arg dbgen.LockSlackConnectionParams) (int64, error)
+	InsertSlackDestination(ctx context.Context, arg dbgen.InsertSlackDestinationParams) (int64, error)
+	UpdateSlackDestination(ctx context.Context, arg dbgen.UpdateSlackDestinationParams) error
 }
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
@@ -275,6 +311,8 @@ func viewOf(d Destination) (view, error) {
 		v.ChannelID = d.TelegramChannelID
 	case TypeBridge:
 		v.ChannelID = d.BridgeChannelID
+	case TypeSlack:
+		v.ChannelID = d.SlackChannelID
 	}
 	if len(d.Mentions) > 0 {
 		if err := json.Unmarshal(d.Mentions, &v.Mentions); err != nil {
@@ -327,6 +365,10 @@ func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) 
 	case in.Type == TypeBridge && in.Bridge != nil:
 		return s.validateBridge(ctx, in)
 	case in.Type == TypeBridge:
+		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
+	case in.Type == TypeSlack && in.Slack != nil:
+		return s.validateSlack(ctx, in)
+	case in.Type == TypeSlack:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeWebhook && in.Webhook != nil:
 		if err := validateCommon(in); err != nil {
@@ -678,9 +720,9 @@ func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (Ch
 // Create creates a Mattermost Destination (C-13.FR-2, FR-3, C-11.FR-18) once its Destination check passed on the
 // interactive path; the check reads the names of its team and channel, which the Destination keeps. A Telegram
 // Destination is created the same way from its channel alone, keeping the discussion group its check found
-// (C-14.FR-2), and a Bridge Destination from its channel id, keeping the channel's name its check read (C-22.FR-3). An
-// outgoing webhook in the events mode has no check: it is created with its first Signing secret (C-15.FR-1, FR-5). It
-// is recorded as destination.created.
+// (C-14.FR-2), and a Bridge or Slack Destination from its channel id, keeping the channel's name its check read
+// (C-22.FR-3, C-24.FR-3). An outgoing webhook in the events mode has no check: it is created with its first Signing
+// secret (C-15.FR-1, FR-5). It is recorded as destination.created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destination, error) {
 	if err := s.validate(ctx, &in, nil); err != nil {
 		return Destination{}, err
@@ -692,6 +734,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		return created(s.createTelegram(ctx, r, in))
 	case TypeBridge:
 		return created(s.createBridge(ctx, r, in))
+	case TypeSlack:
+		return created(s.createSlack(ctx, r, in))
 	}
 	checked, err := s.check(ctx, in, nil)
 	if err != nil {
@@ -740,7 +784,8 @@ func created(d Destination, err error) (Destination, error) {
 	return d, nil
 }
 
-// Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3); a non-nil
+// Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3,
+// C-24.FR-3); a non-nil
 // version must be its current one (If-Match). Saving runs the Destination check as Create does, limited by the
 // Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14). An update that
 // changes nothing writes nothing.
@@ -763,6 +808,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		return s.updateTelegram(ctx, r, before, in)
 	case TypeBridge:
 		return s.updateBridge(ctx, r, before, in)
+	case TypeSlack:
+		return s.updateSlack(ctx, r, before, in)
 	}
 	checked, err := s.check(ctx, in, &before.ID)
 	if err != nil {
@@ -844,8 +891,9 @@ type CheckResult struct {
 }
 
 // Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
-// C-22.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing check of a
-// Broken Destination ends its Broken state. A Bridge Destination's check keeps no channel name it reads: a save does.
+// C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing
+// check of a Broken Destination ends its Broken state. A Bridge or Slack Destination's check keeps no channel name it
+// reads: a save does.
 // A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
 // destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
@@ -897,6 +945,15 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 		c := res.Check
 		out = CheckResult{OK: c.OK(), Health: d.Health, Items: []CheckItem{{Name: bridge.ItemChannel, OK: c.OK(),
 			Message: c.Message, Code: c.Code}}}
+	case d.Type == TypeSlack && d.Connection != nil:
+		res, err := s.writer.Slack.CheckSlackChannel(ctx, SlackChannelCheck{Connection: *d.Connection,
+			Destination: &d.ID, ChannelID: deref(d.SlackChannelID)})
+		if err != nil {
+			return CheckResult{}, err
+		}
+		c := res.Check
+		out = CheckResult{OK: c.OK(), Health: d.Health, Items: []CheckItem{{Name: slack.ItemChannel, OK: c.OK(),
+			Message: c.Message, Code: c.Code, MissingScopes: c.MissingScopes}}}
 	default:
 		return CheckResult{}, &FieldError{Pointer: pointerCheckNotAllowed, Code: CodeCheckNotSupported,
 			Detail: "This type of Destination has no Destination check."}
@@ -1337,6 +1394,184 @@ func lockBridgeConnection(ctx context.Context, q TxQueries, orgID, id int64) err
 	_, err := q.LockBridgeConnection(ctx, dbgen.LockBridgeConnectionParams{OrgID: orgID, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return unknownBridgeConnection()
+	}
+	if err != nil {
+		return fmt.Errorf("lock the connection %d: %w", id, err)
+	}
+	return nil
+}
+
+func unknownSlackConnection() *FieldError {
+	return &FieldError{Pointer: pointerConnection, Code: CodeUnknownID, Detail: "No such Slack Connection."}
+}
+
+// validateSlack checks, before any request, the common fields of in, its channel id, trimmed, which names a channel —
+// C… or G… in upper-case letters and digits, as entered (C-24.FR-3) — its Connection and its Mention settings.
+func (s *Service) validateSlack(ctx context.Context, in *Input) error {
+	if err := validateCommon(in); err != nil {
+		return err
+	}
+	sl := in.Slack
+	sl.ChannelID = strings.TrimSpace(sl.ChannelID)
+	switch {
+	case sl.ChannelID == "":
+		return &FieldError{Pointer: pointerChannel, Code: CodeRequired, Detail: "The channel is empty."}
+	case !slack.ValidChannelID(sl.ChannelID):
+		return &FieldError{Pointer: pointerChannel, Code: CodeInvalidFormat,
+			Detail: "A Slack channel id starts with C or G and has upper-case letters and digits, such as C0123456789."}
+	}
+	conn, err := publicid.Parse(publicid.Connection, sl.Connection)
+	if err != nil {
+		return unknownSlackConnection()
+	}
+	sl.Connection = conn
+	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+}
+
+// checkSlack runs the Destination check of the Slack channel of in for the Destination destinationID, nil before it
+// exists, and refuses a failing one with a *CheckFailedError: its item channel at /channel_id, or at /connection_id
+// when Slack refused the bot token or the token lacks a scope. Its requests are recorded as destination_check under a
+// check run of their own (C-23.FR-2).
+func (s *Service) checkSlack(ctx context.Context, in Input, destinationID *int64) (SlackChannelChecked, error) {
+	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
+	sl := in.Slack
+	res, err := s.writer.Slack.CheckSlackChannel(ctx, SlackChannelCheck{Connection: sl.Connection,
+		Destination: destinationID, ChannelID: sl.ChannelID})
+	if errors.Is(err, ErrUnknownConnection) {
+		return SlackChannelChecked{}, unknownSlackConnection()
+	}
+	if err != nil {
+		return SlackChannelChecked{}, err
+	}
+	c := res.Check
+	if c.OK() {
+		return res, nil
+	}
+	pointer := pointerChannel
+	if c.Code == slack.CodeTokenInvalid || c.Code == slack.CodeMissingScope {
+		pointer = pointerConnection
+	}
+	return SlackChannelChecked{}, &CheckFailedError{Items: []CheckItem{{Name: slack.ItemChannel, Message: c.Message,
+		Code: c.Code, MissingScopes: c.MissingScopes, Pointer: pointer}}}
+}
+
+// createSlack creates a Slack Destination from its channel id once its Destination check passed (C-24.FR-3), keeping
+// the channel's name the check read. It is recorded as destination.created.
+func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Destination, error) {
+	checked, err := s.checkSlack(ctx, in, nil)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	now := s.writer.Business.Now().UTC()
+	conn, channel, name := in.Slack.Connection, in.Slack.ChannelID, checked.Check.Name
+	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
+		SlackChannelID: &channel, SlackChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
+		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
+		CreatedAt: now, Version: 1}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := lockSlackConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
+			return err
+		}
+		id, err := q.InsertSlackDestination(ctx, dbgen.InsertSlackDestinationParams{OrgID: s.orgID,
+			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
+			ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+		if err != nil {
+			return fmt.Errorf("create the destination: %w", nameTaken(err))
+		}
+		d.ID = id
+		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
+	})
+	if err != nil {
+		return Destination{}, err
+	}
+	return d, nil
+}
+
+// updateSlack replaces the configured fields of the Slack Destination before, already validated, once its Destination
+// check passed, limited by the Destination, and keeps the channel's name the check read; a passing check of a Broken
+// Destination ends its Broken state. An update that changes nothing, and whose check read the same name, writes
+// nothing.
+func (s *Service) updateSlack(ctx context.Context, r Requester, before Destination, in Input) (Destination, error) {
+	checked, err := s.checkSlack(ctx, in, &before.ID)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	d := before
+	conn, channel, name := in.Slack.Connection, in.Slack.ChannelID, checked.Check.Name
+	d.Name, d.Connection, d.SlackChannelID, d.SlackChannelName = in.Name, &conn, &channel, &name
+	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	old, err := viewOf(before)
+	if err != nil {
+		return Destination{}, err
+	}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	diff := audit.Diff(old, after)
+	if len(diff) > 0 || deref(before.SlackChannelName) != name {
+		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return fmt.Errorf("lock the destination %s: %w", before.PublicID, err)
+			}
+			if lock.Version != before.Version {
+				return ErrVersionMismatch
+			}
+			if err := lockSlackConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
+				return err
+			}
+			if err := q.UpdateSlackDestination(ctx, dbgen.UpdateSlackDestinationParams{OrgID: s.orgID,
+				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
+				ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+				Now: s.writer.Business.Now().UTC()}); err != nil {
+				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
+			}
+			d.Version++
+			if err := s.renamed(ctx, q, before, d); err != nil {
+				return err
+			}
+			if len(diff) == 0 {
+				return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
+			}
+			return s.record(ctx, q, r, ActionUpdated, d, diff)
+		})
+		if err != nil {
+			return Destination{}, err
+		}
+	}
+	if before.Health.State == healthBroken {
+		if err := s.healthy(ctx, before.ID); err != nil {
+			return Destination{}, err
+		}
+		return s.Get(ctx, before.PublicID)
+	}
+	return d, nil
+}
+
+// lockSlackConnection takes the Slack Connection id in share mode; a Connection deleted since the check is
+// ErrUnknownConnection's field error.
+func lockSlackConnection(ctx context.Context, q TxQueries, orgID, id int64) error {
+	_, err := q.LockSlackConnection(ctx, dbgen.LockSlackConnectionParams{OrgID: orgID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unknownSlackConnection()
 	}
 	if err != nil {
 		return fmt.Errorf("lock the connection %d: %w", id, err)

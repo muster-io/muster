@@ -5,8 +5,8 @@
 // Connection's bot token or app-level token as a bearer token, through internal/outbound with the Connection's proxy in
 // the caller's client class (ADR-0015), JSON for the write methods and form-encoded for the others, with both tokens and
 // the Slack signing secret registered for redaction; the classification of every answer by Slack's `error`
-// (classify.go); and the Connection check (check.go). Later stories add delivery, presses, Socket Mode and Account
-// links.
+// (classify.go); the Connection check (check.go); and the Destination check of a channel and the channel list
+// (channels.go). Later stories add delivery, presses, Socket Mode and Account links.
 package slack
 
 import (
@@ -225,10 +225,10 @@ type Args map[string]any
 
 // Result is how a call ended; a zero Classification is success. Error is the masked, untrusted text of a failure:
 // Slack's `error`, with `needed` when it names one, or what outbound reports; ErrorCode is Slack's `error` alone,
-// masked, empty without an `ok: false` answer. Warning is the `warning` of the answer and NextCursor its
-// `response_metadata.next_cursor`; Scopes are the token's scopes that the answer's x-oauth-scopes names, kept on a
-// failure too, and AcceptedScopes those of x-accepted-oauth-scopes. Body is the answer of a call that succeeded, with
-// the secrets replaced.
+// masked, empty without an `ok: false` answer, and Needed the scopes its `needed` names, masked. Warning is the
+// `warning` of the answer and NextCursor its `response_metadata.next_cursor`; Scopes are the token's scopes that the
+// answer's x-oauth-scopes names, kept on a failure too, and AcceptedScopes those of x-accepted-oauth-scopes. Body is
+// the answer of a call that succeeded, with the secrets replaced.
 // Network is what failed when the call got no answer (outbound.Network*), Detail its masked text, and Blocked whether
 // the outbound address policy refused the address.
 type Result struct {
@@ -236,6 +236,7 @@ type Result struct {
 	Classification Classification
 	Error          outbound.Untrusted
 	ErrorCode      string
+	Needed         []string
 	Warning        outbound.Untrusted
 	NextCursor     string
 	Scopes         []string
@@ -562,7 +563,7 @@ func (c *Client) resultOf(method string, res outbound.Result, err error) Result 
 		r.Classification = Classification{Class: ClassUnknown}
 	case decoded && !*env.OK:
 		code := c.redact(env.Error)
-		r.ErrorCode = cut(code)
+		r.ErrorCode, r.Needed = cut(code), c.scopes(env.Needed)
 		r.Classification = Classify(Answer{Status: res.Status, RetryAfter: res.RetryAfter,
 			HasRetryAfter: res.Outcome == outbound.OutcomeRetryAfter, Error: code, Needed: c.redact(env.Needed)})
 		r.Classification.Reason = outbound.Untrusted(cut(string(r.Classification.Reason)))

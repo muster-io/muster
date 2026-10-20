@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -329,7 +330,8 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return checkFailedProblem(c)
 	}
 	if m, ok := errors.AsType[*connections.MessengerError](err); ok {
-		return problem(http.StatusConflict, typeConflict, "", "Mattermost refused the call: "+m.Text)
+		return problem(http.StatusConflict, typeConflict, "", cmp.Or(m.Messenger, "Mattermost")+" refused the call: "+
+			m.Text)
 	}
 	if f, ok := errors.AsType[*groups.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)

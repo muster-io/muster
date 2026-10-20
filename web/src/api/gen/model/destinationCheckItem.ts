@@ -21,7 +21,7 @@ import type { DestinationCheckItemName } from './destinationCheckItemName';
 import type { NullableDestinationCheckCode } from './nullableDestinationCheckCode';
 
 export interface DestinationCheckItem {
-  /** One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. */
+  /** One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is not archived and has the bot as a member. */
   name: DestinationCheckItemName;
   ok: boolean;
   /**
@@ -30,4 +30,6 @@ export interface DestinationCheckItem {
      */
   message?: string | null;
   code?: NullableDestinationCheckCode | null;
+  /** Set with the code `missing_scope` (Slack `channel`), omitted otherwise — the scopes Slack named as needed (`needed` of its answer), which clients name in their own words; `message` names them in English. */
+  missing_scopes?: string[];
 }

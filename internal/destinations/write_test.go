@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/webhooks"
@@ -75,6 +77,18 @@ func (f *fakeWriter) UpdateBridgeDestination(context.Context, dbgen.UpdateBridge
 	return errBoom
 }
 
+func (f *fakeWriter) LockSlackConnection(context.Context, dbgen.LockSlackConnectionParams) (int64, error) {
+	return 0, pgx.ErrNoRows
+}
+
+func (f *fakeWriter) InsertSlackDestination(context.Context, dbgen.InsertSlackDestinationParams) (int64, error) {
+	return 0, errBoom
+}
+
+func (f *fakeWriter) UpdateSlackDestination(context.Context, dbgen.UpdateSlackDestinationParams) error {
+	return errBoom
+}
+
 func (f *fakeWriter) InsertWebhookDestination(context.Context, dbgen.InsertWebhookDestinationParams) (int64, error) {
 	return 0, errBoom
 }
@@ -94,6 +108,8 @@ type saveWriter struct {
 	tgSets   []dbgen.UpdateTelegramDestinationParams
 	brIns    []dbgen.InsertBridgeDestinationParams
 	brSets   []dbgen.UpdateBridgeDestinationParams
+	slIns    []dbgen.InsertSlackDestinationParams
+	slSets   []dbgen.UpdateSlackDestinationParams
 	hooks    []dbgen.InsertWebhookDestinationParams
 	hookSets []dbgen.UpdateWebhookDestinationParams
 	audit    []auditdb.InsertAuditEntryParams
@@ -201,6 +217,33 @@ func (w *saveWriter) UpdateBridgeDestination(_ context.Context, arg dbgen.Update
 		return err
 	}
 	w.brSets = append(w.brSets, arg)
+	return nil
+}
+
+func (w *saveWriter) LockSlackConnection(_ context.Context, arg dbgen.LockSlackConnectionParams) (int64, error) {
+	if err := w.fail["LockSlackConnection"]; err != nil {
+		return 0, err
+	}
+	if !w.conns[arg.ID] {
+		return 0, pgx.ErrNoRows
+	}
+	return arg.ID, nil
+}
+
+func (w *saveWriter) InsertSlackDestination(_ context.Context, arg dbgen.InsertSlackDestinationParams) (int64,
+	error) {
+	if err := w.fail["InsertSlackDestination"]; err != nil {
+		return 0, err
+	}
+	w.slIns = append(w.slIns, arg)
+	return int64(50 + len(w.slIns)), nil
+}
+
+func (w *saveWriter) UpdateSlackDestination(_ context.Context, arg dbgen.UpdateSlackDestinationParams) error {
+	if err := w.fail["UpdateSlackDestination"]; err != nil {
+		return err
+	}
+	w.slSets = append(w.slSets, arg)
 	return nil
 }
 
@@ -356,6 +399,49 @@ func (c *fakeBridge) CheckBridgeChannel(ctx context.Context, in BridgeChannelChe
 		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
 }
 
+// fakeSlack stands for the Connections: the Destination check of a Slack channel through the Connection CNAAAAAAAAAAA8,
+// by its channel id: C0FAKEOTHER is without the bot, C0FAKEARCH archived, C0FAKEGONE unknown, CREVOKED has its token
+// refused and CSCOPE lacks channels:read; any other channel passes with the name name, "alerts" when it is empty.
+type fakeSlack struct {
+	calls []SlackChannelCheck
+	links []outbound.Links
+	err   error
+	name  string
+}
+
+func (c *fakeSlack) CheckSlackChannel(ctx context.Context, in SlackChannelCheck) (SlackChannelChecked, error) {
+	c.calls, c.links = append(c.calls, in), append(c.links, outbound.LinksOf(ctx))
+	if c.err != nil {
+		return SlackChannelChecked{}, c.err
+	}
+	if in.Connection != "CNAAAAAAAAAAA8" {
+		return SlackChannelChecked{}, ErrUnknownConnection
+	}
+	fatal := func(code, message string, scopes ...string) SlackChannelChecked {
+		return SlackChannelChecked{ConnectionID: 8, Check: slack.ChannelCheck{Message: message, Code: code,
+			MissingScopes: scopes, Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
+				Error: outbound.Untrusted(message)}}}
+	}
+	switch in.ChannelID {
+	case "C0FAKEOTHER":
+		return fatal(slack.CodeBotNotInChannel, "Invite the bot to the channel: /invite @muster-dev-bot-b"), nil
+	case "C0FAKEARCH":
+		return fatal(slack.CodeChannelArchived, slack.MessageChannelArchived), nil
+	case "C0FAKEGONE":
+		return fatal(slack.CodeChannelNotFound, slack.MessageChannelNotFound), nil
+	case "CREVOKED":
+		return fatal(slack.CodeTokenInvalid, slack.MessageTokenInvalid), nil
+	case "CSCOPE":
+		return fatal(slack.CodeMissingScope, slack.MissingScopesMessage([]string{"channels:read"}), "channels:read"), nil
+	}
+	name := c.name
+	if name == "" {
+		name = "alerts"
+	}
+	return SlackChannelChecked{ConnectionID: 8, Check: slack.ChannelCheck{Name: name,
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
+}
+
 // fakeMentions refuses the User SR0000000000ZZ, as mentions.Validate does for a User that does not exist.
 type fakeMentions struct{}
 
@@ -374,15 +460,15 @@ func (fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings)
 func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[]int64) {
 	t.Helper()
 	store := newStore()
-	w := &saveWriter{conns: map[int64]bool{5: true, 6: true, 7: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
-		"DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
+	w := &saveWriter{conns: map[int64]bool{5: true, 6: true, 7: true, 8: true},
+		versions: map[string]int64{"DSAAAAAAAAAAA1": 2, "DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
 	checker := &fakeChecker{}
 	var healed []int64
 	s := New(1, store)
 	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
 	s.SetWriter(WriterConfig{Writer: w, Audit: audit.NewWriter(logger, clock.NewManual(t0)),
 		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Telegram: &fakeTelegram{},
-		Bridge: &fakeBridge{}, Keyring: activeKeyring(t),
+		Bridge: &fakeBridge{}, Slack: &fakeSlack{}, Keyring: activeKeyring(t),
 		Templates: templates.New(clock.NewManual(t0), clock.Real{}),
 		Healthy: func(_ context.Context, id int64) error {
 			healed = append(healed, id)
@@ -661,8 +747,9 @@ func TestCheckDestination(t *testing.T) {
 // each under a run of its own, and checkDestination names its run.
 func TestDestinationCheckRuns(t *testing.T) {
 	s, store, w, checker, _ := newSaver(t)
-	tg, br := s.writer.Telegram.(*fakeTelegram), s.writer.Bridge.(*fakeBridge)
+	tg, br, sl := s.writer.Telegram.(*fakeTelegram), s.writer.Bridge.(*fakeBridge), s.writer.Slack.(*fakeSlack)
 	withBridge(store, w)
+	withSlack(store, w)
 	w.versions["DSAAAAAAAAAAA2"] = 1
 	ctx := t.Context()
 	runRe := regexp.MustCompile(`^CR[0-9A-HJKMNP-TV-Z]{12}$`)
@@ -683,7 +770,8 @@ func TestDestinationCheckRuns(t *testing.T) {
 		id          string
 		links       *[]outbound.Links
 		destination int64
-	}{{"DSAAAAAAAAAAA1", &checker.links, 1}, {"DSAAAAAAAAAAA2", &tg.links, 2}, {"DSAAAAAAAAAAA4", &br.links, 4}} {
+	}{{"DSAAAAAAAAAAA1", &checker.links, 1}, {"DSAAAAAAAAAAA2", &tg.links, 2}, {"DSAAAAAAAAAAA4", &br.links, 4},
+		{"DSAAAAAAAAAAA5", &sl.links, 5}} {
 		res, err := s.Check(ctx, tc.id)
 		if err != nil {
 			t.Fatal(err)
@@ -715,6 +803,15 @@ func TestDestinationCheckRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	last("a save of a Bridge Destination", br.links, 4, "")
+	if _, err := s.Create(ctx, saver, slackInput("new", "C0FAKEALERTS")); err != nil {
+		t.Fatal(err)
+	}
+	last("a new Slack Destination", sl.links, 0, "")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEOTHER")); !errors.As(err,
+		new(*CheckFailedError)) {
+		t.Errorf("refused = %v", err)
+	}
+	last("a refused save of a Slack Destination", sl.links, 5, "")
 }
 
 func assertField(t *testing.T, name string, f func() error, pointer, code string) {
@@ -1017,7 +1114,7 @@ func TestCreateTelegramRefusals(t *testing.T) {
 	} {
 		_, err := s.Create(ctx, saver, telegramInput("x", channel))
 		failed, ok := errors.AsType[*CheckFailedError](err)
-		if !ok || len(failed.Items) != 1 || failed.Items[0] != want {
+		if !ok || len(failed.Items) != 1 || !reflect.DeepEqual(failed.Items[0], want) {
 			t.Errorf("%s = %v", channel, err)
 		}
 	}
@@ -1264,7 +1361,7 @@ func TestCreateBridgeRefusals(t *testing.T) {
 	} {
 		_, err := s.Create(ctx, saver, bridgeInput("x", channel))
 		failed, ok := errors.AsType[*CheckFailedError](err)
-		if !ok || len(failed.Items) != 1 || failed.Items[0] != want || failed.Error() == "" {
+		if !ok || len(failed.Items) != 1 || !reflect.DeepEqual(failed.Items[0], want) || failed.Error() == "" {
 			t.Errorf("%s = %v", channel, err)
 		}
 	}
@@ -1431,7 +1528,8 @@ func TestCheckBridgeDestination(t *testing.T) {
 	r.BridgeChannelID = txt("ch-nobot")
 	res, err := s.Check(ctx, "DSAAAAAAAAAAA4")
 	want := CheckItem{Name: "channel", Message: "The bot is not a member of this channel.", Code: "channel_forbidden"}
-	if err != nil || res.OK || len(res.Items) != 1 || res.Items[0] != want || res.Health.State != "broken" ||
+	if err != nil || res.OK || len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], want) ||
+		res.Health.State != "broken" ||
 		len(*healed) != 0 {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
@@ -1442,7 +1540,8 @@ func TestCheckBridgeDestination(t *testing.T) {
 	r.BridgeChannelID = txt("ch-alerts")
 	br.name = "renamed"
 	res, err = s.Check(ctx, "DSAAAAAAAAAAA4")
-	if err != nil || !res.OK || len(res.Items) != 1 || res.Items[0] != (CheckItem{Name: "channel", OK: true}) ||
+	if err != nil || !res.OK || len(res.Items) != 1 ||
+		!reflect.DeepEqual(res.Items[0], CheckItem{Name: "channel", OK: true}) ||
 		res.Health.State != "healthy" || !slices.Equal(*healed, []int64{4}) {
 		t.Errorf("recovered = %+v, %v, %v", res, err, *healed)
 	}
@@ -1456,18 +1555,20 @@ func TestCheckBridgeDestination(t *testing.T) {
 }
 
 // TestTypeWithoutTesterIsErrNoTester: the test env registers no Tester for the Bridge type, so a Bridge Destination
-// stands for any type without a Tester; its test or preview is ErrNoTester, which the API answers with 501, and nothing
-// is recorded. A Tester without samples is a failure of Muster.
+// stands for any type without a Tester, and none for the Slack type, which has none in this build until S-099; their
+// test or preview is ErrNoTester, which the API answers with 501, and nothing is recorded. A Tester without samples is
+// a failure of Muster.
 func TestTypeWithoutTesterIsErrNoTester(t *testing.T) {
 	e := newTestEnv(t)
 	withBridge(e.store, e.w)
-	if _, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA4", Source{Kind: SourceExample}); !errors.Is(err,
-		ErrNoTester) {
-		t.Errorf("test = %v", err)
-	}
-	if _, err := e.s.Preview(t.Context(), "DSAAAAAAAAAAA4", Source{Kind: SourceExample}); !errors.Is(err,
-		ErrNoTester) {
-		t.Errorf("preview = %v", err)
+	withSlack(e.store, e.w)
+	for _, id := range []string{"DSAAAAAAAAAAA4", "DSAAAAAAAAAAA5"} {
+		if _, err := e.s.Test(t.Context(), saver, id, Source{Kind: SourceExample}); !errors.Is(err, ErrNoTester) {
+			t.Errorf("test %s = %v", id, err)
+		}
+		if _, err := e.s.Preview(t.Context(), id, Source{Kind: SourceExample}); !errors.Is(err, ErrNoTester) {
+			t.Errorf("preview %s = %v", id, err)
+		}
 	}
 	if len(e.w.audit) != 0 || len(e.tester.ins) != 0 {
 		t.Errorf("recorded %+v, tested %+v", e.w.audit, e.tester.ins)
@@ -1476,5 +1577,311 @@ func TestTypeWithoutTesterIsErrNoTester(t *testing.T) {
 	if _, err := e.s.Preview(t.Context(), "DSAAAAAAAAAAA1", Source{Kind: SourceExample}); err == nil ||
 		errors.Is(err, ErrNoTester) {
 		t.Errorf("no samples = %v", err)
+	}
+}
+
+func slackInput(name, channel string) Input {
+	in := mattermostInput(name, "")
+	in.Type, in.Mattermost = TypeSlack, nil
+	n := in.Mentions[mentions.Kinds[0]]
+	n.Everyone = mentions.EveryoneHere
+	in.Mentions[mentions.Kinds[0]] = n
+	in.Slack = &SlackInput{Connection: "cnaaaaaaaaaaa8", ChannelID: channel}
+	return in
+}
+
+// withSlack adds the Slack Destination DSAAAAAAAAAAA5 on C0FAKEALERTS, Broken, to the store, and returns its row.
+func withSlack(store *fakeStore, w *saveWriter) *dbgen.GetDestinationRow {
+	store.rows = append(store.rows, slackRow())
+	w.versions["DSAAAAAAAAAAA5"] = 1
+	return &store.rows[len(store.rows)-1]
+}
+
+// TestCreateSlack is createDestination of type slack (C-24.FR-3, AC-4): the channel id, trimmed, and the Connection are
+// checked through conversations.info before anything is saved, not limited by a Destination; a passing check stores the
+// channel's name it read with the channel id as entered, the Mention settings and the limiter, and records
+// destination.created with the hint.
+func TestCreateSlack(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	sl := s.writer.Slack.(*fakeSlack)
+	d, err := s.Create(t.Context(), saver, slackInput(" alerts ", " C0FAKEALERTS "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sl.calls) != 1 || sl.calls[0].Destination != nil || sl.calls[0].Connection != "CNAAAAAAAAAAA8" ||
+		sl.calls[0].ChannelID != "C0FAKEALERTS" {
+		t.Errorf("checks %+v", sl.calls)
+	}
+	if d.ID != 51 || d.Type != TypeSlack || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA8" ||
+		*d.SlackChannelID != "C0FAKEALERTS" || *d.SlackChannelName != "alerts" || d.Health.State != "healthy" ||
+		d.LimiterLimit != 5 || d.Version != 1 || d.BridgeChannelID != nil || d.MattermostChannelID != nil {
+		t.Errorf("created %+v", d)
+	}
+	if len(w.slIns) != 1 {
+		t.Fatalf("inserts %+v", w.slIns)
+	}
+	ins := w.slIns[0]
+	if ins.ConnectionID.Int64 != 8 || ins.ChannelID.String != "C0FAKEALERTS" || ins.ChannelName.String != "alerts" ||
+		ins.Name != "alerts" || ins.LimiterLimit != 5 || ins.LimiterPerSeconds != 1 || !ins.Now.Equal(t0) ||
+		!bytes.Contains(ins.Mentions, []byte(`"new_alert_group":{"everyone":"here"`)) {
+		t.Errorf("inserted %+v", ins)
+	}
+	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated ||
+		!bytes.Contains(w.audit[0].Diff, []byte(`"/channel_id"`)) ||
+		!bytes.Contains(w.audit[0].Diff, []byte("C0FAKEALERTS")) || len(w.hints) != 1 {
+		t.Errorf("audit %+v hints %+v", w.audit, w.hints)
+	}
+	if got := counterSeries(d.PublicID); !slices.Equal(got, zeroCounterSeries(d.PublicID, TypeSlack)) {
+		t.Errorf("counter series %q", got)
+	}
+	if d, err := s.Create(t.Context(), saver, slackInput("legacy", "G0FAKESECRET")); err != nil ||
+		*d.SlackChannelID != "G0FAKESECRET" {
+		t.Errorf("a G… channel = %v", err)
+	}
+}
+
+// TestCreateSlackRefusals is C-24.AC-4: a channel without the bot is refused at /channel_id with "Invite the bot to the
+// channel: /invite @{bot}" and the check code bot_not_in_channel, an archived one with channel_archived, an unknown one
+// with channel_not_found, and nothing is saved; a refused token and a missing scope are at /connection_id, the scope
+// kept as missing_scopes (D396); an id that is not C… or G… — a direct chat's, a user's, a #name, lower case — is
+// invalid_format at /channel_id before any request; a Connection of another type or deleted, an empty channel and
+// Mention settings Slack does not take are refused before anything is saved.
+func TestCreateSlackRefusals(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	sl := s.writer.Slack.(*fakeSlack)
+	ctx := t.Context()
+	for channel, want := range map[string]CheckItem{
+		"C0FAKEOTHER": {Name: slack.ItemChannel, Message: "Invite the bot to the channel: /invite @muster-dev-bot-b",
+			Code: "bot_not_in_channel", Pointer: "/channel_id"},
+		"C0FAKEARCH": {Name: slack.ItemChannel, Message: "The channel is archived.", Code: "channel_archived",
+			Pointer: "/channel_id"},
+		"C0FAKEGONE": {Name: slack.ItemChannel, Message: slack.MessageChannelNotFound, Code: "channel_not_found",
+			Pointer: "/channel_id"},
+		"CREVOKED": {Name: slack.ItemChannel, Message: slack.MessageTokenInvalid, Code: "token_invalid",
+			Pointer: "/connection_id"},
+		"CSCOPE": {Name: slack.ItemChannel, Message: "The bot token lacks the scopes channels:read.",
+			Code: "missing_scope", MissingScopes: []string{"channels:read"}, Pointer: "/connection_id"},
+	} {
+		_, err := s.Create(ctx, saver, slackInput("x", channel))
+		failed, ok := errors.AsType[*CheckFailedError](err)
+		if !ok || len(failed.Items) != 1 || !reflect.DeepEqual(failed.Items[0], want) || failed.Error() == "" {
+			t.Errorf("%s = %+v", channel, err)
+		}
+	}
+	calls := len(sl.calls)
+	for name, c := range map[string]struct {
+		mut     func(in *Input)
+		pointer string
+		code    string
+	}{
+		"a direct chat":   {func(in *Input) { in.Slack.ChannelID = "D0FAKEDM" }, "/channel_id", CodeInvalidFormat},
+		"a user":          {func(in *Input) { in.Slack.ChannelID = "U0MUSTERUSR1" }, "/channel_id", CodeInvalidFormat},
+		"a name":          {func(in *Input) { in.Slack.ChannelID = "#alerts" }, "/channel_id", CodeInvalidFormat},
+		"lower case":      {func(in *Input) { in.Slack.ChannelID = "c0fakealerts" }, "/channel_id", CodeInvalidFormat},
+		"empty channel":   {func(in *Input) { in.Slack.ChannelID = " \t" }, "/channel_id", CodeRequired},
+		"malformed id":    {func(in *Input) { in.Slack.Connection = "not-an-id" }, "/connection_id", CodeUnknownID},
+		"no slack fields": {func(in *Input) { in.Slack = nil }, "/type", CodeInvalidFormat},
+		"empty name":      {func(in *Input) { in.Name = " " }, "/name", CodeRequired},
+		"no limiter":      {func(in *Input) { in.Limiter = Limiter{} }, "/limiter", CodeInvalidFormat},
+	} {
+		in := slackInput("x", "C0FAKEALERTS")
+		c.mut(&in)
+		_, err := s.Create(ctx, saver, in)
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != c.pointer || fe.Code != c.code {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+	in := slackInput("x", "C0FAKEALERTS")
+	in.Mentions["new_alerts"] = mentions.Setting{Everyone: "none", UserIDs: []string{"SR0000000000ZZ"}, Groups: []string{}}
+	if _, err := s.Create(ctx, saver, in); !errors.As(err, new(*mentions.FieldError)) {
+		t.Errorf("unknown user = %v", err)
+	}
+	if len(sl.calls) != calls {
+		t.Errorf("a refused field ran the check: %+v", sl.calls[calls:])
+	}
+	in = slackInput("x", "C0FAKEALERTS")
+	in.Slack.Connection = "CNAAAAAAAAAAA3"
+	_, err := s.Create(ctx, saver, in)
+	if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != "/connection_id" || fe.Code != CodeUnknownID ||
+		fe.Detail != "No such Slack Connection." {
+		t.Errorf("a bridge connection = %v", err)
+	}
+	if len(w.slIns) != 0 {
+		t.Fatalf("a refused save inserted %+v", w.slIns)
+	}
+	w.fail["InsertSlackDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Create(ctx, saver, slackInput("ops", "C0FAKEALERTS")); !errors.Is(err, ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "InsertSlackDestination")
+	delete(w.conns, 8)
+	assertField(t, "connection deleted since the check", func() error {
+		_, err := s.Create(ctx, saver, slackInput("late", "C0FAKEALERTS"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.fail["LockSlackConnection"] = errBoom
+	if _, err := s.Create(ctx, saver, slackInput("late", "C0FAKEALERTS")); !errors.Is(err, errBoom) {
+		t.Errorf("lock failed = %v", err)
+	}
+	sl.err = &delivery.LimitedError{RetryAfter: 2}
+	if _, err := s.Create(ctx, saver, slackInput("busy", "C0FAKEALERTS")); !errors.As(err,
+		new(*delivery.LimitedError)) {
+		t.Errorf("limited = %v", err)
+	}
+	if len(w.slIns) != 0 || len(w.audit) != 0 {
+		t.Fatalf("a failed save wrote %+v %+v", w.slIns, w.audit)
+	}
+}
+
+// TestUpdateSlack is updateDestination of type slack (C-24.FR-3): the check runs limited by the Destination; a change
+// is recorded with its diff, a new channel name the check read is stored without an Audit log entry, an unchanged save
+// writes nothing, and a passing save of a Broken Destination ends its Broken state.
+func TestUpdateSlack(t *testing.T) {
+	s, store, w, _, healed := newSaver(t)
+	sl := s.writer.Slack.(*fakeSlack)
+	ctx := t.Context()
+	r := withSlack(store, w)
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEOTHER")); !errors.As(err,
+		new(*CheckFailedError)) || len(w.slSets) != 0 || len(*healed) != 0 {
+		t.Errorf("refused = %v", err)
+	}
+	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", new(int64(1)), slackInput("alerts", "C0FAKEPROD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := sl.calls[len(sl.calls)-1]; last.Destination == nil || *last.Destination != 5 ||
+		last.ChannelID != "C0FAKEPROD" {
+		t.Errorf("the check is not limited by the destination: %+v", last)
+	}
+	if d.Health.State != "healthy" || !slices.Equal(*healed, []int64{5}) || len(w.slSets) != 1 ||
+		w.slSets[0].ID != 5 || w.slSets[0].ConnectionID.Int64 != 8 || w.slSets[0].ChannelID.String != "C0FAKEPROD" ||
+		w.slSets[0].ChannelName.String != "alerts" || len(w.audit) != 1 || w.audit[0].Action != ActionUpdated ||
+		!bytes.Contains(w.audit[0].Diff, []byte("C0FAKEPROD")) {
+		t.Errorf("updated %+v, sets %+v, audit %+v", d, w.slSets, w.audit)
+	}
+	// Stored as saved: the same save writes nothing; a new channel name is stored with a hint only.
+	r.Name, r.SlackChannelID, r.Version, r.Health = "alerts", txt("C0FAKEPROD"), 2, "healthy"
+	r.Mentions, _ = json.Marshal(slackInput("x", "").Mentions)
+	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
+	w.versions["DSAAAAAAAAAAA5"] = 2
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEPROD")); err != nil ||
+		len(w.slSets) != 1 || d.Version != 2 {
+		t.Errorf("an unchanged save wrote: %v %d", err, len(w.slSets))
+	}
+	sl.name = "alerts-renamed"
+	hints := len(w.hints)
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("alerts", "C0FAKEPROD")); err != nil ||
+		len(w.slSets) != 2 || w.slSets[1].ChannelName.String != "alerts-renamed" || len(w.audit) != 1 ||
+		len(w.hints) != hints+1 || *d.SlackChannelName != "alerts-renamed" || d.Version != 3 {
+		t.Errorf("a new channel name = %+v %v", d, err)
+	}
+	w.versions["DSAAAAAAAAAAA5"] = 9
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("moved", "C0FAKEALERTS")); !errors.Is(err,
+		ErrVersionMismatch) {
+		t.Errorf("raced = %v", err)
+	}
+	delete(w.versions, "DSAAAAAAAAAAA5")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("gone", "C0FAKEALERTS")); !errors.Is(err,
+		ErrNotFound) {
+		t.Errorf("gone = %v", err)
+	}
+	w.versions["DSAAAAAAAAAAA5"] = 2
+	w.fail["LockDestination"] = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("x", "C0FAKEALERTS")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("lock = %v", err)
+	}
+	delete(w.fail, "LockDestination")
+	assertField(t, "type changed", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, slackInput("x", "C0FAKEALERTS"))
+		return err
+	}, "/type", CodeInvalidFormat)
+	assertField(t, "an id that is not a channel", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("y", "D0FAKEDM"))
+		return err
+	}, "/channel_id", CodeInvalidFormat)
+	delete(w.conns, 8)
+	assertField(t, "connection gone", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("y", "C0FAKEALERTS"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.conns[8] = true
+	w.fail["UpdateSlackDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("ops", "C0FAKEALERTS")); !errors.Is(err,
+		ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "UpdateSlackDestination")
+	r.ID, r.Health = 99, "broken"
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("z", "C0FAKEALERTS")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed end of the broken state = %v", err)
+	}
+	r.ID = 5
+	sl.err = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA5", nil, slackInput("z", "C0FAKEALERTS")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed check = %v", err)
+	}
+}
+
+// TestCheckSlackDestination is checkDestination of a Slack Destination (C-24.FR-3): its one item channel, limited by
+// the Destination, with the code of a failure and, for missing_scope, the scopes (D396); a passing check of a Broken
+// Destination ends its Broken state, and a check stores no channel name it reads.
+func TestCheckSlackDestination(t *testing.T) {
+	s, store, w, _, healed := newSaver(t)
+	sl := s.writer.Slack.(*fakeSlack)
+	ctx := t.Context()
+	r := withSlack(store, w)
+	r.SlackChannelID = txt("C0FAKEOTHER")
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA5")
+	want := CheckItem{Name: "channel", Message: "Invite the bot to the channel: /invite @muster-dev-bot-b",
+		Code: "bot_not_in_channel"}
+	if err != nil || res.OK || len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], want) ||
+		res.Health.State != "broken" || len(*healed) != 0 || res.Run == "" {
+		t.Errorf("failing = %+v, %v", res, err)
+	}
+	if c := sl.calls[0]; c.Destination == nil || *c.Destination != 5 || c.Connection != "CNAAAAAAAAAAA8" ||
+		c.ChannelID != "C0FAKEOTHER" {
+		t.Errorf("check %+v", c)
+	}
+	r.SlackChannelID = txt("CSCOPE")
+	res, err = s.Check(ctx, "DSAAAAAAAAAAA5")
+	if err != nil || res.OK || !reflect.DeepEqual(res.Items[0], CheckItem{Name: "channel", Code: "missing_scope",
+		Message: "The bot token lacks the scopes channels:read.", MissingScopes: []string{"channels:read"}}) {
+		t.Errorf("missing scope = %+v, %v", res, err)
+	}
+	r.SlackChannelID = txt("C0FAKEALERTS")
+	sl.name = "renamed"
+	res, err = s.Check(ctx, "DSAAAAAAAAAAA5")
+	if err != nil || !res.OK || len(res.Items) != 1 ||
+		!reflect.DeepEqual(res.Items[0], CheckItem{Name: "channel", OK: true}) || res.Health.State != "healthy" ||
+		!slices.Equal(*healed, []int64{5}) {
+		t.Errorf("recovered = %+v, %v, %v", res, err, *healed)
+	}
+	if len(w.slSets) != 0 || len(w.hints) != 0 || r.SlackChannelName.String != "alerts" {
+		t.Errorf("a check stored the name it read: %+v", w.slSets)
+	}
+	sl.err = errBoom
+	if _, err := s.Check(ctx, "DSAAAAAAAAAAA5"); !errors.Is(err, errBoom) {
+		t.Errorf("failed check = %v", err)
+	}
+}
+
+// TestDeleteSlack is deleteDestination of a Slack Destination (C-11.FR-14): the deletion does not depend on the type —
+// it is marked deleted, leaves its Routes, gets its final edits and destination.deleted, as any other.
+func TestDeleteSlack(t *testing.T) {
+	s, f, called := newDeleter(t)
+	f.rows = append(f.rows, &fakeDestination{id: 5, publicID: "DSAAAAAAAAAAA5", name: "alerts-sl", version: 1,
+		routes: []int64{9}})
+	if err := s.Delete(t.Context(), deleter, "DSAAAAAAAAAAA5", new(int64(1))); err != nil {
+		t.Fatal(err)
+	}
+	d := f.find(5)
+	if !d.deleted || d.version != 2 || d.routes != nil || !slices.Equal(*called, []int64{5}) ||
+		!slices.Equal(f.bumped, []int64{9}) || len(f.audit) != 1 || f.audit[0].Action != ActionDeleted ||
+		f.audit[0].ResourcePublicID.String != "DSAAAAAAAAAAA5" {
+		t.Errorf("deleted %+v, retired %v, routes %v, audit %+v", d, *called, f.bumped, f.audit)
 	}
 }

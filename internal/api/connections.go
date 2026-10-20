@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/oapi-codegen/nullable"
@@ -16,10 +17,11 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 // Connections is what the API needs of internal/connections: Mattermost, Telegram, Bridge and Slack Connections, their
-// checks, the checks of their drafts and the channels of a Mattermost one.
+// checks, the checks of their drafts and the channels of a Mattermost or Slack one.
 type Connections interface {
 	List(ctx context.Context, f connections.ListFilter) (connections.Page, error)
 	Get(ctx context.Context, publicID string) (connections.Connection, error)
@@ -30,6 +32,7 @@ type Connections interface {
 	Check(ctx context.Context, publicID string, baseURL *string) (connections.CheckResult, error)
 	CheckDraft(ctx context.Context, d connections.Draft) (connections.CheckResult, error)
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
+	SlackChannels(ctx context.Context, publicID, q string) (slack.ChannelList, error)
 	CallbackURL(publicID string) string
 	BridgeCallbackURL(publicID string) string
 	SlackCallbackURL(publicID string) string
@@ -265,7 +268,8 @@ func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 }
 
 // checkResultOf is the API form of the result of a Connection check, of a saved Connection or of a draft: the steps,
-// without latency those that made no call (connections.Step.Called), the bot's name, a Telegram bot's webhook and
+// without latency those that made no call (connections.Step.Called), with the scopes a missing_scope names (D396), the
+// bot's name, a Telegram bot's webhook and
 // pending updates, a Bridge's info, what a Slack check found, null otherwise, and the check run of its requests.
 func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	out := gen.ConnectionCheckResult{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
@@ -293,6 +297,10 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 		} else {
 			step.Code.SetNull()
 		}
+		if len(st.MissingScopes) > 0 {
+			scopes := slices.Clone(st.MissingScopes)
+			step.MissingScopes = &scopes
+		}
 		out.Steps = append(out.Steps, step)
 	}
 	if res.BotName != "" {
@@ -318,8 +326,9 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	return out
 }
 
-// ListConnectionChannels is listConnectionChannels: the channels the bot of a Mattermost Connection belongs to, on the
-// interactive path; a Telegram, Bridge or Slack Connection answers 409.
+// ListConnectionChannels is listConnectionChannels on the interactive path: the channels the bot of a Mattermost
+// Connection belongs to, team by team, as MattermostChannelList, or those of a Slack Connection as SlackChannelList
+// (C-24.FR-3), whose team_id is ignored; a Telegram or Bridge Connection answers 409.
 func (s *Server) ListConnectionChannels(ctx context.Context, req gen.ListConnectionChannelsRequestObject) (
 	gen.ListConnectionChannelsResponseObject, error) {
 	var team, q string
@@ -329,17 +338,42 @@ func (s *Server) ListConnectionChannels(ctx context.Context, req gen.ListConnect
 	if req.Params.Q != nil {
 		q = *req.Params.Q
 	}
-	list, err := s.connections.Channels(ctx, req.ConnectionId, team, q)
+	c, err := s.connections.Get(ctx, req.ConnectionId)
 	if err != nil {
 		return nil, err
 	}
-	out := gen.ListConnectionChannels200JSONResponse{Items: make([]gen.MattermostChannel, 0, len(list))}
-	for _, c := range list {
-		archived := c.DeleteAt != 0
-		out.Items = append(out.Items, gen.MattermostChannel{Id: c.ID, Name: c.Name, DisplayName: c.DisplayName,
-			TeamId: c.TeamID, TeamName: c.TeamName, Type: channelTypeOf(c.Type), Archived: &archived})
+	var body gen.ConnectionChannelList
+	switch c.Type {
+	case connections.TypeSlack:
+		list, err := s.connections.SlackChannels(ctx, req.ConnectionId, q)
+		if err != nil {
+			return nil, err
+		}
+		out := gen.SlackChannelList{Items: make([]gen.SlackChannel, 0, len(list.Channels)), Truncated: list.Truncated}
+		for _, ch := range list.Channels {
+			out.Items = append(out.Items, gen.SlackChannel{Id: ch.ID, Name: ch.Name, IsPrivate: ch.Private})
+		}
+		if err := body.FromSlackChannelList(out); err != nil {
+			return nil, err
+		}
+	case connections.TypeMattermost:
+		list, err := s.connections.Channels(ctx, req.ConnectionId, team, q)
+		if err != nil {
+			return nil, err
+		}
+		out := gen.MattermostChannelList{Items: make([]gen.MattermostChannel, 0, len(list))}
+		for _, ch := range list {
+			archived := ch.DeleteAt != 0
+			out.Items = append(out.Items, gen.MattermostChannel{Id: ch.ID, Name: ch.Name, DisplayName: ch.DisplayName,
+				TeamId: ch.TeamID, TeamName: ch.TeamName, Type: channelTypeOf(ch.Type), Archived: &archived})
+		}
+		if err := body.FromMattermostChannelList(out); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, connections.ErrNotMattermost
 	}
-	return out, nil
+	return gen.ListConnectionChannels200JSONResponse(body), nil
 }
 
 // channelTypeOf is the API name of a Mattermost channel type.

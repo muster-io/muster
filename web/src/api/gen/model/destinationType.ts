@@ -26,4 +26,5 @@ export const DestinationType = {
   telegram: 'telegram',
   webhook: 'webhook',
   bridge: 'bridge',
+  slack: 'slack',
 } as const;

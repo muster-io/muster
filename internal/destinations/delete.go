@@ -98,10 +98,10 @@ func (q txQueries) DB() dbgen.DBTX { return q.tx }
 
 // WriterConfig is what the changes of Destinations need: the Writer, the Audit log, the business clock that dates the
 // changes, routing's Routes hook and delivery's Retire and Renamed hooks; and for the saves, the validation of Mention
-// settings, the Destination checks of the Mattermost, Telegram and Bridge types, delivery's end of a Broken state and
-// its probe at once, and for outgoing webhooks the Keyring that encrypts their secrets and the template sandbox that
-// checks their request. Destination tests and previews (C-16) read their sources through Samples, run through the
-// Tester of each type and log through Log.
+// settings, the Destination checks of the Mattermost, Telegram, Bridge and Slack types, delivery's end of a Broken
+// state and its probe at once, and for outgoing webhooks the Keyring that encrypts their secrets and the template
+// sandbox that checks their request. Destination tests and previews (C-16) read their sources through Samples, run
+// through the Tester of each type and log through Log.
 type WriterConfig struct {
 	Writer     Writer
 	Audit      *audit.Writer
@@ -113,6 +113,7 @@ type WriterConfig struct {
 	Mattermost MattermostChecker
 	Telegram   TelegramChecker
 	Bridge     BridgeChecker
+	Slack      SlackChecker
 	Healthy    Healthy
 	Probe      Probe
 	Keyring    *keyring.Keyring

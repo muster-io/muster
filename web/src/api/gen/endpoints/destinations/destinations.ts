@@ -204,7 +204,7 @@ export const getCreateDestinationUrl = () => {
 }
 
 /**
- * `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+ * `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
  * @summary Create Destination
  */
 export const createDestination = async (destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCreated> => {
@@ -392,7 +392,7 @@ export const getUpdateDestinationUrl = (destinationId: string,) => {
 }
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
  * @summary Update Destination
  */
 export const updateDestination = async (destinationId: string,
@@ -555,7 +555,7 @@ export const useDeleteDestination = <TError = UnauthorizedResponse | ForbiddenRe
 }
 
 /**
- * Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`; Slack `conversations.info` (item `channel`). A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Run the Destination check
  */
 export const checkDestination = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCheckResult> => {
@@ -629,7 +629,7 @@ export const useCheckDestination = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
+ * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
  * @summary Send a test message
  */
 export const testDestination = async (destinationId: string,
@@ -718,7 +718,7 @@ export const useTestDestination = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
  * @summary Preview a message or request
  */
 export const previewDestination = async (destinationId: string,

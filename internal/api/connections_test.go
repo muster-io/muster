@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 const (
@@ -35,20 +36,24 @@ const connectionBody = `{"type":"mattermost","name":"mm","server_url":"http://12
 	`"bot_token":"` + botTokenValue + `","proxy":{"enabled":false},"limiter":{"limit":5,"per_seconds":1}}`
 
 // fakeConnections stands for internal/connections: the Connections in id order, the inputs of the writes with who
-// asked and the version they named, the drafts checked, and the answers of the checks and the channel list.
+// asked and the version they named, the drafts checked, and the answers of the checks and the channel lists of
+// Mattermost and Slack, which chanErr fails.
 type fakeConnections struct {
-	list     []connections.Connection
-	filters  []connections.ListFilter
-	inputs   []connections.Input
-	versions []*int64
-	by       []connections.Requester
-	deleted  []string
-	check    connections.CheckResult
-	channels []connections.Channel
-	chanArgs [][2]string
-	baseURLs []*string
-	drafts   []connections.Draft
-	err      error
+	list      []connections.Connection
+	filters   []connections.ListFilter
+	inputs    []connections.Input
+	versions  []*int64
+	by        []connections.Requester
+	deleted   []string
+	check     connections.CheckResult
+	channels  []connections.Channel
+	chanArgs  [][2]string
+	slack     slack.ChannelList
+	slackArgs [][2]string
+	chanErr   error
+	baseURLs  []*string
+	drafts    []connections.Draft
+	err       error
 }
 
 func (f *fakeConnections) find(id string) int {
@@ -172,7 +177,15 @@ func (f *fakeConnections) Channels(_ context.Context, id, team, q string) ([]con
 	if f.find(id) < 0 {
 		return nil, connections.ErrNotFound
 	}
-	return f.channels, f.err
+	return f.channels, cmp.Or(f.chanErr, f.err)
+}
+
+func (f *fakeConnections) SlackChannels(_ context.Context, id, q string) (slack.ChannelList, error) {
+	f.slackArgs = append(f.slackArgs, [2]string{id, q})
+	if f.find(id) < 0 {
+		return slack.ChannelList{}, connections.ErrNotFound
+	}
+	return f.slack, cmp.Or(f.chanErr, f.err)
 }
 
 func (f *fakeConnections) CallbackURL(id string) string {
@@ -673,7 +686,8 @@ func TestListConnectionChannelsAPI(t *testing.T) {
 	a := x.as(t, connectionsWriter, http.MethodGet, path+"?team_id=team-dev&q=al", "")
 	var list gen.MattermostChannelList
 	decodeInto(t, a, &list)
-	if a.status != http.StatusOK || len(list.Items) != 4 || fc.chanArgs[0] != [2]string{"team-dev", "al"} {
+	if a.status != http.StatusOK || len(list.Items) != 4 || fc.chanArgs[0] != [2]string{"team-dev", "al"} ||
+		strings.Contains(string(a.body), "truncated") || len(fc.slackArgs) != 0 {
 		t.Fatalf("channels = %d %s", a.status, a.body)
 	}
 	for i, want := range []string{"open", "private", "direct", "group"} {
@@ -687,20 +701,31 @@ func TestListConnectionChannelsAPI(t *testing.T) {
 		fc.chanArgs[1] != [2]string{} {
 		t.Errorf("without filters = %d %v", a.status, fc.chanArgs)
 	}
-	fc.err = connections.ErrNotMattermost
-	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusConflict {
-		t.Errorf("telegram = %d %s", a.status, a.body)
+	fc.list = append(fc.list, connections.Connection{ID: 7, PublicID: "CNAAAAAAAAAAT7", Type: connections.TypeTelegram,
+		Name: "tg", Version: 1}, connections.Connection{ID: 8, PublicID: "CNAAAAAAAAAAB8", Type: connections.TypeBridge,
+		Name: "br", Version: 1})
+	calls := len(fc.chanArgs)
+	for _, id := range []string{"CNAAAAAAAAAAT7", "CNAAAAAAAAAAB8"} {
+		if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/"+id+"/channels", ""); a.status !=
+			http.StatusConflict || len(fc.chanArgs) != calls || len(fc.slackArgs) != 0 {
+			t.Errorf("%s = %d %s", id, a.status, a.body)
+		}
 	}
-	fc.err = &connections.MessengerError{Text: "answered 401"}
+	if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAZZ/channels", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("unknown = %d %s", a.status, a.body)
+	}
+	fc.chanErr = &connections.MessengerError{Text: "answered 401"}
 	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusConflict ||
-		!strings.Contains(a.json(t)["detail"].(string), "answered 401") {
+		a.json(t)["detail"] != "Mattermost refused the call: answered 401" {
 		t.Errorf("refused = %d %s", a.status, a.body)
 	}
-	fc.err = &delivery.LimitedError{RetryAfter: time.Second}
+	fc.chanErr = &delivery.LimitedError{RetryAfter: time.Second}
 	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusServiceUnavailable ||
 		a.header.Get("Retry-After") != "1" {
 		t.Errorf("limited = %d", a.status)
 	}
+	fc.chanErr = nil
 	if a := x.as(t, connectionsReader, http.MethodGet, path, ""); a.status != http.StatusForbidden {
 		t.Errorf("by a reader = %d", a.status)
 	}
@@ -989,16 +1014,22 @@ func TestSlackConnectionAPI(t *testing.T) {
 		res.Steps[2].LatencyMs.MustGet() != 12 || strings.Contains(string(a.body), `"info"`) {
 		t.Fatalf("check = %d %s", a.status, a.body)
 	}
+	if strings.Contains(string(a.body), "missing_scopes") {
+		t.Errorf("a passing check names missing scopes: %s", a.body)
+	}
 	fc.check = connections.CheckResult{BotName: bot, Steps: []connections.Step{
 		{Name: connections.StepToken, OK: true, Via: "direct"},
 		{Name: connections.StepScopes, Via: "direct", Message: "The bot token lacks the scopes users:read.email.",
-			Code: "missing_scope"}},
+			Code: "missing_scope", MissingScopes: []string{"users:read.email"}}},
 		Slack: &connections.SlackIdentity{TeamID: team, TeamName: teamName, BotUserID: botUser}}
 	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+	res = gen.ConnectionCheckResult{}
 	decodeInto(t, a, &res)
 	if info, err := res.Slack.Get(); a.status != http.StatusOK || res.Ok || err != nil || !info.AppId.IsNull() ||
 		res.Steps[1].Code.MustGet() != gen.NullableConnectionCheckCodeMissingScope ||
-		res.Steps[1].Message.MustGet() != "The bot token lacks the scopes users:read.email." {
+		res.Steps[1].Message.MustGet() != "The bot token lacks the scopes users:read.email." ||
+		res.Steps[1].MissingScopes == nil || !slices.Equal(*res.Steps[1].MissingScopes, []string{"users:read.email"}) ||
+		res.Steps[0].MissingScopes != nil || strings.Count(string(a.body), `"missing_scopes"`) != 1 {
 		t.Errorf("missing scope = %d %s", a.status, a.body)
 	}
 	for _, tc := range []struct {
@@ -1039,5 +1070,51 @@ func TestSlackConnectionAPI(t *testing.T) {
 	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", draft); a.status !=
 		http.StatusBadRequest || len(fc.drafts) != n {
 		t.Errorf("a Slack draft = %d %s", a.status, a.body)
+	}
+}
+
+// TestListSlackChannelsAPI covers C-24.FR-3 on the API: listConnectionChannels of a Slack Connection answers
+// SlackChannelList — the channels with their id, name and is_private, and truncated — with q and without team_id, which
+// it ignores; Slack's 429, which the service makes a *delivery.LimitedError, is 503 with Retry-After; a page Slack
+// refused is 409 that names Slack; a reader may not list.
+func TestListSlackChannelsAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	fc.list = append(fc.list, connections.Connection{ID: 6, PublicID: "CNAAAAAAAAAAS1", Type: connections.TypeSlack,
+		Name: "sl", Version: 1})
+	fc.slack = slack.ChannelList{Channels: []slack.ListedChannel{{ID: "C0FAKEALERTS", Name: "alerts"},
+		{ID: "C0FAKEPRIV", Name: "private-ops", Private: true}}, Truncated: true}
+	path := "/api/v1/connections/CNAAAAAAAAAAS1/channels"
+	a := x.as(t, connectionsWriter, http.MethodGet, path+"?team_id=ignored&q=al", "")
+	var body gen.ConnectionChannelList
+	decodeInto(t, a, &body)
+	list, err := body.AsSlackChannelList()
+	if a.status != http.StatusOK || err != nil || !list.Truncated || len(list.Items) != 2 ||
+		list.Items[0] != (gen.SlackChannel{Id: "C0FAKEALERTS", Name: "alerts"}) ||
+		list.Items[1] != (gen.SlackChannel{Id: "C0FAKEPRIV", Name: "private-ops", IsPrivate: true}) ||
+		fc.slackArgs[0] != [2]string{"CNAAAAAAAAAAS1", "al"} || len(fc.chanArgs) != 0 {
+		t.Fatalf("channels = %d %s", a.status, a.body)
+	}
+	if m := a.json(t); m["truncated"] != true || len(m) != 2 {
+		t.Errorf("members %s", a.body)
+	}
+	fc.slack = slack.ChannelList{Channels: []slack.ListedChannel{}}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusOK ||
+		strings.TrimSpace(string(a.body)) != `{"items":[],"truncated":false}` || fc.slackArgs[1] != [2]string{
+		"CNAAAAAAAAAAS1", ""} {
+		t.Errorf("empty = %d %s", a.status, a.body)
+	}
+	fc.chanErr = &delivery.LimitedError{RetryAfter: 30 * time.Second}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusServiceUnavailable ||
+		a.header.Get("Retry-After") != "30" {
+		t.Errorf("rate-limited = %d %v", a.status, a.header)
+	}
+	fc.chanErr = &connections.MessengerError{Messenger: "Slack", Text: "invalid_cursor"}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusConflict ||
+		a.json(t)["detail"] != "Slack refused the call: invalid_cursor" {
+		t.Errorf("refused = %d %s", a.status, a.body)
+	}
+	fc.chanErr = nil
+	if a := x.as(t, connectionsReader, http.MethodGet, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("by a reader = %d", a.status)
 	}
 }

@@ -20,11 +20,11 @@
 
 export type ListConnectionChannelsParams = {
 /**
- * Only this team.
+ * Only this team (Mattermost); a Slack Connection ignores it.
  */
 team_id?: string;
 /**
- * Match on channel name.
+ * Only channels whose name, or a Mattermost channel's display name, contains this text, regardless of case.
  */
 q?: string;
 };

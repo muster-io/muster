@@ -1084,24 +1084,167 @@ func TestIntegrationSlackConnections(t *testing.T) {
 	})
 }
 
+// TestIntegrationSlackDestinations runs 0017 over a database with Mattermost, Bridge and Slack Connections and a
+// Mattermost and a Bridge Destination: up refuses nothing they hold and validates both CHECKs; a Slack Destination
+// needs a Slack Connection and a channel id and takes none of the other types' columns, and the other types take no
+// Slack column; down deletes the Slack Destinations with their places on Routes, their delivery events and their
+// limiter buckets, drops the columns and refuses the type again; up again works.
+func TestIntegrationSlackDestinations(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 16)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, bridge_base_url,
+			bridge_event_delivery, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds,
+			created_at, updated_at)
+			SELECT id, c.public_id, c.type, c.name, c.server, c.base, c.delivery, c.mode, c.app, c.app_key, '\x01',
+			'k1', '2026-10-05', 1, 1, '2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES
+				('CN0000000000M1', 'mattermost', 'mm', 'http://mm', NULL, NULL, NULL, NULL, NULL),
+				('CN0000000000B1', 'bridge', 'br', NULL, 'http://br', 'poll', NULL, NULL, NULL),
+				('CN0000000000S1', 'slack', 'sl', NULL, NULL, NULL, 'socket', '\x03'::bytea, 'k1'))
+				AS c (public_id, type, name, server, base, delivery, mode, app, app_key)`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, connection_id, mattermost_team_id,
+			mattermost_channel_id, bridge_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at,
+			updated_at)
+			SELECT c.org_id, d.public_id, c.type, d.name, c.id, d.team, d.channel, d.bridge, '{}', 1, 1, 'healthy',
+				'2026-10-05', '2026-10-05'
+			FROM connections c JOIN (VALUES ('DS0000000000M1', 'mm', 'CN0000000000M1', 't1', 'ch1', NULL),
+				('DS0000000000B1', 'br', 'CN0000000000B1', NULL, NULL, 'ch-br')) AS d (public_id, name, conn, team,
+				channel, bridge) ON d.conn = c.public_id`)
+		insert := func(t *testing.T, id, conn, typ, columns, values string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO destinations (org_id, public_id, type, name,
+				connection_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at`+columns+`)
+				SELECT c.org_id, '`+id+`', '`+typ+`', '`+id+`', c.id, '{}', 30, 60, 'healthy', '2026-10-05',
+				'2026-10-05'`+values+` FROM connections c WHERE c.public_id = '`+conn+`'`)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, code, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != code || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		refused(t, "before 0017", insert(t, "DS0000000000S0", "CN0000000000S1", "slack", ``, ``), "23514",
+			"destinations_type_check")
+
+		e.step(t, 1)
+		if got := e.constraints(t, []string{"destinations"}, "destinations_type"); got !=
+			"destinations.destinations_type_check:true destinations.destinations_type_fields_check:true" {
+			t.Errorf("after up: constraints %s", got)
+		}
+		for _, ok := range []struct {
+			name, id, cols, values string
+		}{
+			{"a channel and its name", "DS0000000000S1", `, slack_channel_id, slack_channel_name`,
+				`, 'C0FAKEALERTS', 'alerts'`},
+			{"a channel without a name", "DS0000000000S2", `, slack_channel_id`, `, 'G0FAKEOPS'`},
+			{"deleted", "DS0000000000S3", `, slack_channel_id, slack_channel_name, deleted_at`,
+				`, 'C0FAKEOLD', 'old', '2026-10-06'`},
+		} {
+			if err := insert(t, ok.id, "CN0000000000S1", "slack", ok.cols, ok.values); err != nil {
+				t.Errorf("%s: %v", ok.name, err)
+			}
+		}
+		for _, bad := range []struct {
+			name, conn, typ, cols, values, code, constraint string
+		}{
+			{"no channel id", "CN0000000000S1", "slack", ``, ``, "23514", "destinations_type_fields_check"},
+			{"a Mattermost team", "CN0000000000S1", "slack", `, slack_channel_id, mattermost_team_id`,
+				`, 'C0FAKEALERTS', 't1'`, "23514", "destinations_type_fields_check"},
+			{"a Telegram channel", "CN0000000000S1", "slack", `, slack_channel_id, telegram_channel_id`,
+				`, 'C0FAKEALERTS', '@alerts'`, "23514", "destinations_type_fields_check"},
+			{"a Bridge channel", "CN0000000000S1", "slack", `, slack_channel_id, bridge_channel_id`,
+				`, 'C0FAKEALERTS', 'ch-br'`, "23514", "destinations_type_fields_check"},
+			{"a webhook mode", "CN0000000000S1", "slack", `, slack_channel_id, webhook_mode`,
+				`, 'C0FAKEALERTS', 'events'`, "23514", "destinations_type_fields_check"},
+			{"through a Mattermost Connection", "CN0000000000M1", "slack", `, slack_channel_id`, `, 'C0FAKEALERTS'`,
+				"23503", "destinations_connection_id_type_fkey"},
+			{"a Bridge Destination with a Slack channel", "CN0000000000B1", "bridge",
+				`, bridge_channel_id, slack_channel_id`, `, 'ch-br', 'C0FAKEALERTS'`, "23514",
+				"destinations_type_fields_check"},
+			{"a Mattermost Destination with a Slack name", "CN0000000000M1", "mattermost",
+				`, mattermost_team_id, mattermost_channel_id, slack_channel_name`, `, 't1', 'ch2', 'alerts'`, "23514",
+				"destinations_type_fields_check"},
+		} {
+			refused(t, bad.name, insert(t, "DS0000000000S9", bad.conn, bad.typ, bad.cols, bad.values), bad.code,
+				bad.constraint)
+		}
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000R1', 'r1', 1, false, '{}', 0, 0, false, '{}', 0, 10, 'en', false, 60, false, 60,
+				60, false, '2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at)
+			SELECT r.id, d.id, d.org_id, '2026-10-05' FROM routes r, destinations d
+			WHERE d.public_id IN ('DS0000000000S1', 'DS0000000000M1')`)
+		e.exec(t, `CREATE TABLE delivery_events_p202610 PARTITION OF delivery_events
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`)
+		e.exec(t, `INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, kind, loudness)
+			SELECT d.org_id, 'DE' || substr(d.public_id, 3), '2026-10-05 12:00:00+00', d.id, 'final_edit', 'quiet'
+			FROM destinations d WHERE d.public_id IN ('DS0000000000S1', 'DS0000000000M1')`)
+		e.exec(t, `INSERT INTO rate_limit_buckets (subject_kind, subject_id, org_id, tokens, refilled_at)
+			SELECT 'destination', d.id, d.org_id, 1, '2026-10-05' FROM destinations d
+			WHERE d.public_id IN ('DS0000000000S1', 'DS0000000000M1')`)
+
+		e.step(t, -1)
+		for what, sql := range map[string]string{
+			"Slack Destinations": `SELECT count(*) FROM destinations WHERE public_id LIKE 'DS0000000000S%'`,
+			"Slack columns": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'destinations' AND column_name LIKE 'slack%'`,
+		} {
+			if n := e.count(t, sql); n != 0 {
+				t.Errorf("after down: %d %s", n, what)
+			}
+		}
+		for what, sql := range map[string]string{
+			"Destinations":    `SELECT count(*) FROM destinations`,
+			"Route places":    `SELECT count(*) FROM route_destinations`,
+			"delivery events": `SELECT count(*) FROM delivery_events`,
+			"limiter buckets": `SELECT count(*) FROM rate_limit_buckets`,
+		} {
+			want := 1
+			if what == "Destinations" {
+				want = 2
+			}
+			if n := e.count(t, sql); n != want {
+				t.Errorf("after down: %d %s, want %d", n, what, want)
+			}
+		}
+		if got := e.constraints(t, []string{"destinations"}, "destinations_type"); got !=
+			"destinations.destinations_type_check:true destinations.destinations_type_fields_check:true" {
+			t.Errorf("after down: constraints %s", got)
+		}
+		refused(t, "after down", insert(t, "DS0000000000S4", "CN0000000000S1", "slack", ``, ``), "23514",
+			"destinations_type_check")
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 17 {
+			t.Errorf("up again: version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (16)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (17)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":16`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":17`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":16`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":17`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1117,10 +1260,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (16)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (17)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":16`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":17`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

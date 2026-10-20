@@ -450,3 +450,70 @@ func TestResolveBridge(t *testing.T) {
 		t.Errorf("a user linked through another connection %+v", b)
 	}
 }
+
+// TestValidateSlack covers C-24.FR-6, AC-15 and C-12.FR-8, a case per kind: a Slack Destination takes nobody, channel,
+// here and chosen Users, and refuses all and messenger groups with unsupported at their pointer, in texts that name
+// Slack.
+func TestValidateSlack(t *testing.T) {
+	ctx := t.Context()
+	s := newService(newFake())
+	if err := s.Validate(ctx, TypeSlack, nobody()); err != nil {
+		t.Errorf("nobody: %v", err)
+	}
+	for _, kind := range Kinds {
+		for _, word := range []string{EveryoneChannel, EveryoneHere} {
+			if err := s.Validate(ctx, TypeSlack, with(kind, Setting{Everyone: word, UserIDs: []string{alice},
+				Groups: []string{}})); err != nil {
+				t.Errorf("%s %s: %v", kind, word, err)
+			}
+		}
+		users := with(kind, Setting{Everyone: EveryoneNone, UserIDs: []string{alice, bob}, Groups: []string{}})
+		if err := s.Validate(ctx, TypeSlack, users); err != nil {
+			t.Errorf("%s with chosen users: %v", kind, err)
+		}
+		err := s.Validate(ctx, TypeSlack, with(kind, Setting{Everyone: EveryoneAll}))
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != "/mentions/"+kind+"/everyone" || fe.Code != CodeUnsupported ||
+			fe.Detail != "Slack has no Mention of all; choose channel or here." {
+			t.Errorf("%s all: %v", kind, err)
+		}
+		err = s.Validate(ctx, TypeSlack, with(kind, Setting{Everyone: EveryoneHere, Groups: []string{"oncall"}}))
+		fe, ok = errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != "/mentions/"+kind+"/groups" || fe.Code != CodeUnsupported ||
+			fe.Detail != "Slack has no messenger groups that Muster can name." {
+			t.Errorf("%s groups: %v", kind, err)
+		}
+		if err := s.Validate(ctx, TypeSlack, with(kind, Setting{Everyone: EveryoneNone,
+			UserIDs: []string{gone}})); err == nil {
+			t.Errorf("%s with a deleted user", kind)
+		}
+	}
+	for _, typ := range []string{TypeMattermost, TypeWebhook} {
+		if err := s.Validate(ctx, typ, with(KindNewAlerts, Setting{Everyone: EveryoneAll,
+			Groups: []string{"oncall"}})); err != nil {
+			t.Errorf("%s takes all and groups: %v", typ, err)
+		}
+	}
+}
+
+// TestResolveSlack covers C-24.FR-6: a Slack Destination's Mentions resolve into channel and here and its Users, and
+// leave out all and groups that settings stored before the rule would carry; its identity space is none until S-102.
+func TestResolveSlack(t *testing.T) {
+	f := newFake()
+	s := newService(f)
+	set := nobody()
+	set[KindNewAlertGroup] = Setting{Everyone: EveryoneHere, Groups: []string{"oncall"}, UserIDs: []string{alice}}
+	set[KindNewAlerts] = Setting{Everyone: EveryoneAll, Groups: []string{"ops"}}
+	set[KindReopen] = Setting{Everyone: EveryoneChannel}
+	f.settings[60] = settingsJSON(t, set)
+	conn := int64(3)
+	r := Request{DestinationID: 60, DestinationType: TypeSlack, ConnectionID: &conn, AlertGroupID: 5,
+		Mentions: []string{KindNewAlertGroup, KindNewAlerts, KindReopen}}
+	got, err := s.Resolve(t.Context(), nil, orgID, r)
+	if err != nil || describe(got) != "everyone:here,user:Alice Smith,everyone:channel" {
+		t.Errorf("slack = %s, %v", describe(got), err)
+	}
+	if IdentitySpace(TypeSlack, &conn) != "" {
+		t.Errorf("identity space %q", IdentitySpace(TypeSlack, &conn))
+	}
+}

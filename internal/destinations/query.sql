@@ -9,7 +9,7 @@
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
        d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
-       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
+       d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -35,7 +35,7 @@ LIMIT @page_size;
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
        d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
-       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
+       d.bridge_channel_id, d.bridge_channel_name, d.slack_channel_id, d.slack_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -180,6 +180,36 @@ SET name = @name, connection_id = @connection_id, bridge_channel_id = @channel_i
     bridge_channel_name = @channel_name, mentions = @mentions, limiter_limit = @limiter_limit,
     limiter_per_seconds = @limiter_per_seconds, updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'bridge';
+
+-- LockSlackConnection takes the Slack Connection that is not deleted in share mode for the save of one of its
+-- Destinations, as LockMattermostConnection does.
+-- name: LockSlackConnection :one
+SELECT id
+FROM connections
+WHERE org_id = @org_id AND id = @id AND type = 'slack' AND deleted_at IS NULL
+FOR SHARE;
+
+-- InsertSlackDestination creates a healthy Slack Destination with its channel id as entered and the channel's name its
+-- Destination check read (C-24.FR-3).
+-- name: InsertSlackDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, slack_channel_id, slack_channel_name, mentions, limiter_limit,
+    limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, 'slack', @name, @connection_id, @channel_id, @channel_name, @mentions, @limiter_limit,
+    @limiter_per_seconds, 'healthy', @now::timestamptz, @now::timestamptz
+)
+RETURNING id;
+
+-- UpdateSlackDestination replaces the configured fields of a Slack Destination and the channel's name its Destination
+-- check read; its health is left alone.
+-- name: UpdateSlackDestination :exec
+UPDATE destinations
+SET name = @name, connection_id = @connection_id, slack_channel_id = @channel_id,
+    slack_channel_name = @channel_name, mentions = @mentions, limiter_limit = @limiter_limit,
+    limiter_per_seconds = @limiter_per_seconds, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND type = 'slack';
 
 -- InsertWebhookDestination creates a healthy outgoing webhook Destination with its request, its proxy and the
 -- password of the proxy, and its first Signing secret (C-15.FR-1, FR-5).

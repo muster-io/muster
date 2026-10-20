@@ -19,6 +19,9 @@
  */
 import type { MattermostChannel } from './mattermostChannel';
 
+/**
+ * The channels of a Mattermost Connection's bot; it has no other member, so that no Slack list reads as one.
+ */
 export interface MattermostChannelList {
   items: MattermostChannel[];
 }

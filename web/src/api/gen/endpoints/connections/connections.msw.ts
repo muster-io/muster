@@ -27,9 +27,9 @@ import type {
 
 import type {
   Connection,
+  ConnectionChannelList,
   ConnectionCheckResult,
-  ConnectionList,
-  MattermostChannelList
+  ConnectionList
 } from '../../model';
 
 import {
@@ -127,7 +127,7 @@ export const getCheckConnectionMockHandler = (overrideResponse?: ConnectionCheck
   }, options)
 }
 
-export const getListConnectionChannelsMockHandler = (overrideResponse?: MattermostChannelList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<MattermostChannelList> | MattermostChannelList), options?: RequestHandlerOptions) => {
+export const getListConnectionChannelsMockHandler = (overrideResponse?: ConnectionChannelList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<ConnectionChannelList> | ConnectionChannelList), options?: RequestHandlerOptions) => {
   return http.get('*/connections/:connectionId/channels', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
 
 

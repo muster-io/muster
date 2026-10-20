@@ -16,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 )
 
@@ -52,23 +53,33 @@ type DoctorQueries interface {
 	ListMattermostDestinations(ctx context.Context, orgID int64) ([]dbgen.ListMattermostDestinationsRow, error)
 	ListTelegramDestinations(ctx context.Context, orgID int64) ([]dbgen.ListTelegramDestinationsRow, error)
 	ListBridgeDestinations(ctx context.Context, orgID int64) ([]dbgen.ListBridgeDestinationsRow, error)
+	ListSlackDestinations(ctx context.Context, orgID int64) ([]dbgen.ListSlackDestinationsRow, error)
 }
 
-// Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost, Telegram and Bridge
-// Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection
-// (GET /api/v4/users/me), the steps of a Telegram one (the dry probe, getMe, getWebhookInfo) and of a Bridge one
-// (getInfo, then whether the info it read offers the Connection's event delivery mode, C-22.FR-2), and the Destination
-// checks of mattermost.CheckDestination, telegram.CheckDestination and bridge.CheckDestination (checkChannel,
-// C-22.FR-3), each request made at once in the background client class, whose retries each check bounds by each. A
-// Telegram or Bridge Connection that fails names the failing step with its message. It only reads: it records nothing
-// of what it finds, not even a Bridge's info. It needs the Keyring and the Network of the Service only; without a
-// Keyring every check fails, for the bot tokens cannot be opened. Slack Connections are skipped until their check joins
-// muster doctor.
+// doctorSlackClient is the client of a Slack Connection that passed muster doctor's check, with the bot's name the
+// check found, which the text of bot_not_in_channel names.
+type doctorSlackClient struct {
+	client *slack.Client
+	bot    string
+}
+
+// Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost, Telegram, Bridge and
+// Slack Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection
+// (GET /api/v4/users/me), the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), of a Bridge one
+// (getInfo, then whether the info it read offers the Connection's event delivery mode, C-22.FR-2) and of a Slack one
+// (token, scopes and in socket mode app_token, C-24.FR-2), and the Destination checks of mattermost.CheckDestination,
+// telegram.CheckDestination, bridge.CheckDestination (checkChannel, C-22.FR-3) and slack.CheckChannel
+// (conversations.info, C-24.FR-3), each request made at once in the background client class, whose retries each check
+// bounds by each. A Telegram, Bridge or Slack Connection that fails names the failing step with its message, and a
+// Bridge or Slack Destination the item channel. It only reads: it records nothing of what it finds, not even a Bridge's
+// info or a Slack workspace. It needs the Keyring and the Network of the Service only, and the Slack route under muster
+// dev; without a Keyring every check fails, for the bot tokens cannot be opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
 	tgClients := map[int64]*telegram.Client{}
 	brClients := map[int64]*bridge.Client{}
+	slClients := map[int64]doctorSlackClient{}
 	failed := map[int64]string{}
 	params := dbgen.ListConnectionsParams{OrgID: s.cfg.OrgID, PageSize: doctorPage}
 	for {
@@ -77,11 +88,18 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			return nil, fmt.Errorf("list the connections: %w", err)
 		}
 		for _, r := range rows {
-			// Slack Connections join muster doctor with their Destinations.
+			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeSlack {
+				var c doctorSlackClient
+				c.client, c.bot, f.Message = s.doctorSlack(ctx, dbgen.GetConnectionRow(r), each)
+				if f.OK() {
+					slClients[r.ID] = c
+				} else {
+					failed[r.ID] = f.Message
+				}
+				out = append(out, f)
 				continue
 			}
-			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeBridge {
 				var c *bridge.Client
 				c, f.Message = s.doctorBridge(ctx, dbgen.GetConnectionRow(r), each)
@@ -188,6 +206,30 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			cancel()
 			if !res.OK() {
 				f.Message = bridge.ItemChannel + ": " + cmp.Or(res.Message, checkFailed)
+			}
+		case failed[d.ConnectionID.Int64] != "":
+			f.Message = "its Connection failed its check: " + failed[d.ConnectionID.Int64]
+		default:
+			f.Message = "its Connection is deleted"
+		}
+		out = append(out, f)
+	}
+	slDests, err := q.ListSlackDestinations(ctx, s.cfg.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the slack destinations: %w", err)
+	}
+	for _, d := range slDests {
+		f := Finding{Kind: FindingDestination, Name: d.Name}
+		c, ok := slClients[d.ConnectionID.Int64]
+		switch {
+		case ok:
+			checkCtx, cancel := context.WithTimeout(ctx, each)
+			// The direct runner has no error of its own.
+			res, _ := slack.CheckChannel(checkCtx, c.client, slack.Direct(delivery.Call{
+				Class: outbound.ClassBackground}), d.SlackChannelID.String, c.bot)
+			cancel()
+			if !res.OK() {
+				f.Message = slack.ItemChannel + ": " + cmp.Or(res.Message, checkFailed)
 			}
 		case failed[d.ConnectionID.Int64] != "":
 			f.Message = "its Connection failed its check: " + failed[d.ConnectionID.Int64]

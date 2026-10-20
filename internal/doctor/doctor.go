@@ -7,7 +7,9 @@
 // every Mattermost Connection and Destination as their checks do, in the background client class (C-13.FR-10), every
 // Telegram Connection with the steps of its check — the dry probe, getMe, getWebhookInfo — and every Telegram
 // Destination with its Destination check — getChat and getChatMember in the channel and its discussion group —
-// printing the failing step with its message (C-14.FR-11, FR-14).
+// printing the failing step with its message (C-14.FR-11, FR-14), and every Bridge and Slack Connection and Destination
+// with theirs (C-22.FR-2, FR-3, C-24.FR-2, FR-3). `muster dev doctor` sends a Slack Connection's requests where `muster
+// dev` sends them, so that the published tokens of the fake Slack server never reach slack.com.
 package doctor
 
 import (
@@ -27,12 +29,14 @@ import (
 	"github.com/muster-io/muster/internal/connections"
 	cdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 // Status is the outcome of one check.
@@ -111,10 +115,11 @@ type Options struct {
 	// development mode.
 	Development bool
 
-	// open and real are replaced by tests.
-	open Opener
-	real clock.Clock
-	each time.Duration
+	// open, real, each and slackRoute are replaced by tests; slackRoute is, under development, devmode.SlackRoute.
+	open       Opener
+	real       clock.Clock
+	each       time.Duration
+	slackRoute slack.Route
 }
 
 // Run runs every check and prints its line. It returns false when a check failed, and an error when the settings
@@ -127,7 +132,7 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	c := &checks{cfg: cfg, out: opts.Out, real: cmp.Or[clock.Clock](opts.real, clock.Real{}), ok: true,
-		each: cmp.Or(opts.each, messengerTimeout)}
+		each: cmp.Or(opts.each, messengerTimeout), slackRoute: slackRouteOf(opts)}
 	c.keys, c.keysErr = keyring.Load(ctx, keyring.Env{Keys: cfg.SecretKeys, Source: cfg.SecretKeysSource},
 		opts.Development)
 	open := opts.open
@@ -153,6 +158,18 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	c.clockSkew(ctx)
 	c.messengers(ctx)
 	return c.ok, nil
+}
+
+// slackRouteOf is where the doctor sends a Slack Connection's requests: the test's route, under development the route
+// of `muster dev`, which serves the fake Slack server's published tokens, and Slack otherwise.
+func slackRouteOf(opts Options) slack.Route {
+	switch {
+	case opts.slackRoute != nil:
+		return opts.slackRoute
+	case opts.Development:
+		return devmode.SlackRoute
+	}
+	return nil
 }
 
 // Open opens the main pool and takes one connection of it, then the session connection, and makes every
@@ -197,14 +214,15 @@ func readOnly(ctx context.Context, conns Connections) error {
 }
 
 type checks struct {
-	cfg     config.Config
-	out     io.Writer
-	real    clock.Clock
-	each    time.Duration
-	conns   Connections
-	keys    *keyring.Keyring
-	keysErr error
-	ok      bool
+	cfg        config.Config
+	out        io.Writer
+	real       clock.Clock
+	each       time.Duration
+	slackRoute slack.Route
+	conns      Connections
+	keys       *keyring.Keyring
+	keysErr    error
+	ok         bool
 }
 
 func (c *checks) print(s Status, check, detail string) {
@@ -350,8 +368,9 @@ func (c *checks) clockSkew(ctx context.Context) {
 	}
 }
 
-// messengers checks the Connections and the Mattermost and Telegram Destinations of every Organization, one line each, through the
-// Organization's outbound address policy; the outbound log lines are for the server, not for the doctor.
+// messengers checks the Connections and the Destinations of every Organization, one line each, through the
+// Organization's outbound address policy and, under development, the Slack route of `muster dev`; the outbound log lines
+// are for the server, not for the doctor.
 func (c *checks) messengers(ctx context.Context) {
 	orgs, err := kdb.New(c.conns.Main).ListOrganizationIDs(ctx)
 	if err != nil {
@@ -364,7 +383,7 @@ func (c *checks) messengers(ctx context.Context) {
 	}
 	quiet := logging.New(io.Discard, logging.LevelError)
 	for _, org := range orgs {
-		svc := connections.New(connections.Config{OrgID: org, Keyring: keys, Log: quiet,
+		svc := connections.New(connections.Config{OrgID: org, Keyring: keys, Log: quiet, SlackRoute: c.slackRoute,
 			Clocks: clock.Clocks{Business: c.real, Real: c.real},
 			Network: mattermost.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(c.conns.Main),
 				org, c.real), Log: quiet, Real: c.real}})
