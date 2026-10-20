@@ -31,7 +31,7 @@ const ParallelPresses = 2
 // PressDeadline bounds each press from the moment it is handed over to the end of its Command, its wait for a slot
 // included, so that a Command stuck on the database frees its slot and the presses waiting behind it end: the 30 s that
 // Mattermost waits for the answer to a press (F-032), which bounds a Mattermost press the same way. The answer to the
-// person keeps its own Budget, so that a press that ran out of time is still told that it failed.
+// person keeps its own Budget, so that a press that ran out of time, waiting or running, is still told that it failed.
 const PressDeadline = 30 * time.Second
 
 // MaxWaitingPresses bounds the presses one process keeps waiting for a slot; one more is dropped, unanswered, and
@@ -284,8 +284,9 @@ func (p *Presses) Wait(ctx context.Context) error {
 // kind of interaction than block_actions is ignored at once; a press waits for a slot, is verified, bound and run
 // within PressDeadline, and once its slot is free again the person who pressed is answered, when there is something to
 // say (C-24.FR-11), unless ctx has ended, so that nothing can reach Slack any more. A press that finds
-// MaxWaitingPresses presses waiting is dropped and not answered. The answer is made once: a failure of both its ways is
-// logged, never retried. A panic is a failed press, logged without its value.
+// MaxWaitingPresses presses waiting is dropped and not answered; one whose deadline ends while it waits is answered that
+// it failed. The answer is made once: a failure of both its ways is logged, never retried. A panic is a failed press,
+// logged without its value.
 func (p *Presses) Handle(ctx context.Context, c Conn, payload []byte) {
 	defer func() {
 		if recover() != nil {
@@ -314,7 +315,12 @@ func (p *Presses) slotted(ctx context.Context, c Conn, in interaction, err error
 	ctx, cancel := context.WithTimeoutCause(ctx, cmp.Or(p.deadline, PressDeadline), errDeadline)
 	defer cancel()
 	release, slotErr := p.slot(ctx)
-	if slotErr != nil {
+	switch {
+	case errors.Is(slotErr, errDeadline) && err == nil:
+		// In English: the Account link that gives the person's language is read only in a slot.
+		return withAnswer(pressed{outcome: outcomeFailed, err: slotErr}, in.to(),
+			messages.T(messages.LanguageEnglish, "press.failed", nil))
+	case slotErr != nil:
 		return pressed{outcome: outcomeFailed, err: slotErr}
 	}
 	defer release()
@@ -337,15 +343,8 @@ func (p *Presses) slotted(ctx context.Context, c Conn, in interaction, err error
 // changes no message and is answered "Done: Still on it" as C-17 says. A refusal, a failure, an account without a link
 // and a disabled User are answered.
 func (p *Presses) press(ctx context.Context, c Conn, in interaction) pressed {
-	to := private{channel: cmp.Or(in.Container.ChannelID, in.Channel.ID), user: in.User.ID,
-		responseURL: in.ResponseURL}
-	answered := func(r pressed, text string) pressed {
-		if to.channel != "" && to.user != "" {
-			r.answer = to
-			r.answer.text = text
-		}
-		return r
-	}
+	to := in.to()
+	answered := func(r pressed, text string) pressed { return withAnswer(r, to, text) }
 	if in.User.ID == "" || in.Container.ChannelID == "" || in.Container.MessageTS == "" || len(in.Actions) == 0 {
 		return answered(pressed{outcome: outcomeNotVerified, err: errIncomplete},
 			messages.T(messages.LanguageEnglish, "press.notVerified", nil))
@@ -408,6 +407,21 @@ func (p *Presses) press(ctx context.Context, c Conn, in interaction) pressed {
 	var text string
 	r.outcome, text, r.err = refusal(lang, err)
 	return answered(r, text)
+}
+
+// to is where the answer to the press in goes: to the person who pressed, in the channel of the press.
+func (in interaction) to() private {
+	return private{channel: cmp.Or(in.Container.ChannelID, in.Channel.ID), user: in.User.ID,
+		responseURL: in.ResponseURL}
+}
+
+// withAnswer is r answered text at to, or r unanswered when to names no channel or no user.
+func withAnswer(r pressed, to private, text string) pressed {
+	if to.channel != "" && to.user != "" {
+		r.answer = to
+		r.answer.text = text
+	}
+	return r
 }
 
 // verdict is how the action id of a press verified.

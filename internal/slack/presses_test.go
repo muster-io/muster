@@ -859,7 +859,8 @@ func TestParallelPresses(t *testing.T) {
 
 // TestPressDeadline is C-24.FR-10 with PressDeadline: a press whose Command is stuck fails when its deadline ends and is
 // still answered, within the Budget of its own, not what is left of the deadline; a press that waits for a slot until
-// its deadline fails with that reason and is not answered.
+// its deadline fails with that reason and is answered so in English, within its own Budget, nothing looked up or run,
+// unless it names no user or is no JSON at all.
 func TestPressDeadline(t *testing.T) {
 	e := newPressEnv(t)
 	e.presses.deadline = time.Millisecond
@@ -882,22 +883,48 @@ func TestPressDeadline(t *testing.T) {
 	}
 	e.commands.hook = nil
 
-	full := &Presses{Parallel: 1, deadline: time.Nanosecond, Log: e.presses.Log}
+	full := &Presses{Path: e.path, Budget: e.presses.Budget, Parallel: 1, deadline: time.Nanosecond,
+		Log: e.presses.Log}
 	hold, err := full.slot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer hold()
+	lookups, ran := len(e.links.spaces), len(e.commands.ran())
 	before := len(e.log.lines(t, "slack_press"))
-	full.Handle(t.Context(), e.conn, e.payload(t, pressIn{user: "U0BOB", channel: pressChannel, ts: pressRootTS,
-		value: e.act(t, buttons.CommandAcknowledge, 0)}))
+	start = time.Now()
+	ack := e.act(t, buttons.CommandAcknowledge, 0)
+	full.Handle(t.Context(), e.conn, e.payload(t, pressIn{user: "U0IVAN", channel: pressChannel, ts: pressRootTS,
+		value: ack}))
+	full.Handle(t.Context(), e.conn, e.payload(t, pressIn{channel: pressChannel, ts: pressRootTS, value: ack}))
+	full.Handle(t.Context(), e.conn, []byte("not json"))
 	lines := e.log.lines(t, "slack_press")
-	if len(lines) != before+1 || field(lines[before], "outcome") != outcomeFailed ||
-		field(lines[before], "error") != errDeadline.Error() || lines[before]["answer"] != nil {
-		t.Errorf("a press that waited until its deadline: %v", lines[before:])
+	if len(lines) != before+3 {
+		t.Fatalf("lines %v", lines[before:])
 	}
-	if n := len(e.ephemerals(t)); n != 1 {
-		t.Errorf("%d answers", n)
+	for i, line := range lines[before:] {
+		var answer any
+		if i == 0 {
+			answer = answeredEphemeral
+		}
+		if field(line, "outcome") != outcomeFailed || field(line, "error") != errDeadline.Error() ||
+			line["answer"] != answer {
+			t.Errorf("press %d that waited until its deadline: %v", i, line)
+		}
+	}
+	got := e.ephemerals(t)
+	if len(got) != 2 || got[1]["text"] != "Muster could not run this command; nothing was changed." ||
+		got[1]["user"] != "U0IVAN" || got[1]["channel"] != pressChannel || got[1]["thread_ts"] != nil {
+		t.Errorf("answers %v", got)
+	}
+	e.path.mu.Lock()
+	deadlines = slices.Clone(e.path.deadlines)
+	e.path.mu.Unlock()
+	if len(deadlines) != 2 || deadlines[1].Before(start.Add(full.Budget/2)) {
+		t.Errorf("the answer's deadlines %v, want its Budget from %v", deadlines, start)
+	}
+	if looked, n := len(e.links.spaces)-lookups, len(e.commands.ran())-ran; looked != 0 || n != 0 {
+		t.Errorf("%d lookups, %d Commands ran", looked, n)
 	}
 }
 
