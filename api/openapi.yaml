@@ -12346,7 +12346,8 @@ components:
           type: integer
           minimum: 0
           description: The connections of the Slack app that `hello` counted beyond those the Leader holds; more than
-            0 means another program, usually a second installation, takes some of the presses.
+            0 means another program, usually another Connection or installation using the same Slack app, takes some
+            of the presses.
     SlackConnectionInput:
       allOf:
       - $ref: '#/components/schemas/SlackConnectionBase'

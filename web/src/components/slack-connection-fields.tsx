@@ -203,8 +203,8 @@ export function SlackConnectionInfo({ connection }: { connection: SlackConnectio
 }
 
 /**
- * Whether the Leader's last Socket Mode hello counted another connection of the app: a second program, usually a
- * second installation, takes some of the presses (C-24.FR-9).
+ * Whether the Leader's last Socket Mode hello counted another connection of the app: a second program, usually
+ * another Connection or installation using the same app, takes some of the presses (C-24.FR-9).
  */
 export function sharesApp(connection: SlackConnection): boolean {
   return (

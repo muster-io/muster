@@ -248,7 +248,7 @@ export const ListConnectionsResponse = zod.object({
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
-  "other_connections": zod.int().min(listConnectionsResponseItemsItemFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.')
+  "other_connections": zod.int().min(listConnectionsResponseItemsItemFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
 }).describe('What a `hello` of the Leader\'s Socket Mode connection of a Slack Connection counted.'),zod.null()]).optional().describe('Socket Mode only. What the last `hello` of the Leader\'s Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -583,7 +583,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
-  "other_connections": zod.int().min(createConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.')
+  "other_connections": zod.int().min(createConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
 }).describe('What a `hello` of the Leader\'s Socket Mode connection of a Slack Connection counted.'),zod.null()]).optional().describe('Socket Mode only. What the last `hello` of the Leader\'s Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -980,7 +980,7 @@ export const GetConnectionResponse = zod.union([zod.object({
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
-  "other_connections": zod.int().min(getConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.')
+  "other_connections": zod.int().min(getConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
 }).describe('What a `hello` of the Leader\'s Socket Mode connection of a Slack Connection counted.'),zod.null()]).optional().describe('Socket Mode only. What the last `hello` of the Leader\'s Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -1324,7 +1324,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
-  "other_connections": zod.int().min(updateConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.')
+  "other_connections": zod.int().min(updateConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
 }).describe('What a `hello` of the Leader\'s Socket Mode connection of a Slack Connection counted.'),zod.null()]).optional().describe('Socket Mode only. What the last `hello` of the Leader\'s Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),

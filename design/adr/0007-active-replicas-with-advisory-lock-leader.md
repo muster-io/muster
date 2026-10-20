@@ -15,6 +15,9 @@
 - Amended: 2026-10-19 — holding the Socket Mode connections of Slack Connections (`slack_socket_mode`) is a Leader task
   (journal D385); it is safe to run twice, because Slack gives each press to one of an app's connections, so an overlap
   only shares them; the presses made while no Leader holds a connection are lost, which the HTTP event mode avoids
+- Amended: 2026-10-21 — a `hello` that counts more connections than the holder's own shows that another Connection or
+  installation shares the Slack app, not only another installation: each Slack Connection needs its own app (journal
+  D414)
 
 ## Context
 
@@ -27,7 +30,8 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
   one place;
 - holding the Socket Mode connection of each Slack Connection in the `socket` event mode: Slack allows an app up to ten
   connections and gives each press to any one of them, so one holder per Connection keeps the count of connections
-  meaningful — a `hello` that counts more than the holder's own shows that another installation shares the app — and
+  meaningful — a `hello` that counts more than the holder's own shows that another Connection or installation shares
+  the app — and
   receives presses the way Telegram updates and Bridge events are received;
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
 - creating and dropping partitions; deleting what the retention periods remove outside partitions — resolved Alerts of

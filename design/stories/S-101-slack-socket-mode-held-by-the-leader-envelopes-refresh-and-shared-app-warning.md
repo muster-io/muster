@@ -266,9 +266,10 @@ None.
 - CONNECT is used for a `ws` target too, so that the fake server and a real `wss` address take the same path through
   a proxy, as F-103 saw for Slack.
 - `slack_socket_other_connections` counts at each `hello`, which Slack sends at least every few hours (F-100); the
-  warning may lag the second installation by that much, and the check says when the count was taken. Right after a
-  Leader crashed, Slack may still count the old Leader's socket until it notices that it is gone (a Pending fact), so a
-  warning then is cleared by a later `hello`; the live check with the operator looks for it after a stopped replica.
+  warning may lag the other Connection on the app by that much, and the check says when the count was taken. Right
+  after a Leader crashed, Slack may still count the old Leader's socket until it notices that it is gone (a Pending
+  fact), so a warning then is cleared by a later `hello`; the live check with the operator looks for it after a stopped
+  replica.
 - The Request log page hides the answer of a record without a status and calls it "No answer"; showing an envelope's
   confirmation there is left to S-103, which owns the Slack pages, so that this story stays a backend story. Here the
   record is checked through the API.

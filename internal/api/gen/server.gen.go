@@ -6823,7 +6823,7 @@ type SlackSocketStatus struct {
 	// HelloAt When the Leader's Socket Mode connection last received `hello`, on the business clock.
 	HelloAt time.Time `json:"hello_at"`
 
-	// OtherConnections The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually a second installation, takes some of the presses.
+	// OtherConnections The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.
 	OtherConnections int `json:"other_connections"`
 }
 
