@@ -5035,7 +5035,8 @@ func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer
 	h := runtime.Callbacks(w, clocks.Real, mattermost.CallbackConfig{Connections: stand, Bindings: stand,
 		Links: probeLinks{}, Commands: probeCommands{}, Keys: k, Business: clocks.Business, Log: logger},
 		telegram.WebhookConfig{Connections: stand, Router: &telegram.Router{Offsets: stand, Log: logger}, Log: logger},
-		bridge.PushConfig{Connections: stand, Real: clocks.Real, Log: logger})
+		bridge.PushConfig{Connections: stand, Real: clocks.Real, Log: logger},
+		slack.CallbackConfig{Real: clocks.Real, Log: logger})
 	var errs []error
 	post := func(path, body string, want int, header ...string) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))

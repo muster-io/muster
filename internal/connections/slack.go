@@ -19,6 +19,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/slack"
@@ -215,6 +216,36 @@ func (s *Service) cachedSlackClient(id, version int64, build func() (*slack.Clie
 	}
 	s.slackClients[id] = cachedSlack{version: version, client: c}
 	return c, nil
+}
+
+// SlackPressConnection is the Slack Connection publicID as the callback of its presses needs it (slack.Connections):
+// its event mode, its client, kept until the Connection changes, and its Slack signing secret. A Slack Connection in
+// socket mode, or in http mode without a stored secret, comes without its client and with an empty secret, which the
+// callback refuses as it refuses a wrong signature, and records (C-23.FR-1); one that is unknown, deleted or not a
+// Slack Connection is slack.ErrNoConnection.
+func (s *Service) SlackPressConnection(ctx context.Context, publicID string) (slack.Conn, logging.Secret, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) || err == nil && row.Type != TypeSlack {
+		return slack.Conn{}, "", slack.ErrNoConnection
+	}
+	if err != nil {
+		return slack.Conn{}, "", err
+	}
+	conn := slack.Conn{ID: row.ID, PublicID: row.PublicID, Mode: row.SlackEventMode.String}
+	stored := storedSlackSigningSecret(row)
+	if conn.Mode != EventModeHTTP || !stored.Set() {
+		return conn, "", nil
+	}
+	secret, err := s.cfg.Keyring.OpenSecret(fieldSlackSigningSecret, stored)
+	if err != nil {
+		return slack.Conn{}, "", fmt.Errorf("open the slack signing secret of the connection %s: %w", row.PublicID, err)
+	}
+	if conn.Client, err = s.cachedSlackClient(row.ID, row.Version, func() (*slack.Client, error) {
+		return s.slackClient(row)
+	}); err != nil {
+		return slack.Conn{}, "", err
+	}
+	return conn, secret, nil
 }
 
 // SlackTarget is where the Slack Destination destinationID posts, for the Slack delivery (slack.Targets): its channel

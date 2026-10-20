@@ -73,6 +73,7 @@
   "press.forbidden": "У вас нет прав на это действие",
   "press.notLinked": "Ваша учётная запись Mattermost не связана с Muster. Свяжите её в профиле: {link}",
   "press.notVerified": "Не удалось проверить эту кнопку; ничего не изменилось.",
+  "press.slackNotLinked": "Ваша учётная запись Slack не связана с Muster. Свяжите её в профиле: {link}",
   "press.telegramNotLinked": "Ваша учётная запись Telegram не связана с Muster. Свяжите её в профиле: {link}",
   "press.test": "Это тестовое сообщение; ничего не изменилось",
   "reason.gone": "алерты пропали из Alertmanager",

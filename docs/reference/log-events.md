@@ -524,6 +524,18 @@ WARN · fields: `grace_seconds` · C-02
 
 The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds.
 
+### `slack_press`
+
+INFO · fields: `connection`, `group`, `command`, `outcome`, `answer`, `error` · C-24
+
+A press of a Slack Connection was handled after Slack had its confirmation — the 200 of the callback in http mode: connection is the public_id of the Connection; group the public_id of the Alert Group and command the Command, once the signed action id is verified against the pressed message, the command alone for a test message; outcome done or unchanged for a Command that ran, which is not answered but "Still on it", which changes no message; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing and was answered; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message, answered that nothing changed; ignored for another kind of interaction, confirmed and not answered; failed when a read or the Command failed, or when the Connection could not be read and the callback answered 500. answer is how the person was answered: ephemeral for chat.postEphemeral in the channel of the press, in the Thread of the Root message for a press on a Reminder, or response_url for the press's response_url when that failed; absent when nothing was answered. error says why the press failed or why its answer was not made, with the tokens, the Slack signing secret and the response_url masked; an answer that fails both ways is not made again.
+
+### `slack_press_rejected`
+
+WARN · fields: `connection`, `reason` · C-24
+
+A request to the callback of Slack presses in http mode was refused and changed nothing: connection is the public_id of the Connection when it is known; reason why — bad_signature (X-Slack-Signature is missing or is not the signature of the body under the Connection's Slack signing secret), stale (X-Slack-Request-Timestamp is missing or further than slack.request_tolerance from Muster's real clock, either way), unknown_connection (no Slack Connection with this id, or a deleted one) or wrong_mode (the Connection receives its presses through Socket Mode), each answered 401 with the same body; no_payload (the body has no payload that is a JSON object) or too_large (the body is over 1 MiB), each answered 400. Lines that keep coming with bad_signature mean a wrong Slack signing secret or someone else's requests. Never carries the signature, the Slack signing secret, the headers or the body.
+
 ### `snapshot_accepted`
 
 INFO · fields: `integration`, `stored_snapshot`, `size_bytes`, `route_pattern` · C-05

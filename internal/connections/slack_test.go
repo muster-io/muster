@@ -884,3 +884,59 @@ func TestSlackTarget(t *testing.T) {
 		t.Errorf("a token that cannot be opened = %v", err)
 	}
 }
+
+// TestSlackPressConnection is the read of the callback of Slack presses (C-24.FR-9): a Slack Connection in http mode
+// with its client, kept until the Connection changes, and its Slack signing secret as it was written; one in socket
+// mode without a client or a secret, which the callback refuses and records; one that is unknown, not a well-formed
+// public_id, of another type or deleted is slack.ErrNoConnection; a failed read or a secret that cannot be opened is an
+// error of its own.
+func TestSlackPressConnection(t *testing.T) {
+	e, _ := newSlackEnv(t)
+	ctx := t.Context()
+	h := e.createSlack(t, slackInput("http", connections.EventModeHTTP))
+	conn, secret, err := e.svc.SlackPressConnection(ctx, h.PublicID)
+	if err != nil || conn.ID != h.ID || conn.PublicID != h.PublicID || conn.Mode != slack.EventModeHTTP ||
+		conn.Client == nil || secret != fakeslack.SigningSecret {
+		t.Fatalf("http = %+v, %v", conn, err)
+	}
+	if again, _, _ := e.svc.SlackPressConnection(ctx, h.PublicID); again.Client != conn.Client {
+		t.Error("the client is not cached")
+	}
+	s := e.createSlack(t, slackInput("socket", connections.EventModeSocket))
+	sc, secret, err := e.svc.SlackPressConnection(ctx, s.PublicID)
+	if err != nil || sc.ID != s.ID || sc.Mode != slack.EventModeSocket || sc.Client != nil || secret != "" {
+		t.Fatalf("socket = %+v, %q, %v", sc, secret, err)
+	}
+	stored := e.store.rows[h.ID].row.SlackSigningSecretCiphertext
+	e.store.rows[h.ID].row.SlackSigningSecretCiphertext = nil
+	if nc, secret, err := e.svc.SlackPressConnection(ctx, h.PublicID); err != nil || nc.ID != h.ID ||
+		nc.Client != nil || secret != "" {
+		t.Errorf("http without a stored secret = %+v, %q, %v", nc, secret, err)
+	}
+	e.store.rows[h.ID].row.SlackSigningSecretCiphertext = stored
+	mm := e.create(t, "mm")
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeHTTP))
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"CN000000000000", "bad", mm.PublicID, gone.PublicID} {
+		if _, _, err := e.svc.SlackPressConnection(ctx, id); !errors.Is(err, slack.ErrNoConnection) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	e.store.rows[h.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[h.ID].row.Version++
+	if _, _, err := e.svc.SlackPressConnection(ctx, h.PublicID); err == nil ||
+		!strings.Contains(err.Error(), "open the bot token") {
+		t.Errorf("a client that cannot be built = %v", err)
+	}
+	e.store.rows[h.ID].row.SlackSigningSecretCiphertext = []byte("garbage")
+	if _, _, err := e.svc.SlackPressConnection(ctx, h.PublicID); err == nil ||
+		errors.Is(err, slack.ErrNoConnection) || !strings.Contains(err.Error(), "open the slack signing secret") {
+		t.Errorf("a secret that cannot be opened = %v", err)
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, _, err := e.svc.SlackPressConnection(ctx, h.PublicID); err == nil || errors.Is(err, slack.ErrNoConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
