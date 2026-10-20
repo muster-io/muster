@@ -552,7 +552,7 @@ A Socket Mode connection of a Slack Connection could not be opened or ended with
 
 WARN · fields: `connection`, `other_connections` · C-24
 
-A hello of a Slack Connection's Socket Mode connection counted more connections of the Slack app than the Leader holds: another program — usually a second Muster installation on the same app — is connected and takes some of its presses at random. connection is the public_id of the Connection and other_connections the connections beyond the Leader's. Right after a Leader change Slack may still count the old Leader's connection; a later hello clears the count. Use one Slack app for each installation.
+A hello of a Slack Connection's Socket Mode connection counted more connections of the Slack app than the Leader holds: another program — usually another Connection or Muster installation on the same app — is connected and takes some of its presses at random. connection is the public_id of the Connection and other_connections the connections beyond the Leader's. Right after a Leader change Slack may still count the old Leader's connection; a later hello clears the count. Use one Slack app for each Connection and share it with no other Connection or installation.
 
 ### `snapshot_accepted`
 
