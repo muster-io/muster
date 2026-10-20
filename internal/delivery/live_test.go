@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	connectionsdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
@@ -3966,6 +3967,20 @@ func (l *live) slackAdapter(t *testing.T) {
 		dests = append(dests, id)
 	}
 	dest := dests[0]
+	// The query the Slack adapter's Targets read in the runtime: the channel, the Connection with its version, and the
+	// workspace address and bot's name its check stored; none of another Organization.
+	row, err := connectionsdb.New(l.d.Pool).GetSlackDestinationTarget(ctx, connectionsdb.GetSlackDestinationTargetParams{
+		OrgID: l.orgID, DestinationID: dest})
+	if err != nil || row.SlackChannelID.String != fakeslack.ChannelAlerts || row.ID != conn || row.Type != "slack" ||
+		row.Version != 1 || row.SlackTeamUrl.String != "https://fake-workspace-b.slack.com/" ||
+		row.BotUsername.String != "muster-dev-bot-b" || len(row.SlackAppTokenCiphertext) == 0 {
+		t.Fatalf("the slack target = %+v, %v", row, err)
+	}
+	if _, err := connectionsdb.New(l.d.Pool).GetSlackDestinationTarget(ctx,
+		connectionsdb.GetSlackDestinationTargetParams{OrgID: l.orgID + 1, DestinationID: dest}); !errors.Is(err,
+		pgx.ErrNoRows) {
+		t.Fatalf("the slack target of another organization: %v", err)
+	}
 	adapter := &timedSlack{Adapter: &slack.Adapter{Targets: targets, Version: "1.2.3"}, clock: l.business}
 	w := l.worker("slack")
 	w.Adapters[delivery.TypeSlack] = adapter
