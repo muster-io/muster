@@ -1328,7 +1328,8 @@ func TestLayoutMrkdwn(t *testing.T) {
 
 // TestPreviewMrkdwn is C-24.FR-7 and C-24.AC-6 for previewTemplate: the format mrkdwn renders the default Root message,
 // a Root message template and a line template in mrkdwn with alert data escaped as Slack receives them — the label
-// value of C-24.AC-6 included — and answers mrkdwn.
+// value of C-24.AC-6 included, and a generator URL that a line template writes into a link stays one link — and
+// answers mrkdwn.
 func TestPreviewMrkdwn(t *testing.T) {
 	f := &fakeQueries{group: source("firing", 3)}
 	f.group.CommonLabels["note"] = ac6
@@ -1355,6 +1356,13 @@ func TestPreviewMrkdwn(t *testing.T) {
 	if err != nil || !res.Valid || res.Format != MarkupMrkdwn ||
 		res.Output != "• "+ac6Mrkdwn+" *prod*\n• ~p2 *prod*~\n• p3 *prod*" {
 		t.Errorf("line template = %+v, %v", res, err)
+	}
+	f.group.Alerts[0].GeneratorURL = hostileURL
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "<{{ .GeneratorURL }}|Source>",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || !strings.HasPrefix(res.Output, "• <"+hostileURLMrkdwn+"|Source>\n") ||
+		strings.Contains(res.Output, "<https://phish") {
+		t.Errorf("generator url in a line template = %+v, %v", res, err)
 	}
 }
 

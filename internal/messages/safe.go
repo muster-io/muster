@@ -185,41 +185,54 @@ func Escaper(m Markup) func(string) string {
 	return func(s string) string { return s }
 }
 
+// urlEscaper is the escaper of the URLs of template data in a markup. In mrkdwn a template writes a URL into a link,
+// `<url|text>`, so `<`, `>` and `|` are percent-encoded and `&` becomes `&amp;`, as in the links Muster lays out: a
+// URL can then neither end the link nor open another one (C-24.FR-7). Other markups keep the URL as it is.
+func urlEscaper(m Markup) func(string) string {
+	if m == MarkupMrkdwn {
+		return mrkdwnURL.Replace
+	}
+	return func(s string) string { return s }
+}
+
 // SafeData is the template data d as a template writing markup sees it: every label and annotation value — and the
-// title, summary, Route and Owner of the Alert Group — cut to ValueCap, neutralized and escaped for markup, and every
-// generator URL kept only when it is http(s).
+// title, summary, Route and Owner of the Alert Group — cut to ValueCap, neutralized and escaped for markup, every
+// generator URL kept only when it is http(s), and in mrkdwn every URL — the generator URLs, ExternalURL and the
+// Alert Group's — escaped for a link.
 func SafeData(d templates.Data, markup Markup) templates.Data {
-	esc := Escaper(markup)
+	esc, escURL := Escaper(markup), urlEscaper(markup)
 	safe := func(s string) string { return esc(Value(s)) }
 	out := d
 	out.GroupLabels = safeKV(d.GroupLabels, safe)
 	out.CommonLabels = safeKV(d.CommonLabels, safe)
 	out.CommonAnnotations = safeKV(d.CommonAnnotations, safe)
+	out.ExternalURL = escURL(d.ExternalURL)
 	out.Alerts = make(templates.Alerts, len(d.Alerts))
 	for i, a := range d.Alerts {
-		out.Alerts[i] = safeAlert(a, safe)
+		out.Alerts[i] = safeAlert(a, safe, escURL)
 	}
-	out.AlertGroup = safeGroup(d.AlertGroup, safe)
+	out.AlertGroup = safeGroup(d.AlertGroup, safe, escURL)
 	return out
 }
 
 // SafeLine is the data of a line template, made safe as SafeData does.
 func SafeLine(a templates.Alert, g templates.AlertGroup, markup Markup) templates.LineData {
-	esc := Escaper(markup)
+	esc, escURL := Escaper(markup), urlEscaper(markup)
 	safe := func(s string) string { return esc(Value(s)) }
-	return templates.LineData{Alert: safeAlert(a, safe), AlertGroup: safeGroup(g, safe)}
+	return templates.LineData{Alert: safeAlert(a, safe, escURL), AlertGroup: safeGroup(g, safe, escURL)}
 }
 
-func safeAlert(a templates.Alert, safe func(string) string) templates.Alert {
+func safeAlert(a templates.Alert, safe, escURL func(string) string) templates.Alert {
 	a.Labels = safeKV(a.Labels, safe)
 	a.Annotations = safeKV(a.Annotations, safe)
-	a.GeneratorURL = SafeURL(a.GeneratorURL)
+	a.GeneratorURL = escURL(SafeURL(a.GeneratorURL))
 	a.Fingerprint, a.Status = templates.StripTokens(a.Fingerprint), templates.StripTokens(a.Status)
 	return a
 }
 
-func safeGroup(g templates.AlertGroup, safe func(string) string) templates.AlertGroup {
+func safeGroup(g templates.AlertGroup, safe, escURL func(string) string) templates.AlertGroup {
 	g.Title, g.Summary, g.Route, g.Owner = safe(g.Title), safe(g.Summary), safe(g.Route), safe(g.Owner)
+	g.URL = escURL(g.URL)
 	return g
 }
 

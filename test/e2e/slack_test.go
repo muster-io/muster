@@ -366,12 +366,13 @@ func TestSlack(t *testing.T) {
 		}
 
 		// C-24.FR-6: Acknowledge edits the Root message, Quietly; a new Alert is a Quiet Thread reply.
+		edits := len(s.requests("chat.update"))
 		if out := s.command(g, "acknowledge"); out != "done" {
 			t.Fatalf("acknowledge = %s", out)
 		}
-		eventually(t, "the edit", func() bool { return len(s.requests("chat.update")) == 1 })
+		eventually(t, "the edit", func() bool { return len(s.requests("chat.update")) > edits })
 		var edit map[string]any
-		_ = json.Unmarshal([]byte(s.requests("chat.update")[0].Body), &edit)
+		_ = json.Unmarshal([]byte(s.requests("chat.update")[edits].Body), &edit)
 		_, hasBlocks := edit["blocks"]
 		_, hasAttachments := edit["attachments"]
 		if !hasBlocks || !hasAttachments || edit["ts"] != root.TS || strings.Contains(edit["text"].(string), "<") {
@@ -392,11 +393,12 @@ func TestSlack(t *testing.T) {
 		if !slices.Equal(got, []string{"Unack:", "Resolve:primary", "Snooze…:"}) {
 			t.Errorf("acknowledged actions %v", got)
 		}
+		replies := len(s.message(root.TS).Replies)
 		s.alert("s1", "i2", `{"team":"sl","cluster":"a","pod":"i2"}`, "")
 		s.notify("s1", "new alerts added")
 		advance(t, r, 61)
-		eventually(t, "the thread reply", func() bool { return len(s.message(root.TS).Replies) == 1 })
-		reply := s.message(root.TS).Replies[0]
+		eventually(t, "the thread reply", func() bool { return len(s.message(root.TS).Replies) > replies })
+		reply := s.message(root.TS).Replies[replies]
 		posts := s.requests("chat.postMessage")
 		var sent map[string]any
 		_ = json.Unmarshal([]byte(posts[len(posts)-1].Body), &sent)
@@ -488,7 +490,7 @@ func TestSlack(t *testing.T) {
 		eventually(t, "the deletion of the misplaced reply", func() bool { return len(s.requests("chat.delete")) > deletes })
 		second := s.root(n2, "CpuHigh", first.TS)
 		eventually(t, "the reminder under the new root message", func() bool {
-			return len(s.message(second.TS).Replies) == 1
+			return len(s.message(second.TS).Replies) > 0
 		})
 		if !deletedNote.MatchString(second.body(t)) || len(s.roots(n2, "CpuHigh")) != 1 ||
 			!strings.HasPrefix(s.message(second.TS).Replies[0].Text, "Reminder") {
@@ -549,8 +551,11 @@ func TestSlack(t *testing.T) {
 			t.Errorf("plain message %+v", plain.Message)
 		}
 		eventually(t, "markup_rejected", func() bool {
-			return count(deliveryEvents(s.timeline(g3, "")), "markup_rejected") == 1
+			return count(deliveryEvents(s.timeline(g3, "")), "markup_rejected") > 0
 		})
+		if got := count(deliveryEvents(s.timeline(g3, "")), "markup_rejected"); got != 1 {
+			t.Errorf("markup_rejected %d times", got)
+		}
 		// edit_window_closed on an edit: Not delivered, and the Destination stays healthy.
 		s.settled()
 		s.fault("chat.update", http.StatusOK, "edit_window_closed", 0)
