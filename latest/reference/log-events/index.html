@@ -3398,6 +3398,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#slack_press" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>slack_press</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slack_press_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>slack_press_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#snapshot_accepted" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4789,6 +4811,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#slack_press" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>slack_press</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slack_press_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>slack_press_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#snapshot_accepted" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5327,6 +5371,12 @@ the event.</p>
 <h3 id="shutdown_requested"><code>shutdown_requested</code><a class="headerlink" href="#shutdown_requested" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>grace_seconds</code> · C-02</p>
 <p>The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds.</p>
+<h3 id="slack_press"><code>slack_press</code><a class="headerlink" href="#slack_press" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>group</code>, <code>command</code>, <code>outcome</code>, <code>answer</code>, <code>error</code> · C-24</p>
+<p>A press of a Slack Connection was handled after Slack had its confirmation — the 200 of the callback in http mode: connection is the public_id of the Connection; group the public_id of the Alert Group and command the Command, once the signed action id is verified against the pressed message, the command alone for a test message; outcome done or unchanged for a Command that ran, which is not answered but "Still on it", which changes no message; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing and was answered; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message, answered that nothing changed; ignored for another kind of interaction, confirmed and not answered; failed when a read or the Command failed, or when the Connection could not be read and the callback answered 500. answer is how the person was answered: ephemeral for chat.postEphemeral in the channel of the press, in the Thread of the Root message for a press on a Reminder, or response_url for the press's response_url when that failed; absent when nothing was answered. error says why the press failed or why its answer was not made, with the tokens, the Slack signing secret and the response_url masked; an answer that fails both ways is not made again.</p>
+<h3 id="slack_press_rejected"><code>slack_press_rejected</code><a class="headerlink" href="#slack_press_rejected" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>reason</code> · C-24</p>
+<p>A request to the callback of Slack presses in http mode was refused and changed nothing: connection is the public_id of the Connection when it is known; reason why — bad_signature (X-Slack-Signature is missing or is not the signature of the body under the Connection's Slack signing secret), stale (X-Slack-Request-Timestamp is missing or further than slack.request_tolerance from Muster's real clock, either way), unknown_connection (no Slack Connection with this id, or a deleted one) or wrong_mode (the Connection receives its presses through Socket Mode), each answered 401 with the same body; no_payload (the body has no payload that is a JSON object) or too_large (the body is over 1 MiB), each answered 400. Lines that keep coming with bad_signature mean a wrong Slack signing secret or someone else's requests. Never carries the signature, the Slack signing secret, the headers or the body.</p>
 <h3 id="snapshot_accepted"><code>snapshot_accepted</code><a class="headerlink" href="#snapshot_accepted" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>integration</code>, <code>stored_snapshot</code>, <code>size_bytes</code>, <code>route_pattern</code> · C-05</p>
 <p>An ingestion request was stored as a pending Stored Snapshot and answered 202: integration and stored_snapshot are public_ids, size_bytes the size of the body, route_pattern the route it came by — never the path, which may carry the token.</p>
