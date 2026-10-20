@@ -150,6 +150,7 @@ func TestAnswerFailsBothWays(t *testing.T) {
 // TestResponseURLPinned is C-24.FR-11 and AC-13: a response_url is called only when it is https on hooks.slack.com,
 // without a port, user information or fragment — or, for a client `muster dev` routes to the fake server, on that
 // server — and only in the interactive class; the client of a Connection that goes to Slack never calls another host.
+// The host is compared in ASCII: the Kelvin sign, which Unicode folds to a `k`, is refused.
 func TestResponseURLPinned(t *testing.T) {
 	s := startStandIn(t, answerJSON(http.StatusOK, `{"ok":true}`))
 	n := network(t, nil)
@@ -162,6 +163,7 @@ func TestResponseURLPinned(t *testing.T) {
 	}{
 		{direct, "https://hooks.slack.com/actions/T0/1/abc", true},
 		{direct, "https://HOOKS.slack.com/actions/T0/1/abc", true},
+		{direct, "https://hoo\u212as.slack.com/actions/T0/1/abc", false},
 		{routed, "https://hooks.slack.com/actions/T0/1/abc", true},
 		{routed, s.srv.URL + "/actions/T0/1/abc", true},
 		{direct, s.srv.URL + "/actions/T0/1/abc", false},

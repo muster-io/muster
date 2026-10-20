@@ -666,16 +666,28 @@ var responseError = regexp.MustCompile(`^[a-z_]{1,64}$`)
 
 // responseURLAllowed is responseURL parsed when the client may call it (C-24.FR-11): an https address on HooksHost,
 // without a port, user information or fragment; or, for a client that `muster dev` routes to the fake Slack server, an
-// address on that server.
+// address on that server. The host is compared in ASCII only: one with any other character, such as the Kelvin sign
+// that Unicode folds to a `k`, is refused.
 func (c *Client) responseURLAllowed(responseURL string) (*url.URL, bool) {
 	u, err := url.Parse(responseURL)
-	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Path == "" {
+	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Path == "" || !ascii(u.Host) {
 		return nil, false
 	}
-	if u.Scheme == "https" && strings.EqualFold(u.Host, HooksHost) {
+	host := strings.ToLower(u.Host)
+	if u.Scheme == "https" && host == HooksHost {
 		return u, true
 	}
-	return u, c.base != BaseURL && strings.EqualFold(u.Scheme+"://"+u.Host, c.origin)
+	return u, c.base != BaseURL && u.Scheme+"://"+host == strings.ToLower(c.origin)
+}
+
+// ascii reports whether s has only ASCII characters.
+func ascii(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // hooksClient is the outbound client of the answers to response_url: the interactive class through the Connection's
