@@ -30,29 +30,36 @@ HTTP
     Slack must reach this address over HTTPS. Any replica receives the press, so no press is lost while the Leader
     changes. It needs the app's Slack signing secret: Muster verifies the signature of every press with it, and
     refuses a request whose timestamp is further than `slack.request_tolerance` (5 minutes) from its own clock, so keep
-    the clocks of Muster's nodes right. A request that fails any check is answered `401` with the same body, which
-    reveals nothing about which Connections exist.
+    the clocks of Muster's nodes right. A request with a wrong or missing signature, a stale timestamp, an unknown
+    Connection or a Connection in Socket Mode is answered `401` with the same body, which reveals nothing about which
+    Connections exist; a body over 1 MiB, or one without a `payload`, is answered `400`.
 
-    Expose only `/api/v1/callbacks/` on the address that Slack reaches, and nothing else of the ingest listener, for
-    example with a reverse proxy that forwards that path alone to the ingest port. See
+    If Slack is the only client outside your network that reaches the ingest listener, expose only `/api/v1/callbacks/`
+    on the address Slack reaches, for example with a reverse proxy that forwards that path alone to the ingest port.
+    `MUSTER_INGEST_URL` is also the address of Alertmanagers and Heartbeats: when they come from outside too, publish
+    their paths as well, or give Slack's callbacks a route of their own. See
     [The two public addresses](../install/helm.md#the-two-public-addresses).
 
 A Slack app sends its presses to the sockets alone while its Socket Mode is on, and over HTTP alone while it is off, so
 the app and the Connection must agree: a Connection receives presses only in its own mode.
 
-### One Slack app per Muster installation
+### One Slack app per Connection
 
-Slack hands each press to any one of the app's open socket connections. Two Muster installations in Socket Mode on one
-Slack app would therefore share its presses at random, and a press made in one would reach the other. Create a Slack
-app for each installation, a test copy included.
+Slack hands each press to any one of the app's open socket connections, and Muster binds a press to a Destination of
+the Connection that receives it. Two Connections on one Slack app, in one Muster or in two, would therefore share its
+presses at random, and a press that reaches the wrong Connection is refused as "This button could not be verified".
+Over HTTP an app has one Request URL, so it serves one Connection. Create a Slack app for each Connection, a test copy
+of Muster included.
 
 Muster notices it. When Slack tells the Leader that the app has more socket connections than the Leader holds, another
-program is connected to the same app, usually a second installation or a script: the **Check connection** of a
+program is connected to the same app, usually a second Connection or Muster, or a script: the **Check connection** of a
 Connection in Socket Mode passes with the warning `another_client_connected`, the Connection page shows the same
 warning, `muster doctor` prints a `WARN` line, and the Leader logs
 [`slack_socket_shared`](../reference/log-events.md#slack_socket_shared). Presses go on working, but some of them are
-lost to the other program. Right after a Leader crashed, Slack may count its old connection for a while; the count
-is taken again at every connection, so the warning goes away by itself.
+lost to the other program. Muster takes the count at each `hello`: when a socket reconnects, at the planned refresh
+hours after the previous one, and when the Connection is saved with a change, which restarts its socket at once. So the
+warning can stay for hours after its cause is gone; to clear it, save the Connection with its app-level token entered
+again. How long Slack counts the connection of a Leader that crashed has not been verified.
 
 ## Create the app from a manifest
 
@@ -136,12 +143,13 @@ the manifest.
 
 The Messages tab is on and read-only
 :   Account links send a person a code by direct message from the bot, and the direct messages of an app show in its
-    Messages tab. Read-only means that the person reads the code and cannot write to the bot. Keep the tab on: with it
-    off, Slack refuses the bot's direct message, and the request for a code fails with the problem
-    `messages_tab_disabled` (`409`). A refused request still counts toward the limits of Account links, 5 requests an
-    hour for a person and 3 for one Slack account (`account_link.slack_code_requests`), so after you turn the tab on
-    again, a person who tried several times may have to wait up to an hour. Turn it on under **App Home → Show Tabs →
-    Messages Tab**. See [Link Slack](account-links.md#link-slack).
+    Messages tab. Read-only means that the person reads the code and cannot write to the bot. Keep the tab on: Slack
+    documents that with it off it refuses the bot's direct message, and the request for a code then fails with the
+    problem `messages_tab_disabled` (`409`), which has not been seen yet on a real workspace. A refused request still
+    counts toward the limits of Account links, 5 requests an hour for a person and 3 for one Slack account
+    (`account_link.slack_code_requests`), so after you turn the tab on again, a person who tried several times may have
+    to wait up to an hour. Turn it on under **App Home → Show Tabs → Messages Tab**. See [Link
+    Slack](account-links.md#link-slack).
 
 The Home tab is off
 :   Muster publishes no Home tab.
@@ -178,7 +186,9 @@ with `missing_scope`, naming the missing ones.
 :   The same for private channels.
 
 `im:write`
-:   Sends the codes of Account links by direct message.
+:   Lets the bot open a direct chat with a person. The Connection check fails without it. The code of an Account link
+    is sent with `chat.postMessage` to the person's user id, which needs `chat:write`; whether Slack also needs
+    `im:write` for that has not been verified, so Muster keeps the scope.
 
 `users:read`
 :   Finds a person by name for an Account link, and reads the app of the bot so that the check can tell whether both
@@ -192,11 +202,14 @@ Muster never joins a channel on its own, so it asks for no `channels:join`: you 
 ## Install the app and create the tokens
 
 1. In the app's settings, open **Install App** and install it in the workspace. Slack then shows the **Bot User OAuth
-   Token** under **OAuth & Permissions**; it starts with `xoxb-`. Copy it. Anyone with the token controls the bot;
-   Muster stores it encrypted and never shows it again.
+   Token** under **OAuth & Permissions**; it starts with `xoxb-`. Copy it. Anyone with the token controls the bot.
 2. In Socket Mode, open **Basic Information → App-Level Tokens** and generate a token with the scope
-   `connections:write`. It starts with `xapp-`. Copy it.
-3. Over HTTP, open **Basic Information → App Credentials** and copy the **Signing Secret**.
+   `connections:write`. It starts with `xapp-`. Copy it. Anyone with this token can open sockets of the app and take
+   its presses.
+3. Over HTTP, open **Basic Information → App Credentials** and copy the **Signing Secret**. Anyone with it can send
+   Muster presses that pass the signature check.
+
+Muster stores all three secrets encrypted, never shows them again and writes them to no log line.
 
 ## Create the Connection
 
@@ -266,7 +279,10 @@ not tried again. Answers are in the language of the User the account is linked t
 without a link.
 
 A replica handles at most 2 presses at a time (`slack.parallel_presses`); the others wait, already confirmed to Slack. A
-press whose deadline ends while it waits for a slot is answered, in English, that it failed.
+press whose deadline ends while it waits for a slot, 30 seconds after it was handed over (`slack.press_deadline`), is
+answered, in English, that it failed. At most 64 presses wait for a slot in a process (`slack.max_waiting_presses`): one
+more, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer and is
+logged. None of these bounds is configurable.
 
 ## Who gets notified
 
@@ -275,7 +291,7 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
 
 - **Edits are Quiet.** An edit of the Root message carries no Mention, so a Loud change is always a new message: a new
   Root message, or a reply in the Thread. The edit drops the Mentions that the Root message had; Slack may then remove
-  them from the person's Activity.
+  them from the person's list of mentions.
 - **Mentions** are `@channel` and `@here`, as the Destination's Mention settings ask, and the people chosen in them,
   through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
   Slack Destination takes neither `@all` nor groups. The footer of a Root message names a linked person without a
@@ -349,10 +365,12 @@ Destination Broken. It waits `slack.hello_timeout`, 10 seconds, for Slack's gree
 The **Request log** of a Slack Connection records its calls to the Web API named as Slack names them, such as
 `chat.postMessage` and `apps.connections.open`. Over HTTP it records each press that reaches the callback address as
 `interactive`, with Muster's answer, refused ones included. In Socket Mode it records each envelope that carries an
-envelope id as `interactive`, with the socket's host as its address and Muster's confirmation as its answer; Slack's
-greetings, disconnects and pings are not recorded. Tokens, the Slack signing secret and the signature are masked, and so
-are the address of the socket, the `response_url` of a press, the signed ids of buttons and the code of an Account link.
-See [Request log](../operations/request-log.md).
+envelope id under the type of the envelope, with the socket's host as its address and Muster's confirmation as its
+answer; the app subscribes to no events, so only `interactive` envelopes arrive. Slack's greetings, disconnects and
+keep-alive frames are not recorded. The answers Muster sends to a press's `response_url` are recorded as `response_url`,
+with the address masked: look there when an answer never shows. Tokens, the Slack signing secret and the signature are
+masked, and so are the address of the socket, the `response_url` of a press, the signed ids of buttons and the code of
+an Account link. See [Request log](../operations/request-log.md).
 
 ## Check from the command line
 

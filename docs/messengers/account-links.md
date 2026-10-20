@@ -7,7 +7,7 @@ in — and Mentions and footers in the messenger name you.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
 Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
-since each Connection is its own workspace, and an account reached through a Bridge, per Bridge Connection. You have at
+and an account reached through a Bridge, per Bridge Connection. You have at
 most one Telegram account and one account per Mattermost, Slack or Bridge Connection; linking another one replaces the
 earlier link, and linking the same account again keeps its link and updates its username and name.
 
@@ -68,11 +68,11 @@ A code allows 5 attempts; after five wrong codes it stops working, even with the
 A new request replaces your earlier one. You can request 5 codes an hour, and one Slack account gets at most 3 codes an
 hour, whoever asks (`account_link.slack_code_requests`); beyond that, wait until the oldest request is an hour old.
 
-The bot can send the code only while the Messages tab of its app is on. When it is off, Slack refuses the direct message
-and Muster answers that the Messages tab of the Slack app is turned off; the problem is `messages_tab_disabled`. Ask the
-admin of the Slack app to turn the tab on under **App Home**, then request a new code. The refused request still counts
-toward the limits above, so if you tried several times before the tab was on, you may have to wait up to an hour. See
-[Connect Slack](slack.md#what-the-manifest-sets).
+The bot can send the code only while the Messages tab of its app is on. Slack documents that with it off it refuses the
+direct message, and then Muster answers that the Messages tab of the Slack app is turned off; the problem is
+`messages_tab_disabled`. Ask the admin of the Slack app to turn the tab on under **App Home**, then request a new code.
+The refused request still counts toward the limits above, so if you tried several times before the tab was on, you may
+have to wait up to an hour. See [Connect Slack](slack.md#what-the-manifest-sets).
 
 ## Link through a Bridge
 
@@ -127,18 +127,18 @@ or a second Telegram bot. What a link covers differs by messenger:
 - **Mattermost links are per Connection.** Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   **Link Mattermost** with each Connection. Your profile lists one row per Connection.
-- **Slack links are per Connection.** Each Slack Connection is its own workspace, and so its own Identity space: two
-  Connections need two links, made one after the other from **Link Slack** with each Connection. Your profile lists one
-  row per Connection.
-- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections
-  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
-  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
+- **Slack links are per Connection.** Each Slack Connection is its own Identity space, even when two Connections serve
+  the same workspace with two apps: two Connections need two links, made one after the other from **Link Slack** with
+  each Connection. Your profile lists one row per Connection.
+- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections reach
+  the same bridge with two bots: two Connections need two links, made one after the other, and a token started for one
+  of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
 - **A Telegram link is valid for all Telegram bots.** Telegram has one Identity space, so the link you make through any
-  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
-  "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.
+  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as "Telegram ·
+  @<username> · for all Telegram bots", with "linked via <Connection>" below.
 
-One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group.
-This is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
+One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group. This
+is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
 Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
 Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.
 

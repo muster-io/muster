@@ -45,8 +45,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   a stored token goes only there, through the Connection's saved proxy (C-13.FR-14). The bot needs the scopes
   `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`, and no other. A read
   returns, read-only, the callback address of FR-9 and what the last successful check learned: the bot's name and user
-  id, the workspace's name and id and the app's id. One Slack app serves one Muster installation: in Socket Mode, two
-  installations on one app would share its presses at random (FR-9). Deleting a Slack Connection follows C-13.FR-6.
+  id, the workspace's name and id and the app's id. One Slack app serves one Slack Connection: in Socket Mode, two
+  Connections on one app, of one installation or of two, would share its presses at random (FR-9), and in `http` mode
+  an app has one Request URL. Deleting a Slack Connection follows C-13.FR-6.
 - **C-24.FR-2** The connection check (interactive) works in steps and shows the latency and path (direct or through the
   proxy) of each: `token` — `auth.test` with the bot token, which shows the bot's name and the workspace (F-072) and
   fails with `token_invalid` for `invalid_auth`, `not_authed`, `account_inactive`, `token_revoked` and `token_expired`,
@@ -170,8 +171,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   the Root message or Thread reply the action id was issued for, of a Destination of this Connection (a mismatch is
   refused like a bad signature), maps `user.id` to a User through their Account link for this Connection (FR-12) and
   dispatches the Command with the Transport `slack` (C-10). A replica handles at most `slack.parallel_presses` presses
-  at a time; the others wait, already confirmed, up to a bound; a press beyond it, and a press still waiting or running
-  at the end of the shutdown's grace period, fails without an answer and is logged. A successful press is not answered:
+  at a time; the others wait, already confirmed, up to `slack.max_waiting_presses` of them in a process; a press beyond
+  that, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer and is
+  logged. A successful press is not answered:
   the edited Root message shows its result, except "Still on it", which changes no message and is answered privately as
   C-17 says. A refusal, a failure, a press from an account without an Account link ("Your Slack account is not linked to
   Muster. Link it in your profile: {link}"), a Viewer's or a disabled User's press (C-18.FR-8), a press whose action id
@@ -184,9 +186,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   fails — the person is no longer in the channel, Slack refuses it, or no limiter token is free within the budget — the
   same text goes to the press's `response_url` as an ephemeral answer, with `replace_original` `false` (F-093), and only
   to an `https` address on `hooks.slack.com` (outside `muster dev`). Muster never edits or deletes a Root message
-  through `response_url`: only the delivery worker edits it (C-11.FR-2). Answers are in the profile language of the
-  User the account is linked to, and in English for an account without a link, or for a press whose deadline ended while
-  it waited for a slot; an answer that fails both ways is logged and not retried.
+  through `response_url`: only the delivery worker edits it (C-11.FR-2). Answers are in the profile language of the User
+  the account is linked to, and in English for an account without a link, or for a press whose deadline,
+  `slack.press_deadline` from its hand-over, ended while it waited for a slot; an answer that fails both ways is logged
+  and not retried.
 - **C-24.FR-12** Account links through a Slack Connection follow C-18 — started only from the signed-in web session
   (C-18.FR-1), one account per User per Slack Connection (the Identity space is the Connection), refusals, unlinking and
   the Audit log with the messenger `slack` — by a code sent by direct message, as for Mattermost (C-18.FR-3): the user
@@ -201,9 +204,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   account; a wrong code is refused as for Mattermost, with the attempts left. The link stores the account's user id, its
   name and its display name — `profile.display_name`, else `profile.real_name` — which Mentions and the footer use. The
   link-making messages are interactive calls (C-18.FR-11). The app's Messages tab stays on and read-only, so the person
-  sees the code and cannot write to the bot (F-096); with the tab off Slack refuses the direct message
-  (`messages_tab_disabled`), and the request is refused with the problem `messages_tab_disabled` (`409`), still counted
-  toward the limits above.
+  sees the code and cannot write to the bot (F-096); Slack documents that with the tab off it refuses the direct message
+  (`messages_tab_disabled`; not yet seen on the stand, [Pending](../../facts.md#pending)), and then the request is
+  refused with the problem `messages_tab_disabled` (`409`), still counted toward the limits above.
 - **C-24.FR-13** The Destination test and preview of C-16 apply. "Send test message" posts one message marked "🧪 Test
   message" with the buttons of its status, through the interactive path. It shows that delivery works and cannot show
   that presses reach Muster, because a bot cannot press its own button in Slack (F-094); the result says so, and that
@@ -227,7 +230,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   what each is for — with the second manifest for HTTP, whose Interactivity Request URL is the Connection's callback
   address; installing the app and creating the app-level token with `connections:write`; inviting the bot to each
   channel; Socket Mode or HTTP — no address of Muster needed against no press lost during a Leader change; one Slack app
-  per Muster installation; the proxy, which must allow CONNECT to `slack.com`, to the hosts under `slack.com` of the
+  per Connection; the proxy, which must allow CONNECT to `slack.com`, to the hosts under `slack.com` of the
   socket and to `hooks.slack.com`; Loud and Quiet in Slack, where Quiet means "without a Mention"; Mentions and Account
   links by code; the limiters and Slack's rate limits; edits and deleted Root messages, including the reply that
   appears in the channel for a moment when a Root message was deleted before any reply (FR-8); the test message, which

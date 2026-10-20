@@ -37,9 +37,9 @@ signature, a wrong secret token, a Connection in the other event delivery mode:
 `interactive`
 `/api/v1/callbacks/slack/{connection_id}`
 :   A button press in Slack, in the HTTP event mode. In Socket Mode there is no request to Muster: each envelope that
-    carries an envelope id is recorded as received, also as `interactive`, with the socket's host as its URL, the
-    envelope as its request and Muster's confirmation as its answer, without a status. Slack's `hello`, `disconnect`
-    and pings are not recorded.
+    carries an envelope id is recorded as received under its own type, with the socket's host as its URL, the
+    envelope as its request and Muster's confirmation as its answer, without a status; the app subscribes to no events,
+    so only `interactive` envelopes arrive. Slack's `hello`, `disconnect` and keep-alive frames are not recorded.
 
 A record holds:
 
@@ -47,9 +47,9 @@ A record holds:
 - the operation as its protocol names it: the method of the Telegram Bot API (`sendMessage`, `editMessageText`,
   `getUpdates`), the operation of Mattermost's REST API in lower camel case (`createPost`, `patchPost`, `getPing`), the
   operation of the Bridge protocol (`getInfo`, `postMessage`, `pollEvents`), the method of Slack's Web API as Slack
-  names it (`chat.postMessage`, `chat.update`, `apps.connections.open`), `event` or the request of a template (`create`,
-  `update`, `open_thread`, `reply_in_thread`) for an outgoing webhook, and `press`, `update`, `push` or `interactive`
-  for requests that reached Muster;
+  names it (`chat.postMessage`, `chat.update`, `apps.connections.open`), `response_url` for an answer sent to a press's
+  `response_url`, `event` or the request of a template (`create`, `update`, `open_thread`, `reply_in_thread`) for an
+  outgoing webhook, and `press`, `update`, `push` or `interactive` for requests that reached Muster;
 - the method, the URL, the request headers and body, and the answer's status, headers and body — none for a request
   that got no answer;
 - the latency in milliseconds, the path — direct or through the proxy — and the attempt;

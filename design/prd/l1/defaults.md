@@ -176,6 +176,8 @@ Other lifecycle values:
 | `slack.hello_timeout` | 10 s: a Socket Mode connection whose `hello` has not come by then is closed, and the next one starts with a new `apps.connections.open` ([F-100](../../facts.md#socket-mode)) | built in | C-24 | decided |
 | `slack.socket_backoff` | from 1 s, doubling with jitter, up to 5 min after a Socket Mode connection failed or was refused (`too_many_websockets`, `link_disabled`), and never shorter than the `Retry-After` of a rate-limited `apps.connections.open`, up to that cap; a `hello` resets it once the connection has lasted 30 s, and so does a planned refresh | built in | C-24 | decided |
 | `slack.request_tolerance` | 5 min between a press's `X-Slack-Request-Timestamp` and Muster's real clock, as Slack recommends ([F-104](../../facts.md#http-mode)) | built in | C-24 | decided |
+| `slack.press_deadline` | 30 s from the hand-over of a press to the end of its Command, its wait for a slot included: the time Mattermost waits for the answer to a press ([F-032](../../facts.md#rate-limit-and-server-settings)); a press that runs out of it is answered that it failed | built in | C-24 | decided |
+| `slack.max_waiting_presses` | 64 Slack presses waiting for a slot in a process; one more is dropped, unanswered and logged, which bounds the memory a replayed signed request can hold | built in | C-24 | decided |
 | `slack.parallel_presses` | 2 Slack presses handled at the same time per replica, over all its Slack Connections and both event modes, like `bridge.parallel_events`; the others wait, already confirmed | built in | C-24 | decided |
 
 ## Request log
