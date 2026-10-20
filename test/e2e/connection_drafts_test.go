@@ -513,6 +513,13 @@ func TestConnectionDrafts(t *testing.T) {
 		}) {
 			t.Fatalf("targets of the proxy %v", got)
 		}
+		// The proxy connected only to the fake, so every request through it is among the fake's: none, on any path,
+		// carries a stored token.
+		for _, token := range []string{devmode.SlackSecondBotToken, devmode.SlackSecondAppToken} {
+			if got := carrying(token); len(got) != 0 {
+				t.Fatalf("a stored token reached the fake through the dry probe: %v", described(got))
+			}
+		}
 
 		// The tokens typed again: the steps through the new proxy with them.
 		resetProxy(t)

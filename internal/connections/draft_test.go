@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 // recorder is a fake server that records the requests it gets.
@@ -829,10 +830,20 @@ func (r *noDNS) take() []string {
 	return out
 }
 
-// slackDraftService is a Service over the store, keyring and interactive path of e with the route of muster dev —
-// the fake Slack server f for its published bot tokens, Slack for any other —, a resolver that resolves no name and a
-// Request log that records into a capture.
-func slackDraftService(t *testing.T, e *env, f *fakeslack.Fake) (*connections.Service, *capture, *noDNS) {
+// devRoute is the route of muster dev: the fake Slack server f for its published bot tokens, Slack for any other.
+func devRoute(f *fakeslack.Fake) slack.Route {
+	return func(token logging.Secret) string {
+		if fakeslack.PublishedBotToken(string(token)) {
+			return f.URL() + "/api/"
+		}
+		return ""
+	}
+}
+
+// slackDraftService is a Service over the store, keyring and interactive path of e with the route of muster dev, or
+// route when it is given, a resolver that resolves no name and a Request log that records into a capture.
+func slackDraftService(t *testing.T, e *env, f *fakeslack.Fake, route ...slack.Route) (*connections.Service, *capture,
+	*noDNS) {
 	t.Helper()
 	logger := logging.New(e.log, logging.LevelInfo)
 	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
@@ -845,13 +856,7 @@ func slackDraftService(t *testing.T, e *env, f *fakeslack.Fake) (*connections.Se
 		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
 		Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
 			Resolver: dns, Recorder: rec},
-		Interactive: e.path, Log: logger,
-		SlackRoute: func(token logging.Secret) string {
-			if fakeslack.PublishedBotToken(string(token)) {
-				return f.URL() + "/api/"
-			}
-			return ""
-		}}), rec, dns
+		Interactive: e.path, Log: logger, SlackRoute: append(route, devRoute(f))[0]}), rec, dns
 }
 
 // slDraft is a Slack draft in mode for the Connection id, empty for a new one, with the tokens typed when set and the
@@ -975,6 +980,10 @@ func TestCheckSlackDraft(t *testing.T) {
 			draft: slDraft("socket", slReal.PublicID, fakeslack.SecondBotToken, "", nil),
 			steps: "token:ok scopes:ok app_token:skip", calls: []string{authTest + bearer + "<sl-bot-b>"},
 			via: "direct", slack: true, owner: slReal.ID},
+		{name: "saved at the fake, a bot token muster dev does not route goes to Slack without the stored app-level token",
+			draft: slDraft("socket", sl.PublicID, unpublishedBot, "", nil),
+			steps: "token:" + dnsFailed + " scopes:skip app_token:skip", calls: []string{}, via: "direct",
+			resolve: []string{"slack.com"}, owner: sl.ID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f.ResetRequests()
@@ -1026,6 +1035,46 @@ func TestCheckSlackDraft(t *testing.T) {
 		if r.Path == "/link/" {
 			t.Errorf("a draft opened a socket")
 		}
+	}
+}
+
+// TestCheckSlackDraftOtherRoute: under muster dev the stored app-level token goes only with a bot token routed where
+// the stored bot token is; a typed bot token routed to another fake Slack server checks there alone, with the step
+// app_token skipped, and nothing reaches the fake of the saved Connection.
+func TestCheckSlackDraftOtherRoute(t *testing.T) {
+	e, f := newSlackEnv(t)
+	other := fakeslack.New()
+	if err := other.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close(context.WithoutCancel(t.Context())) })
+	svc, _, dns := slackDraftService(t, e, f, func(token logging.Secret) string {
+		switch string(token) {
+		case fakeslack.BotToken:
+			return f.URL() + "/api/"
+		case fakeslack.SecondBotToken:
+			return other.URL() + "/api/"
+		}
+		return ""
+	})
+	sl := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	f.ResetRequests()
+	res, err := svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, fakeslack.SecondBotToken, "", nil))
+	if err != nil || stepsOf(res) != "token:ok scopes:ok app_token:skip" {
+		t.Fatalf("steps %q, %v", stepsOf(res), err)
+	}
+	if got := calls(f); len(got) != 0 {
+		t.Errorf("the fake of the saved Connection got %q", got)
+	}
+	if got := calls(other); !slices.Equal(got, []string{"POST /api/auth.test Bearer <sl-bot-b>"}) {
+		t.Errorf("the other fake got %q", got)
+	}
+	if got := dns.take(); len(got) != 0 {
+		t.Errorf("resolved %q", got)
+	}
+	res, err = svc.CheckDraft(t.Context(), slDraft("socket", sl.PublicID, fakeslack.BotToken, "", nil))
+	if err != nil || stepsOf(res) != "token:ok scopes:ok app_token:ok" {
+		t.Errorf("a bot token routed where the stored one is: %q, %v", stepsOf(res), err)
 	}
 }
 
