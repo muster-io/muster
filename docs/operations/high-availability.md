@@ -18,6 +18,7 @@ A few tasks must run **once**, not once per replica. One replica, the **Leader**
 |---|---|
 | Telegram polling | long polling of `getUpdates` for Connections in that update mode; Telegram answers `409` to a second poller |
 | Bridge polling | polls the events of Bridge Connections in the `poll` event delivery mode, with one cursor per Connection |
+| Slack's Socket Mode | holds one Socket Mode connection per Slack Connection in the `socket` event mode; presses made during a handover are lost, the `http` event mode avoids that |
 | Heartbeat and Stale checks | find Integrations that are Heartbeat lost and Alerts that went Stale |
 | partitions and retention | create partitions ahead of time, drop expired ones, and delete what the retention periods remove |
 | pruning | removes ended sessions, expired requests and links, the records of gone replicas, and the Request log past its bounds |
@@ -57,8 +58,10 @@ sequenceDiagram
   B->>PG: "writes the alive mark, runs the Leader tasks"
 ```
 
-A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, the periodic checks
-and the outgoing heartbeat pause. Ingestion, delivery and timers do not.
+A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, Slack's Socket
+Mode connections, the periodic checks and the outgoing heartbeat pause. Ingestion, delivery and timers do not. Telegram
+and the bridges keep what arrives meanwhile; Slack does not, so a press made in Socket Mode before the new Leader
+connects is lost and its person sees Slack's error.
 
 ### When no replica leads
 
@@ -73,6 +76,8 @@ While there is no Leader:
   dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
   `telegram.press_max_age` (1 hour) before it. Connections in the `push` mode of a Bridge and the webhook mode of
   Telegram keep working.
+- Slack Connections in the `socket` event mode hold no Socket Mode connection: a press made meanwhile is lost, and the
+  person sees Slack's error. Connections in the `http` event mode keep working.
 - No Integration becomes Heartbeat lost and no Alert goes Stale.
 - Partition maintenance, retention and pruning pause; the gauges that only the Leader exports go stale.
 - The outgoing heartbeat stops, so a [dead man's switch](outgoing-heartbeat.md) alerts you.

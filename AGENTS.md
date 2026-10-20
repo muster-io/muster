@@ -159,7 +159,7 @@ the example bridge are not in this repository: they live in `muster-io/muster-br
 | 1 | a query on a table with `org_id` does not filter by it, at every query level, with a value from a parameter or an outer query |
 | 2 | `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` is written outside `internal/groups`, or `internal/groups/dbgen` is imported outside it |
 | 3 | a messenger send or edit through `delivery.Adapter` (`Publish`, `Update`, `Reply`) is called outside the delivery worker and the interactive path; the messenger clients beneath the adapters, which `muster bridge check` calls directly, are not checked |
-| 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
+| 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used, or a WebSocket is dialled with `websocket.Dial` of `github.com/coder/websocket`, outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
 | 5 | a known secret value reaches a log line or a returned error |
 | 6 | `context.Background()` or `context.TODO()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
 | 7 | `log` and its subpackages, a third-party logger, `fmt.Print*`, `print`, `println` or direct writes to stdout and stderr appear outside `internal/logging` (`internal/cli`, `internal/devmode`, `test/load` and the build tooling `cmd/muster-archlint` and `internal/tools` may print) |

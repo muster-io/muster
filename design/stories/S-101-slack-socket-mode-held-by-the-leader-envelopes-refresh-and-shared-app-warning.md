@@ -12,6 +12,7 @@ files_touched:
   - internal/outbound/websocket.go
   - internal/outbound/websocket_test.go
   - internal/outbound/proxy.go
+  - internal/archlint/archlint.go
   - internal/archlint/callrules.go
   - internal/archlint/testdata/rule4/**
   - internal/archlint/secretleak.go
@@ -59,6 +60,8 @@ files_touched:
   - web/src/components/connection-check.tsx
   - web/src/components/connection-check.test.tsx
   - test/e2e/slack_test.go
+  - AGENTS.md
+  - CONTRIBUTING.md
 acceptance:
   - "[C-24.FR-9, C-24.AC-10, C-02.FR-10] The Leader's task `slack_socket_mode` holds one connection for each Slack Connection in `socket` mode that is not deleted, opened after a new `apps.connections.open` each time; a `hello` that has not come within `slack.hello_timeout` closes the connection and opens the next; an `interactive` envelope is confirmed with `{\"envelope_id\": …}` on its socket before its press is handled by the path of S-100, and an envelope of another type is confirmed and ignored; losing leadership or stopping the replica closes every connection at once; a Connection switched to `http` or deleted loses its connection within a second (`socket_test.go`, with a manual clock and the fake server's socket)."
   - "[C-24.FR-9, C-24.AC-10] After `disconnect` with the reason `warning` or `refresh_requested`, the next connection is open, with its `hello`, before the old one closes; `link_disabled`, `too_many_websockets` and a failed dial back off by `slack.socket_backoff`, log `slack_socket_failed` with the reason, count against nothing and make no Destination Broken; with two replicas only the Leader holds a connection, and after it stops the new Leader opens one (`test/e2e/slack_test.go`, `E2E_REPLICAS=2`)."

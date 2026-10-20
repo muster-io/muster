@@ -49,7 +49,7 @@ type Config struct {
 
 	Messenger MessengerConfig
 
-	// HTTPExempt lists the directories where rule 4 allows HTTP clients and transports.
+	// HTTPExempt lists the directories where rule 4 allows HTTP clients and transports and WebSocket dials.
 	HTTPExempt []string
 }
 

@@ -177,6 +177,7 @@ Telegram, a reverse proxy or a self-hosted Bot API server set as the Connection'
 | | the outgoing heartbeat; the `MusterOIDCSecretExpiring` check ([C-19].FR-5) |
 | | re-signing the buttons of open Root messages after a key rotation (`rerender_after_rotation`, [C-20].FR-7) |
 | | pruning the Request log to its bounds (`request_log_pruning`, [C-23].FR-4) |
+| | the Socket Mode connections of the Slack Connections in the `socket` event mode (`slack_socket_mode`, [C-24].FR-9) |
 
 ---
 
@@ -199,6 +200,7 @@ flowchart TB
         tgUp["Telegram updates<br/>poller on the Leader or webhook"]
         brEv["Bridge events<br/>poller on the Leader or push"]
         slCb["Slack callback handler<br/>http mode"]
+        slSock["Slack Socket Mode<br/>connections on the Leader"]
     end
 
     processing["snapshot processing<br/>(ingest)"]
@@ -232,6 +234,7 @@ flowchart TB
     tgUp -- "Commands" --> dispatcher
     brEv -- "Commands" --> dispatcher
     slCb -- "Commands" --> dispatcher
+    slSock -- "Commands" --> dispatcher
     brEv -- "deleted Root messages" --> desired
     timers -- "system transitions" --> dispatcher
     dispatcher -- "lifecycle events" --> desired
@@ -239,11 +242,12 @@ flowchart TB
     worker --> desired
     worker -- "records" --> devents
     worker --> adapters
-    mmCb & tgUp & brEv & slCb -- "private answers" --> interactive
+    mmCb & tgUp & brEv & slCb & slSock -- "private answers" --> interactive
     interactive --> adapters
     adapters --> outbound
+    slSock -- "apps.connections.open,<br/>WebSocket" --> outbound
     outbound -- "each attempt, masked" --> requestlog
-    mmCb & tgUp & brEv & slCb -- "each request, masked" --> requestlog
+    mmCb & tgUp & brEv & slCb & slSock -- "each request or envelope, masked" --> requestlog
     requestlog --> db
 ```
 
@@ -283,19 +287,24 @@ flowchart TB
   flow for `message_deleted`, and answers the person through the interactive path before it acknowledges the event
   ([C-22].FR-10 to FR-14, [flow c'](#c-bridge-press-through-polling-or-push)).
 - **Slack presses** come, for a Slack Connection in the `http` event mode, to its callback on the ingest listener of
-  any replica, which checks Slack's signature and timestamp on the real clock and answers `200` at once; one handler,
-  which Socket Mode shares, binds each press to its message by channel and `ts`, maps the person through their Account
-  link, runs the Command through the dispatcher with the Transport `slack` and answers the person privately through the
-  interactive path ([C-24].FR-9 to FR-11, [flow c''](#c-slack-press-over-http)).
+  any replica, which checks Slack's signature and timestamp on the real clock and answers `200` at once, and, in the
+  `socket` event mode, over the Socket Mode connection the Leader holds for the Connection, which confirms each
+  envelope on its socket at once; one handler, which both share, binds each press to its message by channel and `ts`,
+  maps the person through their Account link, runs the Command through the dispatcher with the Transport `slack` and
+  answers the person privately through the interactive path ([C-24].FR-9 to FR-11,
+  [flow c''](#c-slack-press-over-http), [flow c'''](#c-slack-press-over-socket-mode)).
 - **Request log** keeps, for troubleshooting, the recent HTTP requests of the Connections and the outgoing webhook
   Destinations, each attempt with its answer, and the requests that reach a Connection's callbacks on the ingest
   listener — Mattermost presses, Telegram updates in the webhook mode, pushed Bridge events, Slack presses in the
-  `http` event mode — with Muster's answer, refused ones included ([C-23]). The outbound HTTP package hands each
+  `http` event mode — with Muster's answer, refused ones included, and the envelopes of Slack's Socket Mode with
+  Muster's confirmation as the answer, without a status ([C-23], [C-24].FR-14). The outbound HTTP package hands each
   attempt of a client that has an owner to the Request log after its outcome is known, masked of the Secrets of the
   client and of the request and of the credential headers; one middleware around the four callbacks hands over each
-  request whose handler named its Connection, after the answer was sent, its credential headers masked. The Request
-  log masks what the shape of a value tells is a secret — signed action ids, the tokens of `/start` and of
-  `account_link` events, Slack's `X-Slack-Signature`, `response_url` and verification `token` — cuts each body to
+  request whose handler named its Connection, after the answer was sent, its credential headers masked, and the
+  Socket Mode connection hands each envelope with an `envelope_id` to the same inbound recorder once it is confirmed.
+  The Request log masks what the shape of a value tells is a secret — signed action ids, the tokens of `/start` and of
+  `account_link` events, Slack's `X-Slack-Signature`, `response_url` and verification `token`, the `ticket` of a
+  Socket Mode address — cuts each body to
   `request_log.body_max`, and inserts one row on the main pool, outside any transaction of the caller, never failing
   or delaying the request beyond that write. The delivery worker links each attempt to its Destination and Alert Group,
   the Mattermost callback a press to its Destination and Alert Group, a Slack press the requests of its answer, which
@@ -368,6 +377,7 @@ flowchart TB
     end
     lock -- "starts and stops" --> tasks
     tasks --> tgpoll["Telegram getUpdates"]
+    tasks --> slsock["Slack Socket Mode<br/>connections"]
     tasks --> checks["Heartbeat lost and<br/>Stale checks"]
     tasks --> parts["partitions and retention"]
     tasks --> gauges["database gauges"]
@@ -395,7 +405,7 @@ flowchart TB
 
     checks & oidc -- "raise, resolve" --> ialerts
     ialerts -- "Alerts of the built-in<br/>Muster Integration" --> processing["snapshot processing"]
-    tgpoll & ohb --> classes
+    tgpoll & slsock & ohb --> classes
     classes --> dialer --> proxies
 ```
 
@@ -407,9 +417,12 @@ flowchart TB
   shared with the chart rules ([ADR-0014]). `MusterSnapshotTruncated` is raised by processing, `MusterHeartbeatLost` and
   `MusterOIDCSecretExpiring` by the Leader, `MusterDestinationBroken` by delivery and `MusterTemplateError` by
   rendering ([reference](prd/l1/reference.md#internal-alerts)).
-- **outbound HTTP package** is the only place that creates HTTP clients: it checks every resolved address against the
-  outbound address policy inside the dialer, never follows redirects, applies the retry policy of the client class,
-  uses the client's own proxy and redacts secrets that travel in URLs ([ADR-0015], [C-02].FR-20–22).
+- **outbound HTTP package** is the only place that creates HTTP clients and opens WebSocket connections: it checks
+  every resolved address against the outbound address policy inside the dialer, never follows redirects, applies the
+  retry policy of the client class, uses the client's own proxy and redacts secrets that travel in URLs ([ADR-0015],
+  [C-02].FR-20–22). A WebSocket, such as Slack's Socket Mode connection, goes through an HTTP or HTTPS proxy by
+  `CONNECT`, also for a `ws` address, or through a SOCKS5 proxy, and its handshake counts as one request of its client
+  class; reading, writing and pinging it are the caller's.
 - **database access** uses `pgx` with `sqlc`; the three thin queue mechanisms — ingestion, delivery and timers — share
   claiming in a short transaction with a lease, backoff with jitter and slow calls outside the transaction; business
   queries take the current time from Go, never from `now()` ([ADR-0006]).
@@ -417,8 +430,8 @@ flowchart TB
 **Architecture lints** keep these boundaries ([ADR-0016]): every query on a table with `org_id` filters by it; only
 `groups` writes Alert Group tables, with no exception for delivery, whose delivery events have a table of their own;
 only the delivery worker and the interactive path send or edit messenger messages; only the outbound package creates
-HTTP clients; no secret reaches a log line; `context.Background()` only in `main`, wiring and tests; logging only
-through the domain logger; `le` histograms only.
+HTTP clients and dials WebSockets; no secret reaches a log line; `context.Background()` only in `main`, wiring and
+tests; logging only through the domain logger; `le` histograms only.
 
 ---
 
@@ -759,6 +772,65 @@ an interaction again, so presses are not deduplicated, and one that did come twi
 callback's inbound record in the Request log names only the Connection, because the press is matched after the answer;
 the records of the answer's requests also name the Destination and the Alert Group.
 
+### c'''. Slack press over Socket Mode
+
+In the `socket` event mode Slack sends the presses over a WebSocket that Muster opens, so Slack needs no address of
+Muster; the Leader holds one Socket Mode connection for each such Connection (`slack_socket_mode`), and from the Slack
+presses on a press takes the path of [flow c''](#c-slack-press-over-http) ([C-24].FR-9, FR-14, [ADR-0007], verified
+facts on [Socket Mode](facts.md#socket-mode)).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Responder
+    participant SL as Slack
+    participant LD as Socket Mode on the Leader (slack_socket_mode)
+    participant OB as outbound package
+    participant DB as PostgreSQL
+    participant PR as Slack presses (shared with HTTP)
+
+    LD->>DB: the Slack Connections in socket mode, again on their change hint and every minute
+    loop for each Connection, while the replica leads
+        LD->>OB: apps.connections.open with the app-level token, background class
+        OB->>SL: through the Connection's proxy
+        SL-->>LD: the address of a new connection with its single-use ticket
+        LD->>LD: accept only wss under slack.com, or the fake's under muster dev,<br/>held as a secret, its ticket masked everywhere
+        LD->>OB: the WebSocket, by CONNECT through an HTTP or HTTPS proxy, or through SOCKS5
+        OB->>SL: the handshake: address policy, connect timeout, no redirect
+        alt no hello within slack.hello_timeout, link_disabled, too_many_websockets or a failed dial
+            LD->>LD: close it, log slack_socket_failed, wait slack.socket_backoff, open the next
+        else hello
+            LD->>DB: the time of the hello and the connections it counts beyond the Leader's, for this version
+            opt more connections than the Leader holds
+                LD->>LD: log slack_socket_shared, another program takes some of the presses
+            end
+        end
+    end
+    U->>SL: presses Ack on the Root message
+    SL->>LD: an interactive envelope with its envelope_id
+    LD->>SL: the confirmation with the envelope_id on the same socket, at once
+    LD->>DB: the envelope and its confirmation in the Request log, without a status
+    LD->>PR: the payload, in a context of the process that the start of a shutdown does not end
+    Note over PR: as in flow c'': bind, Account link, dispatcher with the Transport slack, private answer
+    SL->>LD: disconnect with the reason warning or refresh_requested
+    LD->>OB: open the next connection first, with its hello
+    LD->>SL: then close the old one, which kept reading and confirming meanwhile
+```
+
+An envelope of another type is confirmed, recorded and ignored; `hello`, `disconnect` and pings are not recorded. Each
+connection is pinged every 30 s and closed when its pong takes longer than 10 s; a failure and every `disconnect` other
+than a planned refresh back off by `slack.socket_backoff`, which a `hello` resets, and count against nothing: no
+Destination becomes Broken. The waits of the socket are on the real clock, and the time of a `hello` is on the business
+clock. When leadership ends, or the replica stops, every connection is closed at once, and a confirmed press is still
+handled in the process's context, so the shutdown drains it as it drains the callback's; the presses made until the
+next Leader connects are lost, since Slack keeps none for later, and their people see Slack's error. A Connection that
+cannot lose a press uses the `http` event mode, which any replica serves. A Connection switched to `http`, deleted or
+saved closes its connection at once; a saved one opens a new one and counts again at its next `hello`. Slack's
+`num_connections` counts every connection of the app, two of Muster's own during a planned refresh: the count beyond
+the Leader's is shown in the Connection's read, as the warning `another_client_connected` of its check and in
+`muster doctor`, because another program on the same app takes some of the presses at random
+([F-102](facts.md#socket-mode)).
+
 ### d. Delivery reconciliation
 
 The delivery worker brings the actual Root message to the latest Desired state with one call; changes made while a call
@@ -1074,9 +1146,9 @@ sequenceDiagram
     PG->>PG: the silent session ends within leader.server_bound, the lock is released
     B->>PG: try the advisory lock
     PG-->>B: granted
-    B->>B: Leader: Telegram polling, Bridge polling, Heartbeat lost and Stale checks,<br/>partitions, retention and pruning, gauges, alive mark,<br/>outgoing heartbeat, OIDC secret expiry check,<br/>re-render after a key rotation, Request log pruning
+    B->>B: Leader: Telegram polling, Bridge polling, Slack's Socket Mode,<br/>Heartbeat lost and Stale checks,<br/>partitions, retention and pruning, gauges, alive mark,<br/>outgoing heartbeat, OIDC secret expiry check,<br/>re-render after a key rotation, Request log pruning
     Note over B,PG: rows leased by A are claimed again when their lease runs out
-    Note over A,B: A process frozen beyond the bound can overlap with its successor for a moment, so every Leader task<br/>is safe to run twice: Telegram answers a second poller with 409, a Bridge event is claimed once by its id,<br/>partitions and Stale resolutions are idempotent.
+    Note over A,B: A process frozen beyond the bound can overlap with its successor for a moment, so every Leader task<br/>is safe to run twice: Telegram answers a second poller with 409, a Bridge event is claimed once by its id,<br/>two Slack connections of one Connection share its presses, partitions and Stale resolutions are idempotent.
 ```
 
 The Leader writes an "alive" mark every 30 seconds; after a full outage the next Leader records the period, opens the

@@ -36,9 +36,10 @@ groups:
         annotations:
           summary: No Muster replica is the Leader
           description: >-
-            No replica holds the Leader lock: Telegram and Bridge polling, the Heartbeat and Stale checks, partition
-            maintenance and the outgoing heartbeat have stopped, while ingestion, delivery and timers keep working.
-            First check the replicas on the System status page and the database connection of each replica.
+            No replica holds the Leader lock: Telegram and Bridge polling, Slack's Socket Mode connections, the
+            Heartbeat and Stale checks, partition maintenance and the outgoing heartbeat have stopped, while
+            ingestion, delivery and timers keep working. First check the replicas on the System status page and the
+            database connection of each replica.
           runbook_url: {{ $runbooks }}/MusterNoLeader/
 {{- end }}{{ end }}
 {{- with $r.MusterDeliveryFailing }}{{ if .enabled }}
