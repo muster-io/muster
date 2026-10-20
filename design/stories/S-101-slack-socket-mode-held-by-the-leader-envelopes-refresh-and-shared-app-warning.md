@@ -20,13 +20,21 @@ files_touched:
   - internal/slack/check.go
   - internal/slack/check_test.go
   - internal/slack/client.go
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
   - internal/connections/slack.go
   - internal/connections/slack_test.go
   - internal/connections/query.sql
   - internal/connections/doctor.go
   - internal/connections/doctor_test.go
+  - internal/api/connections.go
   - internal/leader/tasks.go
   - internal/leader/leader_test.go
+  - internal/db/migrations/0019_request_log_socket_envelopes.up.sql
+  - internal/db/migrations/0019_request_log_socket_envelopes.down.sql
+  - internal/db/migrate_test.go
+  - internal/db/db_test.go
+  - design/db/schema.md
   - internal/requestlog/inbound.go
   - internal/requestlog/inbound_test.go
   - internal/requestlog/mask.go
@@ -38,13 +46,18 @@ files_touched:
   - internal/fakes/fakeslack/fakeslack.go
   - internal/fakes/fakeslack/fakeslack_test.go
   - design/architecture.md
+  - design/stories/S-020-snapshot-processing-and-alerts-view.md
+  - design/stories/S-103-slack-connection-and-destination-pages-check-before-saving-and-profile-links.md
+  - design/stories/coverage.md
   - deploy/helm/muster/files/rules.yaml
   - deploy/helm/muster/tests/rules/MusterNoLeader.yaml
   - docs/operations/runbooks/MusterNoLeader.md
+  - docs/operations/high-availability.md
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/src/components/app-shell.test.tsx
   - web/src/components/connection-check.tsx
+  - web/src/components/connection-check.test.tsx
   - test/e2e/slack_test.go
 acceptance:
   - "[C-24.FR-9, C-24.AC-10, C-02.FR-10] The Leader's task `slack_socket_mode` holds one connection for each Slack Connection in `socket` mode that is not deleted, opened after a new `apps.connections.open` each time; a `hello` that has not come within `slack.hello_timeout` closes the connection and opens the next; an `interactive` envelope is confirmed with `{\"envelope_id\": …}` on its socket before its press is handled by the path of S-100, and an envelope of another type is confirmed and ignored; losing leadership or stopping the replica closes every connection at once; a Connection switched to `http` or deleted loses its connection within a second (`socket_test.go`, with a manual clock and the fake server's socket)."
@@ -95,36 +108,51 @@ issue: 310
   `DialWebSocket` through the Connection's proxy, `hello` within `slack.hello_timeout`, a ping every 30 s with a
   10-s deadline, the frames read in a loop: `hello` (recorded), `disconnect` (`warning` and `refresh_requested` open the
   next connection first; `link_disabled` and `too_many_websockets` back off), and every envelope with an
-  `envelope_id` confirmed at once — `interactive` handed to `slack.Presses.Handle` with the process's context, the
-  others ignored. Failures back off by `slack.socket_backoff`, reset by a `hello`.
+  `envelope_id` confirmed at once — `interactive` handed to `slack.Presses.Go` with the process's context (the drain
+  at shutdown waits for it, as for the callback's presses), the others ignored. Failures back off by
+  `slack.socket_backoff`, reset by a `hello`.
 - **Leader task** (`internal/leader/tasks.go`): `slack_socket_mode` starts and stops one socket per Slack Connection
   in `socket` mode, reading the list again on the Connections' change hint and every minute; it stops all sockets when
   leadership ends (ADR-0007).
-- **Connections** (`internal/connections/slack.go`, `query.sql`): `ListSocketConnections`; `RecordSocketHello` writes
-  `slack_socket_hello_at` and `slack_socket_other_connections` for the version the socket read, not a change of the
-  configuration; the read of a Slack Connection returns `socket` (`hello_at`, `other_connections`), null in `http`
-  mode and before the first `hello`; the check's warning and the doctor's WARN line read it.
+- **Connections** (`internal/connections/slack.go`, `connections.go`, `query.sql`, and `internal/api/connections.go`
+  for the read): `ListSocketConnections`; `RecordSocketHello` writes `slack_socket_hello_at` and
+  `slack_socket_other_connections` for the version the socket read, not a change of the configuration; the read of a
+  Slack Connection returns `socket` (`hello_at`, `other_connections`), null in `http` mode and before the first
+  `hello`; the check's warning and the doctor's WARN line read it. A save of the Connection forgets
+  `slack_socket_hello_at` and `slack_socket_other_connections`: its socket starts again and counts at its next `hello`.
 - **Spec** (`api/openapi.yaml`): `SlackConnection.socket` (`hello_at`, `other_connections`), read-only;
   `ConnectionCheckResult.warnings` gains `another_client_connected`, described, and `connection-check.tsx` shows its
   text from reference.md in English and Russian, since its switch over the warnings must name every value.
-- **Check** (`internal/slack/check.go`): `apps.connections.open` joins the step `app_token`; its answer's `url` is
-  dropped unread.
+- **Check** (`internal/slack/check.go`): `apps.connections.open` is the first call of the step `app_token`, before
+  `auth.test` with the app-level token, so that a bot token typed as the app-level token gets Slack's
+  `not_allowed_token_type` (F-070) and fails the step with `wrong_token_type`; its answer's `url` is dropped unread.
 - **Request log** (`internal/requestlog`): envelopes recorded as C-24.FR-14 says, through the inbound recorder, in one
-  place with the callbacks; masking by shape of `ticket=` in a socket address, so the answer of
-  `apps.connections.open` is masked in the outbound record too.
-- **Log events**: `slack_socket_connected` (info: the Connection, `num_connections`, the connections the Leader holds),
-  `slack_socket_shared` (warn: the Connection, the connections counted beyond the Leader's — another program is
-  connected to the same Slack app and takes some of its presses) and `slack_socket_failed` (warn: the Connection, the
-  reason — `dial`, `hello_timeout`, `link_disabled`, `too_many_websockets`, `closed` — and the back-off).
+  place with the callbacks; an envelope's record has the method `WEBSOCKET`, since a frame has no HTTP method and the
+  column requires one; masking by shape of `ticket=` in a socket address, so the answer of `apps.connections.open` is
+  masked in the outbound record too.
+- **Schema** (`internal/db/migrations/0019_request_log_socket_envelopes`, `design/db/schema.md`):
+  `request_log_answer_check` of 0013 refuses an answer's body without a status, which an envelope's record needs; an
+  expand-only migration loosens it for `inbound` records, and the other directions keep the rule.
+- **Log events**: `slack_socket_connected` (info: the Connection, `num_connections`, the connections the Leader holds,
+  and `error` when the count could not be stored), `slack_socket_shared` (warn: the Connection, the connections counted
+  beyond the Leader's — another program is connected to the same Slack app and takes some of its presses) and
+  `slack_socket_failed` (warn: the Connection, the reason — `dial`, `hello_timeout`, `link_disabled`,
+  `too_many_websockets`, `closed` — the back-off, and `error`, what failed, masked, empty for `hello_timeout`,
+  `link_disabled` and `too_many_websockets`). The reason `dial` covers a failed `apps.connections.open`, an address it
+  answered that is refused, a failed handshake and a client of the Connection that could not be built.
 - **No Leader** (`web/src/locales`, `app-shell.test.tsx`, `deploy/helm/muster/files/rules.yaml`, its rule test and
   `docs/operations/runbooks/MusterNoLeader.md`): the texts of reference.md name Slack's Socket Mode among the paused
-  tasks.
+  tasks; `docs/operations/high-availability.md` names it in its table of Leader tasks and in the Leader's handover.
 - **Fake Slack server** (`internal/fakes/fakeslack/socket.go`, `presses.go`): `/link/` accepts a WebSocket for a
   ticket that `apps.connections.open` issued, once, sends `hello` with `num_connections` — the app's open sockets plus
   `extra_connections` from `/_fake/config` — and `/_fake/socket` scripts `disconnect` with a reason, a missing `hello`
-  and `too_many_websockets`; `/_fake/press` sends the payload as an `interactive` envelope through a socket of the app
-  when it has one and no `request_url`, and records the confirmation and the time between them.
-- **Architecture** (`design/architecture.md`): the Socket Mode flow and the Leader task.
+  and `too_many_websockets`, ends the newest socket without `disconnect` (`close`) and sends an envelope of a given
+  type (`send`); its `GET` shows each app's open and opened sockets, its `hello`s and whether the last planned refresh
+  overlapped, and every envelope with its confirmation; `/_fake/press` sends the payload as an `interactive` envelope
+  through a socket of the app when it has one and no `request_url`, or as `transport` (`http` or `socket`) names, and
+  records the confirmation and the time between them.
+- **Architecture** (`design/architecture.md`): the Socket Mode flow and the Leader task; the clock table of S-020
+  gains the socket's waits (real clock) and `slack_socket_hello_at` (business clock).
 - **Defaults**: `slack.hello_timeout`, `slack.socket_backoff`, `connection.slack.event_mode`.
 
 ## Steps
@@ -228,6 +256,9 @@ None.
   warning may lag the second installation by that much, and the check says when the count was taken. Right after a
   Leader crashed, Slack may still count the old Leader's socket until it notices that it is gone (a Pending fact), so a
   warning then is cleared by a later `hello`; the live check with the operator looks for it after a stopped replica.
+- The Request log page hides the answer of a record without a status and calls it "No answer"; showing an envelope's
+  confirmation there is left to S-103, which owns the Slack pages, so that this story stays a backend story. Here the
+  record is checked through the API.
 
 ## Coverage
 
@@ -239,7 +270,7 @@ None.
 | C-24.FR-17 | partial | the socket's log events and the no-Leader texts |
 | C-24.AC-3 | partial | the socket through the proxy; the Web API requests S-097, S-098 |
 | C-24.AC-10 | full | |
-| C-24.AC-17 | partial | envelopes; the callback S-100 |
+| C-24.AC-17 | partial | envelopes; the callback S-100, the page showing an envelope's confirmation S-103 |
 | C-24.AC-19 | partial | Socket Mode on the test workspace; HTTP S-100 |
 | C-02.FR-10 | partial | the Leader task `slack_socket_mode` |
 | C-02.FR-20 | partial | WebSocket connections through the outbound package |
