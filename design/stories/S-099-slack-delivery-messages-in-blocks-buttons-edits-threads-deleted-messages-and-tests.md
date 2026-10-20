@@ -23,7 +23,6 @@ files_touched:
   - internal/messages/safe_test.go
   - internal/messages/render.go
   - internal/messages/render_test.go
-  - internal/messages/preview.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/delivery/delivery.go
@@ -39,7 +38,6 @@ files_touched:
   - internal/destinations/preview.go
   - internal/mentions/mentions.go
   - internal/mentions/mentions_test.go
-  - internal/api/templates.go
   - internal/api/templates_test.go
   - internal/api/destinations_test.go
   - internal/fakes/fakeslack/fakeslack.go
@@ -48,7 +46,6 @@ files_touched:
   - internal/runtime/runtime.go
   - internal/archlint/secretleak.go
   - test/e2e/slack_test.go
-  - web/src/components/template-preview.tsx
 acceptance:
   - "[C-24.FR-4, C-24.AC-5] A new Alert Group creates, through the delivery worker, one `chat.postMessage` whose `text` and top `section` are the summary line — the status emoji, `#N` and the title — with one attachment in the firing colour whose blocks are a `section` with the heading linked to the Alert Group page, a `section` with the body whose line of links starts with \"Open in Muster\", a `context` with \"Muster v<version>\" and no image, and an `actions` block; the request names `blocks` and `attachments` and sets `unfurl_links` and `unfurl_media` to `false`; no block is `rich_text` or `markdown` (`layout_test.go`, a golden request per status)."
   - "[C-24.FR-5, C-24.AC-5] A firing Root message carries Ack (`primary`), Resolve and the `static_select` \"Snooze…\" whose options are the Route's durations and then the Snooze presets; an acknowledged one Unack, Resolve (`primary`) and the menu; a snoozed one Ack (`primary`), Unsnooze and Resolve; a resolved one no `actions` block; a Reminder \"Still on it\" (`primary`) and Unack; no message has two `primary` buttons or any `danger`; every `value` is a signed action id of at most 150 bytes and every `action_id` is unique in its block (`layout_test.go`)."
@@ -143,9 +140,12 @@ issue: 308
   into the channel without `thread_ts`, a tombstone for a deleted root with replies, and `not_in_channel` for a channel
   the bot left; `GET /_fake/messages?channel=…` lists them, and `POST /_fake/delete` deletes one as a person would.
   `chat.postEphemeral` is only answered here; S-100 lists the ephemeral messages.
-- **Template preview** (`web/src/components/template-preview.tsx`): a `mrkdwn` branch wherever the type check asks
-  for one after the spec change; the option in the Route editor comes with S-103.
-- **Secrets** (lint 5): the probe `slack_connections` gains a Publication and an edit that fail.
+- **Template preview**: the SPA needs no change — its preview's format is a local union of `markdown` and `html`, the
+  generated enums widen and nothing switches over them exhaustively — and neither do `internal/api/templates.go` and
+  `internal/messages/preview.go`, which pass the markup through; the option in the Route editor comes with S-103.
+- **Secrets** (lint 5): the probe `slack_connections` gains the Slack adapter of its Destination, whose Publication and
+  edit fail, whose edit finds the Root message deleted and reads the channel, whose misplaced reply cannot be deleted,
+  and its test message and preview.
 - **Defaults**: `destination.slack.limiter`, `connection.slack.limiter`, `delivery.broken_probe_interval`,
   `delivery.transient_budget`, `message.alerts_listed`.
 
@@ -164,9 +164,11 @@ issue: 308
 ```sh
 make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011; an Integration "lab" with its fake receiver, NOTIFY, ADV and AG as in
-# S-020 and S-028; the On-call policy in P as in S-025, with its ack timeout and Reminders off; the Connection "sl" (C)
-# and the Destination "alerts" on C0FAKEALERTS (D) as in S-098. Messages are picked by their summary line, so the
-# database need not be fresh.
+# S-020 and S-028; the On-call policy in P as in S-025, with its ack timeout off, a Reminder 600 seconds after an
+# acknowledgement and no automatic Unacknowledge ("ack_timeout":{"enabled":false,"first_interval_seconds":900},
+# "reminders":{"enabled":true,"first_interval_seconds":600,"cap_seconds":14400},"auto_unacknowledge":false); the
+# Connection "sl" (C) and the Destination "alerts" on C0FAKEALERTS (D) as in S-098. Messages are picked by their
+# summary line, so the database need not be fresh.
 API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FS=127.0.0.1:18097/_fake
 R=$(curl -s "${H[@]}" $API/routes -d "{\"name\":\"sl\",\"matchers\":[{\"label\":\"team\",\"op\":\"=\",\"value\":\"sl\"}],\"urgent\":false,
   \"group_key\":[\"alertname\"],\"destination_ids\":[\"$D\"],\"policy\":$P}" | jq -r .id)
@@ -206,17 +208,18 @@ TS=$(MSG DiskFull '.ts' | tr -d '"'); curl -s -X POST $FS/delete -d "{\"channel\
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/unacknowledge > /dev/null; sleep 2
 MSG DiskFull '.attachments[0].blocks[1].text.text | test("The previous message was deleted at [0-9]{2}:[0-9]{2}")'   # true
 curl -s -b jar $API/destinations/$D | jq -r .health.state                      # healthy
-# a Root message deleted before any reply: the reply lands in the channel and is deleted at once
-FIRE s2 CpuHigh j1; G2=$(AG 'pod%3D%22j1%22'); TS=$(MSG CpuHigh '.ts' | tr -d '"')
+# a Root message deleted before any reply: the next Reminder, a reply alone, lands in the channel and is deleted at once
+FIRE s2 CpuHigh j1; G2=$(AG 'pod%3D%22j1%22')
+curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null; sleep 1; TS=$(MSG CpuHigh '.ts' | tr -d '"')
 curl -s -X POST $FS/delete -d "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\"}" > /dev/null
-curl -s -X PUT $FAM/groups/s2/alerts/j2 -d '{"labels":{"team":"sl","pod":"j2"}}' > /dev/null
-NOTIFY s2 '{"reason":"new alerts added"}'; ADV 61; sleep 2
+ADV 600; sleep 2
 curl -s $FS/requests | jq '[.[] | select(.path == "/api/chat.delete")] | length >= 1'   # true
 curl -s -b jar "$API/alert-groups/$G2/timeline" | jq '[.items[] | select(.kind == "delivery" and .delivery_event == "republished")] | length'   # 1
+MSG CpuHigh '.replies | length'                                                 # 1: the Reminder, under the new Root message
 
 # C-24.FR-8, AC-8: 429 for the Connection, markup rejected, an edit window
 FAULT chat.update 429 ratelimited 1
-curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null
+curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null
 sleep 3; curl -s $FS/requests | jq -c '[.[] | select(.path == "/api/chat.update")] | (map(.status) | rindex(429)) as $i | .[$i].at_ms as $t |
   [.[$i + 1:][] | (.at_ms - $t) / 1000] | length > 0 and all(. >= 1 and . < 2)'   # true
 FAULT chat.postMessage 200 invalid_blocks
@@ -280,6 +283,11 @@ None.
   fake answers it anyway, as a guard for a later change.
 - The fake does not split a long `text` (F-077), answer with shortcodes (F-079), cut an attachment's text (F-080) or
   turn a `markdown` block into `rich_text` (F-081): Muster relies on none of them.
+- A Root message deleted before any reply meets a reply first only when the next change is a reply alone, such as a
+  Reminder: a new Alert also edits the Root message, and the worker sends an Alert Group's edit before its replies, so
+  that edit finds the deletion (`message_not_found`, `conversations.info`, published again) and no reply lands in the
+  channel. The Verification and `test/e2e/slack_test.go` therefore delete the Root message of an acknowledged Alert
+  Group and let its Reminder, 600 seconds later on the development clock, find the deletion.
 - The live check posts to the maintainer's `#alerts` and deletes what it posted afterwards (F-087: the bot deletes its
   own messages); a Thread with replies leaves a tombstone, which the operator may delete in the client.
 
