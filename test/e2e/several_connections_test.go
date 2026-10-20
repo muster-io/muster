@@ -624,8 +624,8 @@ func TestSeveralConnectionsRoute(t *testing.T) {
 		}
 	}
 
-	// C-18.FR-10, C-22.FR-15: the Connections an account can be linked through, every messenger, the demo Bridge
-	// Connection among them, and two or more of Mattermost and Telegram.
+	// C-18.FR-10, C-22.FR-15, C-24.FR-12: the Connections an account can be linked through, every messenger, the demo
+	// Bridge and Slack Connections among them, and two or more of Mattermost and Telegram.
 	var names []string
 	for _, x := range e.api.json(http.MethodGet, "/api/v1/me/account-links/connections", "",
 		http.StatusOK)["items"].([]any) {
@@ -633,8 +633,8 @@ func TestSeveralConnectionsRoute(t *testing.T) {
 		names = append(names, fmt.Sprint(c["messenger"], " ", c["name"]))
 	}
 	want := []string{"bridge " + devmode.BridgeConnectionName, "mattermost " + devmode.ConnectionName,
-		"mattermost mm-2", "mattermost mm-a", "mattermost mm-b", "telegram " + devmode.TelegramConnectionName,
-		"telegram tg-b"}
+		"mattermost mm-2", "mattermost mm-a", "mattermost mm-b", "slack " + devmode.SlackConnectionName,
+		"telegram " + devmode.TelegramConnectionName, "telegram tg-b"}
 	if !slices.Equal(names, want) {
 		t.Errorf("linkable connections %v, want %v", names, want)
 	}

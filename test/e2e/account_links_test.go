@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
@@ -1059,5 +1061,343 @@ func TestBridgeAccountLinks(t *testing.T) {
 	}
 	if len(e.secrets) < 8 {
 		t.Errorf("only %d secrets were checked", len(e.secrets))
+	}
+}
+
+// slackLinksEnv is the slk environment with the people and Audit log checks of linksEnv: accounts linked through the
+// Connection "sl" of the fake Slack server's second app and through the demo Connection "Dev Slack" of its first.
+type slackLinksEnv struct {
+	*linksEnv
+	s   *slk
+	dev string
+}
+
+func (e *slackLinksEnv) requestSlackCode(p linker, conn, handle string) answer {
+	e.t.Helper()
+	return p.session.do(http.MethodPost, "/api/v1/me/account-links/slack",
+		fmt.Sprintf(`{"connection_id":%q,"handle":%q}`, conn, handle))
+}
+
+func (e *slackLinksEnv) confirmSlackCode(p linker, request, code string) answer {
+	e.t.Helper()
+	return p.session.do(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+request+
+		`","code":"`+code+`"}`)
+}
+
+// slackDMs are the direct messages the bot of the fake's app sent to user.
+func (e *slackLinksEnv) slackDMs(app, user string) []fakeslack.Message {
+	e.t.Helper()
+	var out []fakeslack.Message
+	decode(e.t, call(e.t, http.MethodGet, e.s.fs+"/dms?"+url.Values{"app": {app}, "user": {user}}.Encode(), ""), &out)
+	return out
+}
+
+// slackCodeFor requests a code for p through the Connection conn to the account with handle, and returns the request
+// id and the code from the direct message the bot of app sent to user.
+func (e *slackLinksEnv) slackCodeFor(p linker, conn, handle, app, user string) (string, string) {
+	e.t.Helper()
+	before := len(e.slackDMs(app, user))
+	a := e.requestSlackCode(p, conn, handle)
+	var st struct {
+		RequestID string  `json:"request_id"`
+		Attempts  int     `json:"attempts_remaining"`
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if a.status != http.StatusAccepted {
+		e.t.Fatalf("a slack code for %s = %d %s", handle, a.status, a.body)
+	}
+	decode(e.t, a, &st)
+	if st.Attempts != 5 || st.ExpiresAt == nil {
+		e.t.Errorf("the started code request %s", a.body)
+	}
+	dms := e.slackDMs(app, user)
+	if len(dms) != before+1 {
+		e.t.Fatalf("%d direct messages to %s after %d", len(dms), user, before)
+	}
+	text, code, _ := strings.Cut(dms[len(dms)-1].Text, "\n\n")
+	if text != textCodeRequest || !linkCode.MatchString(code) {
+		e.t.Fatalf("the code message %q", dms[len(dms)-1].Text)
+	}
+	e.secrets = append(e.secrets, code)
+	return st.RequestID, code
+}
+
+// slackProblem is the code, pointer and detail of the first error of a 422.
+func slackProblem(t *testing.T, a answer) string {
+	t.Helper()
+	var p struct {
+		Errors []struct {
+			Code    string `json:"code"`
+			Pointer string `json:"pointer"`
+			Detail  string `json:"detail"`
+		} `json:"errors"`
+	}
+	decode(t, a, &p)
+	if a.status != http.StatusUnprocessableEntity || len(p.Errors) == 0 {
+		return fmt.Sprintf("%d %s", a.status, a.body)
+	}
+	return p.Errors[0].Code + " " + p.Errors[0].Pointer + " " + p.Errors[0].Detail
+}
+
+// TestSlackAccountLinks is the Verification of S-102 against `muster dev` and the fake Slack server, with no link row
+// inserted by hand: the Slack Connections to link through (C-24.FR-12); a code for an email in other letter case,
+// sent by direct message to the account's user id, and the link it makes with the account's id, name and display name,
+// confirmed by the bot (C-24.AC-14); a name found on the second page of users.list, five wrong codes and the right one
+// refused after them; no account, a name two accounts share and the direct messages Slack refuses; the limits of
+// account_link.slack_code_requests; an account linked to another User (C-18.FR-5); a second link through one
+// Connection replacing the first (C-18.FR-4); tokens refused where only the web session may act; the codes masked in
+// the Request log (C-23.FR-3); Alice mentioned as <@U0FAKEALICE> and Dora by her name, and the footer naming Alice by
+// her link's display name (C-24.FR-6, AC-15, C-12.FR-12); a press of Alice's account running as her, and answered "not
+// linked" once she unlinked it; and no code in the log.
+func TestSlackAccountLinks(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	s := newSlack(t, h, r)
+	t.Cleanup(func() {
+		restore(t, http.MethodDelete, s.fs+"/faults", "")
+		restore(t, http.MethodPut, s.fs+"/config", `{"request_url":{"b":null}}`)
+	})
+	e := &slackLinksEnv{linksEnv: &linksEnv{timersEnv: &timersEnv{tgd: &tgd{mm: s.mm}}}, s: s}
+	e.dev = s.connectionNamed(devmode.SlackConnectionName)
+	alice := e.person("Alice A.", "alice", "responder")
+	bob := e.person("Bob B.", "bob", "responder")
+	dora := e.person("Dora D.", "dora", "responder")
+	slackLink := func(p linker) map[string]any {
+		t.Helper()
+		for _, x := range p.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)["items"].([]any) {
+			if l := x.(map[string]any); l["messenger"] == "slack" && l["connection"].(map[string]any)["id"] == s.conn {
+				return l
+			}
+		}
+		return nil
+	}
+
+	// C-24.FR-12: the Slack Connections that are not deleted, with only their id, name and messenger.
+	var got []string
+	for _, x := range alice.session.json(http.MethodGet, "/api/v1/me/account-links/connections", "",
+		http.StatusOK)["items"].([]any) {
+		c := x.(map[string]any)
+		if c["messenger"] != "slack" {
+			continue
+		}
+		got = append(got, c["name"].(string))
+		if keys := slices.Sorted(maps.Keys(c)); !slices.Equal(keys, []string{"id", "messenger", "name"}) {
+			t.Errorf("keys %v of %v", keys, c["name"])
+		}
+	}
+	if !slices.Equal(got, []string{devmode.SlackConnectionName, "sl"}) {
+		t.Errorf("slack connections %v", got)
+	}
+
+	// C-24.FR-12, AC-14: an email in other letter case, the code by direct message, the link and its confirmation.
+	rid, code := e.slackCodeFor(alice, s.conn, "Alice@Example.ORG", fakeslack.AppB, fakeslack.UserAlice)
+	l := alice.session.json(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+rid+
+		`","code":"`+strings.ToLower(code)+`"}`, http.StatusCreated)
+	if l["messenger"] != "slack" || l["external_id"] != fakeslack.UserAlice || l["username"] != "alice" ||
+		l["display_name"] != "Alice Smith" || l["connection"].(map[string]any)["name"] != "sl" {
+		t.Errorf("alice's slack link %v", l)
+	}
+	dms := e.slackDMs(fakeslack.AppB, fakeslack.UserAlice)
+	if got := dms[len(dms)-1].Text; got != "Linked to Muster user Alice A." {
+		t.Errorf("the confirmation %q", got)
+	}
+	if d, _, transport := e.lastAudit("account_link.link"); d["messenger"] != "slack" ||
+		d["external_id"] != fakeslack.UserAlice || d["display_name"] != "Alice Smith" || transport != "ui" {
+		t.Errorf("the link entry %v through %s", d, transport)
+	}
+
+	// C-24.AC-14: a name on the second page of users.list; five wrong codes, then the right one, refused.
+	pages := len(s.requests("users.list"))
+	rid, code = e.slackCodeFor(bob, s.conn, "@BOB", fakeslack.AppB, fakeslack.UserBob)
+	lists := s.requests("users.list")[pages:]
+	if len(lists) != 3 {
+		t.Fatalf("%d pages of users.list", len(lists))
+	}
+	for i, req := range lists {
+		form, _ := url.ParseQuery(req.Body)
+		if form.Get("limit") != "200" || (form.Get("cursor") == "") != (i == 0) {
+			t.Errorf("page %d: %s", i+1, req.Body)
+		}
+	}
+	wrong := "22222222"
+	if code == wrong {
+		wrong = "33333333"
+	}
+	for i := range 5 {
+		a := e.confirmSlackCode(bob, rid, wrong)
+		if got := fieldError(t, a); got != "link_code_invalid /code" || attemptsRemaining(t, a) != 4-i {
+			t.Errorf("wrong code %d: %s, %d left", i+1, got, attemptsRemaining(t, a))
+		}
+	}
+	if a := e.confirmSlackCode(bob, rid, code); fieldError(t, a) != "link_code_invalid /code" ||
+		attemptsRemaining(t, a) != 0 {
+		t.Errorf("the right code after five wrong ones: %s", a.body)
+	}
+	e.wantRejection("wrong_code", "slack", fakeslack.UserBob)
+	rid, code = e.slackCodeFor(bob, s.conn, "bob", fakeslack.AppB, fakeslack.UserBob)
+	l = bob.session.json(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+rid+
+		`","code":"`+code+`"}`, http.StatusCreated)
+	if l["external_id"] != fakeslack.UserBob || l["username"] != "bob" || l["display_name"] != "Bob Jones" {
+		t.Errorf("bob's slack link %v", l)
+	}
+
+	// C-24.FR-12: no account, a name two accounts share, and the direct messages Slack refuses for the person.
+	for handle, want := range map[string]string{
+		"Sam":                 "handle_ambiguous /handle Several Slack accounts have this name. Enter the email instead.",
+		"nobody":              "handle_not_found /handle No Slack account with this email or name was found.",
+		"bob.old@example.org": "handle_not_found /handle No Slack account with this email or name was found.",
+		"helper":              "handle_not_found /handle No Slack account with this email or name was found.",
+	} {
+		if got := slackProblem(t, e.requestSlackCode(dora, s.conn, handle)); got != want {
+			t.Errorf("%s: %s", handle, got)
+		}
+	}
+	for _, code := range []string{"cannot_dm_bot", "user_not_found", "channel_not_found"} {
+		s.fault("chat.postMessage", http.StatusOK, code, 0)
+		if got := slackProblem(t, e.requestSlackCode(dora, s.conn, "carol")); got !=
+			"direct_message_refused /handle The bot cannot send a direct message to this Slack account." {
+			t.Errorf("%s: %s", code, got)
+		}
+	}
+	if dms := e.slackDMs(fakeslack.AppB, fakeslack.UserCarol); len(dms) != 0 {
+		t.Errorf("a refused direct message reached carol: %+v", dms)
+	}
+
+	// C-18.FR-5: an account linked to another User; it is checked after the limits, so it comes before bob's third
+	// request for his account.
+	if a := e.requestSlackCode(alice, s.conn, "bob@example.org"); a.status != http.StatusConflict ||
+		codeOf(t, a) != "account_linked_elsewhere" {
+		t.Errorf("bob's account for alice = %d %s", a.status, a.body)
+	}
+	e.wantRejection("conflict", "slack", fakeslack.UserBob)
+
+	// account_link.slack_code_requests: bob's two earlier codes and this one are the three an hour for his account.
+	e.slackCodeFor(bob, s.conn, "bob", fakeslack.AppB, fakeslack.UserBob)
+	if n := retryAfter(t, e.requestSlackCode(bob, s.conn, "bob")); n < 1 || n > 3600 {
+		t.Errorf("the fourth request for bob's account: Retry-After %d", n)
+	}
+
+	// C-18.FR-4: a second link of dora through Dev Slack replaces her first.
+	rid, code = e.slackCodeFor(dora, e.dev, "carol", fakeslack.AppA, fakeslack.UserCarol)
+	dora.session.json(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+rid+
+		`","code":"`+code+`"}`, http.StatusCreated)
+	rid, code = e.slackCodeFor(dora, e.dev, "dora@example.org", fakeslack.AppA, fakeslack.UserDora)
+	dora.session.json(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+rid+
+		`","code":"`+code+`"}`, http.StatusCreated)
+	if got := links(t, dora.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)); !slices.Equal(
+		got, []string{"slack " + devmode.SlackConnectionName + " " + fakeslack.UserDora + " dora"}) {
+		t.Errorf("dora's links %v", got)
+	}
+	if d, _, _ := e.lastAudit("account_link.unlink"); d["reason"] != "replaced" ||
+		d["external_id"] != fakeslack.UserCarol || d["messenger"] != "slack" {
+		t.Errorf("the replaced link %v", d)
+	}
+
+	// C-18.AC-4: tokens, an Admin's included, cannot start or confirm a link.
+	for _, who := range []patClient{alice.pat, e.api} {
+		for path, body := range map[string]string{
+			"/api/v1/me/account-links/slack":              `{"connection_id":"` + s.conn + `","handle":"alice"}`,
+			"/api/v1/me/account-links/slack/confirmation": `{"request_id":"ARAAAAAAAAAAA1","code":"22222222"}`,
+		} {
+			if a := who.do(http.MethodPost, path, body); a.status != http.StatusForbidden ||
+				codeOf(t, a) != "session_required" {
+				t.Errorf("POST %s with a token = %d %s", path, a.status, a.body)
+			}
+		}
+	}
+
+	// C-23.FR-3: the codes are masked in the Request log of the direct messages.
+	masked := 0
+	for _, conn := range []string{s.conn, e.dev} {
+		for _, rec := range s.requestLog("connection=" + conn + "&operation=chat.postMessage") {
+			full, raw := s.requestRecord(rec["id"].(string))
+			for _, code := range e.secrets {
+				if strings.Contains(raw, code) {
+					t.Errorf("a code in the record %s", rec["id"])
+				}
+			}
+			if body, _ := full["request_body"].(string); strings.Contains(body, textCodeRequest) &&
+				strings.Contains(body, "[redacted]") {
+				masked++
+			}
+		}
+	}
+	if masked < 6 {
+		t.Errorf("%d records with a masked code", masked)
+	}
+
+	// C-24.FR-6, AC-15, C-12.FR-12: Alice by <@U0FAKEALICE>, Dora by her name, and the footer by Alice's link.
+	d := s.api.do(http.MethodGet, "/api/v1/destinations/"+s.dest, "")
+	var dest map[string]any
+	decode(t, d, &dest)
+	mentions := dest["mentions"].(map[string]any)
+	mentions["new_alert_group"] = map[string]any{"everyone": "none", "user_ids": []string{alice.id, dora.id},
+		"groups": []string{}}
+	body, _ := json.Marshal(map[string]any{"type": dest["type"], "name": dest["name"],
+		"connection_id": dest["connection_id"], "channel_id": dest["channel_id"], "limiter": dest["limiter"],
+		"mentions": mentions})
+	s.api.json(http.MethodPut, "/api/v1/destinations/"+s.dest, string(body), http.StatusOK, "If-Match",
+		d.header.Get("ETag"))
+	s.fire("m1", "MentionMe", "u1", `{"team":"sl","cluster":"m","pod":"u1"}`)
+	g := s.groupOf("m")
+	root := s.root(s.number(g), "MentionMe")
+	top := ""
+	if len(root.Top) > 0 && root.Top[0].Text != nil {
+		top = root.Top[0].Text.Text
+	}
+	for _, text := range []string{root.Text, top} {
+		if !strings.Contains(text, "<@"+fakeslack.UserAlice+">") || !strings.Contains(text, "Dora D.") ||
+			strings.Contains(text, "<@"+fakeslack.UserDora+">") {
+			t.Errorf("the mentions in %q", text)
+		}
+	}
+	if strings.Contains(string(root.Message.Attachments), "<@") {
+		t.Errorf("a Mention in the attachment %s", root.Message.Attachments)
+	}
+	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/acknowledge", "", http.StatusOK)
+	eventually(t, "the footer naming alice", func() bool {
+		return strings.HasSuffix(s.message(root.TS).body(t), "Acknowledged by Alice Smith")
+	})
+
+	// C-24.AC-14: a press of Alice's account runs as her; once she unlinked it, a press is answered "not linked".
+	s.httpMode()
+	s.pressed(root.TS, "unack", fakeslack.UserAlice, nil)
+	eventually(t, "the unacknowledgement by alice", func() bool { return s.alertGroup(g)["status"] == "firing" })
+	var unacked []timelineEntry
+	for _, x := range s.timeline(g, "") {
+		if x.Kind == "status" && x.Event == "unacknowledged" {
+			unacked = append(unacked, x)
+		}
+	}
+	if len(unacked) != 1 || unacked[0].Actor.Transport != "slack" || unacked[0].Actor.Name != "Alice A." {
+		t.Errorf("unacknowledged %+v", unacked)
+	}
+	l = slackLink(alice)
+	if l == nil {
+		t.Fatal("alice has no link through sl")
+	}
+	if a := alice.session.do(http.MethodDelete, "/api/v1/me/account-links/"+l["id"].(string), ""); a.status !=
+		http.StatusNoContent {
+		t.Fatalf("unlink = %d %s", a.status, a.body)
+	}
+	s.waitActions(root.TS, "ack")
+	before := len(s.ephemerals())
+	s.pressed(root.TS, "ack", fakeslack.UserAlice, nil)
+	if got := s.answered(before, 1)[0]; got.Text != slackNotLinked || got.User != fakeslack.UserAlice {
+		t.Errorf("the answer to an unlinked press %+v", got)
+	}
+	if st := s.alertGroup(g)["status"]; st != "firing" {
+		t.Errorf("an unlinked press changed %s: %v", g, st)
+	}
+
+	// Secrets (lint 5): no link code reaches the log.
+	out := r.Output()
+	for _, c := range e.secrets {
+		if c != "" && strings.Contains(out, c) {
+			t.Error("a link code reached the log")
+		}
+	}
+	if len(e.secrets) < 6 {
+		t.Errorf("only %d codes were checked", len(e.secrets))
 	}
 }

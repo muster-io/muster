@@ -783,13 +783,16 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   new link replaces the old one in one transaction (delete, insert, Audit log). The composite foreign key
   `(connection_id, messenger)` makes a Telegram link name a Telegram Connection, a Mattermost one a Mattermost
   Connection, a Bridge one a Bridge Connection and a Slack one a Slack Connection. `display_name` (nullable) is the
-  account's name as a bridge reported it, which Bridge links store for Mentions and the footer. A generated column
+  account's name as a bridge reported it, or a Slack account's display name (`profile.display_name`, else
+  `profile.real_name`, C-24.FR-12), which Bridge and Slack links store for Mentions and the footer. A generated column
   cannot change its expression before PostgreSQL 17, so migration 0011 adds the new column, drops the two unique
   constraints and the old column, renames the new one and adds the constraints again under their old names, under one
   exclusive lock of the small table; the values of Mattermost and Telegram links do not change, so an earlier binary
   reads and writes the column and catches the unique violations by name as before. Its down migration deletes the Bridge
   links and swaps the column back the same way. S-076 writes `display_name` for every Bridge link, and the footer names
-  a User linked through a Bridge by it, else by the link's `username` (C-22.FR-16).
+  a User linked through a Bridge by it, else by the link's `username` (C-22.FR-16). S-102 writes `username` (the Slack
+  account's `name`) for every Slack link and `display_name` when the account has one; the footer names a User linked
+  through a Slack Connection by the link's `display_name`, else by their Muster display name (C-24.FR-6).
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
@@ -805,12 +808,15 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `account_link.bridge_code_requests`, as `account_link_requests_target_idx` backs Mattermost's; the per-User count
   uses `account_link_requests_user_idx`. The composite foreign key `(connection_id, messenger)` binds a Bridge request
   to a Bridge Connection. A Slack request (migration 0018, C-24.FR-12) is a hashed code sent by direct message with its
-  target account and `attempts` (`account_link.slack_code`), as a Mattermost one is:
+  target account — `target_external_id` (the user id), `target_username` (its `name`) and `target_display_name`, which
+  the link takes on confirmation — and `attempts` (`account_link.slack_code`), as a Mattermost one is:
   `account_link_requests_slack_target_check` requires its `target_external_id`, the partial index
   `account_link_requests_slack_target_idx` backs the per-target limit of `account_link.slack_code_requests`, and the
-  composite foreign key binds it to a Slack Connection. A request is deleted by `short_lived_pruning`
-  `account_link.request_prune_after` past its `expires_at`, consumed and voided ones included, whatever its messenger,
-  which keeps the hour the limits count; the batched delete scans the small table without an index of its own.
+  composite foreign key binds it to a Slack Connection; a new request of the same User through the Connection voids the
+  pending one, and the per-User count of `account_link.slack_code_requests` uses `account_link_requests_user_idx`. A
+  request is deleted by `short_lived_pruning` `account_link.request_prune_after` past its `expires_at`, consumed and
+  voided ones included, whatever its messenger, which keeps the hour the limits count; the batched delete scans the
+  small table without an index of its own.
 
 ### 4.6 Integrations and ingestion
 

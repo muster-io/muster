@@ -77,9 +77,15 @@ token, the channels of each app, merged by id, a page size for `conversations.li
 its Interactivity Request URL, and the `extra_connections` of each app, the Socket Mode connections of other programs
 that its `hello` counts; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other",
 without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in every channel with the
-bot. In Socket Mode `apps.connections.open` answers an address `ws://127.0.0.1:18097/link/?ticket=…&app_id=…` with a
-single-use ticket; `/link/` accepts one WebSocket for it and sends `hello`, whose `num_connections` counts the app's
-open sockets that said `hello` and its `extra_connections`, or `too_many_websockets` when that would exceed ten.
+bot. Each app's directory pages them with `users.list` over three pages, beside Slackbot, two accounts whose display
+name is "Sam", a bot whose display name is "Bob", the app's bot user and a deleted account whose display name is "bob";
+`users.lookupByEmail` finds them by `alice@example.org` and the like in any letter case, `users.info` by user id, and
+`conversations.open` answers the bot's direct chat with one of them. `chat.postMessage` to a person's user id posts into
+that direct chat, `cannot_dm_bot` for a bot and `user_not_found` for a deleted account, and
+`GET /_fake/dms?user=U…&app=a|b` lists what the bot sent there, such as an Account link code. In Socket Mode
+`apps.connections.open` answers an address `ws://127.0.0.1:18097/link/?ticket=…&app_id=…` with a single-use ticket;
+`/link/` accepts one WebSocket for it and sends `hello`, whose `num_connections` counts the app's open sockets that
+said `hello` and its `extra_connections`, or `too_many_websockets` when that would exceed ten.
 `GET /_fake/socket` shows each app's open and opened sockets, its `hello`s and whether the last planned refresh
 overlapped the next socket, and every envelope sent with its confirmation; `POST /_fake/socket` sends the newest socket
 of an app a `disconnect` with a reason, arms sockets without `hello` or refused with `too_many_websockets`, ends the
