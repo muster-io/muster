@@ -7,10 +7,10 @@ read [Connect a messenger through a bridge](bridge.md) instead.
 
 ## What a bridge is, and when to write one
 
-Muster has native support for [Mattermost](mattermost.md) and [Telegram](telegram.md). For any other messenger, Muster
-talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit and reply to
-messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge reports it back
-to Muster as an **event**.
+Muster has native support for [Mattermost](mattermost.md), [Slack](slack.md) and [Telegram](telegram.md). For any other
+messenger, Muster talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit
+and reply to messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge
+reports it back to Muster as an **event**.
 
 Write a bridge when your team uses a messenger with a bot API that Muster does not support. A bridge does not need to
 live in Muster's repository, and it may stay closed: the protocol is MIT licensed (see [Licence](#licence)).

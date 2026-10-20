@@ -1,15 +1,15 @@
 # Link your messenger accounts
 
-An **Account link** ties your Telegram account, your account on a Mattermost server, or your account on a messenger
-that Muster reaches through a [Bridge](bridge.md), to your Muster User. With it, a button you press under an Alert
-Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed in — and Mentions and
-footers in the messenger name you.
+An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
+or your account on a messenger that Muster reaches through a [Bridge](bridge.md), to your Muster User. With it, a button
+you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
+in — and Mentions and footers in the messenger name you.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
-Mattermost Connection, since each Connection is its own server, and so does an account reached through a Bridge, per
-Bridge Connection. You have at most one Telegram account and one account per Mattermost or Bridge Connection; linking
-another one replaces the earlier link, and linking the same account again keeps its link and updates its username and
-name.
+Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
+and an account reached through a Bridge, per Bridge Connection. You have at
+most one Telegram account and one account per Mattermost, Slack or Bridge Connection; linking another one replaces the
+earlier link, and linking the same account again keeps its link and updates its username and name.
 
 ## Why links start in your profile
 
@@ -48,6 +48,31 @@ codes an hour, whoever asks (`account_link.mattermost_code_requests`); beyond th
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](mattermost.md#direct-messages).
+
+## Link Slack
+
+1. In your profile, open **Messenger accounts**, choose the Slack Connection, enter your Slack email or name and select
+   **Send code**. An email finds your account for sure; a name is compared with the name and the display name of each
+   account, regardless of case.
+2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
+   8-character code. It shows in the **Messages** tab of the bot's app, which is read-only, so you can read the code and
+   cannot write to the bot. If you did not ask for it, ignore it.
+3. Type the code into your profile within 10 minutes (`account_link.slack_code`); capital and small letters are the
+   same. The bot confirms "Linked to Muster user {your name}".
+
+If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
+Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
+and an account that is linked to another User is refused.
+
+A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
+A new request replaces your earlier one. You can request 5 codes an hour, and one Slack account gets at most 3 codes an
+hour, whoever asks (`account_link.slack_code_requests`); beyond that, wait until the oldest request is an hour old.
+
+The bot can send the code only while the Messages tab of its app is on. Slack documents that with it off it refuses the
+direct message, and then Muster answers that the Messages tab of the Slack app is turned off; the problem is
+`messages_tab_disabled`. Ask the admin of the Slack app to turn the tab on under **App Home**, then request a new code.
+The refused request still counts toward the limits above, so if you tried several times before the tab was on, you may
+have to wait up to an hour. See [Connect Slack](slack.md#what-the-manifest-sets).
 
 ## Link through a Bridge
 
@@ -96,21 +121,24 @@ that is linked to another User is refused.
 
 ## Several Connections of one messenger
 
-An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
-Telegram bot. What a link covers differs by messenger:
+An Organization may have several Connections of one messenger, such as two Mattermost bots on one server, two Slack apps
+or a second Telegram bot. What a link covers differs by messenger:
 
 - **Mattermost links are per Connection.** Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   **Link Mattermost** with each Connection. Your profile lists one row per Connection.
-- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections
-  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
-  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
+- **Slack links are per Connection.** Each Slack Connection is its own Identity space, even when two Connections serve
+  the same workspace with two apps: two Connections need two links, made one after the other from **Link Slack** with
+  each Connection. Your profile lists one row per Connection.
+- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections reach
+  the same bridge with two bots: two Connections need two links, made one after the other, and a token started for one
+  of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
 - **A Telegram link is valid for all Telegram bots.** Telegram has one Identity space, so the link you make through any
-  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
-  "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.
+  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as "Telegram ·
+  @<username> · for all Telegram bots", with "linked via <Connection>" below.
 
-One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group.
-This is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
+One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group. This
+is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
 Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
 Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.
 
@@ -128,7 +156,7 @@ from the web session only, as above. They cannot create a link for someone else.
 
 | Who pressed | What happens | The private answer |
 |---|---|---|
-| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret |
+| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost or Slack, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret |
 | A linked Viewer | Nothing changes | "You are not permitted to do this" |
 | A linked User who is disabled | Nothing changes | "Your Muster account is disabled" |
 | A linked Responder or Admin | The Command runs as that User | "Done: {command}", or why it was refused |

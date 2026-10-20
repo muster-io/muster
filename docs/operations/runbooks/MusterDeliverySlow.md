@@ -27,10 +27,11 @@ every Destination together. Changes made by Commands or timers are not measured,
 3. Look for a Storm: `muster_storm_active` by `route`, the log line `storm_started` and **Storms** on the System
    status page (`/admin/system-status`). More than `route.storm_threshold` (20) new Alert Groups per minute on a
    Route fill the limiters.
-4. Check Muster's own limiters. Telegram: `destination.telegram.limiter` (10 requests per minute per Destination,
-   sends and edits together, in the channel and its discussion group) and `connection.telegram.limiter`
-   (15 messages per second per Connection). A busy Destination waits for its limiter, which is expected and not a
-   fault.
+4. Check Muster's own limiters. Telegram: `destination.telegram.limiter` (10 requests per minute per Destination, sends
+   and edits together, in the channel and its discussion group) and `connection.telegram.limiter` (15 messages per
+   second per Connection). Slack: `destination.slack.limiter` (30 requests per minute per Destination, sends and edits
+   together) and `connection.slack.limiter` (50 requests per minute per Connection). A busy Destination waits for its
+   limiter, which is expected and not a fault.
 5. Check the latency of the calls themselves:
    `histogram_quantile(0.95, sum by (le, outcome) (rate(muster_client_request_duration_seconds_bucket{job="muster",client="delivery"}[15m])))`.
    Slow calls point at the network, a proxy or the messenger.

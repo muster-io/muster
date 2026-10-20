@@ -128,8 +128,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 
 `actor`
 :   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
-    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`,
-    for example `timer`.
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`), or `system` with the
+    `reason`, for example `timer`.
 
 `alert_group`
 :   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,

@@ -9,9 +9,10 @@
 
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It turns Alertmanager's
 notifications into Alert Groups — one problem with a number, a status and an Owner — and shows each Alert Group as one
-editable message in Mattermost, in Telegram, in any other messenger through a Bridge, or through an outgoing webhook.
-People acknowledge, resolve and snooze an Alert Group from the chat or the web UI, and Muster keeps its message
-current, sends a Loud update only when someone has to react and records everything in a Timeline and an Audit log.
+editable message in Mattermost, in Slack, in Telegram, in any other messenger through a Bridge, or through an outgoing
+webhook. People acknowledge, resolve and snooze an Alert Group from the chat or the web UI, and Muster keeps its
+message current, sends a Loud update only when someone has to react and records everything in a Timeline and an Audit
+log.
 
 <p align="center"><img src="docs/assets/demo.gif" alt="An Alert Group arrives in the Muster web UI, is acknowledged from its page and resolves" width="960"></p>
 
@@ -39,7 +40,7 @@ Muster is built in four layers. Each layer is usable on its own and is the base 
 - **L1 — Alert Groups in messengers (the first release).** Alertmanager webhooks read as Snapshots, with a Heartbeat
   per Integration; Routes and Group keys built in the UI; the Alert Group lifecycle — Firing, Acknowledged, Resolved,
   Snoozed — with Reopen, visible reasons and a Timeline; a web UI that also works on a phone; commands from the web UI,
-  the API, Mattermost, Telegram and Bridges; one reconciled Root message per Destination, with Threads and Storm
+  the API, Mattermost, Slack, Telegram and Bridges; one reconciled Root message per Destination, with Threads and Storm
   summaries; Bridges to any other messenger over the Bridge protocol, with the bridge libraries for Go,
   [`muster-bridge-go`](https://github.com/muster-io/muster-bridge-go), and for Python,
   [`muster-bridge-python`](https://github.com/muster-io/muster-bridge-python), and the example bridge in
