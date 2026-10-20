@@ -46,6 +46,7 @@ files_touched:
   - web/e2e/account-links.spec.ts
   - web/e2e/connection-checks.spec.ts
   - web/e2e/support.ts
+  - web/e2e/telegram-connection.spec.ts
 acceptance:
   - "[C-24.FR-2, C-24.AC-2, C-13.FR-14] \"Check connection\" in the Slack create form, with the fake server's tokens, shows the steps `token`, `scopes` and `app_token` and the bot, the workspace and the app, and afterwards no Connection exists; in the edit form of a saved Slack Connection with only the proxy changed it shows the step `dry_probe` alone, and with the tokens typed again the three steps through the new proxy — through `checkConnectionDraft` of S-105 (`web/e2e/connection-checks.spec.ts`)."
   - "[C-24.FR-1, C-24.FR-2, C-24.AC-18] Connections → New → Slack shows the name, the bot token, the event mode — Socket Mode with the app-level token, or HTTP with the Slack signing secret, the callback address and the hint of reference.md — the proxy form and the limiter, with \"Check connection\" before saving; a saved Slack Connection's page shows the same with its secrets write-only, the step-by-step check with the bot, the workspace and the app, the Socket Mode hint, and while the Leader's last `hello` counted another connection the warning of reference.md; Delete is offered while no Destination uses it."
@@ -108,7 +109,14 @@ issue: 312
     `<!channel>`, `<@U…>`) notifies nobody, since the preview does not neutralize it as delivery does (S-099).
   - A Socket Mode envelope's record (method `WEBSOCKET`, no status) is "Confirmed" in the list and shows Muster's
     confirmation as its answer (S-101).
-  - The channel filter drops a leading `#` before it is sent as `q`.
+  - The channel picker reads the bot's channels once per Connection, without `q`, and filters them by name in the
+    browser, a leading `#` dropped, as the Mattermost picker does: each list makes the server read up to five pages of
+    `conversations.list` with the Connection's limiter, which delivery shares, so a keystroke must not ask again. The
+    note of a truncated list points to entering the channel id.
+  - The skipped `app_token` step of a draft says to type the app-level token when the saved Connection stores none, and
+    that the stored one goes only with the stored bot token through the saved proxy when it stores one
+    (`app_token_status.set`), whatever the form.
+  - `web/e2e/telegram-connection.spec.ts`: it asserts `connections.hint`, which now names Slack.
   - "Link Slack" names `messages_tab_disabled` if the server ever sends it (a field code or the problem's code): the
     backend does not map Slack's `messages_tab_disabled` yet, which is left to a follow-up.
 - **Texts**: every string through i18next in `en.json` and `ru.json`, the texts of reference.md among them.
@@ -163,7 +171,7 @@ None.
 - Suggested commit: `feat(web): add slack connection and destination pages and linking slack accounts`.
 - The operation of the check before saving is S-105, a backend story, so that this one stays a frontend story; the
   panel here only sends the form's draft.
-- With 39 files the story stays under the size signal; the Connection and Destination halves share the check panels
+- With 40 files the story stays under the size signal; the Connection and Destination halves share the check panels
   and the labels, which splitting would touch twice.
 - Until a check of the saved Connection has stored the bot's name, a channel without the bot is refused with "Invite
   the bot to the channel." without the bot, as the server's own text is.

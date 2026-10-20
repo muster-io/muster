@@ -179,6 +179,7 @@ function EditForm({ current }: { current: Connection }) {
                 ? base.update_mode
                 : edited.update_mode
           }
+          appTokenStored={base.type === "slack" && base.app_token_status.set}
         />
       )}
       {/* The stored info, which a check refreshes without a new version of the Connection. */}

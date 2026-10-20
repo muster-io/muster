@@ -458,12 +458,14 @@ describe("the check of a Slack Connection", () => {
       .toHaveTextContent("App-level token: Skipped: type the app-level token to check it");
     await screen.unmount();
 
-    await render(
+    // An edit whose Connection stores an app-level token: the stored one does not go with this draft.
+    const stored = await render(
       providers(
         <ConnectionCheck
           connectionId={SLACK.id}
           type="slack"
           draft={{ ...draft, connection_id: SLACK.id }}
+          appTokenStored
         />,
       ),
     );
@@ -477,6 +479,23 @@ describe("the check of a Slack Connection", () => {
     await expect
       .element(page.getByTestId("connection-check-summary"))
       .toHaveTextContent("Connected as muster-dev-bot-b");
+    await stored.unmount();
+
+    // An HTTP Connection without a stored app-level token, switched to Socket Mode: there is none to send.
+    await render(
+      providers(
+        <ConnectionCheck
+          connectionId={SLACK.id}
+          type="slack"
+          draft={{ type: "slack", event_mode: "socket", proxy: NO_PROXY, connection_id: SLACK.id }}
+          appTokenStored={false}
+        />,
+      ),
+    );
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-step").nth(2))
+      .toHaveTextContent("App-level token: Skipped: type the app-level token to check it");
   });
 
   test("shows only the dry probe of an edit whose proxy changed", async () => {

@@ -2,9 +2,12 @@
 // Copyright The Muster Authors
 
 // The fields of a Slack Destination (C-24.FR-3, AC-18): a Slack Connection, then a channel from the channels its bot is
-// a member of — public and private, not archived — read with listConnectionChannels and filtered by name on the server
-// (a leading # of the filter is dropped, so "#alerts" finds alerts), with a note when Slack had more channels than the
-// list shows; or the channel id typed by hand, C… or G…, which the list also fills. The list needs connections:write,
+// a member of — public and private, not archived — read once with listConnectionChannels when a Connection is chosen,
+// as the Mattermost picker reads its list, and filtered by name in the browser (a leading # of the filter is dropped,
+// so "#alerts" finds alerts): the server reads up to five pages of conversations.list for each list, with the
+// Connection's limiter that delivery shares, so a keystroke must never call it again. When Slack had more channels than
+// the list shows, a note says to enter the id of a channel that is not listed; the channel id is typed by hand, C… or
+// G…, and the list also fills it. The list needs connections:write,
 // as it calls Slack with the bot token; without it only the id is typed. Saving runs the Destination check, the item
 // channel: a channel without the bot is refused with "Invite the bot to the channel: /invite @{bot}" next to the
 // channel, naming the bot of the Connection, and the saved Destination shows "#" and the channel's name the check
@@ -15,7 +18,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  getListConnectionChannelsQueryKey,
   useListConnectionChannels,
   useListConnections,
 } from "../api/gen/endpoints/connections/connections";
@@ -29,7 +31,6 @@ import { useCan } from "./app-shell";
 import { checkErrorText } from "./connection-check";
 import { destinationCheckDetail, destinationCheckText } from "./destination-check";
 import type { DestinationKind, TypeFieldsProps } from "./destination-form";
-import { PREVIEW_DELAY_MS, useDebounced } from "./template-preview";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -50,9 +51,17 @@ export function isSlackChannelId(text: string): boolean {
   return CHANNEL_ID.test(text.trim());
 }
 
-/** The filter of the channel list as listConnectionChannels takes it: trimmed, without a leading #. */
+/** The filter of the channel list: trimmed, without a leading #, since Slack names channels without it. */
 export function channelQuery(filter: string): string {
   return filter.trim().replace(/^#+/, "").trim();
+}
+
+/** The channels whose name contains the filter, regardless of case; all of them for an empty filter. */
+export function filterChannels(channels: readonly SlackChannel[], filter: string): SlackChannel[] {
+  const query = channelQuery(filter).toLowerCase();
+  return query === ""
+    ? [...channels]
+    : channels.filter((c) => c.name.toLowerCase().includes(query));
 }
 
 function isSlackConnection(c: { type: string }): c is SlackConnection {
@@ -99,25 +108,13 @@ export function SlackDestinationFields({
   const chosen = items.find((c) => c.id === value.connection_id);
   const [filter, setFilter] = useState("");
   const query = channelQuery(filter);
-  const settled = useDebounced(query, query, PREVIEW_DELAY_MS);
   const live = canList && !disabled && value.connection_id !== "";
-  const channels = useListConnectionChannels(
-    value.connection_id,
-    settled === "" ? undefined : { q: settled },
-    {
-      query: {
-        enabled: live,
-        staleTime: 30_000,
-        retry: false,
-        // Another filter keeps the channels shown until its list comes, but never another Connection's.
-        placeholderData: (previous, previousQuery) =>
-          previousQuery?.queryKey[0] === getListConnectionChannelsQueryKey(value.connection_id)[0]
-            ? previous
-            : undefined,
-      },
-    },
-  );
+  // One list per Connection, filtered here: a filter never asks Slack again.
+  const channels = useListConnectionChannels(value.connection_id, undefined, {
+    query: { enabled: live, staleTime: 30_000, retry: false },
+  });
   const list = slackList(channels.data);
+  const shown = filterChannels(list.items, filter);
   const connectionError = errors["/connection_id"];
   // A channel without the bot names the bot of the Connection, in the reader's language (C-24.FR-3).
   const channelProblem = problems["/channel_id"];
@@ -137,7 +134,13 @@ export function SlackDestinationFields({
     options.unshift({ id: value.connection_id, name: value.connection_id });
   }
   const typed = value.channel_id.trim();
-  const picked = list.items.some((c) => c.id === typed) ? typed : "";
+  const pickedChannel = list.items.find((c) => c.id === typed);
+  const picked = pickedChannel === undefined ? "" : typed;
+  // The picked channel stays an option when the filter leaves it out.
+  const channelOptions =
+    pickedChannel === undefined || shown.some((c) => c.id === pickedChannel.id)
+      ? shown
+      : [pickedChannel, ...shown];
   const channelName = stored?.channel_name ?? "";
   const showFound =
     stored !== undefined &&
@@ -220,7 +223,7 @@ export function SlackDestinationFields({
                 <NativeSelectOption value="">
                   {channels.isPending ? t("common.loading") : t("destinations.slack.chooseChannel")}
                 </NativeSelectOption>
-                {list.items.map((c) => (
+                {channelOptions.map((c) => (
                   <NativeSelectOption key={c.id} value={c.id}>
                     {c.is_private
                       ? t("destinations.slack.privateChannel", { name: slackChannelLabel(c) })
@@ -238,9 +241,9 @@ export function SlackDestinationFields({
               {t("destinations.slack.truncated")}
             </p>
           )}
-          {channels.isSuccess && list.items.length === 0 && (
+          {channels.isSuccess && shown.length === 0 && (
             <p className="text-sm text-muted-foreground" role="status">
-              {query === ""
+              {list.items.length === 0
                 ? t("destinations.slack.noChannels")
                 : t("destinations.slack.noMatch", { filter: query })}
             </p>

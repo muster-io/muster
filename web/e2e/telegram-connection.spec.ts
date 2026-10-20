@@ -110,7 +110,7 @@ test("creates a Telegram Connection and checks it step by step, an unsaved path 
   // The list names every type of Connection.
   await nav(page, "Connections").click();
   await expect(page.getByText("How Muster reaches messengers:", { exact: false })).toHaveText(
-    "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, or a bridge to a messenger that Muster has no native support for.",
+    "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, the bot of a Slack app, or a bridge to a messenger that Muster has no native support for.",
   );
   const demo = page
     .getByRole("row")
@@ -268,7 +268,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByRole("heading", { name: "Подключения", level: 1 })).toBeVisible();
   await expect(
     page.getByText(
-      "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost, бот Telegram или мост к мессенджеру, который Muster не поддерживает напрямую.",
+      "Как Muster связывается с мессенджерами: учётная запись бота на сервере Mattermost, бот Telegram, бот приложения Slack или мост к мессенджеру, который Muster не поддерживает напрямую.",
     ),
   ).toBeVisible();
   await page.getByRole("link", { name: "tg", exact: true }).click();

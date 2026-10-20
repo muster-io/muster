@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The Destination form with the Slack fields in a real browser: only the Slack Connections; the channel picked from the
-// bot's channels, filtered by name on the server with a leading # dropped, with the note when Slack had more channels;
+// bot's channels, read once and filtered by name in the browser with a leading # dropped — a filter never asks the
+// server again —, with the note when Slack had more channels;
 // the channel id typed by hand and checked as the server does; destination.slack.limiter; @channel and @here without
 // groups in the Mention settings; a channel without the bot refused at the channel field with "Invite the bot to the
 // channel: /invite @{bot}"; and "#" with the channel's name the check found. The Destination check names the scopes a
@@ -34,6 +35,7 @@ import { defaultMentions } from "./mention-settings";
 import {
   SLACK_KIND,
   channelQuery,
+  filterChannels,
   isSlackChannelId,
   slackValues,
 } from "./slack-destination-fields";
@@ -122,15 +124,12 @@ function urlOf(input: RequestInfo | URL): string {
   return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 }
 
-/** Answers the Connections, the bot's channels — those whose name has the filter q — and the user directory. */
+/** Answers the Connections, the bot's channels and the user directory. */
 function mockReads(list: SlackChannelList = CHANNELS) {
   return vi.spyOn(window, "fetch").mockImplementation((input) => {
     const url = urlOf(input);
     if (url.includes("/channels")) {
-      const q = new URL(url, "http://localhost").searchParams.get("q") ?? "";
-      return Promise.resolve(
-        json(200, { ...list, items: list.items.filter((c) => c.name.includes(q)) }),
-      );
+      return Promise.resolve(json(200, list));
     }
     if (url.startsWith("/api/v1/connections")) {
       return Promise.resolve(json(200, { items: [MM, UI, UNCHECKED], next_cursor: null }));
@@ -216,6 +215,12 @@ describe("the Slack type", () => {
   });
 
   test("drops a leading # of the filter, as Slack names channels without it", () => {
+    expect(filterChannels(CHANNELS.items, "#Alerts").map((c) => c.id)).toEqual(["C0FAKEALERTS"]);
+    expect(filterChannels(CHANNELS.items, " ").map((c) => c.id)).toEqual([
+      "C0FAKEALERTS",
+      "G0FAKEOPS",
+    ]);
+    expect(filterChannels(CHANNELS.items, "nothing")).toEqual([]);
     expect(channelQuery("#alerts")).toBe("alerts");
     expect(channelQuery("  ##al ")).toBe("al");
     expect(channelQuery("ops#1")).toBe("ops#1");
@@ -237,17 +242,26 @@ describe("DestinationForm with the Slack fields", () => {
     const picker = page.getByLabelText("Channel", { exact: true });
     await expect.element(page.getByRole("option", { name: "#alerts" })).toBeInTheDocument();
     await expect.element(page.getByRole("option", { name: "#ops (private)" })).toBeInTheDocument();
-    // A leading # of the filter is not sent.
-    await userEvent.fill(page.getByLabelText("Filter channels"), "#ale");
-    await expect
-      .poll(() => fetch.mock.calls.map(([input]) => urlOf(input)))
-      .toContain(`/api/v1/connections/${UI.id}/channels?q=ale`);
+    const listReads = () =>
+      fetch.mock.calls.map(([input]) => urlOf(input)).filter((url) => url.includes("/channels"));
+    expect(listReads()).toEqual([`/api/v1/connections/${UI.id}/channels`]);
+    // The filter, a leading # dropped, works on the list read once: typing asks the server for nothing.
+    await userEvent.fill(page.getByLabelText("Filter channels"), "#ALE");
     await expect
       .element(page.getByRole("option", { name: "#ops (private)" }))
       .not.toBeInTheDocument();
+    await expect.element(page.getByRole("option", { name: "#alerts" })).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Filter channels"), "o");
+    await expect.element(page.getByRole("option", { name: "#ops (private)" })).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Filter channels"), "#al");
+    await expect.element(page.getByRole("option", { name: "#alerts" })).toBeInTheDocument();
+    expect(listReads()).toEqual([`/api/v1/connections/${UI.id}/channels`]);
     await userEvent.selectOptions(picker, "C0FAKEALERTS");
     // The pick fills the id and, while the user has not typed one, the name.
     await expect.element(page.getByLabelText("Channel id")).toHaveValue("C0FAKEALERTS");
+    // A filter that leaves the picked channel out keeps it as an option.
+    await userEvent.fill(page.getByLabelText("Filter channels"), "ops");
+    await expect.element(picker).toHaveValue("C0FAKEALERTS");
     await expect.element(page.getByLabelText("Name", { exact: true })).toHaveValue("alerts");
     await page.getByRole("button", { name: "Save" }).click();
     expect(save).toHaveBeenCalledWith({
@@ -275,7 +289,7 @@ describe("DestinationForm with the Slack fields", () => {
     await expect
       .element(page.getByTestId("slack-channels-truncated"))
       .toHaveTextContent(
-        "Slack has more channels than the list shows: filter by name, or enter the channel id.",
+        "Slack has more channels than the list shows: enter the channel id of a channel that is not listed.",
       );
     await userEvent.fill(page.getByLabelText("Filter channels"), "nothing");
     await expect.element(page.getByText("No channel of the bot matches “nothing”.")).toBeVisible();

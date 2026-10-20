@@ -1006,7 +1006,7 @@
       "noConnections": "There is no Slack Connection yet: create one under Connections first.",
       "noMatch": "No channel of the bot matches “{{filter}}”.",
       "privateChannel": "{{name}} (private)",
-      "truncated": "Slack has more channels than the list shows: filter by name, or enter the channel id."
+      "truncated": "Slack has more channels than the list shows: enter the channel id of a channel that is not listed."
     },
     "telegram": {
       "channel": "Channel",

@@ -305,9 +305,8 @@ export function connectionCheckErrorText(
 /**
  * Why a step was skipped: only the dry probe ran, for want of a token — a new Connection's draft has none typed, and an
  * edited one has a changed address or proxy that the stored token never goes to —, a Slack draft's app-level token goes
- * nowhere — none is typed in a new Connection's draft (appToken), or an edited one's bot token is typed while its
- * stored app-level token goes only with the stored bot token through the saved proxy (appTokenRetype) —, or an earlier
- * step failed.
+ * nowhere — none is typed and none is stored (appToken), or the stored one goes only with the stored bot token through
+ * the saved proxy, which the draft changed (appTokenRetype) —, or an earlier step failed.
  */
 type SkipReason = "noToken" | "retype" | "appToken" | "appTokenRetype" | "earlier";
 
@@ -316,10 +315,15 @@ type CheckMode = "new" | "edit";
 
 /**
  * The reason of each skipped step, read from the result: a step skipped right after a dry probe that passed was skipped
- * for want of a token, the step app_token after steps that all passed for want of an app-level token, any other after
- * a step that failed. Only a draft skips app_token after passing steps: a check of a saved Connection always has it.
+ * for want of a token, the step app_token after steps that all passed for want of an app-level token — to be typed when
+ * none is stored, typed too when the stored one does not go with the draft —, any other after a step that failed. Only
+ * a draft skips app_token after passing steps: a check of a saved Connection always has it.
  */
-function skipReasons(result: ConnectionCheckResult, mode: CheckMode): (SkipReason | undefined)[] {
+function skipReasons(
+  result: ConnectionCheckResult,
+  mode: CheckMode,
+  appTokenStored: boolean,
+): (SkipReason | undefined)[] {
   let last: ConnectionCheckStep | undefined;
   return result.steps.map((step) => {
     if (step.skipped !== true) {
@@ -330,7 +334,7 @@ function skipReasons(result: ConnectionCheckResult, mode: CheckMode): (SkipReaso
       return mode === "new" ? "noToken" : "retype";
     }
     if (step.name === "app_token" && last !== undefined && last.ok) {
-      return mode === "new" ? "appToken" : "appTokenRetype";
+      return appTokenStored ? "appTokenRetype" : "appToken";
     }
     return "earlier";
   });
@@ -479,17 +483,19 @@ function Result({
   type,
   mode,
   updateMode,
+  appTokenStored,
 }: {
   result: ConnectionCheckResult;
   type: Connection["type"];
   mode: CheckMode;
   updateMode?: TelegramUpdateMode;
+  appTokenStored: boolean;
 }) {
   const { t } = useTranslation();
   const name = result.bot_name ?? "";
   // Telegram names bots by their @username; Mattermost by its username alone.
   const bot = name === "" ? undefined : type === "telegram" ? `@${name}` : name;
-  const reasons = skipReasons(result, mode);
+  const reasons = skipReasons(result, mode, appTokenStored);
   let summary: string;
   if (!result.ok) {
     summary = t("connections.check.failedSummary");
@@ -569,6 +575,8 @@ export interface ConnectionCheckProps {
   invalid?: string;
   /** The update mode of a Telegram Connection, as the form holds it. */
   updateMode?: TelegramUpdateMode;
+  /** Whether the saved Slack Connection of an edit stores an app-level token (app_token_status.set). */
+  appTokenStored?: boolean;
 }
 
 /** What a check was made of: the draft as it was sent, or the saved Connection. */
@@ -582,6 +590,7 @@ export function ConnectionCheck({
   draft,
   invalid,
   updateMode,
+  appTokenStored = false,
 }: ConnectionCheckProps) {
   const { t } = useTranslation();
   const mode: CheckMode = connectionId === undefined ? "new" : "edit";
@@ -670,7 +679,13 @@ export function ConnectionCheck({
             </div>
           )}
           {shown && check.isSuccess && (
-            <Result result={check.data} type={type} mode={mode} updateMode={updateMode} />
+            <Result
+              result={check.data}
+              type={type}
+              mode={mode}
+              updateMode={updateMode}
+              appTokenStored={appTokenStored}
+            />
           )}
         </div>
         {shown && check.isSuccess && (
