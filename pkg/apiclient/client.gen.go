@@ -4424,7 +4424,7 @@ type ConnectionCheckResult struct {
 	Slack nullable.Nullable[SlackCheckInfo] `json:"slack,omitempty"`
 	Steps []ConnectionCheckStep             `json:"steps"`
 
-	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader's; presses are shared between them at random — use one Slack app for each installation.
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader's; presses are shared between them at random — use one Slack app for each Connection and share it with no other Connection or installation.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
 
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.

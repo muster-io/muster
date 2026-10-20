@@ -698,13 +698,13 @@ describe("the check of a Slack Connection", () => {
       "en",
       "Check connection",
       "Connected as muster-dev-slack-bot",
-      "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Muster installation.",
+      "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.",
     ],
     [
       "ru",
       "Проверить подключение",
       "Подключено как muster-dev-slack-bot",
-      "К этому приложению Slack через Socket Mode подключена другая программа: нажатия случайным образом делятся между ними. Используйте отдельное приложение Slack для каждой установки Muster.",
+      "К этому приложению Slack через Socket Mode подключена другая программа: нажатия случайным образом делятся между ними. Используйте отдельное приложение Slack для каждого подключения и не делите его с другими подключениями и установками.",
     ],
   ] as const)(
     "passes with the warning that another program shares the Slack app (%s)",

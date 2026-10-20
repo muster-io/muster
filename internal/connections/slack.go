@@ -57,8 +57,8 @@ const (
 )
 
 // WarningAnotherClientConnected is the warning of a check of a Slack Connection in socket mode whose last hello
-// counted another connection of its Slack app than the Leader's: another program, usually a second installation, takes
-// some of its presses (C-24.FR-2, F-102).
+// counted another connection of its Slack app than the Leader's: another program, usually another Connection or
+// installation on the same app, takes some of its presses (C-24.FR-2, F-102).
 const WarningAnotherClientConnected = "another_client_connected"
 
 var (

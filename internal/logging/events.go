@@ -797,10 +797,11 @@ var SlackSocketConnected = newEvent("slack_socket_connected", LevelInfo, "C-24",
 // SlackSocketShared is logged when a hello counted connections of the Slack app beyond the Leader's (C-24.FR-2, FR-9).
 var SlackSocketShared = newEvent("slack_socket_shared", LevelWarn, "C-24",
 	"A hello of a Slack Connection's Socket Mode connection counted more connections of the Slack app than the Leader "+
-		"holds: another program — usually a second Muster installation on the same app — is connected and takes some "+
+		"holds: another program — usually another Connection or Muster installation on the same app — is connected and takes some "+
 		"of its presses at random. connection is the public_id of the Connection and other_connections the "+
 		"connections beyond the Leader's. Right after a Leader change Slack may still count the old Leader's "+
-		"connection; a later hello clears the count. Use one Slack app for each installation.",
+		"connection; a later hello clears the count. Use one Slack app for each Connection and share it with no other "+
+		"Connection or installation.",
 	"connection", "other_connections")
 
 // SlackSocketFailed is logged when a Socket Mode connection of a Slack Connection failed or was refused (C-24.FR-9).

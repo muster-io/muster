@@ -567,7 +567,7 @@ describe("the page of a Slack Connection", () => {
     await expect
       .element(page.getByTestId("slack-shared-app"))
       .toHaveTextContent(
-        "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Muster installation.",
+        "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.",
       );
     await screen.unmount();
     await render(providers(<SlackSharedAppWarning connection={SLACK} />));
