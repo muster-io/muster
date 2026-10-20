@@ -2058,15 +2058,19 @@ func (probeBridgeBindings) RootDeleted(context.Context, int64, string) error {
 	return nil
 }
 
-// probeSlackDrafts checks drafts of the Slack Connection publicID, saved behind the proxy accepting, before saving
-// (C-13.FR-14, C-24.FR-2) for probeSlack: a new Connection through that proxy with its password typed and the saved
-// one, both with the bot token and the app-level token typed again, against the stand-in's answers that echo the
-// Authorization they got (sentOnly) — as the workspace and the bot, in an unknown error, in invalid_auth, in an HTML 500
-// and in a 429 — and against the listener that drops the connection at cutBase, where every request of a draft fails;
-// and the saved one with the proxy turned off and no token, whose dry probe gets the answers that echo every secret.
-// It returns the errors, step messages and findings of the drafts, which must not carry a secret.
+// probeSlackDrafts checks drafts of the Slack Connection publicID, saved in socket mode behind the proxy accepting,
+// before saving (C-13.FR-14, C-24.FR-2) for probeSlack: a new Connection through that proxy with its password typed
+// and the saved one with the bot token and the app-level token typed again; the saved one on its saved route with its
+// stored bot token, app-level token and proxy password in socket mode, with its stored bot token and proxy password in
+// http mode, and with the bot token typed again and the stored app-level token. They run against the stand-in's
+// answers that echo, through draftEcho, every secret the draft holds: all but the Slack signing secret, and in http
+// mode, which opens no app-level token, also not that — as the workspace and the bot, in an unknown error, in
+// invalid_auth, in an HTML 500 and in a 429 — and against the listener that drops the connection at cutBase, where
+// every request of a draft fails; and the saved one with the proxy turned off and no token, whose dry probe gets the
+// answers that echo every secret. It returns the errors, step messages and findings of the drafts, which must not
+// carry a secret.
 func probeSlackDrafts(ctx context.Context, svc *connections.Service, publicID, botToken, appToken string,
-	accepting proxyconf.Input, answer *atomic.Int32, sentOnly *atomic.Bool, base *atomic.Pointer[string],
+	accepting proxyconf.Input, answer *atomic.Int32, draftEcho *atomic.Pointer[string], base *atomic.Pointer[string],
 	cutBase string) []error {
 	var errs []error
 	draft := func(d connections.Draft) connections.CheckResult {
@@ -2085,27 +2089,42 @@ func probeSlackDrafts(ctx context.Context, svc *connections.Service, publicID, b
 		ConnectionID: &publicID}
 	typed := saved
 	typed.ConnectionID, typed.Proxy = nil, &accepting
+	stored := connections.Draft{Type: connections.TypeSlack, EventMode: connections.EventModeSocket,
+		ConnectionID: &publicID}
+	storedHTTP := stored
+	storedHTTP.EventMode = connections.EventModeHTTP
+	storedApp := stored
+	storedApp.BotToken = keyring.Replace(logging.Secret(botToken))
 	probe := connections.Draft{Type: connections.TypeSlack, EventMode: connections.EventModeSocket,
 		ConnectionID: &publicID, Proxy: &proxyconf.Input{Enabled: false}}
+	password := string(accepting.Password.Value)
+	socketEcho, httpEcho := botToken+" "+appToken+" "+password, botToken+" "+password
+	checked := []struct {
+		draft connections.Draft
+		echo  *string
+		steps int
+	}{{typed, &socketEcho, 3}, {saved, &socketEcho, 3}, {stored, &socketEcho, 3}, {storedHTTP, &httpEcho, 2},
+		{storedApp, &socketEcho, 3}}
 	for _, a := range []int32{slackOK, slackEcho, slackError, slackInvalidAuth, slackHTML500, slackRateLimited} {
 		answer.Store(a)
-		sentOnly.Store(true)
-		res := draft(typed)
-		if a == slackOK && (!res.OK || len(res.Steps) != 3) {
-			errs = append(errs, &probeIncomplete{what: "the draft check against the stand-in Slack did not pass"})
+		for _, d := range checked {
+			draftEcho.Store(d.echo)
+			res := draft(d.draft)
+			if a == slackOK && (!res.OK || len(res.Steps) != d.steps) {
+				errs = append(errs, &probeIncomplete{what: "a draft check against the stand-in Slack did not pass"})
+			}
+			if (a == slackError || a == slackHTML500) && res.OK {
+				errs = append(errs, &probeIncomplete{what: "a draft check passed against a failing answer"})
+			}
 		}
-		if (a == slackError || a == slackHTML500) && res.OK {
-			errs = append(errs, &probeIncomplete{what: "the draft check passed against a failing answer"})
-		}
-		draft(saved)
-		sentOnly.Store(false)
+		draftEcho.Store(nil)
 		if res := draft(probe); len(res.Steps) == 0 || res.Steps[0].Name != slack.StepDryProbe {
 			errs = append(errs, &probeIncomplete{what: "the draft without a token made no dry probe"})
 		}
 	}
 	answer.Store(slackEcho)
 	base.Store(&cutBase)
-	for _, d := range []connections.Draft{typed, saved, probe} {
+	for _, d := range []connections.Draft{typed, saved, stored, storedHTTP, storedApp, probe} {
 		if res := draft(d); res.OK {
 			errs = append(errs, &probeIncomplete{what: "a draft check passed against the listener that drops it"})
 		}
@@ -2142,8 +2161,8 @@ const (
 // check the Destination check of a channel (conversations.info) and the channel list (conversations.list, whose
 // cursors echo the secrets too) run against the same answers, the channel echoing them as its name and, once, without
 // the bot; behind the accepting proxy every one of their requests must cross it (C-24.AC-3). After the dropping
-// listener the Connection is checked before saving, with its tokens typed again and with its dry probe
-// (probeSlackDrafts), also against answers that fail and a listener that drops them. Creations of a bot token
+// listener the Connection is checked before saving, with its tokens typed again, with its stored tokens and with its
+// dry probe (probeSlackDrafts), also against answers that fail and a listener that drops them. Creations of a bot token
 // and an app-level token without their prefixes, of http mode without the Slack signing secret and of socket mode
 // without the app-level token are refused; muster doctor checks the Connection and its Destination; it is deleted;
 // and a client is refused its proxy and its route. Between them the Slack adapter of its Destination publishes, edits,
@@ -2168,8 +2187,9 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	botToken, appToken, signing := "xoxb-"+secrets[0], "xapp-"+secrets[1], secrets[2]
 	proxyPassword := secrets[2] + "-proxy"
 	var answer atomic.Int32
-	// sentOnly makes the stand-in echo only the Authorization it got: a draft knows no Slack signing secret to mask.
-	var sentOnly atomic.Bool
+	// draftEcho, when set, is what the stand-in echoes after the Authorization in place of every secret: the secrets
+	// a draft holds, never the Slack signing secret, which a draft knows nothing of and so cannot mask.
+	var draftEcho atomic.Pointer[string]
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -2179,8 +2199,8 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 		func(w http.ResponseWriter, r *http.Request) {
 			auth := r.Header.Get("Authorization")
 			echo := auth + " " + botToken + " " + appToken + " " + signing + " " + proxyPassword
-			if sentOnly.Load() {
-				echo = auth
+			if held := draftEcho.Load(); held != nil {
+				echo = auth + " " + *held
 			}
 			a := answer.Load()
 			if a == slackLate {
@@ -2346,7 +2366,7 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	chans(ctx)
 	base.Store(&standIn)
 	errs = append(errs, probeSlackDrafts(ctx, svc, c.PublicID, botToken, appToken, proxied(accepting), &answer,
-		&sentOnly, &base, cutBase)...)
+		&draftEcho, &base, cutBase)...)
 	base.Store(&standIn)
 	in.EventMode, in.Proxy = connections.EventModeHTTP, proxyconf.Input{Enabled: false}
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
