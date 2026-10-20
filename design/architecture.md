@@ -701,17 +701,21 @@ sequenceDiagram
     U->>SL: presses Ack on the Root message
     SL->>IN: POST to MUSTER_INGEST_URL/api/v1/callbacks/slack/{connection_id}<br/>a form with payload, X-Slack-Signature and X-Slack-Request-Timestamp
     IN->>IN: read the raw body, at most 1 MiB, and the Connection
-    alt unknown or deleted Connection, socket mode, a timestamp further than<br/>slack.request_tolerance from the real clock, or a signature that does not match
+    alt a body over 1 MiB or one that cannot be read, checked before authentication
+        IN-->>SL: 400
+    else unknown or deleted Connection, socket mode, a timestamp further than<br/>slack.request_tolerance from the real clock, or a signature that does not match
         IN-->>SL: 401, the same for every reason, nothing changes
-    else a body over 1 MiB, or no payload that is a JSON object
+    else signed, but no payload that is a JSON object
         IN-->>SL: 400
     else signed
         IN-->>SL: 200 with an empty body, at once
-        IN->>PR: the payload, in the process's context, not the request's
+        IN->>PR: the payload, in a context of the process that the start of a shutdown does not end
         alt another type than block_actions
             PR->>PR: ignore
+        else 64 presses already wait for a slot on this replica
+            PR->>PR: drop the press, unanswered, logged as failed
         else a press
-            PR->>PR: wait for one of slack.parallel_presses slots on this replica
+            PR->>PR: wait for one of slack.parallel_presses slots on this replica,<br/>within 30 s for the wait and the Command
             PR->>AL: user.id to User, through the link for this Connection,<br/>first, for the language of every answer
             PR->>PR: verify the action id with the key it names (must be in the Keyring)
             alt the data of a test message
@@ -743,8 +747,13 @@ sequenceDiagram
 ```
 
 A press is answered `200` before it is handled, so a crash between the answer and the Command loses it, as a press
-made while Muster is down is lost; Slack is not expected to send an interaction again, so presses are not
-deduplicated, and one that did come twice meets its precondition. The callback's inbound record in the Request log
+made while Muster is down is lost; a graceful stop drains the presses in flight within `process.shutdown_grace`, after
+the listeners and before the database pool closes, and ends those still running at its end as failed. Each press has
+30 s for its wait for a slot and its Command, the time Mattermost waits for the answer to a press, so that a Command
+stuck on the database frees its slot; its answer keeps `delivery.interactive_budget` of its own. At most 64 presses
+wait for a slot on a replica, which bounds what a replay of a captured signed request within
+`slack.request_tolerance` holds; one more is dropped. Slack is not expected to send an interaction again, so presses
+are not deduplicated, and one that did come twice meets its precondition. The callback's inbound record in the Request log
 names only the Connection, because the press is matched after the answer; the records of the answer's requests also
 name the Destination and the Alert Group.
 
