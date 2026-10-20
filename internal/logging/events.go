@@ -789,7 +789,8 @@ var SlackSocketConnected = newEvent("slack_socket_connected", LevelInfo, "C-24",
 		"connection with the old one. The count beyond held is stored on the Connection for its check and page, "+
 		"and the line is written once it was; error, when present, says that it could not be stored within 5 s, "+
 		"and the next hello stores it again. A hello whose count the next hello replaces before it is stored "+
-		"has no line: only the next one is stored and logged.",
+		"has no line: only the next one is stored and logged; nor has a store that the Leader's stop cut "+
+		"short.",
 	"connection", "num_connections", "held", "error")
 
 // SlackSocketShared is logged when a hello counted connections of the Slack app beyond the Leader's (C-24.FR-2, FR-9).
@@ -810,11 +811,11 @@ var SlackSocketFailed = newEvent("slack_socket_failed", LevelWarn, "C-24",
 		"settings), too_many_websockets (the app already has ten connections) or closed (the connection ended, a ping "+
 		"got no pong within 10 s or a confirmation could not be written); backoff_seconds the wait before the next "+
 		"connection, from 1 s doubling with jitter up to 5 min (slack.socket_backoff), never shorter than the "+
-		"Retry-After of a rate-limited apps.connections.open, and reset by a hello once its connection has lasted "+
-		"30 s, or by a planned refresh — absent when the Connection's client could not be built; error what failed, "+
-		"with the tokens and the address's query, the ticket among it, masked, absent for hello_timeout, "+
-		"link_disabled and too_many_websockets. It counts against nothing and makes no Destination Broken; presses "+
-		"made until the next hello are lost.",
+		"Retry-After of a rate-limited apps.connections.open, up to that cap, and reset by a hello once its "+
+		"connection has lasted 30 s, or by a planned refresh — absent when the Connection's client could not be "+
+		"built; error what failed, with the tokens and the address's query, the ticket among it, masked, absent for "+
+		"hello_timeout, link_disabled and too_many_websockets. It counts against nothing and makes no Destination "+
+		"Broken; presses made until the next hello are lost.",
 	"connection", "reason", "backoff_seconds", "error")
 
 // RequestLogWriteFailed is logged when a record of the Request log could not be written (C-23.FR-4, FR-7).

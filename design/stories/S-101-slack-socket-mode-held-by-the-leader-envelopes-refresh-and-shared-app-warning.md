@@ -114,13 +114,13 @@ issue: 310
   next connection first; `link_disabled` and `too_many_websockets` back off), and every envelope with an
   `envelope_id` confirmed at once — `interactive` handed to `slack.Presses.Go` with the process's context (the drain
   at shutdown waits for it, as for the callback's presses), the others ignored. Failures back off by
-  `slack.socket_backoff`, never shorter than the `Retry-After` of a rate-limited `apps.connections.open`, and reset by
-  a `hello` once its connection has lasted 30 s, or by a planned refresh, so that a connection Slack ends right after
-  its `hello` is not opened again every second. A socket Muster lets go — leadership ended, the replica stops, its
-  Connection changed, left `socket` mode or was deleted — is closed with a normal closure, cut after a second without
-  an answer; a broken one is closed at once. The count of a `hello` is stored by a writer of the Connection's own,
-  within 5 s, so that a slow database holds up neither the frames nor the `hello`. A failed read of the Connections
-  after the first keeps the sockets and is logged as `leader_task_failed`.
+  `slack.socket_backoff`, never shorter than the `Retry-After` of a rate-limited `apps.connections.open` up to the
+  back-off's 5 min, and reset by a `hello` once its connection has lasted 30 s, or by a planned refresh, so that a
+  connection Slack ends right after its `hello` is not opened again every second. A socket Muster lets go — leadership
+  ended, the replica stops, its Connection changed, left `socket` mode or was deleted — is closed with a normal closure,
+  cut after a second without an answer; a broken one is closed at once. The count of a `hello` is stored by a writer of
+  the Connection's own, within 5 s, so that a slow database holds up neither the frames nor the `hello`. A failed read
+  of the Connections after the first keeps the sockets and is logged as `leader_task_failed`.
 - **Leader task** (`internal/leader/tasks.go`): `slack_socket_mode` starts and stops one socket per Slack Connection
   in `socket` mode, reading the list again on the Connections' change hint and every minute; it stops all sockets when
   leadership ends (ADR-0007).

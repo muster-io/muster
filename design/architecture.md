@@ -820,22 +820,21 @@ sequenceDiagram
 An envelope of another type is confirmed, recorded and ignored; `hello`, `disconnect` and pings are not recorded. Each
 connection is pinged every 30 s and closed when its pong takes longer than 10 s; a failure and every `disconnect` other
 than a planned refresh back off by `slack.socket_backoff` — never shorter than the `Retry-After` of a rate-limited
-`apps.connections.open`, and reset by a `hello` once its connection has lasted 30 s, or by a planned refresh — and count
-against nothing: no Destination becomes Broken. What Slack's texts repeat of the address's query, the `ticket` above
-all, is masked in what Muster logs. The time of a `hello` and its count are stored by a writer of their own, so that a
-slow database holds up neither the frames nor the `hello`. The waits of the socket are on the real clock, and the time
-of a `hello` is on the business clock. When leadership ends, or the replica stops, every connection is closed at once,
-with a normal closure so that Slack learns that it is gone (cut after a second without an answer), and a confirmed
-press is still handled in the process's context, so the shutdown drains it as it drains the callback's; the presses
-made until the next Leader connects are lost and their people see Slack's error: Muster does not count on Slack to send
-them again. A Connection that cannot lose a press uses the `http` event mode, which any replica serves. A Connection
-switched to `http`, deleted or saved closes its connection at once, in the same way; a saved one opens a new one and
-counts again at its next `hello`. A failed read of the Connections after the first keeps the connections, and is
-logged as `leader_task_failed` and tried again at the next change hint or minute. Slack's
-`num_connections` counts every connection of the app, two of Muster's own during a planned refresh: the count beyond
-the Leader's is shown in the Connection's read, as the warning `another_client_connected` of its check and in
-`muster doctor`, because another program on the same app takes some of the presses at random
-([F-102](facts.md#socket-mode)).
+`apps.connections.open` up to 5 min, and reset by a `hello` once its connection has lasted 30 s, or by a planned
+refresh — and count against nothing: no Destination becomes Broken. What Slack's texts repeat of the address's query,
+the `ticket` above all, is masked in what Muster logs. The time of a `hello` and its count are stored by a writer of
+their own, so that a slow database holds up neither the frames nor the `hello`. The waits of the socket are on the real
+clock, and the time of a `hello` is on the business clock. When leadership ends, or the replica stops, every connection
+is closed at once, with a normal closure so that Slack learns that it is gone (cut after a second without an answer),
+and a confirmed press is still handled in the process's context, so the shutdown drains it as it drains the callback's;
+the presses made until the next Leader connects are lost and their people see Slack's error: Muster does not count on
+Slack to send them again. A Connection that cannot lose a press uses the `http` event mode, which any replica serves. A
+Connection switched to `http`, deleted or saved closes its connection at once, in the same way; a saved one opens a new
+one and counts again at its next `hello`. A failed read of the Connections after the first keeps the connections, and is
+logged as `leader_task_failed` and tried again at the next change hint or minute. Slack's `num_connections` counts every
+connection of the app, two of Muster's own during a planned refresh: the count beyond the Leader's is shown in the
+Connection's read, as the warning `another_client_connected` of its check and in `muster doctor`, because another
+program on the same app takes some of the presses at random ([F-102](facts.md#socket-mode)).
 
 ### d. Delivery reconciliation
 

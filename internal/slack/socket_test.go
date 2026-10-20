@@ -858,21 +858,39 @@ func TestSocketBackoffAfterHello(t *testing.T) {
 }
 
 // TestSocketRetryAfter: when apps.connections.open is rate-limited with a Retry-After longer than the back-off, the
-// next connection waits for the Retry-After.
+// next connection waits for the Retry-After, up to the back-off's cap of 5 min, so that a Retry-After of a day does not
+// leave the Connection without a socket for a day.
 func TestSocketRetryAfter(t *testing.T) {
-	e := newSocketEnv(t)
-	e.sockets.openTimeout = 100 * time.Millisecond
-	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/apps.connections.open", Status: http.StatusTooManyRequests,
-		RetryAfterSeconds: 30, Times: 1}); err != nil {
-		t.Fatal(err)
-	}
-	e.source.set(e.conn(t, 2, false))
-	e.start(t)
-	failedLine(t, e.lines(t, "slack_socket_failed", 1)[0], "CN0000000000K2", reasonDial, 30, true)
-	e.timers.fire(t, 30*time.Second)
-	e.lines(t, "slack_socket_connected", 1)
-	if made, _ := e.timers.made(SocketBackoffBase); made != 0 {
-		t.Fatal("the back-off did not wait for the Retry-After")
+	for _, tc := range []struct {
+		name  string
+		after int
+		want  time.Duration
+	}{
+		{"waited for", 30, 30 * time.Second},
+		{"capped", 86400, SocketBackoffCap},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSocketEnv(t)
+			e.sockets.openTimeout = 100 * time.Millisecond
+			if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/apps.connections.open",
+				Status: http.StatusTooManyRequests, RetryAfterSeconds: tc.after, Times: 1}); err != nil {
+				t.Fatal(err)
+			}
+			e.source.set(e.conn(t, 2, false))
+			e.start(t)
+			failedLine(t, e.lines(t, "slack_socket_failed", 1)[0], "CN0000000000K2", reasonDial, tc.want.Seconds(),
+				true)
+			e.timers.fire(t, tc.want)
+			e.lines(t, "slack_socket_connected", 1)
+			if made, _ := e.timers.made(SocketBackoffBase); made != 0 {
+				t.Fatal("the back-off did not wait for the Retry-After")
+			}
+			if whole := time.Duration(tc.after) * time.Second; whole != tc.want {
+				if made, _ := e.timers.made(whole); made != 0 {
+					t.Fatal("the back-off waited for the whole Retry-After")
+				}
+			}
+		})
 	}
 }
 
@@ -1017,7 +1035,7 @@ func TestSocketFrames(t *testing.T) {
 
 // TestSocketHelloStoreBlocked: a store of what a hello counted that does not return holds up nothing — the hello
 // reaches the holder, which stops its hello timeout, and an envelope is confirmed meanwhile — is bounded by 5 s, and
-// ends with the run, which returns at once.
+// ends with the run, which returns at once and logs no slack_socket_connected for the store it cut short.
 func TestSocketHelloStoreBlocked(t *testing.T) {
 	e := newSocketEnv(t)
 	entered := make(chan time.Time, 4)
@@ -1046,8 +1064,8 @@ func TestSocketHelloStoreBlocked(t *testing.T) {
 	if err := e.ended(t, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if l := e.lines(t, "slack_socket_connected", 1)[0]; field(l, "error") != context.Canceled.Error() {
-		t.Fatalf("connected %v", l)
+	if n := len(e.log.lines(t, "slack_socket_connected")); n != 0 {
+		t.Fatalf("%d slack_socket_connected lines for a store the stop cut short", n)
 	}
 }
 

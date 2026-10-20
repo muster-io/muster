@@ -33,7 +33,8 @@ const (
 	PingTimeout  = 10 * time.Second
 	// SocketBackoffBase and SocketBackoffCap are slack.socket_backoff: the wait after a failed connection doubles
 	// from the base up to the cap, with equal jitter, and starts from the base again once a connection has lasted
-	// socketSettled after its hello, or is ended by a planned refresh.
+	// socketSettled after its hello, or is ended by a planned refresh. It is never shorter than a Retry-After of
+	// apps.connections.open, up to the cap.
 	SocketBackoffBase = time.Second
 	SocketBackoffCap  = 5 * time.Minute
 	// socketSettled is how long a connection must last after its hello for its end to reset the back-off: one ping
@@ -113,10 +114,10 @@ type SocketSource interface {
 // callback of http mode hands over its presses, and any other type is ignored; each is recorded in the Request log.
 // A disconnect warning or refresh_requested opens the next connection, with its hello, before the old one is closed;
 // link_disabled, too_many_websockets, a failed dial, a missing hello and a connection that ended back off by
-// slack.socket_backoff — at least as long as a Retry-After of apps.connections.open asks, and reset once a connection
-// has lasted socketSettled or by a planned refresh — and log slack_socket_failed, with the address's query masked;
-// nothing counts them and nothing becomes Broken. Each hello stores, through Source, the connections of the app it
-// counts beyond those held, and then logs slack_socket_connected, and slack_socket_shared when there are any; a
+// slack.socket_backoff — at least as long as a Retry-After of apps.connections.open asks, up to the cap, and reset once
+// a connection has lasted socketSettled or by a planned refresh — and log slack_socket_failed, with the address's query
+// masked; nothing counts them and nothing becomes Broken. Each hello stores, through Source, the connections of the app
+// it counts beyond those held, and then logs slack_socket_connected, and slack_socket_shared when there are any; a
 // holder's writer does it in order, within helloWriteTimeout, so that a slow store holds up neither the frames nor the
 // hello, and a count the next hello replaces before it is stored is left out. A socket Muster lets go is closed with a
 // normal closure, cut after closeGrace without an answer; a broken one is closed at once.
@@ -396,10 +397,11 @@ func (h *holder) run(ctx context.Context) {
 	}
 }
 
-// backOff logs the failure f, the nth in a row, and waits for its back-off, at least as long as Slack asked; it
-// reports false when ctx ended first.
+// backOff logs the failure f, the nth in a row, and waits for its back-off, at least as long as Slack asked up to the
+// back-off's cap, so that a Retry-After of hours does not leave the Connection without a socket; it reports false when
+// ctx ended first.
 func (h *holder) backOff(ctx context.Context, n int, f socketFailure) bool {
-	wait := max(h.s.backoff(n), f.after)
+	wait := max(h.s.backoff(n), min(f.after, h.s.backoffCap()))
 	h.s.failed(ctx, h.c, f, wait)
 	return h.s.pause(ctx, wait)
 }
@@ -753,11 +755,15 @@ func (h *holder) store(ctx context.Context) {
 }
 
 // record stores what a hello counted through Source, logs slack_socket_connected, with the error of the store when
-// it failed, and slack_socket_shared when the hello counted others.
+// it failed, and slack_socket_shared when the hello counted others. A store the holder's stop cut short logs nothing:
+// its error says only that the socket was let go.
 func (h *holder) record(ctx context.Context, c helloCount) {
 	wctx, cancel := context.WithTimeout(ctx, helloWriteTimeout)
 	err := h.s.Source.RecordSocketHello(wctx, h.c, c.other)
 	cancel()
+	if err != nil && ctx.Err() != nil {
+		return
+	}
 	fields := []logging.Field{logging.F("connection", h.c.PublicID), logging.F("num_connections", c.n),
 		logging.F("held", c.held)}
 	if err != nil {
@@ -787,14 +793,19 @@ func (s *Sockets) failed(ctx context.Context, c SocketConn, f socketFailure, wai
 	s.Log.Log(ctx, logging.SlackSocketFailed, fields...)
 }
 
+// backoffCap is BackoffCap, or SocketBackoffCap when it is not set.
+func (s *Sockets) backoffCap() time.Duration {
+	if s.BackoffCap > 0 {
+		return s.BackoffCap
+	}
+	return SocketBackoffCap
+}
+
 // backoff is the wait after n failures in a row: from BackoffBase doubling up to BackoffCap, with equal jitter.
 func (s *Sockets) backoff(n int) time.Duration {
-	d, ceiling := s.BackoffBase, s.BackoffCap
+	d, ceiling := s.BackoffBase, s.backoffCap()
 	if d <= 0 {
 		d = SocketBackoffBase
-	}
-	if ceiling <= 0 {
-		ceiling = SocketBackoffCap
 	}
 	for i := 1; i < n && d < ceiling; i++ {
 		d *= 2
