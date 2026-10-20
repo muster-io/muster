@@ -1444,24 +1444,158 @@ func TestIntegrationSlackPressesAndLinks(t *testing.T) {
 	})
 }
 
+// TestIntegrationRequestLogSocketEnvelopes runs 0019 over a Request log with a Slack Connection's records: before it an
+// inbound record whose answer has a body but no status — the confirmation of a Socket Mode envelope — is refused by
+// request_log_answer_check; up replaces the CHECK under its name, validated, so that such an inbound record is
+// accepted while an outbound one is still refused, and an answer with a status still needs its headers and body, and
+// headers still need a status. Down deletes the envelope records, keeping the others, and restores the old CHECK,
+// validated, which refuses them again; up again accepts them.
+func TestIntegrationRequestLogSocketEnvelopes(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 18)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
+			slack_app_token_ciphertext, slack_app_token_key_id, slack_app_token_updated_at, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, 'CN0000000000S1', 'slack', 'sl', 'socket', '\x01', 'k1', '2026-10-05', '\x02', 'k1',
+				'2026-10-05', 1, 1, '2026-10-05', '2026-10-05'
+			FROM organizations`)
+		n := 0
+		record := func(t *testing.T, set map[string]string) error {
+			t.Helper()
+			n++
+			cols := map[string]string{
+				"public_id": fmt.Sprintf("'RQ%012d'", n), "at": "'2026-10-05 12:00:00+00'", "direction": "'inbound'",
+				"operation": "'interactive'", "method": "'WEBSOCKET'", "url": "'wss://wss-primary.slack.com/link/'",
+				"request_headers": "'{}'", "request_body": `'{"envelope_id":"e1","type":"interactive"}'`,
+				"request_body_bytes": "42", "request_body_truncated": "false", "status": "NULL",
+				"response_headers": "NULL", "response_body": `'{"envelope_id":"e1"}'`, "response_body_bytes": "20",
+				"response_body_truncated": "false", "latency_ms": "1", "via": "'direct'", "attempt": "1",
+				"connection_id": "(SELECT id FROM connections WHERE public_id = 'CN0000000000S1')",
+			}
+			maps.Copy(cols, set)
+			names, values := make([]string, 0, len(cols)), make([]string, 0, len(cols))
+			for k, v := range cols {
+				names, values = append(names, k), append(values, v)
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO request_log (org_id, `+strings.Join(names, ", ")+`)
+				SELECT id, `+strings.Join(values, ", ")+` FROM organizations`)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.ConstraintName != "request_log_answer_check" {
+				t.Errorf("%s: refused by %v, want request_log_answer_check", name, err)
+			}
+		}
+		answered := map[string]string{"direction": "'outbound'", "operation": "'apps.connections.open'",
+			"method": "'POST'", "url": "'https://slack.com/api/apps.connections.open'", "status": "200",
+			"response_headers": "'{}'", "response_body": `'{"ok":true}'`}
+		noAnswer := map[string]string{"direction": "'outbound'", "operation": "'apps.connections.open'",
+			"method": "'POST'", "response_body": "NULL", "response_body_bytes": "0", "error_class": "'transient'",
+			"error_code": "'connect_failed'", "error": "'connection refused'"}
+		with := func(base map[string]string, kv ...string) map[string]string {
+			out := maps.Clone(base)
+			for i := 0; i+1 < len(kv); i += 2 {
+				out[kv[i]] = kv[i+1]
+			}
+			return out
+		}
+		check := func(t *testing.T) string {
+			t.Helper()
+			return e.constraints(t, []string{"request_log"}, "request_log_answer")
+		}
+		const valid = "request_log.request_log_answer_check:true"
+		envelopes := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM request_log WHERE status IS NULL AND response_body IS NOT NULL`)
+		}
+		for _, set := range []map[string]string{answered, noAnswer, with(answered, "direction", "'inbound'")} {
+			if err := record(t, set); err != nil {
+				t.Fatalf("before 0019: %v", err)
+			}
+		}
+		if got := check(t); got != valid {
+			t.Fatalf("before 0019: %s", got)
+		}
+		refused(t, "before 0019, an envelope", record(t, nil))
+
+		e.step(t, 1)
+		if got := check(t); got != valid {
+			t.Errorf("after up: %s", got)
+		}
+		if err := record(t, nil); err != nil {
+			t.Errorf("after up, an envelope: %v", err)
+		}
+		if err := record(t, map[string]string{"operation": "'events_api'", "via": "'proxy'"}); err != nil {
+			t.Errorf("after up, an envelope through a proxy: %v", err)
+		}
+		if err := record(t, with(answered, "direction", "'inbound'")); err != nil {
+			t.Errorf("after up, an answered inbound record: %v", err)
+		}
+		if err := record(t, noAnswer); err != nil {
+			t.Errorf("after up, an outbound record without an answer: %v", err)
+		}
+		for _, tt := range []struct {
+			name string
+			set  map[string]string
+		}{
+			{"an outbound answer body without a status", with(noAnswer, "response_body", `'{"ok":true}'`,
+				"error_code", "NULL")},
+			{"a status without an answer body", with(answered, "response_body", "NULL")},
+			{"a status without answer headers", with(answered, "response_headers", "NULL")},
+			{"answer headers without a status", map[string]string{"response_headers": "'{}'"}},
+			{"inbound answer headers without a status", map[string]string{"response_body": "NULL",
+				"response_headers": "'{}'"}},
+		} {
+			refused(t, "after up, "+tt.name, record(t, tt.set))
+		}
+		if got := envelopes(t); got != 2 {
+			t.Fatalf("after up: %d envelope records, want 2", got)
+		}
+
+		e.step(t, -1)
+		if got := check(t); got != valid {
+			t.Errorf("after down: %s", got)
+		}
+		if got := envelopes(t); got != 0 {
+			t.Errorf("after down: %d envelope records", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM request_log`); got != 5 {
+			t.Errorf("after down: %d records, want the 5 with a status or without an answer", got)
+		}
+		refused(t, "after down, an envelope", record(t, nil))
+
+		e.step(t, 1)
+		if got := check(t); got != valid {
+			t.Errorf("after up again: %s", got)
+		}
+		if err := record(t, nil); err != nil {
+			t.Errorf("after up again, an envelope: %v", err)
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 19 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (18)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (19)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":18`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":19`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":18`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":19`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1477,10 +1611,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (18)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (19)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":18`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":19`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

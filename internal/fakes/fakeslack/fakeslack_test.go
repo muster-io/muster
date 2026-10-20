@@ -5,6 +5,7 @@ package fakeslack_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +24,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
@@ -292,7 +295,7 @@ func TestConfig(t *testing.T) {
 		`"C0FAKEOTHER":{"name":"other","member":false,"archived":false,"private":false}}`
 	if got := do(t, req); got.raw != `{"scopes":{"a":"`+fakeslack.DefaultScopes+`","b":"`+fakeslack.DefaultScopes+
 		`"},"revoked":[],"user_tokens":[],"app_of":{},"channels":{"a":`+channels+`,"b":`+channels+
-		`},"page_size":0,"request_url":{}}`+"\n" {
+		`},"page_size":0,"request_url":{},"extra_connections":{}}`+"\n" {
 		t.Fatalf("default config %s", got.raw)
 	}
 	five := "chat:write,channels:read,groups:read,im:write,users:read"
@@ -1316,8 +1319,8 @@ func pressable(t *testing.T, f *fakeslack.Fake, prefix string) (root, reminder s
 // form whose payload is the block_actions payload built from the stored message with the app's verification token and
 // a response_url on the fake, signed with the app's Slack signing secret at the current time — and Muster's status and
 // body come back; a wrong signature, a timestamp offset, another message's value and a value sent as it is go as they
-// are; an unknown message is 404, an app without a request_url 409, an action the message lacks 422, a request it
-// cannot read 400 and an app that does not answer 502.
+// are; an unknown message is 404, an app without a request_url or a socket 409, an action the message lacks 422, a
+// request it cannot read or an unknown transport 400 and an app that does not answer 502.
 func TestPress(t *testing.T) {
 	f := start(t)
 	rc := newReceiver(t)
@@ -1329,7 +1332,7 @@ func TestPress(t *testing.T) {
 
 	before := time.Now().Unix()
 	if a := press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`); a.status !=
-		http.StatusOK || a.raw != `{"status":200,"body":""}`+"\n" {
+		http.StatusOK || a.raw != `{"status":200,"body":"","transport":"http"}`+"\n" {
 		t.Fatalf("press = %d %s", a.status, a.raw)
 	}
 	r, p := rc.last(t)
@@ -1385,7 +1388,7 @@ func TestPress(t *testing.T) {
 	rc.status, rc.answer = http.StatusUnauthorized, `{"status":401}`
 	rc.mu.Unlock()
 	if a := press(`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","value":"AAAA"}`); a.raw !=
-		`{"status":401,"body":"{\"status\":401}"}`+"\n" {
+		`{"status":401,"body":"{\"status\":401}","transport":"http"}`+"\n" {
 		t.Errorf("refused press %s", a.raw)
 	}
 	if _, p = rc.last(t); p["actions"].([]any)[0].(map[string]any)["value"] != "AAAA" {
@@ -1411,6 +1414,8 @@ func TestPress(t *testing.T) {
 		{`{"channel":"C0FAKEALERTS","ts":"` + reminder + `","action":"ack","user":"U0FAKEALICE"}`,
 			http.StatusUnprocessableEntity},
 		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","transport":"socket"}`,
+			http.StatusConflict},
+		{`{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE","transport":"pigeon"}`,
 			http.StatusBadRequest},
 		{`{"app":"c","channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"}`,
 			http.StatusBadRequest},
@@ -1544,5 +1549,505 @@ func TestRequestURLConfig(t *testing.T) {
 	}
 	if err := f.SetConfig(fakeslack.Config{}); err != nil || len(f.Config().RequestURL) != 0 {
 		t.Errorf("SetConfig without request_url: %v %v", err, f.Config().RequestURL)
+	}
+}
+
+// sock is a socket of a test client of Socket Mode: the frames it received, read in the background as the pongs of
+// its pings need; with confirm it confirms every envelope at once (F-093).
+type sock struct {
+	c      *websocket.Conn
+	frames chan map[string]any
+	done   chan struct{}
+}
+
+// dialSocket dials the Socket Mode address u; the socket is closed at the end of the test.
+func dialSocket(t *testing.T, u string, confirm bool) *sock {
+	t.Helper()
+	c, resp, err := websocket.Dial(t.Context(), u, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial %s: %v", u, err)
+	}
+	t.Cleanup(func() { _ = c.CloseNow() })
+	s := &sock{c: c, frames: make(chan map[string]any, 100), done: make(chan struct{})}
+	go func() {
+		defer close(s.done)
+		for {
+			_, data, err := c.Read(t.Context())
+			if err != nil {
+				return
+			}
+			var m map[string]any
+			_ = json.Unmarshal(data, &m)
+			if id, ok := m["envelope_id"].(string); ok && confirm {
+				_ = c.Write(t.Context(), websocket.MessageText, []byte(`{"envelope_id":"`+id+`"}`))
+			}
+			s.frames <- m
+		}
+	}()
+	return s
+}
+
+// openSocket asks apps.connections.open with the app-level token for an address and dials it.
+func openSocket(t *testing.T, f *fakeslack.Fake, token string, confirm bool) (*sock, string) {
+	t.Helper()
+	a := call(t, f, "apps.connections.open", token, nil, false)
+	u, _ := a.body["url"].(string)
+	if u == "" {
+		t.Fatalf("apps.connections.open = %s", a.raw)
+	}
+	return dialSocket(t, u, confirm), u
+}
+
+// next is the next frame the socket received.
+func (s *sock) next(t *testing.T) map[string]any {
+	t.Helper()
+	select {
+	case m := <-s.frames:
+		return m
+	case <-time.After(5 * time.Second):
+		t.Fatal("no frame within 5 s")
+	}
+	return nil
+}
+
+// hello is the hello the socket received first.
+func (s *sock) hello(t *testing.T) map[string]any {
+	t.Helper()
+	m := s.next(t)
+	if m["type"] != "hello" {
+		t.Fatalf("the first frame is %v, want hello", m)
+	}
+	return m
+}
+
+// sync pings through the socket: the fake answers the ping after what it wrote before and after the frames it read
+// before, so that afterwards the frames sent before are in s.frames and those written are taken.
+func (s *sock) sync(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := s.c.Ping(ctx); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+}
+
+// quiet checks that the socket is open and received nothing more.
+func (s *sock) quiet(t *testing.T) {
+	t.Helper()
+	s.sync(t)
+	select {
+	case m := <-s.frames:
+		t.Fatalf("an unexpected frame %v", m)
+	default:
+	}
+}
+
+// ended waits until the fake closed the socket.
+func (s *sock) ended(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the socket is still open after 5 s")
+	}
+}
+
+// eventually polls cond every 10 ms for up to 5 s.
+func eventually(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for range 500 {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s: not within 5 s", what)
+}
+
+// script posts a socket script to the fake.
+func script(t *testing.T, f *fakeslack.Fake, body string) answer {
+	t.Helper()
+	return control(t, f, http.MethodPost, "/_fake/socket", body)
+}
+
+// TestSocketHello covers F-100 and F-102: a socket opened at the address of apps.connections.open gets hello, whose
+// num_connections counts the app's open sockets that said hello, this one included, and its extra_connections, each
+// app on its own; GET /_fake/socket shows each app's open and opened sockets and hellos; the handshake is recorded and
+// takes faults; closing the fake ends its sockets.
+func TestSocketHello(t *testing.T) {
+	f := start(t)
+	b1, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	m := b1.hello(t)
+	info, _ := m["connection_info"].(map[string]any)
+	debug, _ := m["debug_info"].(map[string]any)
+	if m["num_connections"] != 1.0 || info["app_id"] != "A0MUSTERDEVB" ||
+		debug["approximate_connection_time"] != 18060.0 || debug["host"] != "fake-applink" {
+		t.Errorf("hello %v", m)
+	}
+	b2, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := b2.hello(t); m["num_connections"] != 2.0 {
+		t.Errorf("the second hello %v", m)
+	}
+	_ = b1.c.CloseNow()
+	eventually(t, "the closed socket is forgotten", func() bool { return f.Sockets().Apps["b"].Open == 1 })
+	putConfig(t, f, `{"extra_connections":{"b":1}}`)
+	b3, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := b3.hello(t); m["num_connections"] != 3.0 {
+		t.Errorf("hello with another program %v", m)
+	}
+	a1, _ := openSocket(t, f, fakeslack.AppToken, false)
+	if m := a1.hello(t); m["num_connections"] != 1.0 ||
+		m["connection_info"].(map[string]any)["app_id"] != "A0MUSTERDEVA" {
+		t.Errorf("app a counts its own %v", m)
+	}
+	want := map[string]fakeslack.AppSockets{"a": {Open: 1, Opened: 1, Hellos: 1},
+		"b": {Open: 2, Opened: 3, Hellos: 3}}
+	if got := f.Sockets().Apps; !reflect.DeepEqual(got, want) {
+		t.Errorf("sockets %+v", got)
+	}
+	if a := control(t, f, http.MethodGet, "/_fake/socket", ""); a.raw != `{"apps":{"a":{"open":1,"opened":1,`+
+		`"hellos":1,"overlapped":false},"b":{"open":2,"opened":3,"hellos":3,"overlapped":false}},"envelopes":[]}`+"\n" {
+		t.Errorf("GET /_fake/socket = %d %s", a.status, a.raw)
+	}
+	links := 0
+	for _, r := range f.Requests() {
+		if r.Path == "/link/" && strings.HasPrefix(r.Query, "ticket=") && r.Method == http.MethodGet {
+			links++
+		}
+	}
+	if links != 4 {
+		t.Errorf("%d handshakes recorded, want 4", links)
+	}
+
+	if err := f.SetFault(fakeserver.Fault{Path: "/link/", Status: http.StatusForbidden, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	a := call(t, f, "apps.connections.open", fakeslack.SecondAppToken, nil, false)
+	c, resp, err := websocket.Dial(t.Context(), a.body["url"].(string), nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		if c != nil {
+			_ = c.CloseNow()
+		}
+		t.Errorf("a faulted handshake: %v %v", resp, err)
+	}
+
+	if err := f.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []*sock{b2, b3, a1} {
+		s.ended(t)
+	}
+}
+
+// TestSocketTicketSingleUse covers F-100: a ticket opens one socket; the same address again, or a ticket the fake did
+// not issue, gets a socket that never says hello, counted under the app its address names.
+func TestSocketTicketSingleUse(t *testing.T) {
+	f := start(t)
+	first, u := openSocket(t, f, fakeslack.SecondAppToken, false)
+	first.hello(t)
+	again := dialSocket(t, u, false)
+	again.quiet(t)
+	host := strings.TrimPrefix(f.URL(), "http://")
+	unknown := dialSocket(t, "ws://"+host+"/link/?ticket="+strings.Repeat("0", 32)+"&app_id=A0MUSTERDEVB", false)
+	unknown.quiet(t)
+	other := dialSocket(t, "ws://"+host+"/link/?ticket=x&app_id=A0OTHER", false)
+	other.quiet(t)
+	if got := f.Sockets().Apps; got["b"] != (fakeslack.AppSockets{Open: 3, Opened: 3, Hellos: 1}) ||
+		got["a"] != (fakeslack.AppSockets{}) {
+		t.Errorf("sockets %+v", got)
+	}
+	if a := script(t, f, `{"send":{"type":"events_api"}}`); a.status != http.StatusOK {
+		t.Fatalf("send = %d %s", a.status, a.raw)
+	}
+	if m := first.next(t); m["type"] != "events_api" {
+		t.Errorf("the envelope went to %v", m)
+	}
+	again.quiet(t)
+	unknown.quiet(t)
+}
+
+// TestSocketTooMany covers F-102: an app that would count more than ten connections, its other programs' included,
+// gets disconnect too_many_websockets without hello, and the socket is closed.
+func TestSocketTooMany(t *testing.T) {
+	f := start(t)
+	putConfig(t, f, `{"extra_connections":{"b":9}}`)
+	tenth, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := tenth.hello(t); m["num_connections"] != 10.0 {
+		t.Errorf("the tenth hello %v", m)
+	}
+	eleventh, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := eleventh.next(t); m["type"] != "disconnect" || m["reason"] != "too_many_websockets" {
+		t.Errorf("the eleventh got %v", m)
+	}
+	eleventh.ended(t)
+	tenth.quiet(t)
+	if got := f.Sockets().Apps["b"]; got != (fakeslack.AppSockets{Open: 1, Opened: 2, Hellos: 1}) {
+		t.Errorf("sockets %+v", got)
+	}
+}
+
+// TestSocketScripts covers POST /_fake/socket: disconnect with a reason, keeping the socket open; too_many_websockets
+// and a missing hello armed for the next sockets; close; the refusals; and overlapped, true when a socket said hello
+// while the socket of the last scripted refresh was open, false otherwise.
+func TestSocketScripts(t *testing.T) {
+	f := start(t)
+	for _, c := range []struct {
+		body   string
+		status int
+	}{
+		{`{"disconnect":"warning"}`, http.StatusConflict},
+		{`{"send":{"type":"events_api"}}`, http.StatusConflict},
+		{`{"close":true}`, http.StatusConflict},
+		{`{"app":"c","skip_hello":1}`, http.StatusBadRequest},
+		{`{"skip_hello":-1}`, http.StatusBadRequest},
+		{`{"too_many_websockets":-1}`, http.StatusBadRequest},
+		{`{"send":{"payload":{}}}`, http.StatusBadRequest},
+		{`{"other":1}`, http.StatusBadRequest},
+		{`{`, http.StatusBadRequest},
+	} {
+		if a := script(t, f, c.body); a.status != c.status {
+			t.Errorf("%s = %d %s, want %d", c.body, a.status, a.raw, c.status)
+		}
+	}
+	if err := f.Script(t.Context(), fakeslack.SocketScript{Send: &fakeslack.SocketSend{Type: "x",
+		Payload: json.RawMessage(`{`)}}); err == nil {
+		t.Error("Script sent a payload that is no JSON")
+	}
+
+	s1, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s1.hello(t)
+	if a := script(t, f, `{"app":"b","disconnect":"link_disabled"}`); a.status != http.StatusOK ||
+		!strings.Contains(a.raw, `"b":{"open":1,"opened":1,"hellos":1,"overlapped":false}`) {
+		t.Fatalf("disconnect = %d %s", a.status, a.raw)
+	}
+	if m := s1.next(t); m["type"] != "disconnect" || m["reason"] != "link_disabled" ||
+		m["debug_info"].(map[string]any)["host"] != "fake-applink" {
+		t.Errorf("disconnect frame %v", m)
+	}
+	s1.quiet(t)
+
+	script(t, f, `{"too_many_websockets":1}`)
+	s2, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := s2.next(t); m["type"] != "disconnect" || m["reason"] != "too_many_websockets" {
+		t.Errorf("an armed too_many_websockets: %v", m)
+	}
+	s2.ended(t)
+	script(t, f, `{"skip_hello":1}`)
+	s3, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s3.quiet(t)
+	s4, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	if m := s4.hello(t); m["num_connections"] != 2.0 {
+		t.Errorf("a socket without hello is not counted: %v", m)
+	}
+	if a := script(t, f, `{"close":true}`); a.status != http.StatusOK {
+		t.Fatalf("close = %d %s", a.status, a.raw)
+	}
+	s4.ended(t)
+	s3.quiet(t)
+	if got := f.Sockets().Apps["b"]; got != (fakeslack.AppSockets{Open: 2, Opened: 4, Hellos: 2}) {
+		t.Errorf("sockets %+v", got)
+	}
+	_ = s3.c.CloseNow()
+	eventually(t, "s3 closed", func() bool { return f.Sockets().Apps["b"].Open == 1 })
+
+	script(t, f, `{"disconnect":"refresh_requested"}`)
+	if m := s1.next(t); m["reason"] != "refresh_requested" {
+		t.Errorf("refresh frame %v", m)
+	}
+	if f.Sockets().Apps["b"].Overlapped {
+		t.Error("overlapped before the next socket")
+	}
+	s5, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s5.hello(t)
+	_ = s1.c.CloseNow()
+	eventually(t, "s1 closed", func() bool { return f.Sockets().Apps["b"].Open == 1 })
+	if !f.Sockets().Apps["b"].Overlapped {
+		t.Error("the next hello came before the old socket closed, but overlapped is false")
+	}
+
+	if err := f.Script(t.Context(), fakeslack.SocketScript{Disconnect: "warning"}); err != nil {
+		t.Fatal(err)
+	}
+	if m := s5.next(t); m["reason"] != "warning" {
+		t.Errorf("warning frame %v", m)
+	}
+	_ = s5.c.CloseNow()
+	eventually(t, "s5 closed", func() bool { return f.Sockets().Apps["b"].Open == 0 })
+	s6, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s6.hello(t)
+	if got := f.Sockets().Apps["b"]; got.Overlapped || got.Open != 1 || got.Hellos != 4 {
+		t.Errorf("a reconnect after the old socket closed is no overlap: %+v", got)
+	}
+	if f.Sockets().Apps["a"] != (fakeslack.AppSockets{}) {
+		t.Errorf("app a %+v", f.Sockets().Apps["a"])
+	}
+}
+
+// TestSocketEnvelopes covers F-093: an envelope goes through the newest socket of the app that said hello as
+// {"envelope_id", "type", "payload", "accepts_response_payload"}; {"envelope_id": …} on that socket confirms it, with the
+// time from sending, and on another socket does not; WaitConfirmed waits for the confirmation.
+func TestSocketEnvelopes(t *testing.T) {
+	f := start(t)
+	s1, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s1.hello(t)
+	s2, _ := openSocket(t, f, fakeslack.SecondAppToken, false)
+	s2.hello(t)
+	a := script(t, f, `{"send":{"type":"events_api","payload":{"event":{"type":"app_mention"}}}}`)
+	if a.status != http.StatusOK {
+		t.Fatalf("send = %d %s", a.status, a.raw)
+	}
+	m := s2.next(t)
+	id, _ := m["envelope_id"].(string)
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).MatchString(id) ||
+		m["type"] != "events_api" || m["accepts_response_payload"] != false ||
+		m["payload"].(map[string]any)["event"].(map[string]any)["type"] != "app_mention" {
+		t.Errorf("envelope %v", m)
+	}
+	s1.quiet(t)
+	if !strings.Contains(a.raw, `"envelopes":[{"app":"b","envelope_id":"`+id+
+		`","type":"events_api","confirmed":false,"confirm_ms":null}]`) {
+		t.Errorf("state %s", a.raw)
+	}
+	confirm := func(s *sock, id string) {
+		t.Helper()
+		if err := s.c.Write(t.Context(), websocket.MessageText, []byte(`{"envelope_id":"`+id+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+		s.sync(t)
+	}
+	confirm(s1, id)
+	_ = s1.c.Write(t.Context(), websocket.MessageText, []byte(`not json`))
+	s1.sync(t)
+	if got := f.Sockets().Envelopes[0]; got.Confirmed {
+		t.Errorf("a confirmation on another socket counted: %+v", got)
+	}
+	confirm(s2, id)
+	if got := f.Sockets().Envelopes[0]; !got.Confirmed || got.ConfirmMS == nil || *got.ConfirmMS < 0 ||
+		*got.ConfirmMS > 5000 {
+		t.Errorf("confirmed %+v", got)
+	}
+
+	sent, err := f.SendEnvelope(t.Context(), fakeslack.AppB, "slash_commands", nil)
+	if err != nil || sent.Type != "slash_commands" || sent.App != "b" || sent.Confirmed {
+		t.Fatalf("SendEnvelope = %+v, %v", sent, err)
+	}
+	if m := s2.next(t); m["envelope_id"] != sent.EnvelopeID || !reflect.DeepEqual(m["payload"], map[string]any{}) {
+		t.Errorf("envelope %v", m)
+	}
+	done, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, ok := f.WaitConfirmed(done, sent.EnvelopeID); ok {
+		t.Error("WaitConfirmed before the confirmation")
+	}
+	confirm(s2, sent.EnvelopeID)
+	if got, ok := f.WaitConfirmed(t.Context(), sent.EnvelopeID); !ok || got.ConfirmMS == nil {
+		t.Errorf("WaitConfirmed = %+v, %v", got, ok)
+	}
+	if _, ok := f.WaitConfirmed(t.Context(), "nope"); ok {
+		t.Error("WaitConfirmed of an envelope never sent")
+	}
+	if _, err := f.SendEnvelope(t.Context(), fakeslack.AppA, "events_api", nil); err == nil {
+		t.Error("SendEnvelope to an app without a socket")
+	}
+	if got := len(f.Sockets().Envelopes); got != 2 {
+		t.Errorf("%d envelopes, want 2", got)
+	}
+}
+
+// TestPressOverSocket covers /_fake/press in Socket Mode (F-093): without a request_url the press goes as an
+// interactive envelope, whose payload is the block_actions payload, through a socket of the app, and the answer tells
+// that Muster confirmed it and how fast; with a request_url it goes there unless transport names socket; an app with
+// neither, or without the way asked, is 409.
+func TestPressOverSocket(t *testing.T) {
+	f := start(t)
+	root, _ := pressable(t, f, "V")
+	press := func(body string) answer {
+		t.Helper()
+		return control(t, f, http.MethodPost, "/_fake/press", body)
+	}
+	ack := `{"channel":"C0FAKEALERTS","ts":"` + root + `","action":"ack","user":"U0FAKEALICE"`
+	if a := press(ack + `}`); a.status != http.StatusConflict || a.body["error"] != "the app has no request_url and no socket" {
+		t.Errorf("neither = %d %s", a.status, a.raw)
+	}
+	s, _ := openSocket(t, f, fakeslack.SecondAppToken, true)
+	s.hello(t)
+	a := press(ack + `}`)
+	var res fakeslack.PressResult
+	if err := json.Unmarshal([]byte(a.raw), &res); err != nil || a.status != http.StatusOK ||
+		res.Transport != fakeslack.TransportSocket || res.Confirmed == nil || !*res.Confirmed || res.ConfirmMS == nil ||
+		res.EnvelopeID == "" || res.Status != 0 {
+		t.Fatalf("press over the socket = %d %s", a.status, a.raw)
+	}
+	m := s.next(t)
+	p, _ := m["payload"].(map[string]any)
+	action := p["actions"].([]any)[0].(map[string]any)
+	if m["type"] != "interactive" || m["envelope_id"] != res.EnvelopeID || p["type"] != "block_actions" ||
+		p["token"] != fakeslack.SecondVerificationToken || action["value"] != "VACK" ||
+		!strings.HasPrefix(p["response_url"].(string), f.URL()+"/actions/T0MUSTERDEVB/") {
+		t.Errorf("envelope %v", m)
+	}
+	if got := f.Sockets().Envelopes; len(got) != 1 || got[0].Type != "interactive" || !got[0].Confirmed {
+		t.Errorf("envelopes %+v", got)
+	}
+
+	rc := newReceiver(t)
+	putConfig(t, f, `{"request_url":{"b":"`+rc.srv.URL+`/cb"}}`)
+	if a := press(ack + `}`); a.status != http.StatusOK || !strings.Contains(a.raw, `"transport":"http"`) {
+		t.Errorf("with a request_url = %d %s", a.status, a.raw)
+	}
+	rc.last(t)
+	if a := press(ack + `,"transport":"socket"}`); a.status != http.StatusOK ||
+		!strings.Contains(a.raw, `"transport":"socket"`) || !strings.Contains(a.raw, `"confirmed":true`) {
+		t.Errorf("transport socket = %d %s", a.status, a.raw)
+	}
+	if m := s.next(t); m["type"] != "interactive" {
+		t.Errorf("envelope %v", m)
+	}
+	ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": alerts, "text": "app a"}))
+	appA := f.Messages("a", alerts)[0].TS
+	if a := press(`{"app":"a","channel":"C0FAKEALERTS","ts":"` + appA + `","action":"ack","user":"U0FAKEALICE",` +
+		`"transport":"socket"}`); a.status != http.StatusConflict {
+		t.Errorf("app a without a socket = %d %s", a.status, a.raw)
+	}
+	putConfig(t, f, `{"request_url":{"b":null}}`)
+	if a := press(ack + `,"transport":"http"}`); a.status != http.StatusConflict {
+		t.Errorf("transport http without a request_url = %d %s", a.status, a.raw)
+	}
+}
+
+// TestExtraConnectionsConfig covers extra_connections in /_fake/config: set app by app, removed by null or 0; an
+// unknown app or a negative number is refused, changing nothing.
+func TestExtraConnectionsConfig(t *testing.T) {
+	f := start(t)
+	putConfig(t, f, `{"extra_connections":{"b":2}}`)
+	putConfig(t, f, `{"extra_connections":{"a":1}}`)
+	if got := f.Config().ExtraConnections; !reflect.DeepEqual(got, map[string]int{"a": 1, "b": 2}) {
+		t.Fatalf("extra_connections %v", got)
+	}
+	if a := putConfig(t, f, `{"extra_connections":{"b":null,"a":0}}`); a.status != http.StatusOK ||
+		!strings.Contains(a.raw, `"extra_connections":{}`) {
+		t.Fatalf("removed = %d %s", a.status, a.raw)
+	}
+	putConfig(t, f, `{"extra_connections":{"b":3}}`)
+	for _, body := range []string{`{"extra_connections":{"c":1}}`, `{"extra_connections":{"b":-1}}`,
+		`{"extra_connections":{"b":"x"}}`} {
+		if a := putConfig(t, f, body); a.status != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, a.status, a.raw)
+		}
+	}
+	if got := f.Config().ExtraConnections; !reflect.DeepEqual(got, map[string]int{"b": 3}) {
+		t.Errorf("a refused patch changed extra_connections: %v", got)
+	}
+	if err := f.SetConfig(fakeslack.Config{ExtraConnections: map[string]int{"b": -1}}); err == nil {
+		t.Error("SetConfig took a negative number")
+	}
+	if err := f.SetConfig(fakeslack.Config{}); err != nil || len(f.Config().ExtraConnections) != 0 {
+		t.Errorf("SetConfig without extra_connections: %v %v", err, f.Config().ExtraConnections)
 	}
 }

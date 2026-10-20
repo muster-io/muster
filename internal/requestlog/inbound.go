@@ -4,6 +4,7 @@
 package requestlog
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -13,18 +14,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
 // The operations of inbound records (C-23.FR-2): a Mattermost button press, a Telegram update in the webhook mode, a
-// pushed Bridge event, and a Slack interaction — a press in http mode (C-24.FR-14).
+// pushed Bridge event, and a Slack interaction — a press in http mode, and the envelope of the type interactive in
+// Socket Mode, whose record takes the operation of its type as every envelope's does (C-24.FR-14).
 const (
 	OperationPress       = "press"
 	OperationUpdate      = "update"
 	OperationPush        = "push"
 	OperationInteractive = "interactive"
 )
+
+// MethodWebSocket is the method of the record of an envelope received over a WebSocket, which has no HTTP method.
+const MethodWebSocket = "WEBSOCKET"
+
+// operationEnvelope is the operation of the record of an envelope without a type.
+const operationEnvelope = "envelope"
+
+// maxOperation is the longest operation a record stores.
+const maxOperation = 64
 
 // captureMax is the most of a request or an answer body Inbound keeps. The shape masking needs a JSON body whole, so a
 // larger body, or one its handler did not read to the end, is recorded with its size and without its text.
@@ -100,6 +113,48 @@ type InboundRecord struct {
 // InboundRecorder keeps the records of the requests that reach the callbacks; *Writer implements it.
 type InboundRecorder interface {
 	RecordInbound(ctx context.Context, r InboundRecord)
+}
+
+// EnvelopeRecord is an envelope that reached a Connection over a WebSocket and was confirmed on it — an envelope of
+// Slack's Socket Mode (C-24.FR-14, C-23.FR-1): its Connection, its type as the operation, the socket's address without
+// its query, the envelope as received, Muster's confirmation, the path of the socket — outbound.ViaDirect or
+// outbound.ViaProxy — and the time from its receipt to the confirmation on the real clock.
+type EnvelopeRecord struct {
+	Links        Links
+	Operation    string
+	URL          string
+	Envelope     []byte
+	Confirmation []byte
+	Via          string
+	Latency      time.Duration
+}
+
+// EnvelopeRecorder keeps the records of envelopes; *Writer implements it.
+type EnvelopeRecorder interface {
+	RecordEnvelope(ctx context.Context, r EnvelopeRecord)
+}
+
+var _ EnvelopeRecorder = (*Writer)(nil)
+
+// RecordEnvelope writes the record of an envelope (C-23.FR-1, FR-2, C-24.FR-14) as RecordInbound writes the record of
+// a callback's request: the direction inbound, the attempt 1, no error; the method WEBSOCKET, no request headers, the
+// envelope as the request body and the confirmation as the answer's body without a status or answer headers,
+// shape-masked and cut as every record. Its operation is the envelope's type, sanitized and cut to what a record
+// stores, envelope when it has none. Like Record it fails nothing; a nil Writer records nothing.
+func (w *Writer) RecordEnvelope(ctx context.Context, r EnvelopeRecord) {
+	if w == nil {
+		return
+	}
+	op := cmp.Or(cutAt(sanitize(r.Operation), maxOperation), operationEnvelope)
+	p := w.paramsOf(DirectionInbound, outbound.Record{
+		Owner:     outbound.Owner{Connection: r.Links.Connection, PublicID: r.Links.ConnectionID},
+		Links:     outbound.Links{Destination: r.Links.Destination, AlertGroup: r.Links.AlertGroup},
+		Operation: op, Method: MethodWebSocket, URL: r.URL, RequestBody: r.Envelope, Latency: r.Latency,
+		Via: cmp.Or(r.Via, outbound.ViaDirect), Attempt: 1})
+	body, size, cut := textOf(r.Confirmation)
+	p.ResponseBody = pgtype.Text{String: body, Valid: true}
+	p.ResponseBodyBytes, p.ResponseBodyTruncated = size, cut
+	w.insert(ctx, DirectionInbound, op, r.Links.ConnectionID, p)
 }
 
 // Inbound wraps the callback next of operation (C-23.FR-1, FR-3): it keeps the request's headers and the body as the
