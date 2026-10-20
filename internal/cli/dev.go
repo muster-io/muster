@@ -24,9 +24,12 @@ variable replaces its default.
                          fake Mattermost server on 127.0.0.1:18066, each Mattermost and the Telegram server with
                          a second bot (tokens muster-dev-mattermost-token-b and 234567:dev-telegram-token-b),
                          the fake bridge on 127.0.0.1:18094 with two bots (tokens muster-dev-bridge-token and
-                         muster-dev-bridge-token-b), and the fake HTTP and SOCKS5 proxies on 127.0.0.1:18091
-                         and 127.0.0.1:18092, then Muster against the development database (make dev-db),
-                         migrated on start, with the demo OIDC configuration "Dev IdP"
+                         muster-dev-bridge-token-b), the fake Slack server on 127.0.0.1:18097 with two apps
+                         (bot tokens xoxb-muster-dev-slack-token and xoxb-muster-dev-slack-token-b, app-level
+                         tokens xapp-muster-dev-slack-token and xapp-muster-dev-slack-token-b), and the fake
+                         HTTP and SOCKS5 proxies on 127.0.0.1:18091 and 127.0.0.1:18092, then Muster against
+                         the development database (make dev-db), migrated on start, with the demo OIDC
+                         configuration "Dev IdP"
   muster dev --replica   run an additional replica on :9080, :9081 and :9082, without fake servers
   muster dev <command>   run another command with the development defaults, such as muster dev migrate
 `

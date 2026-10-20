@@ -21,6 +21,7 @@ import type { BridgeInfo } from './bridgeInfo';
 import type { ConnectionCheckResultWarningsItem } from './connectionCheckResultWarningsItem';
 import type { ConnectionCheckStep } from './connectionCheckStep';
 import type { PublicId } from './publicId';
+import type { SlackCheckInfo } from './slackCheckInfo';
 
 export interface ConnectionCheckResult {
   ok: boolean;
@@ -41,6 +42,8 @@ export interface ConnectionCheckResult {
   pending_updates?: number | null;
   /** Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types. */
   info?: BridgeInfo | null;
+  /** Slack only. What the step `token` found — the workspace and the bot — and the app that the step `app_token` found, stored on the Connection by a passing `checkConnection`; null when `token` failed, and for the other types. */
+  slack?: SlackCheckInfo | null;
   /** The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them. */
   request_log_run: PublicId;
 }

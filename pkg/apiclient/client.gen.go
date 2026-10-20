@@ -549,17 +549,21 @@ func (e ConnectionCheckResultWarnings) Valid() bool {
 
 // Defines values for ConnectionCheckStepName.
 const (
+	ConnectionCheckStepNameAppToken       ConnectionCheckStepName = "app_token"
 	ConnectionCheckStepNameDryProbe       ConnectionCheckStepName = "dry_probe"
 	ConnectionCheckStepNameEventDelivery  ConnectionCheckStepName = "event_delivery"
 	ConnectionCheckStepNameGetMe          ConnectionCheckStepName = "get_me"
 	ConnectionCheckStepNameGetWebhookInfo ConnectionCheckStepName = "get_webhook_info"
 	ConnectionCheckStepNameInfo           ConnectionCheckStepName = "info"
+	ConnectionCheckStepNameScopes         ConnectionCheckStepName = "scopes"
 	ConnectionCheckStepNameToken          ConnectionCheckStepName = "token"
 )
 
 // Valid indicates whether the value is a known member of the ConnectionCheckStepName enum.
 func (e ConnectionCheckStepName) Valid() bool {
 	switch e {
+	case ConnectionCheckStepNameAppToken:
+		return true
 	case ConnectionCheckStepNameDryProbe:
 		return true
 	case ConnectionCheckStepNameEventDelivery:
@@ -569,6 +573,8 @@ func (e ConnectionCheckStepName) Valid() bool {
 	case ConnectionCheckStepNameGetWebhookInfo:
 		return true
 	case ConnectionCheckStepNameInfo:
+		return true
+	case ConnectionCheckStepNameScopes:
 		return true
 	case ConnectionCheckStepNameToken:
 		return true
@@ -599,6 +605,7 @@ func (e ConnectionPath) Valid() bool {
 const (
 	ConnectionTypeBridge     ConnectionType = "bridge"
 	ConnectionTypeMattermost ConnectionType = "mattermost"
+	ConnectionTypeSlack      ConnectionType = "slack"
 	ConnectionTypeTelegram   ConnectionType = "telegram"
 )
 
@@ -608,6 +615,8 @@ func (e ConnectionType) Valid() bool {
 	case ConnectionTypeBridge:
 		return true
 	case ConnectionTypeMattermost:
+		return true
+	case ConnectionTypeSlack:
 		return true
 	case ConnectionTypeTelegram:
 		return true
@@ -1548,14 +1557,17 @@ func (e NullableCheckKind) Valid() bool {
 
 // Defines values for NullableConnectionCheckCode.
 const (
+	NullableConnectionCheckCodeAppMismatch             NullableConnectionCheckCode = "app_mismatch"
 	NullableConnectionCheckCodeBlocked                 NullableConnectionCheckCode = "blocked"
 	NullableConnectionCheckCodeConnectFailed           NullableConnectionCheckCode = "connect_failed"
 	NullableConnectionCheckCodeDnsFailed               NullableConnectionCheckCode = "dns_failed"
 	NullableConnectionCheckCodeEventDeliveryNotOffered NullableConnectionCheckCode = "event_delivery_not_offered"
 	NullableConnectionCheckCodeLessThannil             NullableConnectionCheckCode = "<nil>"
+	NullableConnectionCheckCodeMissingScope            NullableConnectionCheckCode = "missing_scope"
 	NullableConnectionCheckCodeNotBotApi               NullableConnectionCheckCode = "not_bot_api"
 	NullableConnectionCheckCodeNotBridge               NullableConnectionCheckCode = "not_bridge"
 	NullableConnectionCheckCodeNotMattermost           NullableConnectionCheckCode = "not_mattermost"
+	NullableConnectionCheckCodeNotSlack                NullableConnectionCheckCode = "not_slack"
 	NullableConnectionCheckCodeProtocolMismatch        NullableConnectionCheckCode = "protocol_mismatch"
 	NullableConnectionCheckCodeProtocolVersionUnknown  NullableConnectionCheckCode = "protocol_version_unknown"
 	NullableConnectionCheckCodeProxyRefused            NullableConnectionCheckCode = "proxy_refused"
@@ -1566,11 +1578,14 @@ const (
 	NullableConnectionCheckCodeUnexpectedStatus        NullableConnectionCheckCode = "unexpected_status"
 	NullableConnectionCheckCodeWebhookSet              NullableConnectionCheckCode = "webhook_set"
 	NullableConnectionCheckCodeWrongPathPrefix         NullableConnectionCheckCode = "wrong_path_prefix"
+	NullableConnectionCheckCodeWrongTokenType          NullableConnectionCheckCode = "wrong_token_type"
 )
 
 // Valid indicates whether the value is a known member of the NullableConnectionCheckCode enum.
 func (e NullableConnectionCheckCode) Valid() bool {
 	switch e {
+	case NullableConnectionCheckCodeAppMismatch:
+		return true
 	case NullableConnectionCheckCodeBlocked:
 		return true
 	case NullableConnectionCheckCodeConnectFailed:
@@ -1581,11 +1596,15 @@ func (e NullableConnectionCheckCode) Valid() bool {
 		return true
 	case NullableConnectionCheckCodeLessThannil:
 		return true
+	case NullableConnectionCheckCodeMissingScope:
+		return true
 	case NullableConnectionCheckCodeNotBotApi:
 		return true
 	case NullableConnectionCheckCodeNotBridge:
 		return true
 	case NullableConnectionCheckCodeNotMattermost:
+		return true
+	case NullableConnectionCheckCodeNotSlack:
 		return true
 	case NullableConnectionCheckCodeProtocolMismatch:
 		return true
@@ -1606,6 +1625,8 @@ func (e NullableConnectionCheckCode) Valid() bool {
 	case NullableConnectionCheckCodeWebhookSet:
 		return true
 	case NullableConnectionCheckCodeWrongPathPrefix:
+		return true
+	case NullableConnectionCheckCodeWrongTokenType:
 		return true
 	default:
 		return false
@@ -2097,19 +2118,19 @@ func (e Permission) Valid() bool {
 
 // Defines values for ProxyType.
 const (
-	Http   ProxyType = "http"
-	Https  ProxyType = "https"
-	Socks5 ProxyType = "socks5"
+	ProxyTypeHttp   ProxyType = "http"
+	ProxyTypeHttps  ProxyType = "https"
+	ProxyTypeSocks5 ProxyType = "socks5"
 )
 
 // Valid indicates whether the value is a known member of the ProxyType enum.
 func (e ProxyType) Valid() bool {
 	switch e {
-	case Http:
+	case ProxyTypeHttp:
 		return true
-	case Https:
+	case ProxyTypeHttps:
 		return true
-	case Socks5:
+	case ProxyTypeSocks5:
 		return true
 	default:
 		return false
@@ -2332,6 +2353,69 @@ func (e SeverityLevel) Valid() bool {
 	case SeverityLevelInfo:
 		return true
 	case SeverityLevelWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackConnectionType.
+const (
+	SlackConnectionTypeSlack SlackConnectionType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackConnectionType enum.
+func (e SlackConnectionType) Valid() bool {
+	switch e {
+	case SlackConnectionTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackConnectionBaseType.
+const (
+	SlackConnectionBaseTypeSlack SlackConnectionBaseType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackConnectionBaseType enum.
+func (e SlackConnectionBaseType) Valid() bool {
+	switch e {
+	case SlackConnectionBaseTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackConnectionInputType.
+const (
+	SlackConnectionInputTypeSlack SlackConnectionInputType = "slack"
+)
+
+// Valid indicates whether the value is a known member of the SlackConnectionInputType enum.
+func (e SlackConnectionInputType) Valid() bool {
+	switch e {
+	case SlackConnectionInputTypeSlack:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SlackEventMode.
+const (
+	SlackEventModeHttp   SlackEventMode = "http"
+	SlackEventModeSocket SlackEventMode = "socket"
+)
+
+// Valid indicates whether the value is a known member of the SlackEventMode enum.
+func (e SlackEventMode) Valid() bool {
+	switch e {
+	case SlackEventModeHttp:
+		return true
+	case SlackEventModeSocket:
 		return true
 	default:
 		return false
@@ -4263,8 +4347,11 @@ type ConnectionCheckResult struct {
 	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
 
 	// RequestLogRun The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.
-	RequestLogRun PublicId              `json:"request_log_run"`
-	Steps         []ConnectionCheckStep `json:"steps"`
+	RequestLogRun PublicId `json:"request_log_run"`
+
+	// Slack Slack only. What the step `token` found — the workspace and the bot — and the app that the step `app_token` found, stored on the Connection by a passing `checkConnection`; null when `token` failed, and for the other types.
+	Slack nullable.Nullable[SlackCheckInfo] `json:"slack,omitempty"`
+	Steps []ConnectionCheckStep             `json:"steps"`
 
 	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
@@ -4278,10 +4365,10 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 
-	// LatencyMs How long the step's request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.
+	// LatencyMs How long the step's request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.
 	LatencyMs nullable.Nullable[int] `json:"latency_ms,omitempty"`
 
 	// Message What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code's text.
@@ -5285,7 +5372,7 @@ type NullableAlertGroupStatus string
 // NullableCheckKind The check or test a request belongs to, null for any other request.
 type NullableCheckKind string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot's: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack's JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
@@ -5907,7 +5994,7 @@ type RequestRecord struct {
 	LatencyMs int      `json:"latency_ms"`
 	Method    string   `json:"method"`
 
-	// Operation The operation as its protocol names it — the Bot API method for Telegram, the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
+	// Operation The operation as its protocol names it — the Bot API method for Telegram, the Web API method for Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
 	Operation string `json:"operation"`
 
 	// RequestBody The body as sent, masked, cut to `request_log.body_max` bytes at a character boundary, bytes that are not UTF-8 replaced; untrusted text.
@@ -5981,7 +6068,7 @@ type RequestRecordSummary struct {
 	LatencyMs int      `json:"latency_ms"`
 	Method    string   `json:"method"`
 
-	// Operation The operation as its protocol names it — the Bot API method for Telegram, the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
+	// Operation The operation as its protocol names it — the Bot API method for Telegram, the Web API method for Slack (`auth.test`, `chat.postMessage`), the `operationId` of the Bridge protocol, the operation of Mattermost's REST API in lower camel case — or for an outgoing webhook `event`, or the request of the template mode (`create`, `update`, `open_thread`, `reply_in_thread`).
 	Operation string `json:"operation"`
 
 	// RequestBodyTruncated The request body is cut to `request_log.body_max` bytes.
@@ -6404,6 +6491,118 @@ type SigningSecretStatus struct {
 	Set                 bool                         `json:"set"`
 	UpdatedAt           nullable.Nullable[time.Time] `json:"updated_at,omitempty"`
 }
+
+// SlackCheckInfo What a check of a Slack Connection found.
+type SlackCheckInfo struct {
+	// AppId The Slack app's id (`A…`); null in `http` mode, which has no step `app_token`, and when that step failed.
+	AppId nullable.Nullable[string] `json:"app_id"`
+
+	// BotUserId The bot's user id (`U…`).
+	BotUserId string `json:"bot_user_id"`
+
+	// TeamId The workspace's id (`T…`).
+	TeamId string `json:"team_id"`
+
+	// TeamName The workspace's name.
+	TeamName string `json:"team_name"`
+}
+
+// SlackConnection defines model for SlackConnection.
+type SlackConnection struct {
+	// AppId The Slack app's id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.
+	AppId nullable.Nullable[string] `json:"app_id,omitempty"`
+
+	// AppTokenStatus What a read shows instead of a Secret. The value itself is never returned.
+	AppTokenStatus SecretStatus `json:"app_token_status"`
+
+	// BotName The bot's name (`user` of `auth.test`), as the last successful Connection check found it; null before one and after the bot token changed.
+	BotName nullable.Nullable[string] `json:"bot_name,omitempty"`
+
+	// BotTokenStatus What a read shows instead of a Secret. The value itself is never returned.
+	BotTokenStatus SecretStatus `json:"bot_token_status"`
+
+	// BotUserId The bot's user id (`U…`); null as `bot_name`.
+	BotUserId nullable.Nullable[string] `json:"bot_user_id,omitempty"`
+
+	// CallbackUrl Where Slack posts the button presses of this Connection in `http` mode, `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity Request URL of the Slack app. Slack's own address is fixed, so the Connection has no address field.
+	CallbackUrl *string   `json:"callback_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// DestinationCount A Connection used by Destinations cannot be deleted.
+	DestinationCount int `json:"destination_count"`
+
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
+	Etag *string `json:"etag,omitempty"`
+
+	// EventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
+	EventMode SlackEventMode `json:"event_mode"`
+
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id PublicId `json:"id"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter `json:"limiter"`
+	Name    string  `json:"name"`
+
+	// Proxy Per-client proxy as read. The password is a Secret.
+	Proxy ProxyConfig `json:"proxy"`
+
+	// SlackSigningSecretStatus What a read shows instead of a Secret. The value itself is never returned.
+	SlackSigningSecretStatus SecretStatus `json:"slack_signing_secret_status"`
+
+	// TeamId The workspace's id (`T…`); null as `bot_name`.
+	TeamId nullable.Nullable[string] `json:"team_id,omitempty"`
+
+	// TeamName The workspace's name; null as `bot_name`.
+	TeamName nullable.Nullable[string] `json:"team_name,omitempty"`
+	Type     SlackConnectionType       `json:"type"`
+}
+
+// SlackConnectionType defines model for SlackConnection.Type.
+type SlackConnectionType string
+
+// SlackConnectionBase defines model for SlackConnectionBase.
+type SlackConnectionBase struct {
+	// EventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
+	EventMode SlackEventMode `json:"event_mode"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter                 `json:"limiter"`
+	Name    string                  `json:"name"`
+	Type    SlackConnectionBaseType `json:"type"`
+}
+
+// SlackConnectionBaseType defines model for SlackConnectionBase.Type.
+type SlackConnectionBaseType string
+
+// SlackConnectionInput defines model for SlackConnectionInput.
+type SlackConnectionInput struct {
+	// AppToken Write-only Secret, the app-level token (`xapp-…`, with the scope `connections:write`); required in `socket` mode, sent now or stored. Omit on update to keep the stored one; a change to `http` keeps it.
+	AppToken *string `json:"app_token,omitempty"`
+
+	// BotToken Write-only Secret, the bot token (`xoxb-…`). Omit on update to keep the stored one; a new one forgets what the last check learned.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// EventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
+	EventMode SlackEventMode `json:"event_mode"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter `json:"limiter"`
+	Name    string  `json:"name"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy ProxyConfigInput `json:"proxy"`
+
+	// SlackSigningSecret Write-only Secret, the Slack signing secret of the app; required in `http` mode, sent now or stored. Omit on update to keep the stored one; a change to `socket` keeps it. It is never sent anywhere.
+	SlackSigningSecret *string                  `json:"slack_signing_secret,omitempty"`
+	Type               SlackConnectionInputType `json:"type"`
+}
+
+// SlackConnectionInputType defines model for SlackConnectionInput.Type.
+type SlackConnectionInputType string
+
+// SlackEventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
+type SlackEventMode string
 
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
 type SnapshotState string
@@ -9221,6 +9420,40 @@ func (t *Connection) MergeBridgeConnection(v BridgeConnection) error {
 	return err
 }
 
+// AsSlackConnection returns the union data inside the Connection as a SlackConnection
+func (t Connection) AsSlackConnection() (SlackConnection, error) {
+	var body SlackConnection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackConnection overwrites any union data inside the Connection as the provided SlackConnection
+func (t *Connection) FromSlackConnection(v SlackConnection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	t.union = b
+	return err
+}
+
+// MergeSlackConnection performs a merge with any union data inside the Connection, using the provided SlackConnection
+func (t *Connection) MergeSlackConnection(v SlackConnection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Connection) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -9239,6 +9472,8 @@ func (t Connection) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeConnection()
 	case "mattermost":
 		return t.AsMattermostConnection()
+	case "slack":
+		return t.AsSlackConnection()
 	case "telegram":
 		return t.AsTelegramConnection()
 	default:
@@ -9495,6 +9730,40 @@ func (t *ConnectionInput) MergeBridgeConnectionInput(v BridgeConnectionInput) er
 	return err
 }
 
+// AsSlackConnectionInput returns the union data inside the ConnectionInput as a SlackConnectionInput
+func (t ConnectionInput) AsSlackConnectionInput() (SlackConnectionInput, error) {
+	var body SlackConnectionInput
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSlackConnectionInput overwrites any union data inside the ConnectionInput as the provided SlackConnectionInput
+func (t *ConnectionInput) FromSlackConnectionInput(v SlackConnectionInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	t.union = b
+	return err
+}
+
+// MergeSlackConnectionInput performs a merge with any union data inside the ConnectionInput, using the provided SlackConnectionInput
+func (t *ConnectionInput) MergeSlackConnectionInput(v SlackConnectionInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"slack"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t ConnectionInput) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -9513,6 +9782,8 @@ func (t ConnectionInput) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeConnectionInput()
 	case "mattermost":
 		return t.AsMattermostConnectionInput()
+	case "slack":
+		return t.AsSlackConnectionInput()
 	case "telegram":
 		return t.AsTelegramConnectionInput()
 	default:
@@ -10429,7 +10700,7 @@ type ClientInterface interface {
 
 	// CreateConnectionWithBody Create Connection
 	//
-	// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+	// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10438,7 +10709,7 @@ type ClientInterface interface {
 
 	// CreateConnection Create Connection
 	//
-	// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+	// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -10495,14 +10766,14 @@ type ClientInterface interface {
 
 	// ListConnectionChannels List channels visible to the bot
 	//
-	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Corresponds with GET /connections/{connection_id}/channels (the `ListConnectionChannels` operationId).
 	ListConnectionChannels(ctx context.Context, connectionId ConnectionId, params *ListConnectionChannelsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CheckConnectionWithBody Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -10511,7 +10782,7 @@ type ClientInterface interface {
 
 	// CheckConnection Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11019,7 +11290,7 @@ type ClientInterface interface {
 
 	// ListLinkableConnections List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 	ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -12349,7 +12620,7 @@ func (c *Client) ListConnections(ctx context.Context, params *ListConnectionsPar
 
 // CreateConnectionWithBody Create Connection
 //
-// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12368,7 +12639,7 @@ func (c *Client) CreateConnectionWithBody(ctx context.Context, contentType strin
 
 // CreateConnection Create Connection
 //
-// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12495,7 +12766,7 @@ func (c *Client) UpdateConnection(ctx context.Context, connectionId ConnectionId
 
 // ListConnectionChannels List channels visible to the bot
 //
-// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Corresponds with GET /connections/{connection_id}/channels (the `ListConnectionChannels` operationId).
 func (c *Client) ListConnectionChannels(ctx context.Context, connectionId ConnectionId, params *ListConnectionChannelsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12512,7 +12783,7 @@ func (c *Client) ListConnectionChannels(ctx context.Context, connectionId Connec
 
 // CheckConnectionWithBody Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12531,7 +12802,7 @@ func (c *Client) CheckConnectionWithBody(ctx context.Context, connectionId Conne
 
 // CheckConnection Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -13699,7 +13970,7 @@ func (c *Client) ConfirmBridgeLink(ctx context.Context, body ConfirmBridgeLinkJS
 
 // ListLinkableConnections List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 func (c *Client) ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -23434,7 +23705,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateConnectionWithBodyWithResponse Create Connection
 	//
-	// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+	// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23443,7 +23714,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateConnectionWithResponse Create Connection
 	//
-	// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+	// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23504,7 +23775,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListConnectionChannelsWithResponse List channels visible to the bot
 	//
-	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -23513,7 +23784,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckConnectionWithBodyWithResponse Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -23522,7 +23793,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckConnectionWithResponse Check a Connection
 	//
-	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -24088,7 +24359,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -38305,7 +38576,7 @@ func (c *ClientWithResponses) ListConnectionsWithResponse(ctx context.Context, p
 
 // CreateConnectionWithBodyWithResponse Create Connection
 //
-// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38320,7 +38591,7 @@ func (c *ClientWithResponses) CreateConnectionWithBodyWithResponse(ctx context.C
 
 // CreateConnectionWithResponse Create Connection
 //
-// `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+// `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38423,7 +38694,7 @@ func (c *ClientWithResponses) UpdateConnectionWithResponse(ctx context.Context, 
 
 // ListConnectionChannelsWithResponse List channels visible to the bot
 //
-// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -38438,7 +38709,7 @@ func (c *ClientWithResponses) ListConnectionChannelsWithResponse(ctx context.Con
 
 // CheckConnectionWithBodyWithResponse Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -38453,7 +38724,7 @@ func (c *ClientWithResponses) CheckConnectionWithBodyWithResponse(ctx context.Co
 
 // CheckConnectionWithResponse Check a Connection
 //
-// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -39415,7 +39686,7 @@ func (c *ClientWithResponses) ConfirmBridgeLinkWithResponse(ctx context.Context,
 
 // ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Returns a wrapper object for the known response body format(s).
 //

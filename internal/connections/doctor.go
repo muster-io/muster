@@ -62,7 +62,8 @@ type DoctorQueries interface {
 // C-22.FR-3), each request made at once in the background client class, whose retries each check bounds by each. A
 // Telegram or Bridge Connection that fails names the failing step with its message. It only reads: it records nothing
 // of what it finds, not even a Bridge's info. It needs the Keyring and the Network of the Service only; without a
-// Keyring every check fails, for the bot tokens cannot be opened.
+// Keyring every check fails, for the bot tokens cannot be opened. Slack Connections are skipped until their check joins
+// muster doctor.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
@@ -76,6 +77,10 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			return nil, fmt.Errorf("list the connections: %w", err)
 		}
 		for _, r := range rows {
+			// Slack Connections join muster doctor with their Destinations.
+			if r.Type == TypeSlack {
+				continue
+			}
 			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeBridge {
 				var c *bridge.Client

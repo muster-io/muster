@@ -443,6 +443,7 @@
   },
   "checks": {
     "codes": {
+      "appMismatch": "The app-level token belongs to another Slack app than the bot token.",
       "blocked": "The outbound address policy blocks this address.",
       "botMayNotEdit": "The bot may not edit messages in the channel.",
       "botMayNotPost": "The bot may not post messages in the channel.",
@@ -458,10 +459,13 @@
       "connectFailed": "The connection failed.",
       "dnsFailed": "The host name does not resolve.",
       "eventDeliveryNotOffered": "The bridge does not offer this event delivery mode.",
+      "missingScope": "The bot token lacks the scopes {{scopes}}.",
+      "missingScopeUnnamed": "The bot token lacks scopes that Muster needs.",
       "notAChannel": "This chat is not a channel.",
       "notBotApi": "This is not a Bot API.",
       "notBridge": "The address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem.",
       "notMattermost": "The address answers, but not as a Mattermost server.",
+      "notSlack": "The address answered, but not as Slack's API.",
       "protocolMismatch": "The bridge's answer does not match the protocol.",
       "protocolVersionUnknown": "The bridge speaks a protocol version this Muster does not.",
       "proxyRefused": "The proxy refused the connection.",
@@ -471,7 +475,8 @@
       "tokenInvalid": "The bot token is not valid.",
       "unexpectedStatus": "The address answered with an unexpected status.",
       "webhookSet": "A webhook is set.",
-      "wrongPathPrefix": "Wrong path prefix: the server answered 404."
+      "wrongPathPrefix": "Wrong path prefix: the server answered 404.",
+      "wrongTokenType": "This is not a bot token."
     },
     "detail": "Details: {{detail}}",
     "reasonWithDetail": "{{reason}} Details: {{detail}}"
@@ -671,19 +676,23 @@
       "probePassed": {
         "bridge": "The address answers as a bridge.",
         "mattermost": "The address answers as a Mattermost server.",
+        "slack": "The address answers as Slack's Web API.",
         "telegram": "The address answers as a Bot API."
       },
       "running": "Checking…",
       "skippedEarlier": "Skipped: an earlier step failed",
       "skippedNoToken": "Skipped: type the bot token to check it",
       "skippedRetype": "Skipped: type the bot token again to check the new address or proxy, or save first",
+      "slackHint": "Checks the bot token with auth.test and the scopes it grants, and in Socket Mode that the app-level token belongs to the same Slack app.",
       "start": "Check connection",
       "steps": {
+        "appToken": "App-level token",
         "dryProbe": "Dry probe without the token",
         "eventDelivery": "Event delivery",
         "getMe": "getMe",
         "getWebhookInfo": "getWebhookInfo",
         "info": "Bridge info",
+        "scopes": "Scopes",
         "token": "Token"
       },
       "stepsLabel": "Steps of the check",
@@ -745,6 +754,9 @@
     "list": {
       "empty": "No Connections yet."
     },
+    "slack": {
+      "limiterHint": "At most this many requests go to Slack's Web API through this Connection. When Slack asks Muster to wait, Muster waits as long as it asks."
+    },
     "telegram": {
       "baseUrlHint": "A self-hosted Bot API server keeps the bot on that server only. Do not call api.telegram.org with this token from anywhere else: even getMe moves the bot back to Telegram's cloud, and presses and comments start to go missing without an error.",
       "httpWarning": "The bot token travels in clear text over http. Use https unless this path is a private network or a tunnel.",
@@ -758,7 +770,8 @@
     },
     "title": "Connections",
     "types": {
-      "bridge": "Bridge"
+      "bridge": "Bridge",
+      "slack": "Slack"
     }
   },
   "deliveries": {

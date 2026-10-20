@@ -18,8 +18,8 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 )
 
-// Connections is what the API needs of internal/connections: Mattermost, Telegram and Bridge Connections, their checks,
-// the checks of their drafts and the channels of a Mattermost one.
+// Connections is what the API needs of internal/connections: Mattermost, Telegram, Bridge and Slack Connections, their
+// checks, the checks of their drafts and the channels of a Mattermost one.
 type Connections interface {
 	List(ctx context.Context, f connections.ListFilter) (connections.Page, error)
 	Get(ctx context.Context, publicID string) (connections.Connection, error)
@@ -32,6 +32,7 @@ type Connections interface {
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
 	CallbackURL(publicID string) string
 	BridgeCallbackURL(publicID string) string
+	SlackCallbackURL(publicID string) string
 }
 
 // connectionsCursor is the cursor of the Connection list.
@@ -78,8 +79,8 @@ func (s *Server) ListConnections(ctx context.Context, req gen.ListConnectionsReq
 	return out, nil
 }
 
-// CreateConnection is createConnection (C-13.FR-1, C-14.FR-1, C-22.FR-1): a Mattermost, Telegram or Bridge
-// Connection; the bot token and the push secret are write-only.
+// CreateConnection is createConnection (C-13.FR-1, C-14.FR-1, C-22.FR-1, C-24.FR-1): a Mattermost, Telegram, Bridge or
+// Slack Connection; the bot token, the push secret, the app-level token and the Slack signing secret are write-only.
 func (s *Server) CreateConnection(ctx context.Context, req gen.CreateConnectionRequestObject) (
 	gen.CreateConnectionResponseObject, error) {
 	r, err := connectionRequester(ctx)
@@ -121,7 +122,8 @@ func (s *Server) GetConnection(ctx context.Context, req gen.GetConnectionRequest
 	return gen.GetConnection200JSONResponse{Body: body, Headers: gen.GetConnection200ResponseHeaders{ETag: &tag}}, nil
 }
 
-// UpdateConnection is updateConnection, with If-Match; an omitted bot token or push secret keeps the stored one.
+// UpdateConnection is updateConnection, with If-Match; an omitted bot token, push secret, app-level token or Slack
+// signing secret keeps the stored one.
 func (s *Server) UpdateConnection(ctx context.Context, req gen.UpdateConnectionRequestObject) (
 	gen.UpdateConnectionResponseObject, error) {
 	r, err := connectionRequester(ctx)
@@ -172,11 +174,12 @@ func (s *Server) DeleteConnection(ctx context.Context, req gen.DeleteConnectionR
 	return gen.DeleteConnection204Response{}, nil
 }
 
-// CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11, C-22.FR-2) on the interactive path: the steps with their
-// latency and path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a Telegram one,
-// only the dry probe with an unsaved base_url; info and event_delivery of a Bridge — the bot's name once the token
-// works, a Telegram bot's webhook and pending updates, the info a Bridge's check read, null when it failed, and the
-// warnings that do not fail the check. A step's message is English; its code is what clients translate.
+// CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11, C-22.FR-2, C-24.FR-2) on the interactive path: the steps
+// with their latency and path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a
+// Telegram one, only the dry probe with an unsaved base_url; info and event_delivery of a Bridge; token, scopes and in
+// socket mode app_token of a Slack one — the bot's name once the token works, a Telegram bot's webhook and pending
+// updates, the info a Bridge's check read, null when it failed, what a Slack check found, null when its token failed,
+// and the warnings that do not fail the check. A step's message is English; its code is what clients translate.
 func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionRequestObject) (
 	gen.CheckConnectionResponseObject, error) {
 	var baseURL *string
@@ -263,7 +266,7 @@ func connectionDraftOf(body gen.ConnectionDraft) (connections.Draft, error) {
 
 // checkResultOf is the API form of the result of a Connection check, of a saved Connection or of a draft: the steps,
 // without latency those that made no call (connections.Step.Called), the bot's name, a Telegram bot's webhook and
-// pending updates, a Bridge's info, and the check run of its requests.
+// pending updates, a Bridge's info, what a Slack check found, null otherwise, and the check run of its requests.
 func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	out := gen.ConnectionCheckResult{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
 		Warnings: make([]gen.ConnectionCheckResultWarnings, 0, len(res.Warnings))}
@@ -310,12 +313,13 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 	if res.Bridge {
 		out.Info = bridgeInfoOf(res.Info)
 	}
+	out.Slack = slackCheckInfoOf(res.Slack)
 	out.RequestLogRun = res.Run
 	return out
 }
 
 // ListConnectionChannels is listConnectionChannels: the channels the bot of a Mattermost Connection belongs to, on the
-// interactive path.
+// interactive path; a Telegram, Bridge or Slack Connection answers 409.
 func (s *Server) ListConnectionChannels(ctx context.Context, req gen.ListConnectionChannelsRequestObject) (
 	gen.ListConnectionChannelsResponseObject, error) {
 	var team, q string
@@ -351,18 +355,20 @@ func channelTypeOf(t string) gen.MattermostChannelType {
 	return gen.MattermostChannelTypeOpen
 }
 
-// connectionInputOf is the Input of a Connection's body, Mattermost, Telegram or Bridge.
+// connectionInputOf is the Input of a Connection's body, Mattermost, Telegram, Bridge or Slack.
 func connectionInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return connections.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
-			"The type is not mattermost, telegram or bridge.")
+			"The type is not mattermost, telegram, bridge or slack.")
 	}
 	switch kind {
 	case connections.TypeTelegram:
 		return telegramInputOf(body)
 	case connections.TypeBridge:
 		return bridgeInputOf(body)
+	case connections.TypeSlack:
+		return slackInputOf(body)
 	case connections.TypeMattermost:
 	default:
 		return connections.Input{Type: kind}, nil
@@ -416,13 +422,16 @@ func bridgeInputOf(body gen.ConnectionInput) (connections.Input, error) {
 }
 
 // connectionOf is the API form of a Connection: its secrets as their status, and the callback address of a Mattermost
-// one, the warnings of a Telegram one or the callback address and the last info of a Bridge.
+// one, the warnings of a Telegram one, the callback address and the last info of a Bridge, or the callback address
+// and what the last check of a Slack one learned.
 func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) {
 	switch c.Type {
 	case connections.TypeTelegram:
 		return telegramConnectionOf(c)
 	case connections.TypeBridge:
 		return s.bridgeConnectionOf(c)
+	case connections.TypeSlack:
+		return s.slackConnectionOf(c)
 	}
 	tag := etag(c.Version)
 	callback := s.connections.CallbackURL(c.PublicID)
@@ -501,5 +510,66 @@ func bridgeInfoOf(raw json.RawMessage) nullable.Nullable[gen.BridgeInfo] {
 		return out
 	}
 	out.Set(i)
+	return out
+}
+
+// slackInputOf is the Input of a Slack Connection's body: each of its three secrets replaces the stored one when sent.
+func slackInputOf(body gen.ConnectionInput) (connections.Input, error) {
+	sl, err := body.AsSlackConnectionInput()
+	if err != nil {
+		return connections.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Slack Connection.")
+	}
+	in := connections.Input{Type: connections.TypeSlack, Name: sl.Name, EventMode: string(sl.EventMode),
+		Proxy:   proxyInput(sl.Proxy),
+		Limiter: connections.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)}}
+	if sl.BotToken != nil {
+		in.BotToken = keyring.Replace(logging.Secret(*sl.BotToken))
+	}
+	if sl.AppToken != nil {
+		in.AppToken = keyring.Replace(logging.Secret(*sl.AppToken))
+	}
+	if sl.SlackSigningSecret != nil {
+		in.SlackSigningSecret = keyring.Replace(logging.Secret(*sl.SlackSigningSecret))
+	}
+	return in, nil
+}
+
+// slackConnectionOf is the API form of a Slack Connection: its three secrets as their status, its callback address,
+// and the bot, the workspace and the app its last passing check learned, null before one and after the bot token
+// changed.
+func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, error) {
+	tag := etag(c.Version)
+	callback := s.connections.SlackCallbackURL(c.PublicID)
+	sl := gen.SlackConnection{Id: c.PublicID, Type: gen.SlackConnectionTypeSlack, Name: c.Name,
+		EventMode: gen.SlackEventMode(c.EventMode), BotTokenStatus: keyStatusOf(c.BotToken),
+		AppTokenStatus: keyStatusOf(c.AppToken), SlackSigningSecretStatus: keyStatusOf(c.SlackSigningSecret),
+		CallbackUrl: &callback, BotName: nullableString(c.BotUsername), BotUserId: nullableString(c.BotUserID),
+		TeamId: nullableString(c.SlackTeamID), TeamName: nullableString(c.SlackTeamName),
+		AppId: nullableString(c.SlackAppID), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
+		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
+		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag}
+	var out gen.Connection
+	if err := out.FromSlackConnection(sl); err != nil {
+		return gen.Connection{}, err
+	}
+	return out, nil
+}
+
+// slackCheckInfoOf is what a check of a Slack Connection found, in the API form: the workspace, the bot's user id and
+// the app, null without the step app_token; null when the step token failed and for the other types.
+func slackCheckInfoOf(id *connections.SlackIdentity) nullable.Nullable[gen.SlackCheckInfo] {
+	var out nullable.Nullable[gen.SlackCheckInfo]
+	if id == nil {
+		out.SetNull()
+		return out
+	}
+	info := gen.SlackCheckInfo{TeamId: id.TeamID, TeamName: id.TeamName, BotUserId: id.BotUserID}
+	if id.AppID != "" {
+		info.AppId.Set(id.AppID)
+	} else {
+		info.AppId.SetNull()
+	}
+	out.Set(info)
 	return out
 }

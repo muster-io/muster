@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Connections (C-13.FR-1, C-14.FR-1, C-22.FR-1): the Connections with their type — a Bridge by the messenger its bridge
-// names once a check read it — name, with the host of a Mattermost server or a bridge's base URL or the @username of a
-// Telegram bot once a Connection check found it (D309), and the number of Destinations that use them, page by page,
-// and "Create connection" with connections:write.
+// Connections (C-13.FR-1, C-14.FR-1, C-22.FR-1, C-24.FR-1): the Connections with their type — a Bridge by the messenger
+// its bridge names once a check read it — name, with the host of a Mattermost server or a bridge's base URL, or the
+// @username of a Telegram bot or the name of a Slack bot once a Connection check found it (D309), and the number of
+// Destinations that use them, page by page, and "Create connection" with connections:write.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";

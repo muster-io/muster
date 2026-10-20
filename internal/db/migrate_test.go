@@ -973,24 +973,135 @@ func TestIntegrationSnoozePresets(t *testing.T) {
 	})
 }
 
+// TestIntegrationSlackConnections runs 0016 over a database with a Mattermost and a Bridge Connection: up refuses
+// nothing they hold and validates the replaced and the new CHECKs, so that a Slack Connection is accepted in socket
+// mode with its app-level token and in http mode with its Slack signing secret, deleted without either, and refused
+// without the secret of its mode, with an unknown event mode, with another type's address, or with a ciphertext
+// without its key id, as another type with an event mode is; encrypted_values lists both new secrets; down deletes the
+// Slack Connections and drops their columns, refusing the type again; up again works.
+func TestIntegrationSlackConnections(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 15)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, bridge_base_url,
+			bridge_event_delivery, bridge_push_secret_ciphertext, bridge_push_secret_key_id, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, c.public_id, c.type, c.name, c.server, c.base, c.delivery, c.push, c.push_key, '\x01', 'k1',
+			'2026-10-05', 1, 1, '2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('CN0000000000M1', 'mattermost', 'mm', 'http://mm', NULL, NULL, NULL, NULL),
+				('CN0000000000B1', 'bridge', 'br', NULL, 'http://br', 'push', '\x02'::bytea, 'k1'))
+				AS c (public_id, type, name, server, base, delivery, push, push_key)`)
+		insert := func(t *testing.T, id, columns, values string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO connections (org_id, public_id, type, name,
+				bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds,
+				created_at, updated_at`+columns+`)
+				SELECT id, '`+id+`', 'slack', '`+id+`', '\x01', 'k1', '2026-10-05', 50, 60, '2026-10-05',
+				'2026-10-05'`+values+` FROM organizations`)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		refused(t, "before 0016", insert(t, "CN0000000000S0", ``, ``), "connections_type_check")
+
+		e.step(t, 1)
+		if got := e.constraints(t, []string{"connections"}, "connections_"); !strings.Contains(got,
+			"connections.connections_slack_app_token_check:true") ||
+			!strings.Contains(got, "connections.connections_slack_signing_secret_check:true") ||
+			!strings.Contains(got, "connections.connections_type_check:true") ||
+			!strings.Contains(got, "connections.connections_type_fields_check:true") {
+			t.Errorf("after up: constraints %s", got)
+		}
+		for _, ok := range []struct {
+			name             string
+			id, cols, values string
+		}{
+			{"socket", "CN0000000000S1", `, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id,
+				slack_signing_secret_ciphertext, slack_signing_secret_key_id`, `, 'socket', '\x03', 'k1', '\x04', 'k1'`},
+			{"http", "CN0000000000S2", `, slack_event_mode, slack_signing_secret_ciphertext,
+				slack_signing_secret_key_id`, `, 'http', '\x04', 'k1'`},
+			{"deleted", "CN0000000000S3", `, slack_event_mode, deleted_at`, `, 'socket', '2026-10-06'`},
+		} {
+			if err := insert(t, ok.id, ok.cols, ok.values); err != nil {
+				t.Errorf("%s: %v", ok.name, err)
+			}
+		}
+		for _, bad := range []struct {
+			name, cols, values, constraint string
+		}{
+			{"socket without app-level token", `, slack_event_mode, slack_signing_secret_ciphertext,
+				slack_signing_secret_key_id`, `, 'socket', '\x04', 'k1'`, "connections_type_fields_check"},
+			{"http without Slack signing secret", `, slack_event_mode, slack_app_token_ciphertext,
+				slack_app_token_key_id`, `, 'http', '\x03', 'k1'`, "connections_type_fields_check"},
+			{"no event mode", ``, ``, "connections_type_fields_check"},
+			{"unknown event mode", `, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id`,
+				`, 'poll', '\x03', 'k1'`, "connections_type_fields_check"},
+			{"a server URL", `, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id,
+				mattermost_server_url`, `, 'socket', '\x03', 'k1', 'http://mm'`, "connections_type_fields_check"},
+			{"a bridge address", `, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id,
+				bridge_base_url`, `, 'socket', '\x03', 'k1', 'http://br'`, "connections_type_fields_check"},
+			{"an app-level token without its key", `, slack_event_mode, slack_app_token_ciphertext`,
+				`, 'socket', '\x03'`, "connections_slack_app_token_check"},
+			{"a Slack signing secret without its key", `, slack_event_mode, slack_app_token_ciphertext,
+				slack_app_token_key_id, slack_signing_secret_ciphertext`, `, 'socket', '\x03', 'k1', '\x04'`,
+				"connections_slack_signing_secret_check"},
+		} {
+			refused(t, bad.name, insert(t, "CN0000000000S9", bad.cols, bad.values), bad.constraint)
+		}
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE connections SET slack_event_mode = 'socket'
+			WHERE public_id = 'CN0000000000M1'`)
+		refused(t, "a Mattermost Connection with an event mode", err, "connections_type_fields_check")
+		if n := e.count(t, `SELECT count(*) FROM encrypted_values WHERE row_key = (SELECT id::text FROM connections
+			WHERE public_id = 'CN0000000000S1') AND field IN ('connections.slack_app_token',
+			'connections.slack_signing_secret')`); n != 2 {
+			t.Errorf("encrypted_values lists %d Slack secrets", n)
+		}
+
+		e.step(t, -1)
+		if n := e.count(t, `SELECT count(*) FROM connections WHERE type = 'slack'`); n != 0 {
+			t.Errorf("after down: %d Slack Connections", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'connections' AND column_name LIKE 'slack%'`); n != 0 {
+			t.Errorf("after down: %d Slack columns", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM connections`); n != 2 {
+			t.Errorf("after down: %d Connections", n)
+		}
+		if got := e.constraints(t, []string{"connections"}, "connections_type"); got !=
+			"connections.connections_type_check:true connections.connections_type_fields_check:true" {
+			t.Errorf("after down: constraints %s", got)
+		}
+		refused(t, "after down", insert(t, "CN0000000000S4", ``, ``), "connections_type_check")
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 16 {
+			t.Errorf("up again: version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (15)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (16)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":15`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":16`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":15`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":16`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1006,10 +1117,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (15)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (16)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":15`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":16`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

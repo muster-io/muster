@@ -58,7 +58,7 @@ const (
 
 // FakeURLs are the base URLs of the fake servers.
 type FakeURLs struct {
-	Alertmanager, Mattermost, MattermostSecond, Telegram, Bridge string
+	Alertmanager, Mattermost, MattermostSecond, Telegram, Bridge, Slack string
 }
 
 type Harness struct {
@@ -100,12 +100,13 @@ func (h *Harness) startDevProcess(replicas int) {
 		MattermostSecond: "http://" + a.MattermostSecond,
 		Telegram:         "http://" + a.Telegram,
 		Bridge:           "http://" + a.Bridge,
+		Slack:            "http://" + a.Slack,
 	}
 	first := h.newReplica([]string{"dev"}, h.databaseEnv(), ":8080", ":8081", ":8082", fakesReadyLine)
 	first.Start(h.t)
 	first.waitFor(h.t, "the fake servers to answer", func() bool {
 		for _, u := range []string{h.Fakes.Alertmanager, h.Fakes.Mattermost, h.Fakes.MattermostSecond, h.Fakes.Telegram,
-			h.Fakes.Bridge} {
+			h.Fakes.Bridge, h.Fakes.Slack} {
 			if !answers(h.t.Context(), u+"/_fake/requests") {
 				return false
 			}
@@ -139,6 +140,7 @@ func (h *Harness) startFakesInProcess() {
 		MattermostSecond: fakes.MattermostSecond.URL(),
 		Telegram:         fakes.Telegram.URL(),
 		Bridge:           fakes.Bridge.URL(),
+		Slack:            fakes.Slack.URL(),
 	}
 }
 

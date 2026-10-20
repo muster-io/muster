@@ -31,7 +31,9 @@
   [`0014_alerts_org_last_seen_index`](../../internal/db/migrations/0014_alerts_org_last_seen_index.up.sql)
   (`alerts_org_last_seen_idx` for the values seen of the severity label) and
   [`0015_snooze_presets`](../../internal/db/migrations/0015_snooze_presets.up.sql)
-  (`organizations.workday_start` and `organizations.week_start` for the Snooze presets, S-092), in
+  (`organizations.workday_start` and `organizations.week_start` for the Snooze presets, S-092) and
+  [`0016_slack_connections`](../../internal/db/migrations/0016_slack_connections.up.sql)
+  (Slack Connections, S-097), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -438,7 +440,7 @@ erDiagram
     }
     connections {
         bigint id PK
-        text type "mattermost telegram bridge"
+        text type "mattermost telegram bridge slack"
         bytea bot_token_ciphertext "Secret"
         text telegram_bot_api_base_url
         bigint telegram_update_offset
@@ -447,6 +449,10 @@ erDiagram
         text bridge_events_cursor "poll mode"
         bytea bridge_push_secret_ciphertext "Secret"
         jsonb bridge_info
+        text slack_event_mode "socket http"
+        bytea slack_app_token_ciphertext "Secret"
+        bytea slack_signing_secret_ciphertext "Secret"
+        text slack_team_id
         jsonb proxy
     }
     destinations {
@@ -703,12 +709,14 @@ Serves C-04; [ADR-0011](../adr/0011-application-level-secret-encryption.md).
 
 ### 4.5 Connections, Destinations and Account links
 
-Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md),
+Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
+[ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md),
 [ADR-0013](../adr/0013-account-links-from-web-session-only.md), [ADR-0015](../adr/0015-outbound-http-and-ssrf-policy.md).
 
-- **`connections`** — a Mattermost bot (server URL), a Telegram bot (Bot API base URL, update mode) or a Bridge (base
-  URL, event delivery mode `poll` or `push`; C-22). The bot token, the proxy password, the Telegram webhook secret token
-  and the Bridge push secret are Secrets; the proxy settings object of C-03.FR-19 is `proxy jsonb`
+- **`connections`** — a Mattermost bot (server URL), a Telegram bot (Bot API base URL, update mode), a Bridge (base
+  URL, event delivery mode `poll` or `push`; C-22) or the bot of a Slack app (event mode `socket` or `http`; C-24). The
+  bot token, the proxy password, the Telegram webhook secret token, the Bridge push secret, the Slack app-level token
+  and the Slack signing secret are Secrets; the proxy settings object of C-03.FR-19 is `proxy jsonb`
   (`{"enabled", "type", "address", "username"}`) next to the password triple — the same shape on `connections`,
   `destinations`, `oidc_settings` and the outgoing heartbeat. `telegram_update_offset` lets a new Leader resume
   `getUpdates` where the old one stopped. A Bridge in push mode has a push secret until it is deleted
@@ -718,9 +726,18 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
   is where the poller of the Bridge's events goes on, written by the Leader task `bridge_polling` after each batch it
   handled, and only for the version of the Connection the poller read, so that a poller of an earlier version or of a
   frozen old Leader writes nothing; it is not a change of the configuration. A new base URL or bot token forgets all
-  three, as it forgets the bot a check learned. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
-  Connection cannot be deleted while a Destination that is not deleted uses it; deleting it abandons the final edits
-  still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
+  three, as it forgets the bot a check learned. A Slack Connection keeps its bot token in the `bot_token_*` columns and
+  two more Secrets: the app-level token (`slack_app_token_*`), which `socket` mode needs, and the Slack signing secret
+  (`slack_signing_secret_*`), which `http` mode needs, each until the Connection is deleted
+  (`connections_type_fields_check`) and kept with its key id by `connections_slack_app_token_check` and
+  `connections_slack_signing_secret_check`; a change of the event mode keeps the other mode's secret. Slack's address
+  is fixed, so the Connection has none. What the last passing check learned — `slack_team_id`, `slack_team_name`,
+  `slack_team_url` (the `url` of `auth.test`), `slack_app_id` and `slack_bot_id`, with the bot's user id and name in
+  `bot_user_id` and `bot_username` — is written only for the version of the Connection the check read and is not a
+  change of the configuration; a new bot token forgets it. `slack_socket_hello_at` and `slack_socket_other_connections`
+  hold what the last Socket Mode `hello` counted, written by the Leader from S-101. `UNIQUE (id, type)` is the target of
+  type-checked foreign keys. A Connection cannot be deleted while a Destination that is not deleted uses it; deleting
+  it abandons the final edits still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
 - **`destinations`** — one table for the four types, with type-specific nullable columns and a `CHECK` per type. The
   composite foreign key `(connection_id, type) REFERENCES connections (id, type)` guarantees that a Mattermost
   Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection and a Bridge one

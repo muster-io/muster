@@ -88,10 +88,16 @@ func (f *fakeConnections) Create(_ context.Context, r connections.Requester, in 
 	}
 	c := connections.Connection{ID: int64(len(f.list) + 1), PublicID: "CNAAAAAAAAAAA9", Type: in.Type, Name: in.Name,
 		ServerURL: in.ServerURL, BotAPIBaseURL: in.BotAPIBaseURL, UpdateMode: in.UpdateMode,
-		BridgeBaseURL: in.BridgeBaseURL, EventDelivery: in.EventDelivery,
+		BridgeBaseURL: in.BridgeBaseURL, EventDelivery: in.EventDelivery, EventMode: in.EventMode,
 		BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, Limiter: in.Limiter, CreatedAt: t0, Version: 1}
 	if in.PushSecret.Given {
 		c.PushSecret = keyring.SecretStatus{Set: true, UpdatedAt: &t0}
+	}
+	if in.AppToken.Given {
+		c.AppToken = keyring.SecretStatus{Set: true, UpdatedAt: &t0}
+	}
+	if in.SlackSigningSecret.Given {
+		c.SlackSigningSecret = keyring.SecretStatus{Set: true, UpdatedAt: &t0}
 	}
 	if in.Type == connections.TypeTelegram {
 		c.Warnings = []string{"base_url_uses_http"}
@@ -175,6 +181,10 @@ func (f *fakeConnections) CallbackURL(id string) string {
 
 func (f *fakeConnections) BridgeCallbackURL(id string) string {
 	return "http://localhost:8081/api/v1/callbacks/bridge/" + id
+}
+
+func (f *fakeConnections) SlackCallbackURL(id string) string {
+	return "http://localhost:8081/api/v1/callbacks/slack/" + id
 }
 
 func newConnectionsAPI(t *testing.T) (*testAPI, *fakeConnections) {
@@ -851,5 +861,183 @@ func TestBridgeConnectionAPI(t *testing.T) {
 	if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAB1/channels", ""); a.status !=
 		http.StatusConflict {
 		t.Errorf("the channels of a Bridge = %d %s", a.status, a.body)
+	}
+}
+
+// The secrets of the Slack bodies, which no answer may carry.
+const (
+	slackBotToken      = "xoxb-muster-dev-slack-token-b"
+	slackAppToken      = "xapp-muster-dev-slack-token-b"
+	slackSigningSecret = "muster-dev-slack-signing-secret-b"
+)
+
+// TestSlackConnectionAPI covers C-24.FR-1 and FR-2 on the API: a Slack Connection is created with its event mode and
+// its three write-only secrets, which reach the service and no answer; it reads with the three secrets' status, its
+// callback_url and what its last check learned, null before one; the type filter selects it; its check answers the
+// steps token, scopes without latency, and app_token, with the new codes, and slack with the workspace, the bot and
+// the app, null without the step app_token, and null for the other types; a refusal of the service is 422 at its
+// pointer; its channel list is 409; a Slack draft matches no member of ConnectionDraft and is 400.
+func TestSlackConnectionAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	body := `{"type":"slack","name":"sl","event_mode":"socket","bot_token":"` + slackBotToken + `","app_token":"` +
+		slackAppToken + `","slack_signing_secret":"` + slackSigningSecret + `","proxy":{"enabled":false},` +
+		`"limiter":{"limit":50,"per_seconds":60}}`
+	secretFree := func(t *testing.T, a answer) {
+		t.Helper()
+		for _, v := range []string{slackBotToken, slackAppToken, slackSigningSecret, `"bot_token"`, `"app_token"`,
+			`"slack_signing_secret"`} {
+			if strings.Contains(string(a.body), v) {
+				t.Errorf("the answer has %s: %s", v, a.body)
+			}
+		}
+	}
+	a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", body)
+	m := a.json(t)
+	if a.status != http.StatusCreated || m["type"] != "slack" || m["event_mode"] != "socket" ||
+		m["bot_token_status"].(map[string]any)["set"] != true || m["app_token_status"].(map[string]any)["set"] != true ||
+		m["slack_signing_secret_status"].(map[string]any)["set"] != true ||
+		m["callback_url"] != "http://localhost:8081/api/v1/callbacks/slack/CNAAAAAAAAAAA9" {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	for _, k := range []string{"bot_name", "bot_user_id", "team_id", "team_name", "app_id"} {
+		if v, ok := m[k]; !ok || v != nil {
+			t.Errorf("%s = %v, present %v", k, v, ok)
+		}
+	}
+	for _, k := range []string{"server_url", "base_url", "bot_api_base_url"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("a Slack Connection has %s: %s", k, a.body)
+		}
+	}
+	secretFree(t, a)
+	in := fc.inputs[0]
+	if in.Type != connections.TypeSlack || in.Name != "sl" || in.EventMode != connections.EventModeSocket ||
+		in.BotToken != keyring.Replace(slackBotToken) || in.AppToken != keyring.Replace(slackAppToken) ||
+		in.SlackSigningSecret != keyring.Replace(slackSigningSecret) || in.Limiter.Limit != 50 ||
+		in.Limiter.PerSeconds != 60 || in.ServerURL != "" || in.Proxy.Enabled {
+		t.Errorf("input %+v", in)
+	}
+	withoutSecrets := `{"type":"slack","name":"sl","event_mode":"http","proxy":{"enabled":false},` +
+		`"limiter":{"limit":50,"per_seconds":60}}`
+	a = x.as(t, connectionsWriter, http.MethodPut, "/api/v1/connections/CNAAAAAAAAAAA9", withoutSecrets, "If-Match",
+		`"1"`)
+	if in := fc.inputs[len(fc.inputs)-1]; a.status != http.StatusOK || in.BotToken.Given || in.AppToken.Given ||
+		in.SlackSigningSecret.Given || in.EventMode != connections.EventModeHTTP {
+		t.Errorf("update without secrets = %d %s, %+v", a.status, a.body, in)
+	}
+	for name, bad := range map[string]string{
+		"an unknown event mode": strings.Replace(withoutSecrets, `"http"`, `"poll"`, 1),
+		"no event mode":         strings.Replace(withoutSecrets, `"event_mode":"http",`, ``, 1),
+	} {
+		if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", bad); a.status !=
+			http.StatusBadRequest {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	fc.err = &connections.FieldError{Pointer: "/slack_signing_secret", Code: connections.CodeRequired,
+		Detail: "HTTP mode needs the Slack signing secret."}
+	a = x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", withoutSecrets)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
+		errs[0]["pointer"] != "/slack_signing_secret" || errs[0]["code"] != "required" {
+		t.Errorf("a refusal = %d %s", a.status, a.body)
+	}
+	fc.err = nil
+
+	team, teamName, bot, botUser, app := "T0MUSTERDEVB", "Fake workspace B", "muster-dev-bot-b", "U0MUSTERBOTB",
+		"A0MUSTERDEVB"
+	fc.list = append(fc.list, connections.Connection{ID: 6, PublicID: "CNAAAAAAAAAAS1", Type: connections.TypeSlack,
+		Name: "checked", EventMode: connections.EventModeHTTP, BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0},
+		AppToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, SlackSigningSecret: keyring.SecretStatus{Set: true,
+			UpdatedAt: &t0}, BotUsername: &bot, BotUserID: &botUser, SlackTeamID: &team, SlackTeamName: &teamName,
+		SlackAppID: &app, Limiter: connections.Limiter{Limit: 50, PerSeconds: 60}, CreatedAt: t0, Version: 4})
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAS1", "")
+	var sl gen.SlackConnection
+	decodeInto(t, a, &sl)
+	if a.status != http.StatusOK || sl.EventMode != gen.SlackEventModeHttp || sl.BotName.MustGet() != bot ||
+		sl.BotUserId.MustGet() != botUser || sl.TeamId.MustGet() != team || sl.TeamName.MustGet() != teamName ||
+		sl.AppId.MustGet() != app || !sl.AppTokenStatus.Set || !sl.SlackSigningSecretStatus.Set || *sl.Etag != `"4"` ||
+		*sl.CallbackUrl != "http://localhost:8081/api/v1/callbacks/slack/CNAAAAAAAAAAS1" {
+		t.Fatalf("get = %d %s", a.status, a.body)
+	}
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections?type=slack", "")
+	var list gen.ConnectionList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 2 || *fc.filters[len(fc.filters)-1].Type != "slack" {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	for _, it := range list.Items {
+		if kind, _ := it.Discriminator(); kind != "slack" {
+			t.Errorf("listed %s", kind)
+		}
+	}
+
+	path := "/api/v1/connections/CNAAAAAAAAAAS1/checks"
+	fc.check = connections.CheckResult{OK: true, BotName: bot, Steps: []connections.Step{
+		{Name: connections.StepToken, OK: true, Latency: 9 * time.Millisecond, Via: "direct"},
+		{Name: connections.StepScopes, OK: true, Via: "direct"},
+		{Name: connections.StepAppToken, OK: true, Latency: 12 * time.Millisecond, Via: "direct"}},
+		Slack: &connections.SlackIdentity{TeamID: team, TeamName: teamName, BotUserID: botUser, AppID: app}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+	var res gen.ConnectionCheckResult
+	decodeInto(t, a, &res)
+	info, err := res.Slack.Get()
+	if a.status != http.StatusOK || !res.Ok || err != nil || info.TeamId != team || info.TeamName != teamName ||
+		info.BotUserId != botUser || info.AppId.MustGet() != app || res.BotName.MustGet() != bot ||
+		len(res.Steps) != 3 || res.Steps[0].Name != gen.ConnectionCheckStepNameToken ||
+		res.Steps[0].LatencyMs.MustGet() != 9 || res.Steps[1].Name != gen.ConnectionCheckStepNameScopes ||
+		!res.Steps[1].LatencyMs.IsNull() || res.Steps[2].Name != gen.ConnectionCheckStepNameAppToken ||
+		res.Steps[2].LatencyMs.MustGet() != 12 || strings.Contains(string(a.body), `"info"`) {
+		t.Fatalf("check = %d %s", a.status, a.body)
+	}
+	fc.check = connections.CheckResult{BotName: bot, Steps: []connections.Step{
+		{Name: connections.StepToken, OK: true, Via: "direct"},
+		{Name: connections.StepScopes, Via: "direct", Message: "The bot token lacks the scopes users:read.email.",
+			Code: "missing_scope"}},
+		Slack: &connections.SlackIdentity{TeamID: team, TeamName: teamName, BotUserID: botUser}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+	decodeInto(t, a, &res)
+	if info, err := res.Slack.Get(); a.status != http.StatusOK || res.Ok || err != nil || !info.AppId.IsNull() ||
+		res.Steps[1].Code.MustGet() != gen.NullableConnectionCheckCodeMissingScope ||
+		res.Steps[1].Message.MustGet() != "The bot token lacks the scopes users:read.email." {
+		t.Errorf("missing scope = %d %s", a.status, a.body)
+	}
+	for _, tc := range []struct {
+		step connections.Step
+		code gen.NullableConnectionCheckCode
+	}{
+		{connections.Step{Name: connections.StepToken, Via: "direct", Message: "Slack refused the token.",
+			Code: "token_invalid"}, gen.NullableConnectionCheckCodeTokenInvalid},
+		{connections.Step{Name: connections.StepToken, Via: "direct", Message: "This is not a bot token.",
+			Code: "wrong_token_type"}, gen.NullableConnectionCheckCodeWrongTokenType},
+		{connections.Step{Name: connections.StepAppToken, Via: "proxy",
+			Message: "The app-level token belongs to another Slack app than the bot token.", Code: "app_mismatch"},
+			gen.NullableConnectionCheckCodeAppMismatch},
+	} {
+		fc.check = connections.CheckResult{Steps: []connections.Step{tc.step}}
+		a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+		decodeInto(t, a, &res)
+		if a.status != http.StatusOK || res.Ok || res.Steps[0].Code.MustGet() != tc.code ||
+			res.Steps[0].Message.MustGet() != tc.step.Message || !res.Slack.IsNull() {
+			t.Errorf("%s = %d %s", tc.code, a.status, a.body)
+		}
+	}
+	fc.check = connections.CheckResult{OK: true, Steps: []connections.Step{{Name: connections.StepToken, OK: true,
+		Via: "direct"}}}
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/"+connectionID+"/checks", ""); a.status !=
+		http.StatusOK || !strings.Contains(string(a.body), `"slack":null`) {
+		t.Errorf("a Mattermost check = %s", a.body)
+	}
+
+	fc.err = connections.ErrNotMattermost
+	if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAS1/channels", ""); a.status !=
+		http.StatusConflict {
+		t.Errorf("the channels of a Slack Connection = %d %s", a.status, a.body)
+	}
+	fc.err = nil
+	n := len(fc.drafts)
+	draft := `{"type":"slack","event_mode":"socket","bot_token":"` + slackBotToken + `","proxy":{"enabled":false}}`
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/checks", draft); a.status !=
+		http.StatusBadRequest || len(fc.drafts) != n {
+		t.Errorf("a Slack draft = %d %s", a.status, a.body)
 	}
 }

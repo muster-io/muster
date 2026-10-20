@@ -74,6 +74,7 @@ import (
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/tokens"
@@ -123,6 +124,7 @@ var registry = []Probe{
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "bridge_links", Run: probeBridgeLinks},
 	{Name: "bridge_check", Run: probeBridgeCheck},
+	{Name: "slack_connections", Run: probeSlack},
 	{Name: "connection_drafts", Run: probeConnectionDrafts},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
@@ -2051,6 +2053,271 @@ func (probeBridgeBindings) RootDeleted(context.Context, int64, string) error {
 	return nil
 }
 
+// The answers of the stand-in Slack of probeSlack.
+const (
+	slackOK int32 = iota
+	slackEcho
+	slackUser
+	slackScopesEcho
+	slackMismatch
+	slackInvalidAuth
+	slackError
+	slackMissingScope
+	slackHTML500
+	slackRateLimited
+	slackLate
+)
+
+// probeSlack pushes the secrets through a Slack Connection (C-24.AC-3): the bot token, the app-level token, the Slack
+// signing secret and the password of its HTTP proxy. The Connection is created in http mode with all three secrets
+// behind a proxy that refuses the password, and checked there; then, in socket mode without a proxy, it is checked
+// against a stand-in Slack, where muster dev's route would send it, whose answers echo the three secrets and the
+// Authorization header: as the workspace, the bot and a person, as the scopes of x-oauth-scopes, in ok:false answers
+// of an unknown error, of invalid_auth and of missing_scope (needed), in an HTML 500 and in a 429; then behind a
+// proxy that accepts the password, which every request of the check must cross, also with the stand-in answering only
+// after the check stopped waiting; then against a listener that drops the connection; then in http mode. Creations of
+// a bot token and an app-level token without their prefixes, of http mode without the Slack signing secret and of
+// socket mode without the app-level token are refused; muster doctor skips the Connection; it is deleted; and a client
+// is refused its proxy and its route. Neither the log nor any error, step message or what the check found and the
+// Connection shows may carry a secret.
+func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	botToken, appToken, signing := "xoxb-"+secrets[0], "xapp-"+secrets[1], secrets[2]
+	proxyPassword := secrets[2] + "-proxy"
+	var answer atomic.Int32
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			echo := auth + " " + botToken + " " + appToken + " " + signing + " " + proxyPassword
+			a := answer.Load()
+			if a == slackLate {
+				// The answer comes once the check stopped waiting and closed the connection.
+				select {
+				case <-r.Context().Done():
+				case <-time.After(5 * time.Second):
+				}
+				a = slackEcho
+			}
+			slackAnswer(w, r, a, echo)
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	cut, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	cutter := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			if c, _, err := http.NewResponseController(w).Hijack(); err == nil {
+				_ = c.Close()
+			}
+		})}
+	go func() { _ = cutter.Serve(cut) }()
+	defer func() { _ = cutter.Close() }()
+	refusing, err := fakeproxy.Start(ctx, fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = refusing.Close() }()
+	accepting, err := fakeproxy.Start(ctx, fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: proxyPassword})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = accepting.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
+	var base atomic.Pointer[string]
+	standIn := "http://" + ln.Addr().String() + "/api/"
+	base.Store(&standIn)
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
+		SlackRoute:  func(logging.Secret) string { return *base.Load() },
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	by := connections.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	proxied := func(p *fakeproxy.Server) proxyconf.Input {
+		return proxyconf.Input{Enabled: true, Type: new("http"), Address: new(p.Addr()), UsernameSet: true,
+			Username: new("muster"), Password: keyring.Replace(logging.Secret(proxyPassword))}
+	}
+	in := connections.Input{Type: connections.TypeSlack, Name: "probe", EventMode: connections.EventModeHTTP,
+		BotToken: keyring.Replace(logging.Secret(botToken)), AppToken: keyring.Replace(logging.Secret(appToken)),
+		SlackSigningSecret: keyring.Replace(logging.Secret(signing)), Proxy: proxied(refusing),
+		Limiter: connections.Limiter{Limit: 50, PerSeconds: 60}}
+	var errs []error
+	shown := func(c connections.Connection, err error) {
+		errs = append(errs, err)
+		for _, s := range []*string{c.BotUsername, c.BotUserID, c.SlackTeamID, c.SlackTeamName, c.SlackAppID} {
+			if s != nil {
+				errs = append(errs, errors.New(*s))
+			}
+		}
+	}
+	check := func(ctx context.Context) connections.CheckResult {
+		res, err := svc.Check(ctx, store.row.PublicID, nil)
+		errs = append(errs, err, errors.New(res.BotName))
+		for _, st := range res.Steps {
+			errs = append(errs, errors.New(st.Message), errors.New(st.Code), errors.New(st.Via))
+		}
+		if id := res.Slack; id != nil {
+			errs = append(errs, errors.New(id.TeamID+" "+id.TeamName+" "+id.BotUserID+" "+id.AppID))
+		}
+		shown(svc.Get(ctx, store.row.PublicID))
+		return res
+	}
+	c, err := svc.Create(ctx, by, in)
+	if err != nil {
+		return err
+	}
+	if res := check(ctx); res.OK || refusing.Refused() == 0 {
+		errs = append(errs, &probeIncomplete{what: "the check did not meet the proxy that refuses the password"})
+	}
+	in.EventMode, in.Proxy = connections.EventModeSocket, proxyconf.Input{Enabled: false}
+	in.BotToken, in.AppToken, in.SlackSigningSecret = keyring.Keep, keyring.Keep, keyring.Keep
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	for _, a := range []int32{slackOK, slackEcho, slackUser, slackScopesEcho, slackMismatch, slackInvalidAuth,
+		slackError, slackMissingScope, slackHTML500, slackRateLimited} {
+		answer.Store(a)
+		res := check(ctx)
+		if a == slackOK && (!res.OK || len(res.Steps) != 3 || !store.row.SlackTeamID.Valid) {
+			errs = append(errs, &probeIncomplete{what: "the check against the stand-in Slack did not pass"})
+		}
+	}
+	answer.Store(slackOK)
+	in.Proxy = proxied(accepting)
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	res := check(ctx)
+	viaProxy := res.OK && len(accepting.Targets()) > 0
+	for _, st := range res.Steps {
+		viaProxy = viaProxy && (!st.Called() || st.Via == slack.ViaProxy)
+	}
+	if !viaProxy {
+		errs = append(errs, &probeIncomplete{what: "the check did not reach the stand-in Slack through the proxy"})
+	}
+	answer.Store(slackLate)
+	late, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	if res := check(late); res.OK {
+		errs = append(errs, &probeIncomplete{what: "the check waited for the late answer"})
+	}
+	cancel()
+	answer.Store(slackEcho)
+	cutBase := "http://" + cut.Addr().String() + "/api/"
+	base.Store(&cutBase)
+	check(ctx)
+	base.Store(&standIn)
+	in.EventMode, in.Proxy = connections.EventModeHTTP, proxyconf.Input{Enabled: false}
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	check(ctx)
+	refused := []connections.Input{in, in, in, in}
+	refused[0].BotToken = keyring.Replace(logging.Secret("x" + secrets[0]))
+	refused[1].EventMode, refused[1].BotToken = connections.EventModeSocket, keyring.Replace(logging.Secret(botToken))
+	refused[1].AppToken = keyring.Replace(logging.Secret("bad-" + secrets[1]))
+	refused[2].BotToken, refused[2].AppToken = keyring.Replace(logging.Secret(botToken)),
+		keyring.Replace(logging.Secret(appToken))
+	refused[3].EventMode, refused[3].BotToken = connections.EventModeSocket, keyring.Replace(logging.Secret(botToken))
+	refused[3].SlackSigningSecret = keyring.Replace(logging.Secret(signing))
+	for _, r := range refused {
+		r.Name = "refused"
+		_, err := svc.Create(ctx, by, r)
+		if err == nil {
+			errs = append(errs, &probeIncomplete{what: "a Slack Connection without a secret it needs was created"})
+		}
+		errs = append(errs, err)
+	}
+	found, err := svc.Doctor(ctx, store, 2*time.Second)
+	errs = append(errs, err)
+	for _, f := range found {
+		errs = append(errs, errors.New(f.Message))
+	}
+	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
+	_, err = slack.NewClient(slack.Network(network), slack.Settings{BotToken: logging.Secret(botToken),
+		AppToken: logging.Secret(appToken), SigningSecret: logging.Secret(signing), Proxy: &outbound.Proxy{Type: "ftp",
+			Address: "proxy:1", Username: "muster", Password: logging.Secret(proxyPassword)}})
+	errs = append(errs, err)
+	_, err = slack.NewClient(slack.Network(network), slack.Settings{BotToken: logging.Secret(botToken),
+		Route: func(token logging.Secret) string { return "http://muster:" + string(token) + "@127.0.0.1:1/api/" }})
+	return errors.Join(append(errs, err)...)
+}
+
+// slackAnswer is the answer a of probeSlack's stand-in Slack to r, by its method and its token; echo, which carries the
+// secrets, goes where the answer names something.
+func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	scopes := strings.Join(slack.RequiredScopes, ",")
+	if a == slackScopesEcho {
+		scopes = echo
+	}
+	w.Header().Set("X-OAuth-Scopes", scopes)
+	name := "probe"
+	if a == slackEcho || a == slackUser {
+		name = echo
+	}
+	appID := "A0PROBE1"
+	if a == slackMismatch {
+		appID = "A0PROBE2"
+	}
+	var body map[string]any
+	switch method := strings.TrimPrefix(r.URL.Path, "/api/"); {
+	case a == slackInvalidAuth:
+		body = map[string]any{"ok": false, "error": "invalid_auth", "warning": echo,
+			"response_metadata": map[string]any{"warnings": []string{echo}, "messages": []string{echo}}}
+	case a == slackError:
+		body = map[string]any{"ok": false, "error": "invalid_auth " + echo, "needed": echo, "warning": echo}
+	case a == slackMissingScope:
+		body = map[string]any{"ok": false, "error": "missing_scope", "needed": echo, "provided": echo}
+	case a == slackHTML500:
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, "<html><body>"+echo+"</body></html>") //nolint:gosec // G705: a stand-in server that echoes the secrets on purpose
+		return
+	case a == slackRateLimited:
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		body = map[string]any{"ok": false, "error": "ratelimited", "warning": echo}
+	case method == "auth.test" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer xapp-"):
+		body = map[string]any{"ok": true, "app_id": appID}
+	case method == "auth.test":
+		body = map[string]any{"ok": true, "url": "https://probe.slack.com/", "team": name, "user": name,
+			"team_id": "T0PROBE1", "user_id": "U0PROBE1"}
+		if a != slackUser {
+			body["bot_id"] = "B0PROBE1"
+		}
+	case method == "bots.info":
+		body = map[string]any{"ok": true, "bot": map[string]any{"id": "B0PROBE1", "app_id": "A0PROBE1",
+			"user_id": "U0PROBE1", "name": name}}
+	default:
+		body = map[string]any{"ok": false, "error": "unknown_method", "warning": echo}
+	}
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 // probeConnections is the one Connection of probeMattermost in memory, with the cursor of its Bridge events and the
 // ids of the events it handled.
 type probeConnections struct {
@@ -2070,9 +2337,12 @@ func (s *probeConnections) InsertConnection(_ context.Context, a cdb.InsertConne
 		TelegramWebhookSecretCiphertext: a.WebhookSecretCiphertext, TelegramWebhookSecretKeyID: a.WebhookSecretKeyID,
 		BridgeBaseUrl: a.BridgeBaseUrl, BridgeEventDelivery: a.EventDelivery,
 		BridgePushSecretCiphertext: a.PushSecretCiphertext, BridgePushSecretKeyID: a.PushSecretKeyID,
-		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, BotTokenCiphertext: a.BotTokenCiphertext,
-		BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt, Proxy: a.Proxy,
-		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
+		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, SlackEventMode: a.SlackEventMode,
+		SlackAppTokenCiphertext: a.SlackAppTokenCiphertext, SlackAppTokenKeyID: a.SlackAppTokenKeyID,
+		SlackAppTokenUpdatedAt: a.SlackAppTokenUpdatedAt, SlackSigningSecretCiphertext: a.SlackSigningSecretCiphertext,
+		SlackSigningSecretKeyID: a.SlackSigningSecretKeyID, SlackSigningSecretUpdatedAt: a.SlackSigningSecretUpdatedAt,
+		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
+		Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
 		LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}
 	return 1, nil
@@ -2103,6 +2373,11 @@ func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConne
 	s.row.BridgeBaseUrl, s.row.BridgeEventDelivery = a.BridgeBaseUrl, a.EventDelivery
 	s.row.BridgePushSecretCiphertext, s.row.BridgePushSecretKeyID, s.row.BridgePushSecretUpdatedAt =
 		a.PushSecretCiphertext, a.PushSecretKeyID, a.PushSecretUpdatedAt
+	s.row.SlackEventMode = a.SlackEventMode
+	s.row.SlackAppTokenCiphertext, s.row.SlackAppTokenKeyID, s.row.SlackAppTokenUpdatedAt = a.SlackAppTokenCiphertext,
+		a.SlackAppTokenKeyID, a.SlackAppTokenUpdatedAt
+	s.row.SlackSigningSecretCiphertext, s.row.SlackSigningSecretKeyID, s.row.SlackSigningSecretUpdatedAt =
+		a.SlackSigningSecretCiphertext, a.SlackSigningSecretKeyID, a.SlackSigningSecretUpdatedAt
 	s.row.BotTokenCiphertext, s.row.BotTokenKeyID = a.BotTokenCiphertext, a.BotTokenKeyID
 	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
 	s.row.Version++
@@ -2201,6 +2476,14 @@ func (s *probeConnections) ListMattermostDestinations(context.Context, int64) ([
 
 func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {
 	return nil
+}
+
+// SetSlackIdentity records what a passing check of the Slack Connection found.
+func (s *probeConnections) SetSlackIdentity(_ context.Context, a cdb.SetSlackIdentityParams) (int64, error) {
+	s.row.SlackTeamID, s.row.SlackTeamName, s.row.SlackTeamUrl, s.row.SlackBotID = a.TeamID, a.TeamName, a.TeamUrl,
+		a.BotID
+	s.row.SlackAppID, s.row.BotUserID, s.row.BotUsername = a.AppID, a.BotUserID, a.BotUsername
+	return 1, nil
 }
 
 // SetBridgeInfo records the info that a check of the Bridge Connection read.

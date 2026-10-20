@@ -925,12 +925,18 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
-	conns := connections.New(connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
+	connsCfg := connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
 		Audit: w, Clocks: p.clocks, Interactive: interactive, IngestURL: p.cfg.IngestURL, Log: p.log,
 		Network: mattermost.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real, Recorder: p.requestLog},
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
-		}})
+		}}
+	// Under muster dev a Slack Connection of the fake Slack server's published tokens calls the fake server instead of
+	// Slack (C-01.FR-13); outside it every Slack request goes to Slack.
+	if p.opts.Development {
+		connsCfg.SlackRoute = devmode.SlackRoute
+	}
+	conns := connections.New(connsCfg)
 	p.connections, p.interactive, p.roles = conns, interactive, roles
 	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013,
 	// C-22.FR-15).
@@ -997,6 +1003,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		}
 		if err := conns.EnsureDemo(ctx, devmode.BridgeDemo()); err != nil {
 			return nil, fmt.Errorf("the demo bridge connection: %w", err)
+		}
+		if err := conns.EnsureDemo(ctx, devmode.SlackDemo()); err != nil {
+			return nil, fmt.Errorf("the demo slack connection: %w", err)
 		}
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)

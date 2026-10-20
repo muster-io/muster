@@ -14,7 +14,9 @@
 // the skipped steps then ask for the token, which the panel reads from the result, never deciding it itself. A change of
 // the form makes an earlier result stale, and the panel hides it. The check runs on the interactive path, so a busy
 // messenger answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and
-// "Requests of this check" opens the requests it made (C-23.FR-6), a check before saving included.
+// "Requests of this check" opens the requests it made (C-23.FR-6), a check before saving included. A Slack check
+// (C-24.FR-2) has the steps "Token", "Scopes" and, in Socket Mode, "App-level token"; the scopes a bot token lacks are
+// read from the server's English message and named in the reader's language.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -61,6 +63,10 @@ function stepName(t: TFunction, name: ConnectionCheckStepName): string {
       return t("connections.check.steps.info");
     case "event_delivery":
       return t("connections.check.steps.eventDelivery");
+    case "scopes":
+      return t("connections.check.steps.scopes");
+    case "app_token":
+      return t("connections.check.steps.appToken");
     default:
       return unreachable(name);
   }
@@ -74,6 +80,8 @@ function checkHint(t: TFunction, type: Connection["type"]): string {
       return t("connections.check.telegramHint");
     case "bridge":
       return t("connections.check.bridgeHint");
+    case "slack":
+      return t("connections.check.slackHint");
     default:
       return unreachable(type);
   }
@@ -84,8 +92,19 @@ export type CheckCode =
   | NonNullable<NullableConnectionCheckCode>
   | NonNullable<NullableDestinationCheckCode>;
 
-/** What a check found, by its code, in the reader's language; the server's English message is its detail. */
-export function checkCodeText(t: TFunction, code: CheckCode): string {
+/**
+ * The scopes the server's English message of missing_scope names, "The bot token lacks the scopes chat:write,
+ * users:read.email."; undefined for any other message.
+ */
+function missingScopes(message: string | null | undefined): string | undefined {
+  return /^The bot token lacks the scopes (.+)\.$/.exec(message ?? "")?.[1];
+}
+
+/**
+ * What a check found, by its code, in the reader's language; the server's English message is its detail. The scopes a
+ * bot token lacks are named from that message, and without it the text names none.
+ */
+export function checkCodeText(t: TFunction, code: CheckCode, message?: string | null): string {
   switch (code) {
     case "token_invalid":
       return t("checks.codes.tokenInvalid");
@@ -145,6 +164,18 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
       return t("checks.codes.notMattermost");
     case "not_bridge":
       return t("checks.codes.notBridge");
+    case "wrong_token_type":
+      return t("checks.codes.wrongTokenType");
+    case "missing_scope": {
+      const scopes = missingScopes(message);
+      return scopes === undefined
+        ? t("checks.codes.missingScopeUnnamed")
+        : t("checks.codes.missingScope", { scopes });
+    }
+    case "app_mismatch":
+      return t("checks.codes.appMismatch");
+    case "not_slack":
+      return t("checks.codes.notSlack");
     default:
       return unreachable(code);
   }
@@ -168,7 +199,7 @@ export function checkDetail(
   ) {
     return null;
   }
-  return message === checkCodeText(i18n.getFixedT("en"), code) ? null : message;
+  return message === checkCodeText(i18n.getFixedT("en"), code, message) ? null : message;
 }
 
 /** The detail of a check's code: the server's English message, small and muted below the translated text. */
@@ -301,6 +332,8 @@ function probePassedText(t: TFunction, type: Connection["type"]): string {
       return t("connections.check.probePassed.telegram");
     case "bridge":
       return t("connections.check.probePassed.bridge");
+    case "slack":
+      return t("connections.check.probePassed.slack");
     default:
       return unreachable(type);
   }
@@ -372,7 +405,7 @@ function Step({
           >
             {code === null
               ? (step.message ?? t("connections.check.unknownError"))
-              : checkCodeText(t, code)}
+              : checkCodeText(t, code, step.message)}
           </span>
         )}
         {found && (
@@ -380,7 +413,7 @@ function Step({
             className="wrap-anywhere text-muted-foreground"
             data-testid="connection-check-step-reason"
           >
-            {code === null ? step.message : checkCodeText(t, code)}
+            {code === null ? step.message : checkCodeText(t, code, step.message)}
           </span>
         )}
         {(failed || found) && (

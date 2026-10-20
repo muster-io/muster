@@ -813,6 +813,84 @@ func (q *Queries) ListRotateSigningSecret(ctx context.Context, arg ListRotateSig
 	return items, nil
 }
 
+const listRotateSlackAppToken = `-- name: ListRotateSlackAppToken :many
+SELECT id, slack_app_token_ciphertext AS ciphertext, slack_app_token_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND slack_app_token_ciphertext IS NOT NULL
+  AND slack_app_token_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateSlackAppTokenParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateSlackAppTokenRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateSlackAppToken(ctx context.Context, arg ListRotateSlackAppTokenParams) ([]ListRotateSlackAppTokenRow, error) {
+	rows, err := q.db.Query(ctx, listRotateSlackAppToken, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateSlackAppTokenRow{}
+	for rows.Next() {
+		var i ListRotateSlackAppTokenRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateSlackSigningSecret = `-- name: ListRotateSlackSigningSecret :many
+SELECT id, slack_signing_secret_ciphertext AS ciphertext, slack_signing_secret_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND slack_signing_secret_ciphertext IS NOT NULL
+  AND slack_signing_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateSlackSigningSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateSlackSigningSecretRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateSlackSigningSecret(ctx context.Context, arg ListRotateSlackSigningSecretParams) ([]ListRotateSlackSigningSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateSlackSigningSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateSlackSigningSecretRow{}
+	for rows.Next() {
+		var i ListRotateSlackSigningSecretRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRotateTOTPPendingSeed = `-- name: ListRotateTOTPPendingSeed :many
 SELECT user_id, pending_seed_ciphertext AS ciphertext, pending_seed_key_id::text AS key_id
 FROM user_totp
@@ -1347,6 +1425,62 @@ type ReencryptSigningSecretParams struct {
 
 func (q *Queries) ReencryptSigningSecret(ctx context.Context, arg ReencryptSigningSecretParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reencryptSigningSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptSlackAppToken = `-- name: ReencryptSlackAppToken :execrows
+UPDATE connections
+SET slack_app_token_ciphertext = $1, slack_app_token_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND slack_app_token_key_id = $5::text
+`
+
+type ReencryptSlackAppTokenParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptSlackAppToken(ctx context.Context, arg ReencryptSlackAppTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptSlackAppToken,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptSlackSigningSecret = `-- name: ReencryptSlackSigningSecret :execrows
+UPDATE connections
+SET slack_signing_secret_ciphertext = $1, slack_signing_secret_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND slack_signing_secret_key_id = $5::text
+`
+
+type ReencryptSlackSigningSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptSlackSigningSecret(ctx context.Context, arg ReencryptSlackSigningSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptSlackSigningSecret,
 		arg.Ciphertext,
 		arg.KeyID,
 		arg.OrgID,

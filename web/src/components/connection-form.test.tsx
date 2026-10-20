@@ -36,6 +36,7 @@ import type {
   ConnectionInput,
   Permission,
   Session,
+  SlackConnection,
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
@@ -95,6 +96,27 @@ const BRIDGE: BridgeConnection = {
   proxy: { enabled: false },
   destination_count: 0,
   created_at: "2026-10-17T09:30:00Z",
+  etag: '"1"',
+};
+
+const SLACK: SlackConnection = {
+  id: "CN0000000000SL",
+  type: "slack",
+  name: "Dev Slack",
+  event_mode: "socket",
+  limiter: { limit: 1, per_seconds: 1 },
+  bot_token_status: { set: true, updated_at: "2026-10-20T09:30:00Z" },
+  app_token_status: { set: true, updated_at: "2026-10-20T09:30:00Z" },
+  slack_signing_secret_status: { set: false },
+  callback_url: "http://localhost:8081/api/v1/callbacks/slack/CN0000000000SL",
+  bot_name: "muster",
+  bot_user_id: "U0MUSTERDEVA",
+  team_id: "T0MUSTERDEVA",
+  team_name: "Muster Dev",
+  app_id: "A0MUSTERDEVA",
+  proxy: { enabled: false },
+  destination_count: 0,
+  created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
 };
 
@@ -449,6 +471,16 @@ describe("the checks before a save", () => {
     expect(addressChanged(moved, BRIDGE)).toBe(true);
     expect(connectionErrors(moved, BRIDGE)).toEqual({ "/bot_token": TOKEN_FOR_NEW_SERVER });
     expect(connectionErrors({ ...moved, bot_token: token }, BRIDGE)).toEqual({});
+  });
+
+  test("asks for no token again when the proxy of a Slack Connection changes, since Slack's address is fixed", () => {
+    const stored = connectionValues(SLACK);
+    const proxied = {
+      ...stored,
+      proxy: { ...stored.proxy, enabled: true, address: "127.0.0.1:18091" },
+    };
+    expect(addressChanged(stored, SLACK)).toBe(false);
+    expect(addressChanged(proxied, SLACK)).toBe(false);
   });
 
   test("needs whole limiter numbers of at least 1", () => {

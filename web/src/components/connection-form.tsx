@@ -91,6 +91,9 @@ export const DEFAULT_MATTERMOST_LIMITER = { limit: 5, per_seconds: 1 } as const;
 /** The limiter of a new Telegram Connection: connection.telegram.limiter, 15 messages per second. */
 export const DEFAULT_TELEGRAM_LIMITER = { limit: 15, per_seconds: 1 } as const;
 
+/** The limiter of a new Slack Connection: connection.slack.limiter, 50 requests per minute. */
+export const DEFAULT_SLACK_LIMITER = { limit: 50, per_seconds: 60 } as const;
+
 export interface ConnectionValues {
   type: ConnectionType;
   name: string;
@@ -118,6 +121,8 @@ function defaultLimiter(type: ConnectionType) {
       return DEFAULT_TELEGRAM_LIMITER;
     case "bridge":
       return DEFAULT_BRIDGE_LIMITER;
+    case "slack":
+      return DEFAULT_SLACK_LIMITER;
     default:
       return DEFAULT_MATTERMOST_LIMITER;
   }
@@ -267,6 +272,9 @@ export function addressChanged(v: ConnectionValues, stored: Connection | undefin
       return normalizeBaseUrl(v.bot_api_base_url) !== stored.bot_api_base_url;
     case "bridge":
       return normalizeBaseUrl(v.base_url) !== stored.base_url;
+    case "slack":
+      // Slack's address is fixed, and a change of the proxy asks for no token again, as for the other types.
+      return false;
     default:
       return v.server_url.trim() !== stored.server_url;
   }
@@ -514,6 +522,8 @@ function formTitle(t: TFunction, kind: ConnectionType): string {
       return t("connections.form.telegram");
     case "bridge":
       return t("connections.types.bridge");
+    case "slack":
+      return t("connections.types.slack");
     default:
       return unreachable(kind);
   }
@@ -527,6 +537,8 @@ function limiterHint(t: TFunction, kind: ConnectionType): string {
       return t("connections.telegram.limiterHint");
     case "bridge":
       return t("connections.bridge.limiterHint");
+    case "slack":
+      return t("connections.slack.limiterHint");
     default:
       return unreachable(kind);
   }

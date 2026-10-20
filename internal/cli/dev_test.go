@@ -58,7 +58,7 @@ func (b *syncBuffer) String() string {
 
 var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0",
 	MattermostSecond: "127.0.0.1:0", Telegram: "127.0.0.1:0", OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0",
-	Bridge: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
+	Bridge: "127.0.0.1:0", Slack: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 // started runs `muster dev args` in the background with env and the fakes at addrs; stop interrupts it like a signal
 // and returns its exit code.
@@ -105,7 +105,7 @@ func waitLines(t *testing.T, out *syncBuffer, lines int) string {
 func TestDevFakeServers(t *testing.T) {
 	env := mapEnv{"MUSTER_SECRET_KEYS": "a2V5"}
 	stdout, stderr, stop := started(t, env, anyPort)
-	got := waitLines(t, stdout, 11)
+	got := waitLines(t, stdout, 12)
 	re := regexp.MustCompile(`^muster dev: development defaults for MUSTER_PUBLIC_URL, MUSTER_INGEST_URL, MUSTER_DATABASE_URL, ` +
 		`MUSTER_BOOTSTRAP_ADMIN_EMAIL, MUSTER_BOOTSTRAP_ADMIN_PASSWORD\n` +
 		`muster dev: from the environment: MUSTER_SECRET_KEYS\n` +
@@ -117,6 +117,7 @@ func TestDevFakeServers(t *testing.T) {
 		`muster dev: fake SOCKS5 proxy 127\.0\.0\.1:\d+\n` +
 		`muster dev: fake webhook receiver http://127\.0\.0\.1:\d+\n` +
 		`muster dev: fake bridge http://127\.0\.0\.1:\d+\n` +
+		`muster dev: fake Slack http://127\.0\.0\.1:\d+\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
 	m := re.FindStringSubmatch(got)
 	if m == nil {

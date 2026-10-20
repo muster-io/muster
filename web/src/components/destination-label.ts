@@ -8,7 +8,7 @@
 // Connection's bridge names, "Bridge" until a check read it (C-22.FR-1). The chat a Destination posts in tells the
 // Route editor when two Destinations would post the same Alert Group twice into one chat (D305): one Telegram chat id,
 // one Mattermost server and channel, or one bridge base URL and channel. The Connections list names a Connection by its
-// messenger and the host it calls, or its Telegram bot.
+// messenger and the host it calls, or its Telegram bot; a Slack Connection by its bot's name once a check found it.
 
 import type { TFunction } from "i18next";
 import { useMemo } from "react";
@@ -182,7 +182,7 @@ export function destinationMessengerName(
   return type === "bridge" ? bridgeMessengerName(t, connection) : destinationTypeName(t, type);
 }
 
-/** The messenger of a Connection in the Connections list: Mattermost, Telegram, or a Bridge's messenger. */
+/** The messenger of a Connection in the Connections list: Mattermost, Telegram, Slack, or a Bridge's messenger. */
 export function connectionMessengerName(t: TFunction, c: Connection): string {
   const { type } = c;
   switch (type) {
@@ -192,6 +192,8 @@ export function connectionMessengerName(t: TFunction, c: Connection): string {
       return "Telegram";
     case "bridge":
       return bridgeMessengerName(t, c);
+    case "slack":
+      return t("connections.types.slack");
     default:
       return unreachable(type);
   }
@@ -207,8 +209,9 @@ function hostOf(url: string): string | undefined {
 }
 
 /**
- * What a Connection calls, in the Connections list: the host of a Mattermost server URL or of a Bridge's base URL, or
- * the @username of a Telegram bot once a check found it.
+ * What a Connection calls, in the Connections list: the host of a Mattermost server URL or of a Bridge's base URL, the
+ * @username of a Telegram bot or the name of a Slack bot once a check found it. Slack's address is fixed, so it has
+ * none.
  */
 export function connectionAccount(c: Connection): string | undefined {
   switch (c.type) {
@@ -218,6 +221,8 @@ export function connectionAccount(c: Connection): string | undefined {
       return c.bot_username ? `@${c.bot_username}` : undefined;
     case "bridge":
       return hostOf(c.base_url);
+    case "slack":
+      return c.bot_name || undefined;
     default:
       // A type this SPA does not know calls nothing it could name.
       return undefined;

@@ -268,7 +268,7 @@ func TestBridgeValidation(t *testing.T) {
 	in = bridgeInput("br-type", "http://bridge.example.org", connections.EventDeliveryPoll)
 	in.Type = "smoke"
 	if fe := fieldError(func() error { _, err := e.svc.Create(t.Context(), by, in); return err }()); fe == nil ||
-		fe.Detail != "The type is not mattermost, telegram or bridge." {
+		fe.Detail != "The type is not mattermost, telegram, bridge or slack." {
 		t.Errorf("an unknown type = %v", fe)
 	}
 	if len(e.store.rows) != 1 {

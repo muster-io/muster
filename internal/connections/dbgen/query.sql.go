@@ -142,6 +142,9 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
        c.version, c.bridge_base_url, c.bridge_event_delivery, c.bridge_push_secret_ciphertext,
        c.bridge_push_secret_key_id, c.bridge_push_secret_updated_at, c.bridge_info, c.bridge_info_read_at,
+       c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
+       c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
+       c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -189,6 +192,18 @@ type GetConnectionRow struct {
 	BridgePushSecretUpdatedAt       pgtype.Timestamptz
 	BridgeInfo                      []byte
 	BridgeInfoReadAt                pgtype.Timestamptz
+	SlackEventMode                  pgtype.Text
+	SlackAppTokenCiphertext         []byte
+	SlackAppTokenKeyID              pgtype.Text
+	SlackAppTokenUpdatedAt          pgtype.Timestamptz
+	SlackSigningSecretCiphertext    []byte
+	SlackSigningSecretKeyID         pgtype.Text
+	SlackSigningSecretUpdatedAt     pgtype.Timestamptz
+	SlackTeamID                     pgtype.Text
+	SlackTeamName                   pgtype.Text
+	SlackTeamUrl                    pgtype.Text
+	SlackAppID                      pgtype.Text
+	SlackBotID                      pgtype.Text
 	DestinationCount                int64
 }
 
@@ -228,6 +243,18 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.BridgePushSecretUpdatedAt,
 		&i.BridgeInfo,
 		&i.BridgeInfoReadAt,
+		&i.SlackEventMode,
+		&i.SlackAppTokenCiphertext,
+		&i.SlackAppTokenKeyID,
+		&i.SlackAppTokenUpdatedAt,
+		&i.SlackSigningSecretCiphertext,
+		&i.SlackSigningSecretKeyID,
+		&i.SlackSigningSecretUpdatedAt,
+		&i.SlackTeamID,
+		&i.SlackTeamName,
+		&i.SlackTeamUrl,
+		&i.SlackAppID,
+		&i.SlackBotID,
 		&i.DestinationCount,
 	)
 	return i, err
@@ -412,7 +439,9 @@ INSERT INTO connections (
     org_id, public_id, type, name, mattermost_server_url, telegram_bot_api_base_url, telegram_update_mode,
     telegram_webhook_secret_ciphertext, telegram_webhook_secret_key_id, telegram_webhook_secret_updated_at,
     bridge_base_url, bridge_event_delivery, bridge_push_secret_ciphertext, bridge_push_secret_key_id,
-    bridge_push_secret_updated_at, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy,
+    bridge_push_secret_updated_at, slack_event_mode, slack_app_token_ciphertext, slack_app_token_key_id,
+    slack_app_token_updated_at, slack_signing_secret_ciphertext, slack_signing_secret_key_id,
+    slack_signing_secret_updated_at, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy,
     proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at, limiter_limit, limiter_per_seconds,
     created_at, updated_at
 )
@@ -421,44 +450,55 @@ VALUES (
     $7, $8, $9,
     $10, $11, $12,
     $13, $14, $15,
-    $16, $17, $18::timestamptz, $19,
-    $20, $21, $22,
-    $23, $24, $25::timestamptz, $25::timestamptz
+    $16, $17, $18,
+    $19, $20,
+    $21, $22, $23,
+    $24, $25::timestamptz, $26,
+    $27, $28, $29,
+    $30, $31, $32::timestamptz, $32::timestamptz
 )
 RETURNING id
 `
 
 type InsertConnectionParams struct {
-	OrgID                   int64
-	PublicID                string
-	Type                    string
-	Name                    string
-	ServerUrl               pgtype.Text
-	BotApiBaseUrl           pgtype.Text
-	UpdateMode              pgtype.Text
-	WebhookSecretCiphertext []byte
-	WebhookSecretKeyID      pgtype.Text
-	WebhookSecretUpdatedAt  pgtype.Timestamptz
-	BridgeBaseUrl           pgtype.Text
-	EventDelivery           pgtype.Text
-	PushSecretCiphertext    []byte
-	PushSecretKeyID         pgtype.Text
-	PushSecretUpdatedAt     pgtype.Timestamptz
-	BotTokenCiphertext      []byte
-	BotTokenKeyID           pgtype.Text
-	BotTokenUpdatedAt       time.Time
-	Proxy                   []byte
-	ProxyPasswordCiphertext []byte
-	ProxyPasswordKeyID      pgtype.Text
-	ProxyPasswordUpdatedAt  pgtype.Timestamptz
-	LimiterLimit            int64
-	LimiterPerSeconds       int64
-	Now                     time.Time
+	OrgID                        int64
+	PublicID                     string
+	Type                         string
+	Name                         string
+	ServerUrl                    pgtype.Text
+	BotApiBaseUrl                pgtype.Text
+	UpdateMode                   pgtype.Text
+	WebhookSecretCiphertext      []byte
+	WebhookSecretKeyID           pgtype.Text
+	WebhookSecretUpdatedAt       pgtype.Timestamptz
+	BridgeBaseUrl                pgtype.Text
+	EventDelivery                pgtype.Text
+	PushSecretCiphertext         []byte
+	PushSecretKeyID              pgtype.Text
+	PushSecretUpdatedAt          pgtype.Timestamptz
+	SlackEventMode               pgtype.Text
+	SlackAppTokenCiphertext      []byte
+	SlackAppTokenKeyID           pgtype.Text
+	SlackAppTokenUpdatedAt       pgtype.Timestamptz
+	SlackSigningSecretCiphertext []byte
+	SlackSigningSecretKeyID      pgtype.Text
+	SlackSigningSecretUpdatedAt  pgtype.Timestamptz
+	BotTokenCiphertext           []byte
+	BotTokenKeyID                pgtype.Text
+	BotTokenUpdatedAt            time.Time
+	Proxy                        []byte
+	ProxyPasswordCiphertext      []byte
+	ProxyPasswordKeyID           pgtype.Text
+	ProxyPasswordUpdatedAt       pgtype.Timestamptz
+	LimiterLimit                 int64
+	LimiterPerSeconds            int64
+	Now                          time.Time
 }
 
 // InsertConnection creates a Connection: a Mattermost one with its server URL, a Telegram one with its Bot API base
-// URL, its update mode and, in the webhook mode, its webhook secret token, or a Bridge with its base URL, its event
-// delivery mode and, in the push mode, its push secret.
+// URL, its update mode and, in the webhook mode, its webhook secret token, a Bridge with its base URL, its event
+// delivery mode and, in the push mode, its push secret, or a Slack Connection with its event mode, its app-level token
+// and its Slack signing secret.
 func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertConnection,
 		arg.OrgID,
@@ -476,6 +516,13 @@ func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionPara
 		arg.PushSecretCiphertext,
 		arg.PushSecretKeyID,
 		arg.PushSecretUpdatedAt,
+		arg.SlackEventMode,
+		arg.SlackAppTokenCiphertext,
+		arg.SlackAppTokenKeyID,
+		arg.SlackAppTokenUpdatedAt,
+		arg.SlackSigningSecretCiphertext,
+		arg.SlackSigningSecretKeyID,
+		arg.SlackSigningSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,
@@ -604,6 +651,9 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
        c.version, c.bridge_base_url, c.bridge_event_delivery, c.bridge_push_secret_ciphertext,
        c.bridge_push_secret_key_id, c.bridge_push_secret_updated_at, c.bridge_info, c.bridge_info_read_at,
+       c.slack_event_mode, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
+       c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
+       c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -654,14 +704,27 @@ type ListConnectionsRow struct {
 	BridgePushSecretUpdatedAt       pgtype.Timestamptz
 	BridgeInfo                      []byte
 	BridgeInfoReadAt                pgtype.Timestamptz
+	SlackEventMode                  pgtype.Text
+	SlackAppTokenCiphertext         []byte
+	SlackAppTokenKeyID              pgtype.Text
+	SlackAppTokenUpdatedAt          pgtype.Timestamptz
+	SlackSigningSecretCiphertext    []byte
+	SlackSigningSecretKeyID         pgtype.Text
+	SlackSigningSecretUpdatedAt     pgtype.Timestamptz
+	SlackTeamID                     pgtype.Text
+	SlackTeamName                   pgtype.Text
+	SlackTeamUrl                    pgtype.Text
+	SlackAppID                      pgtype.Text
+	SlackBotID                      pgtype.Text
 	DestinationCount                int64
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Connections (C-13.FR-1, FR-6, C-14.FR-1, C-22.FR-1): a messenger server, bot or bridge through which Destinations
-// post. The bot token, the proxy password, the Telegram webhook secret token and the push secret of a Bridge are read
-// as ciphertexts only to build the Connection's client or to check a request to Muster; reads show their status.
+// Connections (C-13.FR-1, FR-6, C-14.FR-1, C-22.FR-1, C-24.FR-1): a messenger server, bot or bridge through which
+// Destinations post. The bot token, the proxy password, the Telegram webhook secret token, the push secret of a Bridge
+// and the app-level token and Slack signing secret of a Slack Connection are read as ciphertexts only to build the
+// Connection's client or to check a request to Muster; reads show their status.
 // ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type,
 // each with the count of its Destinations that are not deleted.
 func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams) ([]ListConnectionsRow, error) {
@@ -710,6 +773,18 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.BridgePushSecretUpdatedAt,
 			&i.BridgeInfo,
 			&i.BridgeInfoReadAt,
+			&i.SlackEventMode,
+			&i.SlackAppTokenCiphertext,
+			&i.SlackAppTokenKeyID,
+			&i.SlackAppTokenUpdatedAt,
+			&i.SlackSigningSecretCiphertext,
+			&i.SlackSigningSecretKeyID,
+			&i.SlackSigningSecretUpdatedAt,
+			&i.SlackTeamID,
+			&i.SlackTeamName,
+			&i.SlackTeamUrl,
+			&i.SlackAppID,
+			&i.SlackBotID,
 			&i.DestinationCount,
 		); err != nil {
 			return nil, err
@@ -955,7 +1030,8 @@ UPDATE connections
 SET deleted_at = $1::timestamptz, updated_at = $1::timestamptz, version = version + 1,
     bot_token_ciphertext = NULL, bot_token_key_id = NULL, proxy_password_ciphertext = NULL,
     proxy_password_key_id = NULL, telegram_webhook_secret_ciphertext = NULL, telegram_webhook_secret_key_id = NULL,
-    bridge_push_secret_ciphertext = NULL, bridge_push_secret_key_id = NULL
+    bridge_push_secret_ciphertext = NULL, bridge_push_secret_key_id = NULL, slack_app_token_ciphertext = NULL,
+    slack_app_token_key_id = NULL, slack_signing_secret_ciphertext = NULL, slack_signing_secret_key_id = NULL
 WHERE org_id = $2 AND id = $3
 `
 
@@ -1078,6 +1154,49 @@ func (q *Queries) SetBridgeInfo(ctx context.Context, arg SetBridgeInfoParams) (i
 	return result.RowsAffected(), nil
 }
 
+const setSlackIdentity = `-- name: SetSlackIdentity :execrows
+UPDATE connections
+SET slack_team_id = $1, slack_team_name = $2, slack_team_url = $3, slack_bot_id = $4,
+    bot_user_id = $5, bot_username = $6,
+    slack_app_id = coalesce($7::text, slack_app_id)
+WHERE org_id = $8 AND id = $9 AND type = 'slack' AND version = $10 AND deleted_at IS NULL
+`
+
+type SetSlackIdentityParams struct {
+	TeamID      pgtype.Text
+	TeamName    pgtype.Text
+	TeamUrl     pgtype.Text
+	BotID       pgtype.Text
+	BotUserID   pgtype.Text
+	BotUsername pgtype.Text
+	AppID       pgtype.Text
+	OrgID       int64
+	ID          int64
+	Version     int64
+}
+
+// SetSlackIdentity records what a passing check of a Slack Connection learned — the workspace, its address and the
+// bot, and the app when the check had the step app_token, keeping the stored app otherwise — unless the Connection
+// changed since the check read it; it is not a change of the configuration.
+func (q *Queries) SetSlackIdentity(ctx context.Context, arg SetSlackIdentityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setSlackIdentity,
+		arg.TeamID,
+		arg.TeamName,
+		arg.TeamUrl,
+		arg.BotID,
+		arg.BotUserID,
+		arg.BotUsername,
+		arg.AppID,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const storeBridgeEventsCursor = `-- name: StoreBridgeEventsCursor :execrows
 UPDATE connections
 SET bridge_events_cursor = $1::text
@@ -1145,54 +1264,73 @@ SET name = $1, mattermost_server_url = $2,
     bridge_push_secret_ciphertext = $10,
     bridge_push_secret_key_id = $11,
     bridge_push_secret_updated_at = $12,
-    bot_token_ciphertext = $13, bot_token_key_id = $14,
-    bot_token_updated_at = $15::timestamptz,
-    bot_user_id = CASE WHEN $16::boolean THEN NULL ELSE bot_user_id END,
-    bot_username = CASE WHEN $16::boolean THEN NULL ELSE bot_username END,
-    bridge_info = CASE WHEN $16::boolean THEN NULL ELSE bridge_info END,
-    bridge_info_read_at = CASE WHEN $16::boolean THEN NULL ELSE bridge_info_read_at END,
-    bridge_events_cursor = CASE WHEN $16::boolean THEN NULL ELSE bridge_events_cursor END,
-    telegram_update_offset = CASE WHEN $17::boolean THEN NULL ELSE telegram_update_offset END,
-    proxy = $18, proxy_password_ciphertext = $19,
-    proxy_password_key_id = $20,
-    proxy_password_updated_at = $21, limiter_limit = $22,
-    limiter_per_seconds = $23, updated_at = $24::timestamptz, version = version + 1
-WHERE org_id = $25 AND id = $26
+    slack_event_mode = $13,
+    slack_app_token_ciphertext = $14,
+    slack_app_token_key_id = $15,
+    slack_app_token_updated_at = $16,
+    slack_signing_secret_ciphertext = $17,
+    slack_signing_secret_key_id = $18,
+    slack_signing_secret_updated_at = $19,
+    bot_token_ciphertext = $20, bot_token_key_id = $21,
+    bot_token_updated_at = $22::timestamptz,
+    bot_user_id = CASE WHEN $23::boolean THEN NULL ELSE bot_user_id END,
+    bot_username = CASE WHEN $23::boolean THEN NULL ELSE bot_username END,
+    bridge_info = CASE WHEN $23::boolean THEN NULL ELSE bridge_info END,
+    bridge_info_read_at = CASE WHEN $23::boolean THEN NULL ELSE bridge_info_read_at END,
+    bridge_events_cursor = CASE WHEN $23::boolean THEN NULL ELSE bridge_events_cursor END,
+    slack_team_id = CASE WHEN $23::boolean THEN NULL ELSE slack_team_id END,
+    slack_team_name = CASE WHEN $23::boolean THEN NULL ELSE slack_team_name END,
+    slack_team_url = CASE WHEN $23::boolean THEN NULL ELSE slack_team_url END,
+    slack_app_id = CASE WHEN $23::boolean THEN NULL ELSE slack_app_id END,
+    slack_bot_id = CASE WHEN $23::boolean THEN NULL ELSE slack_bot_id END,
+    telegram_update_offset = CASE WHEN $24::boolean THEN NULL ELSE telegram_update_offset END,
+    proxy = $25, proxy_password_ciphertext = $26,
+    proxy_password_key_id = $27,
+    proxy_password_updated_at = $28, limiter_limit = $29,
+    limiter_per_seconds = $30, updated_at = $31::timestamptz, version = version + 1
+WHERE org_id = $32 AND id = $33
 `
 
 type UpdateConnectionParams struct {
-	Name                    string
-	ServerUrl               pgtype.Text
-	BotApiBaseUrl           pgtype.Text
-	UpdateMode              pgtype.Text
-	WebhookSecretCiphertext []byte
-	WebhookSecretKeyID      pgtype.Text
-	WebhookSecretUpdatedAt  pgtype.Timestamptz
-	BridgeBaseUrl           pgtype.Text
-	EventDelivery           pgtype.Text
-	PushSecretCiphertext    []byte
-	PushSecretKeyID         pgtype.Text
-	PushSecretUpdatedAt     pgtype.Timestamptz
-	BotTokenCiphertext      []byte
-	BotTokenKeyID           pgtype.Text
-	BotTokenUpdatedAt       time.Time
-	ForgetBot               bool
-	ForgetUpdates           bool
-	Proxy                   []byte
-	ProxyPasswordCiphertext []byte
-	ProxyPasswordKeyID      pgtype.Text
-	ProxyPasswordUpdatedAt  pgtype.Timestamptz
-	LimiterLimit            int64
-	LimiterPerSeconds       int64
-	Now                     time.Time
-	OrgID                   int64
-	ID                      int64
+	Name                         string
+	ServerUrl                    pgtype.Text
+	BotApiBaseUrl                pgtype.Text
+	UpdateMode                   pgtype.Text
+	WebhookSecretCiphertext      []byte
+	WebhookSecretKeyID           pgtype.Text
+	WebhookSecretUpdatedAt       pgtype.Timestamptz
+	BridgeBaseUrl                pgtype.Text
+	EventDelivery                pgtype.Text
+	PushSecretCiphertext         []byte
+	PushSecretKeyID              pgtype.Text
+	PushSecretUpdatedAt          pgtype.Timestamptz
+	SlackEventMode               pgtype.Text
+	SlackAppTokenCiphertext      []byte
+	SlackAppTokenKeyID           pgtype.Text
+	SlackAppTokenUpdatedAt       pgtype.Timestamptz
+	SlackSigningSecretCiphertext []byte
+	SlackSigningSecretKeyID      pgtype.Text
+	SlackSigningSecretUpdatedAt  pgtype.Timestamptz
+	BotTokenCiphertext           []byte
+	BotTokenKeyID                pgtype.Text
+	BotTokenUpdatedAt            time.Time
+	ForgetBot                    bool
+	ForgetUpdates                bool
+	Proxy                        []byte
+	ProxyPasswordCiphertext      []byte
+	ProxyPasswordKeyID           pgtype.Text
+	ProxyPasswordUpdatedAt       pgtype.Timestamptz
+	LimiterLimit                 int64
+	LimiterPerSeconds            int64
+	Now                          time.Time
+	OrgID                        int64
+	ID                           int64
 }
 
 // UpdateConnection replaces the configured fields of a Connection and its secrets as the write path computed them.
-// A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, and
-// what a bridge told: its info and the cursor of its events; a new bot token also forgets telegram_update_offset,
-// since another bot's update ids start elsewhere.
+// A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, what a
+// bridge told — its info and the cursor of its events — and what a Slack check learned — the workspace, the app and
+// the bot's id; a new bot token also forgets telegram_update_offset, since another bot's update ids start elsewhere.
 func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionParams) error {
 	_, err := q.db.Exec(ctx, updateConnection,
 		arg.Name,
@@ -1207,6 +1345,13 @@ func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionPara
 		arg.PushSecretCiphertext,
 		arg.PushSecretKeyID,
 		arg.PushSecretUpdatedAt,
+		arg.SlackEventMode,
+		arg.SlackAppTokenCiphertext,
+		arg.SlackAppTokenKeyID,
+		arg.SlackAppTokenUpdatedAt,
+		arg.SlackSigningSecretCiphertext,
+		arg.SlackSigningSecretKeyID,
+		arg.SlackSigningSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,

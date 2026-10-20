@@ -135,7 +135,7 @@ issue: 307
 ```sh
 make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011; the Connection "sl" (C) as in S-097, in `socket` mode, no proxy
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake
 M='{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},"new_alerts":{"everyone":"none","user_ids":[],"groups":[]},
 "reopen":{"everyone":"none","user_ids":[],"groups":[]},"ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},
 "snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},"rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}}'

@@ -69,6 +69,7 @@ type memStore struct {
 	updates   []dbgen.UpdateConnectionParams
 	bots      []dbgen.SetBotIdentityParams
 	infos     []dbgen.SetBridgeInfoParams
+	slackIDs  []dbgen.SetSlackIdentityParams
 	fail      map[string]error
 	tx        int
 	committed int
@@ -139,11 +140,12 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 	}
 	nAudit, nHints, nUpdates, nBots, nInfos, next := len(s.audit), len(s.hints), len(s.updates), len(s.bots),
 		len(s.infos), s.next
+	nSlack := len(s.slackIDs)
 	seen := maps.Clone(s.seen)
 	if err := f(s); err != nil {
 		s.rows, s.audit, s.hints, s.updates, s.bots, s.infos, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
 			s.updates[:nUpdates], s.bots[:nBots], s.infos[:nInfos], next
-		s.seen = seen
+		s.seen, s.slackIDs = seen, s.slackIDs[:nSlack]
 		return err
 	}
 	s.committed++
@@ -244,8 +246,11 @@ func (s *memStore) InsertConnection(_ context.Context, a dbgen.InsertConnectionP
 		TelegramWebhookSecretKeyID: a.WebhookSecretKeyID, TelegramWebhookSecretUpdatedAt: a.WebhookSecretUpdatedAt,
 		BridgeBaseUrl: a.BridgeBaseUrl, BridgeEventDelivery: a.EventDelivery,
 		BridgePushSecretCiphertext: a.PushSecretCiphertext, BridgePushSecretKeyID: a.PushSecretKeyID,
-		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, BotTokenCiphertext: a.BotTokenCiphertext,
-		BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
+		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, SlackEventMode: a.SlackEventMode,
+		SlackAppTokenCiphertext: a.SlackAppTokenCiphertext, SlackAppTokenKeyID: a.SlackAppTokenKeyID,
+		SlackAppTokenUpdatedAt: a.SlackAppTokenUpdatedAt, SlackSigningSecretCiphertext: a.SlackSigningSecretCiphertext,
+		SlackSigningSecretKeyID: a.SlackSigningSecretKeyID, SlackSigningSecretUpdatedAt: a.SlackSigningSecretUpdatedAt,
+		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
 		Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
 		LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}}
@@ -268,6 +273,11 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	r.BridgeBaseUrl, r.BridgeEventDelivery = a.BridgeBaseUrl, a.EventDelivery
 	r.BridgePushSecretCiphertext, r.BridgePushSecretKeyID, r.BridgePushSecretUpdatedAt = a.PushSecretCiphertext,
 		a.PushSecretKeyID, a.PushSecretUpdatedAt
+	r.SlackEventMode = a.SlackEventMode
+	r.SlackAppTokenCiphertext, r.SlackAppTokenKeyID, r.SlackAppTokenUpdatedAt = a.SlackAppTokenCiphertext,
+		a.SlackAppTokenKeyID, a.SlackAppTokenUpdatedAt
+	r.SlackSigningSecretCiphertext, r.SlackSigningSecretKeyID, r.SlackSigningSecretUpdatedAt =
+		a.SlackSigningSecretCiphertext, a.SlackSigningSecretKeyID, a.SlackSigningSecretUpdatedAt
 	r.BotTokenCiphertext, r.BotTokenKeyID, r.BotTokenUpdatedAt = a.BotTokenCiphertext, a.BotTokenKeyID,
 		a.BotTokenUpdatedAt
 	r.ProxyPasswordCiphertext, r.ProxyPasswordKeyID, r.ProxyPasswordUpdatedAt = a.ProxyPasswordCiphertext,
@@ -276,6 +286,8 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	if a.ForgetBot {
 		r.BotUserID, r.BotUsername = pgtype.Text{}, pgtype.Text{}
 		r.BridgeInfo, r.BridgeInfoReadAt = nil, pgtype.Timestamptz{}
+		r.SlackTeamID, r.SlackTeamName, r.SlackTeamUrl, r.SlackAppID, r.SlackBotID = pgtype.Text{}, pgtype.Text{},
+			pgtype.Text{}, pgtype.Text{}, pgtype.Text{}
 		s.rows[a.ID].cursor = nil
 	}
 	if a.ForgetUpdates {
@@ -308,6 +320,24 @@ func (s *memStore) SetBridgeInfo(_ context.Context, a dbgen.SetBridgeInfoParams)
 	return 1, nil
 }
 
+func (s *memStore) SetSlackIdentity(_ context.Context, a dbgen.SetSlackIdentityParams) (int64, error) {
+	if err := s.fail["SetSlackIdentity"]; err != nil {
+		return 0, err
+	}
+	s.slackIDs = append(s.slackIDs, a)
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || r.row.Type != connections.TypeSlack || r.row.Version != a.Version {
+		return 0, nil
+	}
+	r.row.SlackTeamID, r.row.SlackTeamName, r.row.SlackTeamUrl, r.row.SlackBotID = a.TeamID, a.TeamName, a.TeamUrl,
+		a.BotID
+	r.row.BotUserID, r.row.BotUsername = a.BotUserID, a.BotUsername
+	if a.AppID.Valid {
+		r.row.SlackAppID = a.AppID
+	}
+	return 1, nil
+}
+
 func (s *memStore) CountConnectionDestinations(_ context.Context, a dbgen.CountConnectionDestinationsParams) (int64,
 	error) {
 	if err := s.fail["CountConnectionDestinations"]; err != nil {
@@ -326,6 +356,8 @@ func (s *memStore) MarkConnectionDeleted(_ context.Context, a dbgen.MarkConnecti
 	r.row.ProxyPasswordCiphertext, r.row.ProxyPasswordKeyID = nil, pgtype.Text{}
 	r.row.TelegramWebhookSecretCiphertext, r.row.TelegramWebhookSecretKeyID = nil, pgtype.Text{}
 	r.row.BridgePushSecretCiphertext, r.row.BridgePushSecretKeyID = nil, pgtype.Text{}
+	r.row.SlackAppTokenCiphertext, r.row.SlackAppTokenKeyID = nil, pgtype.Text{}
+	r.row.SlackSigningSecretCiphertext, r.row.SlackSigningSecretKeyID = nil, pgtype.Text{}
 	r.row.Version++
 	return nil
 }
@@ -651,6 +683,9 @@ type env struct {
 	done     []bool
 	abandonE error
 	keys     *keyring.Keyring
+	// slackBase is where the requests of a Slack Connection go instead of Slack, the fake Slack server once a test
+	// starts one.
+	slackBase string
 }
 
 func newEnv(t *testing.T) *env {
@@ -674,6 +709,7 @@ func newEnv(t *testing.T) *env {
 		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
 		Network:     mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
 		Interactive: e.path, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081", Path: "/"}, Log: logger,
+		SlackRoute: func(logging.Secret) string { return e.slackBase },
 		Abandon: func(_ context.Context, tx dbgen.DBTX, id int64) (func(context.Context), error) {
 			e.abandon, e.txs = append(e.abandon, id), append(e.txs, tx)
 			if e.abandonE != nil {
@@ -805,7 +841,7 @@ func TestCreateValidation(t *testing.T) {
 		pointer string
 		code    string
 	}{
-		{"unknown type", func(in *connections.Input) { in.Type = "slack" }, "/type", connections.CodeInvalidFormat},
+		{"unknown type", func(in *connections.Input) { in.Type = "matrix" }, "/type", connections.CodeInvalidFormat},
 		{"empty name", func(in *connections.Input) { in.Name = "  " }, "/name", connections.CodeRequired},
 		{"long name", func(in *connections.Input) { in.Name = strings.Repeat("я", 201) }, "/name",
 			connections.CodeTooLong},
@@ -1098,7 +1134,7 @@ func TestDeleteWithoutAbandon(t *testing.T) {
 }
 
 // TestStepCalled: a step that ran made a call, whose latency it has, unless it was skipped or is event_delivery, which
-// only reads the info that the step info read.
+// only reads the info that the step info read, or scopes, which reads the header of the answer of the step token.
 func TestStepCalled(t *testing.T) {
 	for _, tc := range []struct {
 		step connections.Step
@@ -1111,6 +1147,9 @@ func TestStepCalled(t *testing.T) {
 		{connections.Step{Name: connections.StepEventDelivery, OK: true}, false},
 		{connections.Step{Name: connections.StepEventDelivery, Code: "event_delivery_not_offered"}, false},
 		{connections.Step{Name: connections.StepEventDelivery, Skipped: true}, false},
+		{connections.Step{Name: connections.StepScopes, OK: true}, false},
+		{connections.Step{Name: connections.StepScopes, Code: "missing_scope"}, false},
+		{connections.Step{Name: connections.StepAppToken, OK: true}, true},
 	} {
 		if got := tc.step.Called(); got != tc.want {
 			t.Errorf("%+v.Called() = %v, want %v", tc.step, got, tc.want)

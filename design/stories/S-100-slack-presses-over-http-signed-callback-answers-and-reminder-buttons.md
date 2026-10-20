@@ -156,7 +156,7 @@ issue: 309
 make dev > dev.log 2>&1 &
 # as in S-099: the session, FAM, NOTIFY, ADV, AG, FIRE and the Route "sl" with the Destination "alerts" (D) of the
 # Connection "sl" (C); the Responder "alice" and the Viewer "vic", created with `createUser` as in S-011
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake; ING=localhost:8081/api/v1
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake; ING=localhost:8081/api/v1
 ETAG() { curl -s -b jar $API/connections/$C | jq -r .etag; }
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"slack","name":"sl","event_mode":"http",
   "slack_signing_secret":"muster-dev-slack-signing-secret-b","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}' > /dev/null
