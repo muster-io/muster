@@ -50,7 +50,8 @@ const (
 // HintAnotherClientConnected is what muster doctor says of a Slack Connection in socket mode whose last hello counted
 // another connection of its Slack app than the Leader's (C-24.FR-2, F-102).
 const HintAnotherClientConnected = "another program is connected to this Slack app through Socket Mode: presses are " +
-	"shared between them at random; use one Slack app for each Muster installation"
+	"shared between them at random; use one Slack app for each Connection and share it with no other Connection or " +
+	"installation"
 
 // RequiredScopes are the scopes the bot token needs, and no other (C-24.FR-1).
 var RequiredScopes = []string{"chat:write", "channels:read", "groups:read", "im:write", "users:read",

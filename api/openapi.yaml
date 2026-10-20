@@ -12346,7 +12346,8 @@ components:
           type: integer
           minimum: 0
           description: The connections of the Slack app that `hello` counted beyond those the Leader holds; more than
-            0 means another program, usually a second installation, takes some of the presses.
+            0 means another program, usually another Connection or installation using the same Slack app, takes some
+            of the presses.
     SlackConnectionInput:
       allOf:
       - $ref: '#/components/schemas/SlackConnectionBase'
@@ -13017,7 +13018,8 @@ components:
             show in the Thread of the Root message instead of the channel view; granting that permission, for example
             with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode):
             the last `hello` counted another connection of the Slack app than the Leader''s; presses are shared between
-            them at random — use one Slack app for each installation.'
+            them at random — use one Slack app for each Connection and share it with no other Connection or
+            installation.'
           items:
             type: string
             enum:

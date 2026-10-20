@@ -38,7 +38,7 @@ const CALLBACK_URL = /^http:\/\/localhost:8081\/api\/v1\/callbacks\/slack\/CN[0-
 const CALLBACK_HINT =
   /^Slack sends button presses to http:\/\/localhost:8081\/api\/v1\/callbacks\/slack\/CN[0-9A-Z]+\. Enter it as the Interactivity Request URL of the Slack app, and the app's Slack signing secret here\. A press on a test message checks both\.$/;
 const SHARED =
-  "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Muster installation.";
+  "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.";
 const IDENTITY = "Bot: muster-dev-bot-b · Workspace: Fake workspace B · App: A0MUSTERDEVB";
 
 let connectionId = "";

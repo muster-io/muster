@@ -26,8 +26,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
    your profile: {link}". Bob enters his Slack email in his profile; the bot sends him a code by direct message, and he
    types it into the profile.
 6. Someone deletes a Root message; the next edit finds it gone, and Muster posts the Alert Group again once.
-7. A second Muster installation is connected to the same Slack app in Socket Mode by mistake. The Connection page and
-   `muster doctor` warn that presses are shared between them at random.
+7. Another Connection, of the same or a second Muster installation, is connected to the same Slack app in Socket Mode
+   by mistake. The Connection page and `muster doctor` warn that presses are shared between them at random.
 8. The bot is removed from `#alerts-prod` at night, and the Destination becomes Broken. In the morning someone invites
    it back; the next probe ends the Broken state, though no alert has fired.
 
@@ -151,13 +151,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   next connection before it closes the old one (F-101); a failure, `too_many_websockets` (F-102) or `link_disabled`
   backs off by `slack.socket_backoff`, is logged, never counts against the Connection and makes no Destination Broken.
   Every envelope is confirmed at once on its socket with its `envelope_id`, before its press is handled (F-093). When a
-  `hello` counts more connections of the app than the Leader holds, another program — usually a second installation — is
-  connected to the same app and would take some of its presses (F-102): Muster logs it, keeps the count on the
-  Connection for its check (FR-2) and page, and goes on; right after a Leader crashed, Slack may still count the old
-  Leader's connection until it notices that it is gone, so the count is taken again at every `hello`. A Leader change
-  closes the connection, and the presses made until the next Leader connects are lost: the person sees Slack's error,
-  and Muster does not count on Slack to send them again ([Pending](../../facts.md#pending)); an installation that cannot
-  lose a press uses HTTP. **HTTP** (`http`): Slack posts each press to
+  `hello` counts more connections of the app than the Leader holds, another program — usually another Connection or
+  installation — is connected to the same app and would take some of its presses (F-102): Muster logs it, keeps the
+  count on the Connection for its check (FR-2) and page, and goes on; right after a Leader crashed, Slack may still
+  count the old Leader's connection until it notices that it is gone, so the count is taken again at every `hello`. A
+  Leader change closes the connection, and the presses made until the next Leader connects are lost: the person sees
+  Slack's error, and Muster does not count on Slack to send them again ([Pending](../../facts.md#pending)); an
+  installation that cannot lose a press uses HTTP. **HTTP** (`http`): Slack posts each press to
   `MUSTER_INGEST_URL/api/v1/callbacks/slack/{connection_id}` on the ingest listener; Muster verifies `X-Slack-Signature`
   over the raw body with the Connection's Slack signing secret and refuses an `X-Slack-Request-Timestamp` further than
   `slack.request_tolerance` from its real clock (F-104); it answers `401` to a missing or wrong signature, a stale
