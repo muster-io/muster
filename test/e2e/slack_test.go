@@ -851,6 +851,18 @@ func (s *slk) waitActions(ts, action string) {
 	eventually(s.t, "the action "+action+" on "+ts, func() bool { return slices.Contains(s.actionIDs(ts), action) })
 }
 
+// changes counts the Timeline entries of the Alert Group id that a Command could make: all but the delivery events.
+func (s *slk) changes(id string) int {
+	s.t.Helper()
+	n := 0
+	for _, x := range s.timeline(id, "") {
+		if x.Kind != "delivery" {
+			n++
+		}
+	}
+	return n
+}
+
 // presetEnd is the end of the Snooze preset tomorrow from now in loc, the working day starting at 09:00 (C-10.FR-17).
 func presetEnd(now time.Time, loc *time.Location) time.Time {
 	y, m, d := now.In(loc).Date()
@@ -891,7 +903,7 @@ func TestSlackPresses(t *testing.T) {
 		{"dora", "responder", fakeslack.UserDora, "AK0000000000S4"},
 	} {
 		ids[u.login] = s.api.json(http.MethodPost, "/api/v1/users", `{"name":"`+u.login+`","login":"`+u.login+
-			`","role":"`+u.role+`"}`, http.StatusCreated)["id"].(string)
+			`","role":"`+u.role+`"}`, http.StatusCreated)["user"].(map[string]any)["id"].(string)
 		h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
 			username, display_name, created_at) SELECT 1, '`+u.link+`', u.id, 'slack', c.id, '`+u.external+`', '`+
 			u.login+`', u.name, now() FROM users u, connections c WHERE u.login = '`+u.login+`' AND c.public_id = '`+
@@ -942,7 +954,7 @@ func TestSlackPresses(t *testing.T) {
 
 	t.Run("refused_requests", func(t *testing.T) {
 		s := s.on(t)
-		entries := len(s.timeline(g, ""))
+		entries := s.changes(g)
 		var bodies []string
 		refuse := func(extra map[string]any) {
 			t.Helper()
@@ -989,7 +1001,7 @@ func TestSlackPresses(t *testing.T) {
 			!slices.Equal(s.rejected(dev), []string{"wrong_mode"}) {
 			t.Errorf("slack_press_rejected %v, %v, %v", mine, s.rejected(""), s.rejected(dev))
 		}
-		if st := s.alertGroup(g)["status"]; st != "acknowledged" || len(s.timeline(g, "")) != entries {
+		if st := s.alertGroup(g)["status"]; st != "acknowledged" || s.changes(g) != entries {
 			t.Errorf("a refused press changed %s: %v", g, st)
 		}
 	})
@@ -1037,7 +1049,7 @@ func TestSlackPresses(t *testing.T) {
 		g2 = s.groupOf("b")
 		root2 = s.root(s.number(g2), "CpuHigh")
 		s.api.json(http.MethodPost, "/api/v1/users/"+ids["dora"]+"/disable", "", http.StatusOK)
-		entries, entries2 := len(s.timeline(g, "")), len(s.timeline(g2, ""))
+		entries, entries2, status := s.changes(g), s.changes(g2), s.alertGroup(g)["status"]
 		var resolve string
 		for _, el := range root2.actions() {
 			if el.ActionID == "resolve" {
@@ -1073,9 +1085,10 @@ func TestSlackPresses(t *testing.T) {
 				t.Errorf("slack_press %v", l)
 			}
 		}
-		if st := s.alertGroup(g2)["status"]; st != "firing" || s.alertGroup(g)["status"] != "acknowledged" ||
-			len(s.timeline(g2, "")) != entries2 || len(s.timeline(g, "")) != entries {
-			t.Errorf("a refused press changed %s: %v", g2, st)
+		if st := s.alertGroup(g2)["status"]; st != "firing" || s.alertGroup(g)["status"] != status ||
+			s.changes(g2) != entries2 || s.changes(g) != entries {
+			t.Errorf("a refused press changed %s: %v, %d entries of %d, %d of %d", g2, st, s.changes(g2), entries2,
+				s.changes(g), entries)
 		}
 	})
 
@@ -1162,7 +1175,7 @@ func TestSlackPresses(t *testing.T) {
 	t.Run("test_message", func(t *testing.T) {
 		s := s.on(t)
 		s.settled()
-		entries := len(s.timeline(g, ""))
+		entries := s.changes(g)
 		s.api.json(http.MethodPost, "/api/v1/destinations/"+s.dest+"/tests", `{"source":`+example+`}`, http.StatusOK)
 		var test slackMessage
 		eventually(t, "the test message", func() bool {
@@ -1181,7 +1194,7 @@ func TestSlackPresses(t *testing.T) {
 		if l := s.pressLine("", "test"); l["command"] != "acknowledge" || l["answer"] != "ephemeral" {
 			t.Errorf("slack_press %v", l)
 		}
-		if got := len(s.timeline(g, "")); got != entries {
+		if got := s.changes(g); got != entries {
 			t.Errorf("the press changed a timeline: %d entries, want %d", got, entries)
 		}
 	})
