@@ -2067,6 +2067,8 @@ const (
 	slackRateLimited
 	slackNotMember
 	slackLate
+	slackGone
+	slackMisplaced
 )
 
 // probeSlack pushes the secrets through a Slack Connection (C-24.AC-3): the bot token, the app-level token, the Slack
@@ -2082,8 +2084,9 @@ const (
 // the bot; behind the accepting proxy every one of their requests must cross it (C-24.AC-3). Creations of a bot token
 // and an app-level token without their prefixes, of http mode without the Slack signing secret and of socket mode
 // without the app-level token are refused; muster doctor checks the Connection and its Destination; it is deleted;
-// and a client is refused its proxy and its route. Neither the log nor any error, step message, check item, channel or
-// what the check found and the Connection shows may carry a secret.
+// and a client is refused its proxy and its route. Between them the Slack adapter of its Destination publishes, edits,
+// replies and checks against the same answers (probeSlackAdapter). Neither the log nor any error, step message, check
+// item, channel or what the check found and the Connection shows may carry a secret.
 func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
@@ -2240,6 +2243,7 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 			errs = append(errs, &probeIncomplete{what: "the channel check did not miss the bot"})
 		}
 	}
+	errs = append(errs, probeSlackAdapter(ctx, svc, clocks, &answer))
 	answer.Store(slackOK)
 	in.Proxy = proxied(accepting)
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
@@ -2322,6 +2326,57 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	return errors.Join(append(errs, err)...)
 }
 
+// probeSlackAdapter publishes, edits and replies through the Slack adapter to the Destination 3 of probeSlack's
+// Connection on the interactive path, as lint 3 allows, checks it there and in the delivery class as the Broken probe
+// does, and runs its test message and its preview, against each answer of the stand-in Slack that answer selects: the
+// echoes, refusals, a 500 and a 429 of probeSlack, an edit answered message_not_found whose read of the channel
+// echoes the secrets (the deleted Root message), and a reply answered without thread_ts whose chat.delete is refused
+// with the secrets (the misplaced reply). It returns the text of every outcome and step.
+func probeSlackAdapter(ctx context.Context, svc *connections.Service, clocks clock.Clocks, answer *atomic.Int32) error {
+	a := &slack.Adapter{Targets: svc, Version: "probe"}
+	conn := int64(1)
+	dest := delivery.Destination{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: delivery.TypeSlack, Connection: &conn}
+	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"}}
+	path := deliverytest.Unlimited(1, clocks)
+	var errs []error
+	failed := map[string]bool{}
+	for _, ans := range []int32{slackOK, slackEcho, slackInvalidAuth, slackError, slackHTML500, slackRateLimited,
+		slackGone, slackMisplaced} {
+		answer.Store(ans)
+		outs := map[string]delivery.Outcome{}
+		for name, op := range map[string]delivery.Op{"publish": delivery.PublishOp(a, m),
+			"update": delivery.UpdateOp(a, "1.000001", m), "reply": delivery.ReplyOp(a, delivery.Root{
+				MessageID: "1.000001"}, m), "check": delivery.CheckOp(a)} {
+			o, err := path.Do(ctx, delivery.Subject{Destination: &dest}, op)
+			errs = append(errs, err, errors.New(string(o.Error)+" "+o.MessageURL))
+			outs[name] = o
+			if o.Kind != delivery.OutcomeOK {
+				failed[name] = true
+			}
+		}
+		o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
+		errs = append(errs, errors.New(string(o.Error)))
+		errs = append(errs, probeTester(ctx, &slack.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
+			Real: clocks.Real}, dest))
+		switch {
+		case ans == slackOK && (outs["publish"].Kind != delivery.OutcomeOK || outs["update"].Kind != delivery.OutcomeOK ||
+			outs["reply"].Kind != delivery.OutcomeOK):
+			errs = append(errs, &probeIncomplete{what: "the Slack adapter did not deliver to the stand-in Slack"})
+		case ans == slackGone && outs["update"].Kind != delivery.OutcomeGone:
+			errs = append(errs, &probeIncomplete{what: "the Slack adapter did not find the deleted Root message"})
+		case ans == slackMisplaced && (outs["reply"].Kind != delivery.OutcomeGone ||
+			!strings.Contains(string(outs["reply"].Error), "could not be deleted")):
+			errs = append(errs, &probeIncomplete{what: "the Slack adapter did not try to delete the misplaced reply"})
+		}
+	}
+	if !failed["publish"] || !failed["update"] {
+		errs = append(errs, &probeIncomplete{what: "no Publication and no edit through the Slack adapter failed"})
+	}
+	answer.Store(slackOK)
+	return errors.Join(errs...)
+}
+
 // slackAnswer is the answer a of probeSlack's stand-in Slack to r, by its method and its token; echo, which carries the
 // secrets, goes where the answer names something.
 func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
@@ -2332,8 +2387,14 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 	}
 	w.Header().Set("X-OAuth-Scopes", scopes)
 	name := "probe"
-	if a == slackEcho || a == slackUser || a == slackNotMember {
+	if a == slackEcho || a == slackUser || a == slackNotMember || a == slackGone || a == slackMisplaced {
 		name = echo
+	}
+	var sent struct {
+		ThreadTS string `json:"thread_ts"`
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		_ = json.NewDecoder(r.Body).Decode(&sent)
 	}
 	cursor := ""
 	if a == slackEcho {
@@ -2379,6 +2440,19 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 		body = map[string]any{"ok": true, "channels": []map[string]any{{"id": "C0PROBE01", "name": name,
 			"is_member": true, "is_archived": false, "is_private": false}},
 			"response_metadata": map[string]any{"next_cursor": cursor}}
+	case method == "chat.update" && a == slackGone:
+		body = map[string]any{"ok": false, "error": "message_not_found", "warning": echo}
+	case method == "chat.delete" && a == slackMisplaced:
+		body = map[string]any{"ok": false, "error": "cant_delete_message " + echo, "warning": echo}
+	case method == "chat.postMessage", method == "chat.update":
+		message := map[string]any{"type": "message", "ts": "1.000002", "text": name, "user": "U0PROBE1"}
+		if sent.ThreadTS != "" && a != slackMisplaced {
+			message["thread_ts"] = sent.ThreadTS
+		}
+		body = map[string]any{"ok": true, "channel": "C0PROBE01", "ts": "1.000002", "message": message,
+			"warning": echo}
+	case method == "chat.delete":
+		body = map[string]any{"ok": true, "channel": "C0PROBE01", "ts": "1.000002"}
 	default:
 		body = map[string]any{"ok": false, "error": "unknown_method", "warning": echo}
 	}
@@ -2488,6 +2562,25 @@ func (s *probeConnections) ListTelegramDestinations(context.Context, int64) ([]c
 	return []cdb.ListTelegramDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
 		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, TelegramChannelID: pgtype.Text{String: "@probe",
 			Valid: true}}}, nil
+}
+
+// GetSlackDestinationTarget is the Destination 3 of the Connection, on the stand-in's channel C0PROBE01, with the
+// workspace address and the bot's name its last passing check stored.
+func (s *probeConnections) GetSlackDestinationTarget(context.Context, cdb.GetSlackDestinationTargetParams) (
+	cdb.GetSlackDestinationTargetRow, error) {
+	if s.row == nil {
+		return cdb.GetSlackDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	r := s.row
+	return cdb.GetSlackDestinationTargetRow{SlackChannelID: pgtype.Text{String: "C0PROBE01", Valid: true}, ID: r.ID,
+		PublicID: r.PublicID, Type: r.Type, Name: r.Name, BotTokenCiphertext: r.BotTokenCiphertext,
+		BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		SlackAppTokenCiphertext: r.SlackAppTokenCiphertext, SlackAppTokenKeyID: r.SlackAppTokenKeyID,
+		SlackAppTokenUpdatedAt: r.SlackAppTokenUpdatedAt, SlackSigningSecretCiphertext: r.SlackSigningSecretCiphertext,
+		SlackSigningSecretKeyID: r.SlackSigningSecretKeyID, SlackSigningSecretUpdatedAt: r.SlackSigningSecretUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version, SlackTeamUrl: r.SlackTeamUrl,
+		BotUsername: r.BotUsername}, nil
 }
 
 // GetBridgeDestinationTarget is the Destination 2 of the Connection, on the channel probe.

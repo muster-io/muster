@@ -997,6 +997,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 				Real: p.clocks.Real},
 			destinations.TypeBridge: &bridge.Tester{Adapter: p.bridge, Path: interactive, Renderer: p.renderer,
 				Real: p.clocks.Real},
+			destinations.TypeSlack: &slack.Tester{Adapter: p.slack, Path: interactive, Renderer: p.renderer,
+				Real: p.clocks.Real},
 			destinations.TypeWebhook: &webhooks.Tester{Adapter: p.requests, Path: interactive, Data: p.renderer,
 				DB: pool},
 		}})

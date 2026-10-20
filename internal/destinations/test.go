@@ -51,7 +51,8 @@ type Samples interface {
 }
 
 // Tester runs the test of one Destination type through the interactive path and renders its preview without sending
-// anything (C-16), declared by its consumer; *mattermost.Tester, *telegram.Tester and *webhooks.Tester implement it.
+// anything (C-16), declared by its consumer; *mattermost.Tester, *telegram.Tester, *bridge.Tester, *slack.Tester and
+// *webhooks.Tester implement it.
 // An error is a failure of Muster itself, never of the Destination, whose failures are the steps' classes.
 type Tester interface {
 	Test(ctx context.Context, in delivery.TestInput) ([]delivery.TestStep, error)
