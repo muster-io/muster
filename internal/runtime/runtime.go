@@ -687,6 +687,10 @@ func (p *process) serve(ctx context.Context) error {
 	p.keeper = p.newKeeper()
 	leader.Register(p.keeper)
 	health := server.NewHealth(p.db.Ping)
+	// The Slack presses that the callback answered 200 outlive their requests in a context of their own, which the
+	// start of a shutdown does not end, and the end of its grace period does (drainSlackPresses).
+	presses, endPresses := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer endPresses(nil)
 	// Requests keep their context through the shutdown, so that the drain lets them finish.
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
@@ -697,7 +701,7 @@ func (p *process) serve(ctx context.Context) error {
 			TrustedProxies: p.cfg.TrustedProxies,
 		}), heartbeat.NewHandler(heartbeat.HandlerConfig{
 			Auth: p.integrations, Signals: p.signals, Log: p.log, TrustedProxies: p.cfg.TrustedProxies,
-		}), p.callbacks(ctx)),
+		}), p.callbacks(presses)),
 		Internal: p.internalHandler(health),
 	})
 	if err != nil {
@@ -750,7 +754,13 @@ func (p *process) serve(ctx context.Context) error {
 	p.stopReplica(ctx)
 	health.ShuttingDown()
 	// Workers that later stories register stop claiming here and finish or release their rows within the grace.
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	drained := srv.Shutdown(shutdownCtx) == nil
+	// No callback hands over a press any more: the Slack presses still being handled finish within the grace, before
+	// the pool closes.
+	if !drainSlackPresses(shutdownCtx, p.slackPresses, endPresses) {
+		drained = false
+	}
+	if !drained {
 		p.log.Log(ctx, logging.ShutdownGraceExceeded, logging.F("grace_seconds", grace.Seconds()))
 	}
 	if stopped != nil {
@@ -799,9 +809,10 @@ func Callbacks(rec requestlog.InboundRecorder, realClock clock.Clock, mm matterm
 	return mux
 }
 
-// callbacks is Callbacks with the services of the process. A Slack press confirmed by its callback is handled in ctx
-// without its end, the context the listeners give their requests, so that the start of a shutdown does not cut it.
-func (p *process) callbacks(ctx context.Context) http.Handler {
+// callbacks is Callbacks with the services of the process. A Slack press confirmed by its callback is handled in
+// presses, a context of the process that the start of a shutdown does not end, so that the shutdown drains the press
+// within its grace period and ends presses only when that is over (drainSlackPresses).
+func (p *process) callbacks(presses context.Context) http.Handler {
 	return Callbacks(p.requestLog, p.clocks.Real, mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: p.links,
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
@@ -810,7 +821,29 @@ func (p *process) callbacks(ctx context.Context) http.Handler {
 			Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log},
 		bridge.PushConfig{Connections: p.connections, Events: p.bridgeEvents, Real: p.clocks.Real, Log: p.log},
 		slack.CallbackConfig{Connections: p.connections, Presses: p.slackPresses, Real: p.clocks.Real,
-			Base: context.WithoutCancel(ctx), Log: p.log})
+			Base: presses, Log: p.log})
+}
+
+// pressesEnd bounds the wait for the Slack presses whose context the end of the grace period ended: a cancelled wait
+// for a slot, query or call returns at once, so that this only lets them log that they failed before the pool closes.
+const pressesEnd = time.Second
+
+// errGraceEnded is why the Slack presses still being handled at the end of the shutdown's grace period fail.
+var errGraceEnded = errors.New("the grace period of the shutdown ended")
+
+// drainSlackPresses waits until the Slack presses handed to presses have ended, within the grace period of shutdown,
+// and reports whether they did. When the grace period ends first, end ends their context with errGraceEnded, so that
+// each press still waiting for a slot or running ends as failed, unanswered, and they are waited for pressesEnd more at
+// most.
+func drainSlackPresses(shutdown context.Context, presses *slack.Presses, end context.CancelCauseFunc) bool {
+	if presses.Wait(shutdown) == nil {
+		return true
+	}
+	end(errGraceEnded)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(shutdown), pressesEnd)
+	defer cancel()
+	_ = presses.Wait(ctx)
+	return false
 }
 
 // internalHandler serves health and metrics, and in development mode the development clock.

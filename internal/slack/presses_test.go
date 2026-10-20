@@ -202,7 +202,8 @@ type ran struct {
 }
 
 // pressCommands is the dispatcher as presses see it: a caller without the Command's Permission is forbidden, err
-// replaces every other answer, unchanged makes a Command that ran change nothing, and hook runs inside each Command.
+// replaces every other answer, unchanged makes a Command that ran change nothing, and hook runs inside each Command;
+// a Command whose context ended by the end of hook fails with its error, as the database does.
 type pressCommands struct {
 	mu        sync.Mutex
 	calls     []ran
@@ -218,6 +219,9 @@ func (f *pressCommands) run(ctx context.Context, r ran) (groups.Result, error) {
 	f.mu.Unlock()
 	if hook != nil {
 		hook(ctx)
+	}
+	if ctx.Err() != nil {
+		return groups.Result{}, fmt.Errorf("run %s: %w", r.command, ctx.Err())
 	}
 	if p := groups.Command(r.command).Permission(); !slices.Contains(r.caller.Permissions, p) {
 		return groups.Result{}, &groups.ForbiddenError{Permission: p}
@@ -768,15 +772,13 @@ func TestTestMessagePress(t *testing.T) {
 func TestOtherInteraction(t *testing.T) {
 	e := newPressEnv(t)
 	cb := newCBEnv(t)
-	done := make(chan struct{})
-	cb.cfg.Presses = handlerFunc(func(ctx context.Context, c Conn, payload []byte) {
-		defer close(done)
-		e.presses.Handle(ctx, c, payload)
-	})
+	cb.cfg.Presses = e.presses
 	cb.mount()
 	w := cb.signedPost(t, 0, pressForm(string(e.payload(t, pressIn{typ: "view_submission", user: "U0BOB",
 		channel: pressChannel, ts: pressRootTS, value: e.act(t, buttons.CommandAcknowledge, 0)}))))
-	<-done
+	if err := e.presses.Wait(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	lines := e.log.lines(t, "slack_press")
 	if w.Code != http.StatusOK || len(lines) != 1 || field(lines[0], "outcome") != outcomeIgnored ||
 		field(lines[0], "connection") != cbHTTP || lines[0]["answer"] != nil {
@@ -786,10 +788,6 @@ func TestOtherInteraction(t *testing.T) {
 		t.Error("an interaction that is no press was handled")
 	}
 }
-
-type handlerFunc func(ctx context.Context, c Conn, payload []byte)
-
-func (f handlerFunc) Handle(ctx context.Context, c Conn, payload []byte) { f(ctx, c, payload) }
 
 // TestParallelPresses is C-24.FR-10 and slack.parallel_presses: a replica handles at most Parallel presses at a time;
 // the others wait for a slot, already confirmed, and run once one is free. A press whose context ends while it waits
@@ -856,5 +854,151 @@ func TestParallelPresses(t *testing.T) {
 	if len(lines) != before+1 || field(lines[before], "outcome") != outcomeFailed ||
 		field(lines[before], "error") != context.Canceled.Error() {
 		t.Errorf("a press whose context ended while it waited: %v", lines[before:])
+	}
+}
+
+// TestPressDeadline is C-24.FR-10 with PressDeadline: a press whose Command is stuck fails when its deadline ends and is
+// still answered, within the Budget of its own, not what is left of the deadline; a press that waits for a slot until
+// its deadline fails with that reason and is not answered.
+func TestPressDeadline(t *testing.T) {
+	e := newPressEnv(t)
+	e.presses.deadline = time.Millisecond
+	e.commands.hook = func(ctx context.Context) { <-ctx.Done() }
+	start := time.Now()
+	line := e.press(t, pressIn{value: e.act(t, buttons.CommandAcknowledge, 0)})
+	if field(line, "outcome") != outcomeFailed || field(line, "answer") != answeredEphemeral ||
+		!strings.Contains(field(line, "error"), context.DeadlineExceeded.Error()) || field(line, "group") != pressGroup {
+		t.Errorf("a stuck Command: %v", line)
+	}
+	if got := e.ephemerals(t); len(got) != 1 ||
+		got[0]["text"] != "Muster could not run this command; nothing was changed." {
+		t.Errorf("answers %v", got)
+	}
+	e.path.mu.Lock()
+	deadlines := slices.Clone(e.path.deadlines)
+	e.path.mu.Unlock()
+	if len(deadlines) != 1 || deadlines[0].Before(start.Add(e.presses.Budget/2)) {
+		t.Errorf("the answer's deadlines %v, want its Budget from %v", deadlines, start)
+	}
+	e.commands.hook = nil
+
+	full := &Presses{Parallel: 1, deadline: time.Nanosecond, Log: e.presses.Log}
+	hold, err := full.slot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
+	before := len(e.log.lines(t, "slack_press"))
+	full.Handle(t.Context(), e.conn, e.payload(t, pressIn{user: "U0BOB", channel: pressChannel, ts: pressRootTS,
+		value: e.act(t, buttons.CommandAcknowledge, 0)}))
+	lines := e.log.lines(t, "slack_press")
+	if len(lines) != before+1 || field(lines[before], "outcome") != outcomeFailed ||
+		field(lines[before], "error") != errDeadline.Error() || lines[before]["answer"] != nil {
+		t.Errorf("a press that waited until its deadline: %v", lines[before:])
+	}
+	if n := len(e.ephemerals(t)); n != 1 {
+		t.Errorf("%d answers", n)
+	}
+}
+
+// TestWaitingPressesBounded is C-24.FR-10 with MaxWaitingPresses: while the most presses wait for a slot, one more is
+// dropped at once, logged as failed with its reason and not answered, nothing run; the waiting ones still run once a
+// slot is free.
+func TestWaitingPressesBounded(t *testing.T) {
+	e := newPressEnv(t)
+	e.presses.Parallel, e.presses.maxWaiting = 1, 1
+	hold, err := e.presses.slot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parked := make(chan struct{}, 1)
+	e.presses.parked = func() { parked <- struct{}{} }
+	ack := e.act(t, buttons.CommandAcknowledge, 0)
+	waited := make(chan struct{})
+	go func() {
+		defer close(waited)
+		e.presses.Handle(t.Context(), e.conn, e.payload(t, pressIn{user: "U0BOB", channel: pressChannel,
+			ts: pressRootTS, value: ack}))
+	}()
+	<-parked
+	line := e.press(t, pressIn{value: ack})
+	if field(line, "outcome") != outcomeFailed || field(line, "error") != errBusy.Error() || line["answer"] != nil ||
+		field(line, "group") != "" {
+		t.Errorf("a press beyond the waiting ones: %v", line)
+	}
+	if n := len(e.commands.ran()); n != 0 || len(e.slack.seen()) != 0 {
+		t.Errorf("%d Commands ran, %d answers", n, len(e.slack.seen()))
+	}
+	hold()
+	<-waited
+	lines := e.log.lines(t, "slack_press")
+	if n := len(e.commands.ran()); n != 1 || field(lines[len(lines)-1], "outcome") != "done" {
+		t.Errorf("%d Commands ran, lines %v", n, lines)
+	}
+	if line := e.press(t, pressIn{value: ack}); field(line, "outcome") != "done" {
+		t.Errorf("once nothing waits: %v", line)
+	}
+}
+
+// TestGoAndWait is the drain of C-02.FR-16 for Slack presses: Go handles a press in the background in the context it
+// is given; Wait returns at once with nothing in flight, waits for the presses in flight to end, and gives up when its
+// context ends first, with the cause; a press whose context then ends fails without an answer.
+func TestGoAndWait(t *testing.T) {
+	e := newPressEnv(t)
+	if err := e.presses.Wait(t.Context()); err != nil {
+		t.Fatalf("nothing in flight: %v", err)
+	}
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	e.commands.hook = func(ctx context.Context) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	ack := e.act(t, buttons.CommandAcknowledge, 0)
+	payload := e.payload(t, pressIn{user: "U0BOB", channel: pressChannel, ts: pressRootTS, value: ack})
+	base, end := context.WithCancelCause(t.Context())
+	e.presses.Go(base, e.conn, payload)
+	<-entered
+	waited := make(chan error, 1)
+	go func() { waited <- e.presses.Wait(t.Context()) }()
+	select {
+	case err := <-waited:
+		t.Fatalf("Wait returned %v while a press was in flight", err)
+	default:
+	}
+	close(release)
+	if err := <-waited; err != nil {
+		t.Fatalf("Wait = %v", err)
+	}
+	if lines := e.log.lines(t, "slack_press"); len(lines) != 1 || field(lines[0], "outcome") != "done" {
+		t.Fatalf("lines %v", lines)
+	}
+
+	e.commands.hook = func(ctx context.Context) {
+		entered <- struct{}{}
+		<-ctx.Done()
+	}
+	e.presses.Go(base, e.conn, payload)
+	<-entered
+	graceOver := errors.New("the grace period ended")
+	grace, over := context.WithCancelCause(t.Context())
+	over(graceOver)
+	if err := e.presses.Wait(grace); !errors.Is(err, graceOver) {
+		t.Fatalf("Wait at the end of the grace period = %v", err)
+	}
+	end(graceOver)
+	if err := e.presses.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait after the end = %v", err)
+	}
+	lines := e.log.lines(t, "slack_press")
+	if len(lines) != 2 || field(lines[1], "outcome") != outcomeFailed || lines[1]["answer"] != nil ||
+		!strings.Contains(field(lines[1], "error"), context.Canceled.Error()) {
+		t.Errorf("a press whose context ended: %v", lines)
+	}
+	if n := len(e.slack.seen()); n != 0 {
+		t.Errorf("%d answers", n)
 	}
 }

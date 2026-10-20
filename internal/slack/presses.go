@@ -28,6 +28,18 @@ import (
 // Connections and both event modes; the others wait for a slot, already confirmed.
 const ParallelPresses = 2
 
+// PressDeadline bounds each press from the moment it is handed over to the end of its Command, its wait for a slot
+// included, so that a Command stuck on the database frees its slot and the presses waiting behind it end: the 30 s that
+// Mattermost waits for the answer to a press (F-032), which bounds a Mattermost press the same way. The answer to the
+// person keeps its own Budget, so that a press that ran out of time is still told that it failed.
+const PressDeadline = 30 * time.Second
+
+// MaxWaitingPresses bounds the presses one process keeps waiting for a slot; one more is dropped, unanswered, and
+// logged as failed. A slot frees in the time of one Command, so 64 waiting presses are seconds of work for the
+// ParallelPresses slots and more than the people of a team press at once, while the payloads they hold stay under
+// 64 MiB, MaxRequestBytes each, however often a captured signed request is replayed within slack.request_tolerance.
+const MaxWaitingPresses = 64
+
 // typeBlockActions is the type of the interaction of a press (F-093).
 const typeBlockActions = "block_actions"
 
@@ -78,6 +90,13 @@ var (
 	errPanicked   = errors.New("the press failed unexpectedly")
 )
 
+// The errors of a press that ran out of room or time: one more than MaxWaitingPresses waiting for a slot, and one not
+// handled within PressDeadline.
+var (
+	errBusy     = errors.New("too many presses waiting")
+	errDeadline = errors.New("the press was not handled within its deadline")
+)
+
 // snoozePresets are the Snooze presets by the argument of their buttons (C-10.FR-18).
 var snoozePresets = map[int]groups.SnoozePreset{
 	buttons.ArgumentTomorrow:  groups.PresetTomorrow,
@@ -85,10 +104,11 @@ var snoozePresets = map[int]groups.SnoozePreset{
 }
 
 // Presses is the one handler of Slack presses for both event modes (C-24.FR-10): the callback of http mode hands it
-// every press it confirmed, and Socket Mode every interactive envelope. It handles at most Parallel presses at a time;
-// the others wait for a slot, already confirmed. Each press is verified, bound to its message, run as the linked User
+// every press it confirmed through Go, and Socket Mode every interactive envelope. It handles at most Parallel presses
+// at a time; the others wait for a slot, already confirmed, MaxWaitingPresses at most, and each press has
+// PressDeadline for its wait and its Command. Each press is verified, bound to its message, run as the linked User
 // through the dispatcher and, when there is something to say, answered privately (answers.go); it is logged as
-// slack_press.
+// slack_press. Wait lets the shutdown drain the presses handed to Go.
 type Presses struct {
 	// Bindings find the message a press names among the Connection's deliveries.
 	Bindings Bindings
@@ -117,6 +137,15 @@ type Presses struct {
 	slots     chan struct{}
 	// parked, when set, is called when a press finds no free slot and starts to wait for one; tests set it.
 	parked func()
+	// maxWaiting and deadline replace MaxWaitingPresses and PressDeadline when set; tests set them.
+	maxWaiting int
+	deadline   time.Duration
+
+	mu sync.Mutex
+	// waiting counts the presses waiting for a slot, and running those handed to Go that have not ended.
+	waiting, running int
+	// idle is closed, for Wait, when running drops to zero.
+	idle chan struct{}
 }
 
 // interaction is the part of an interaction payload that Muster reads (F-093).
@@ -161,7 +190,7 @@ type pressed struct {
 }
 
 // slot waits until fewer than Parallel presses are being handled, or ctx ends, and returns the release of the slot it
-// took.
+// took. When MaxWaitingPresses presses already wait, it does not wait and returns errBusy.
 func (p *Presses) slot(ctx context.Context) (func(), error) {
 	p.slotsOnce.Do(func() {
 		n := p.Parallel
@@ -176,6 +205,10 @@ func (p *Presses) slot(ctx context.Context) (func(), error) {
 		return release, nil
 	default:
 	}
+	if !p.park() {
+		return nil, errBusy
+	}
+	defer p.unpark()
 	if p.parked != nil {
 		p.parked()
 	}
@@ -183,15 +216,76 @@ func (p *Presses) slot(ctx context.Context) (func(), error) {
 	case p.slots <- struct{}{}:
 		return release, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
+	}
+}
+
+// park counts a press that starts to wait for a slot, unless MaxWaitingPresses already wait.
+func (p *Presses) park() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waiting >= cmp.Or(p.maxWaiting, MaxWaitingPresses) {
+		return false
+	}
+	p.waiting++
+	return true
+}
+
+func (p *Presses) unpark() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.waiting--
+}
+
+// Go handles the interaction payload of the Connection c, which Slack already had confirmed, in the background, in
+// ctx: a context of the process, never a request's, whose end ends the press as failed. Wait waits for it.
+func (p *Presses) Go(ctx context.Context, c Conn, payload []byte) {
+	p.mu.Lock()
+	p.running++
+	p.mu.Unlock()
+	go func() {
+		defer p.ended()
+		p.Handle(ctx, c, payload)
+	}()
+}
+
+func (p *Presses) ended() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running--
+	if p.running == 0 && p.idle != nil {
+		close(p.idle)
+		p.idle = nil
+	}
+}
+
+// Wait waits until every press handed to Go has ended, or until ctx ends, and then returns the cause of its end: the
+// shutdown drains the presses that were answered 200 within its grace period (C-02.FR-16).
+func (p *Presses) Wait(ctx context.Context) error {
+	p.mu.Lock()
+	if p.running == 0 {
+		p.mu.Unlock()
+		return nil
+	}
+	if p.idle == nil {
+		p.idle = make(chan struct{})
+	}
+	idle := p.idle
+	p.mu.Unlock()
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
 	}
 }
 
 // Handle handles the interaction payload of the Connection c, which Slack already had confirmed (C-24.FR-10): another
-// kind of interaction than block_actions is ignored at once; a press waits for a slot, is verified, bound and run, and
-// once its slot is free again the person who pressed is answered, when there is something to say (C-24.FR-11). The
-// answer is made once: a failure of both its ways is logged, never retried. A panic is a failed press, logged without
-// its value.
+// kind of interaction than block_actions is ignored at once; a press waits for a slot, is verified, bound and run
+// within PressDeadline, and once its slot is free again the person who pressed is answered, when there is something to
+// say (C-24.FR-11), unless ctx has ended, so that nothing can reach Slack any more. A press that finds
+// MaxWaitingPresses presses waiting is dropped and not answered. The answer is made once: a failure of both its ways is
+// logged, never retried. A panic is a failed press, logged without its value.
 func (p *Presses) Handle(ctx context.Context, c Conn, payload []byte) {
 	defer func() {
 		if recover() != nil {
@@ -206,7 +300,7 @@ func (p *Presses) Handle(ctx context.Context, c Conn, payload []byte) {
 	}
 	r := p.slotted(ctx, c, in, err)
 	how := ""
-	if r.answer.text != "" {
+	if r.answer.text != "" && ctx.Err() == nil {
 		var answerErr error
 		how, answerErr = p.answer(ctx, c, r.answer)
 		r.err = errors.Join(r.err, answerErr)
@@ -214,8 +308,11 @@ func (p *Presses) Handle(ctx context.Context, c Conn, payload []byte) {
 	p.log(ctx, c, r, how)
 }
 
-// slotted handles the press in of the Connection c, whose payload decoded with err, holding a slot.
+// slotted handles the press in of the Connection c, whose payload decoded with err, holding a slot, within
+// PressDeadline from now.
 func (p *Presses) slotted(ctx context.Context, c Conn, in interaction, err error) pressed {
+	ctx, cancel := context.WithTimeoutCause(ctx, cmp.Or(p.deadline, PressDeadline), errDeadline)
+	defer cancel()
 	release, slotErr := p.slot(ctx)
 	if slotErr != nil {
 		return pressed{outcome: outcomeFailed, err: slotErr}

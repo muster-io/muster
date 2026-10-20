@@ -5151,7 +5151,7 @@ func (p probeInbound) SlackPressConnection(context.Context, string) (slack.Conn,
 	return slack.Conn{ID: 4, PublicID: "CNAAAAAAAAAAA4", Mode: slack.EventModeHTTP}, p.slackSecret, nil
 }
 
-func (probeInbound) Handle(context.Context, slack.Conn, []byte) {}
+func (probeInbound) Go(context.Context, slack.Conn, []byte) {}
 
 func (probeInbound) Connection(context.Context, string) (mattermost.Connection, error) {
 	return mattermost.Connection{ID: 2, PublicID: "CNAAAAAAAAAAA2"}, nil
@@ -5277,11 +5277,10 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 	presses := &slack.Presses{Bindings: probeSlackBindings{}, Links: probeLinks{}, Commands: probeCommands{}, Keys: k,
 		Path: deliverytest.Unlimited(1, clocks), Budget: 2 * time.Second, Business: clocks.Business,
 		PublicURL: "http://localhost:8080", Log: logger}
-	handled := make(chan struct{}, 4)
 	mux := http.NewServeMux()
 	mux.Handle(slack.CallbackPattern, requestlog.Inbound(writer, clocks.Real, requestlog.OperationInteractive,
 		slack.NewCallback(slack.CallbackConfig{Connections: probeSlackConn{conn: conn, secret: logging.Secret(signing)},
-			Presses: probeSlackHandler{presses: presses, handled: handled}, Real: clocks.Real, Base: ctx, Log: logger})))
+			Presses: presses, Real: clocks.Real, Base: ctx, Log: logger})))
 	verification := probeWord()
 	payload := func(user, responseURL string) []byte {
 		b, _ := json.Marshal(map[string]any{"type": "block_actions", "token": verification, "api_app_id": "A0PROBE",
@@ -5317,13 +5316,11 @@ func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) err
 	post("u-other", 10*time.Minute, false, http.StatusUnauthorized)
 	post("u-other", 0, false, http.StatusOK)
 	post("u-linked", 0, false, http.StatusOK)
-	for range 2 {
-		select {
-		case <-handled:
-		case <-time.After(10 * time.Second):
-			errs = append(errs, &probeIncomplete{"a confirmed Slack press was not handled"})
-		}
+	handled, stop := context.WithTimeout(ctx, 10*time.Second)
+	if presses.Wait(handled) != nil {
+		errs = append(errs, &probeIncomplete{"a confirmed Slack press was not handled"})
 	}
+	stop()
 	presses.Handle(ctx, conn, payload("u-other", "https://evil.example.org/actions/T0PROBE/1/"+hooksToken))
 	linesMu.Lock()
 	logged := lines.String()
@@ -5384,17 +5381,6 @@ func (p probeSlackConn) SlackPressConnection(_ context.Context, publicID string)
 		return slack.Conn{}, "", slack.ErrNoConnection
 	}
 	return p.conn, p.secret, nil
-}
-
-// probeSlackHandler handles each confirmed press with presses and then tells handled.
-type probeSlackHandler struct {
-	presses *slack.Presses
-	handled chan<- struct{}
-}
-
-func (h probeSlackHandler) Handle(ctx context.Context, c slack.Conn, payload []byte) {
-	h.presses.Handle(ctx, c, payload)
-	h.handled <- struct{}{}
 }
 
 // probeSlackBindings bind every press to the Root message of the Alert Group AGAAAAAAAAAAA1 on the Slack Destination 3.

@@ -76,9 +76,10 @@ type Connections interface {
 	SlackPressConnection(ctx context.Context, publicID string) (Conn, logging.Secret, error)
 }
 
-// Handler handles the payload of a press the callback confirmed; *Presses implements it.
+// Handler takes the payload of each press the callback confirmed and handles it in the background, in ctx; *Presses
+// implements it.
 type Handler interface {
-	Handle(ctx context.Context, c Conn, payload []byte)
+	Go(ctx context.Context, c Conn, payload []byte)
 }
 
 // CallbackConfig is what the callback of presses in http mode needs.
@@ -91,7 +92,8 @@ type CallbackConfig struct {
 	// Tolerance is slack.request_tolerance; zero is RequestTolerance.
 	Tolerance time.Duration
 	// Base is the context of the process that a press is handled in once it is answered: never the request's, which
-	// ends with its answer; nil takes the request's without its end.
+	// ends with its answer, and not one that the start of a shutdown ends, since the shutdown drains the presses and
+	// ends Base with its grace period; nil takes the request's without its end.
 	Base context.Context //nolint:containedctx // the process context the presses outlive their requests in
 	Log  *logging.Logger
 }
@@ -169,7 +171,7 @@ func (h *callback) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if base == nil {
 		base = context.WithoutCancel(ctx)
 	}
-	go h.cfg.Presses.Handle(base, conn, payload)
+	h.cfg.Presses.Go(base, conn, payload)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 }

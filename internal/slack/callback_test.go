@@ -75,7 +75,8 @@ type handedPress struct {
 	payload []byte
 }
 
-// cbHandler records the presses handed to it; each blocks until release is closed, when set.
+// cbHandler records the presses handed to it, each in the background as Presses handles it; each blocks until release
+// is closed, when set.
 type cbHandler struct {
 	mu      sync.Mutex
 	got     []handedPress
@@ -83,17 +84,19 @@ type cbHandler struct {
 	entered chan struct{}
 }
 
-func (h *cbHandler) Handle(ctx context.Context, c Conn, payload []byte) {
+func (h *cbHandler) Go(ctx context.Context, c Conn, payload []byte) {
 	h.mu.Lock()
 	h.got = append(h.got, handedPress{ctx: ctx, conn: c, payload: payload})
 	release, entered := h.release, h.entered
 	h.mu.Unlock()
-	if entered != nil {
-		entered <- struct{}{}
-	}
-	if release != nil {
-		<-release
-	}
+	go func() {
+		if entered != nil {
+			entered <- struct{}{}
+		}
+		if release != nil {
+			<-release
+		}
+	}()
 }
 
 func (h *cbHandler) handed() []handedPress {
