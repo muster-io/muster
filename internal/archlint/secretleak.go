@@ -55,6 +55,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
@@ -125,6 +126,7 @@ var registry = []Probe{
 	{Name: "bridge_links", Run: probeBridgeLinks},
 	{Name: "bridge_check", Run: probeBridgeCheck},
 	{Name: "slack_connections", Run: probeSlack},
+	{Name: "slack_presses", Run: probeSlackPresses},
 	{Name: "connection_drafts", Run: probeConnectionDrafts},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 	{Name: "key_rotation", Run: probeKeyRotation},
@@ -4990,13 +4992,15 @@ func probeRLLeaks(rows []probeRLRow, values []probeRLValue) error {
 // callbacks run behind runtime.Callbacks, as the runtime wraps them, with stand-in Connections and a requestlog.Writer
 // whose INSERTs the in-memory probeRLRows keeps — the lint has no database. The first secret is the Authorization of
 // a Mattermost press and of a Bridge push and the bot token of the Bridge Connection, the second the webhook secret
-// token of the Telegram Connection, and the third the push secret of the Bridge Connection. Through them: a Mattermost
-// press of a signed action id; Telegram updates with the secret token, a `/start <token>` and a press of the signed
-// action id, and the `/start` again with a wrong secret token, which is refused before its body is read; an
-// account_link event signed with the push secret under another webhook-id, refused after the signature check, and the
-// same event with a forged signature; each with an Authorization or a Cookie header. The signed action id, the tokens,
-// the wrong secret token, the header values and the signatures are not planted secrets, so the probe looks for them in
-// the stored values itself; it is incomplete when a callback answered otherwise or left no record.
+// token of the Telegram Connection, and the third the push secret of the Bridge Connection and the Slack signing secret
+// of the Slack Connection. Through them: a Mattermost press of a signed action id; Telegram updates with the secret
+// token, a `/start <token>` and a press of the signed action id, and the `/start` again with a wrong secret token,
+// which is refused before its body is read; an account_link event signed with the push secret under another
+// webhook-id, refused after the signature check, and the same event with a forged signature; a Slack press of the
+// signed action id with its response_url and verification token in the form, signed with the Slack signing secret, and
+// again with a forged signature; each with an Authorization or a Cookie header. The signed action id, the tokens, the
+// response_url, the wrong secret token, the header values and the signatures are not planted secrets, so the probe
+// looks for them in the stored values itself; it is incomplete when a callback answered otherwise or left no record.
 func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
@@ -5029,14 +5033,14 @@ func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer
 	if err != nil {
 		return err
 	}
-	stand := probeInbound{secret: logging.Secret(secrets[1]), bridge: brc}
+	stand := probeInbound{secret: logging.Secret(secrets[1]), bridge: brc, slackSecret: logging.Secret(secrets[2])}
 	rows := &probeRLRows{}
 	w := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
 	h := runtime.Callbacks(w, clocks.Real, mattermost.CallbackConfig{Connections: stand, Bindings: stand,
 		Links: probeLinks{}, Commands: probeCommands{}, Keys: k, Business: clocks.Business, Log: logger},
 		telegram.WebhookConfig{Connections: stand, Router: &telegram.Router{Offsets: stand, Log: logger}, Log: logger},
 		bridge.PushConfig{Connections: stand, Real: clocks.Real, Log: logger},
-		slack.CallbackConfig{Real: clocks.Real, Log: logger})
+		slack.CallbackConfig{Connections: stand, Presses: stand, Real: clocks.Real, Base: ctx, Log: logger})
 	var errs []error
 	post := func(path, body string, want int, header ...string) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
@@ -5085,10 +5089,29 @@ func probeRequestLogInbound(ctx context.Context, secrets []string, log io.Writer
 	post(pushPath, event, http.StatusUnauthorized, webhooks.HeaderID, "e1", webhooks.HeaderTimestamp, ts,
 		webhooks.HeaderSignature, sigB, "Cookie", "session="+cookie)
 
+	hooks, verification := probeWord(), probeWord()
+	payload, err := json.Marshal(map[string]any{"type": "block_actions", "token": verification, "api_app_id": "A0PROBE",
+		"user": map[string]any{"id": "U0PROBE"}, "container": map[string]any{"type": "message_attachment",
+			"message_ts": "1.000001", "channel_id": "C0PROBE"}, "response_url": "https://hooks.slack.com/actions/T0PROBE/1/" +
+			hooks, "actions": []any{map[string]any{"action_id": "ack", "type": "button", "value": signed}}})
+	if err != nil {
+		return err
+	}
+	slackBody := "payload=" + url.QueryEscape(string(payload))
+	slackSig := fakeslack.Sign(secrets[2], ts, []byte(slackBody))
+	forgedSig := "v0=" + hex.EncodeToString(forged)
+	slackPath := slack.CallbackPath + "CNAAAAAAAAAAA4"
+	post(slackPath, slackBody, http.StatusOK, slack.HeaderTimestamp, ts, slack.HeaderSignature, slackSig,
+		"Authorization", "Bearer "+secrets[0])
+	post(slackPath, slackBody, http.StatusUnauthorized, slack.HeaderTimestamp, ts, slack.HeaderSignature, forgedSig,
+		"Cookie", "session="+cookie)
+
 	return rows.inboundVerdict(errs, []probeRLValue{{"a signed action id", signed}, {"the token of a /start", start},
 		{"the token of an account_link event", link}, {"a wrong secret token", wrong}, {"the value of Authorization", auth},
 		{"the value of Cookie", cookie}, {"the value of webhook-signature", sigA},
-		{"the value of webhook-signature", sigB}})
+		{"the value of webhook-signature", sigB}, {"the response_url of a Slack press", hooks},
+		{"the verification token of a Slack press", verification}, {"the value of X-Slack-Signature", slackSig},
+		{"the value of X-Slack-Signature", forgedSig}})
 }
 
 // inboundVerdict is the error of probeRequestLogInbound: errs, the answers that were not as they should be; a
@@ -5104,11 +5127,11 @@ func (p *probeRLRows) inboundVerdict(errs []error, values []probeRLValue) error 
 		ops[r.operation]++
 		stored = append(stored, r.values...)
 	}
-	press, update, push := ops[requestlog.OperationPress], ops[requestlog.OperationUpdate],
-		ops[requestlog.OperationPush]
-	if press != 1 || update != 3 || push != 2 || len(rows) != 6 {
-		errs = append(errs, &probeIncomplete{fmt.Sprintf("records of %d presses, %d updates and %d pushes among %d, "+
-			"want 1, 3 and 2", press, update, push, len(rows))})
+	press, update, push, interactive := ops[requestlog.OperationPress], ops[requestlog.OperationUpdate],
+		ops[requestlog.OperationPush], ops[requestlog.OperationInteractive]
+	if press != 1 || update != 3 || push != 2 || interactive != 2 || len(rows) != 8 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("records of %d presses, %d updates, %d pushes and %d "+
+			"interactions among %d, want 1, 3, 2 and 2", press, update, push, interactive, len(rows))})
 	}
 	return errors.Join(append(errs, probeRLLeaks(rows, values),
 		fmt.Errorf("request_log rows: %s", strings.Join(stored, "\n")))...)
@@ -5116,11 +5139,19 @@ func (p *probeRLRows) inboundVerdict(errs []error, values []probeRLValue) error 
 
 // probeInbound stands for the Connections of probeRequestLogInbound: the Mattermost CNAAAAAAAAAAA2, whose presses are
 // bound to no post; the Telegram CNAAAAAAAAAAA1 in the webhook mode with the secret token secret, whose updates find
-// no handler; and the Bridge CNAAAAAAAAAAA3 in push mode with the client bridge, whose events are never handled.
+// no handler; the Bridge CNAAAAAAAAAAA3 in push mode with the client bridge, whose events are never handled; and the
+// Slack CNAAAAAAAAAAA4 in http mode with the Slack signing secret slackSecret, whose presses are never handled.
 type probeInbound struct {
-	secret logging.Secret
-	bridge *bridge.Client
+	secret      logging.Secret
+	bridge      *bridge.Client
+	slackSecret logging.Secret
 }
+
+func (p probeInbound) SlackPressConnection(context.Context, string) (slack.Conn, logging.Secret, error) {
+	return slack.Conn{ID: 4, PublicID: "CNAAAAAAAAAAA4", Mode: slack.EventModeHTTP}, p.slackSecret, nil
+}
+
+func (probeInbound) Handle(context.Context, slack.Conn, []byte) {}
 
 func (probeInbound) Connection(context.Context, string) (mattermost.Connection, error) {
 	return mattermost.Connection{ID: 2, PublicID: "CNAAAAAAAAAAA2"}, nil
@@ -5160,4 +5191,222 @@ func (probeInbound) StoreEventsCursor(context.Context, bridge.Conn, *string) err
 
 func (probeInbound) HandleEventOnce(context.Context, int64, string, func(context.Context) error) (bool, error) {
 	return false, nil
+}
+
+// probeSlackPresses is the probe of Slack presses in http mode (C-24.FR-9 to FR-11, FR-14): the presses of the Slack
+// Connection CNAAAAAAAAAAA5 reach slackInteraction behind the Request log's inbound recorder, whose records, and those
+// of the answers, a requestlog.Writer keeps in the in-memory probeRLRows. The bot token is the first secret, the last
+// segment of the press's response_url the second, and the Slack signing secret the third. A press with a signature
+// that has not even its shape and a stale one are refused; one from an account without an Account link and one from a linked account
+// whose Command is refused are answered, and both answers fail both ways: the stand-in Slack refuses
+// chat.postEphemeral with user_not_in_channel and the request and the secrets echoed, and the response_url answers 500
+// echoing its address, the request and the secrets, and then drops the connection. A press handled directly whose response_url is not Slack's is not answered
+// there. No log line, error or record may carry a secret; the verification token, the signatures and the signed action
+// id are not planted secrets, so the probe looks for them in the records itself. It is incomplete when a press was
+// answered otherwise, a log line or a record is missing, or the stand-in was not called.
+func probeSlackPresses(ctx context.Context, secrets []string, log io.Writer) error {
+	var lines bytes.Buffer
+	var linesMu sync.Mutex
+	logger := logging.New(io.MultiWriter(log, &lockedWriter{w: &lines, mu: &linesMu}), logging.LevelInfo)
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	signed, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	botToken, hooksToken, signing := "xoxb-"+secrets[0], secrets[1], secrets[2]
+	var ephemerals, responses atomic.Int32
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			echo := r.Header.Get("Authorization") + " " + r.URL.String() + " " + string(body) + " " + botToken + " " +
+				signing
+			switch {
+			case r.URL.Path == "/api/chat.postEphemeral":
+				ephemerals.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "user_not_in_channel",
+					"warning": echo})
+			case strings.HasPrefix(r.URL.Path, "/actions/") && responses.Add(1)%2 == 1:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": echo})
+			case strings.HasPrefix(r.URL.Path, "/actions/"):
+				if c, _, err := http.NewResponseController(w).Hijack(); err == nil {
+					_ = c.Close()
+				}
+			default:
+				http.NotFound(w, r)
+			}
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	base := "http://" + ln.Addr().String()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	rows := &probeRLRows{}
+	writer := requestlog.NewWriter(requestlog.Config{OrgID: 1, DB: rows, Business: clocks.Business, Log: logger})
+	client, err := slack.NewClient(slack.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clocks.Real,
+		Recorder: writer}, slack.Settings{BotToken: logging.Secret(botToken), SigningSecret: logging.Secret(signing),
+		Owner: outbound.Owner{Connection: 5, PublicID: "CNAAAAAAAAAAA5"},
+		Route: func(logging.Secret) string { return base + "/api/" }})
+	if err != nil {
+		return err
+	}
+	conn := slack.Conn{ID: 5, PublicID: "CNAAAAAAAAAAA5", Mode: slack.EventModeHTTP, Client: client}
+	presses := &slack.Presses{Bindings: probeSlackBindings{}, Links: probeLinks{}, Commands: probeCommands{}, Keys: k,
+		Path: deliverytest.Unlimited(1, clocks), Budget: 2 * time.Second, Business: clocks.Business,
+		PublicURL: "http://localhost:8080", Log: logger}
+	handled := make(chan struct{}, 4)
+	mux := http.NewServeMux()
+	mux.Handle(slack.CallbackPattern, requestlog.Inbound(writer, clocks.Real, requestlog.OperationInteractive,
+		slack.NewCallback(slack.CallbackConfig{Connections: probeSlackConn{conn: conn, secret: logging.Secret(signing)},
+			Presses: probeSlackHandler{presses: presses, handled: handled}, Real: clocks.Real, Base: ctx, Log: logger})))
+	verification := probeWord()
+	payload := func(user, responseURL string) []byte {
+		b, _ := json.Marshal(map[string]any{"type": "block_actions", "token": verification, "api_app_id": "A0PROBE",
+			"user": map[string]any{"id": user}, "container": map[string]any{"type": "message_attachment",
+				"message_ts": "1.000001", "channel_id": "C0PROBE"}, "channel": map[string]any{"id": "C0PROBE"},
+			"response_url": responseURL, "actions": []any{map[string]any{"action_id": "ack", "type": "button",
+				"value": signed}}}) // plain values always encode
+		return b
+	}
+	var errs []error
+	var sigs []string
+	post := func(user string, age time.Duration, forge bool, want int) {
+		body := "payload=" + url.QueryEscape(string(payload(user, base+"/actions/T0PROBE/1/"+hooksToken)))
+		ts := strconv.FormatInt(clocks.Real.Now().Add(-age).Unix(), 10)
+		sig := fakeslack.Sign(signing, ts, []byte(body))
+		if forge {
+			sig = "v0=" + probeWord()
+		}
+		sigs = append(sigs, sig)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, slack.CallbackPath+conn.PublicID,
+			strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set(slack.HeaderTimestamp, ts)
+		req.Header.Set(slack.HeaderSignature, sig)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		errs = append(errs, errors.New(rec.Body.String()))
+		if rec.Code != want {
+			errs = append(errs, &probeIncomplete{fmt.Sprintf("a Slack press answered %d, want %d", rec.Code, want)})
+		}
+	}
+	post("u-other", 0, true, http.StatusUnauthorized)
+	post("u-other", 10*time.Minute, false, http.StatusUnauthorized)
+	post("u-other", 0, false, http.StatusOK)
+	post("u-linked", 0, false, http.StatusOK)
+	for range 2 {
+		select {
+		case <-handled:
+		case <-time.After(10 * time.Second):
+			errs = append(errs, &probeIncomplete{"a confirmed Slack press was not handled"})
+		}
+	}
+	presses.Handle(ctx, conn, payload("u-other", "https://evil.example.org/actions/T0PROBE/1/"+hooksToken))
+	linesMu.Lock()
+	logged := lines.String()
+	linesMu.Unlock()
+	rejected, pressLines := strings.Count(logged, `"event":"slack_press_rejected"`), strings.Count(logged,
+		`"event":"slack_press"`)
+	switch {
+	case rejected != 2 || pressLines != 3:
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d slack_press_rejected and %d slack_press lines, want 2 and 3",
+			rejected, pressLines)})
+	case ephemerals.Load() != 3 || responses.Load() != 2:
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d calls of chat.postEphemeral and %d of the response_url, "+
+			"want 3 and 2", ephemerals.Load(), responses.Load())})
+	}
+	rows.mu.Lock()
+	stored := slices.Clone(rows.rows)
+	rows.mu.Unlock()
+	ops := map[string]int{}
+	var values []string
+	for _, r := range stored {
+		ops[r.operation]++
+		values = append(values, r.values...)
+	}
+	if ops[requestlog.OperationInteractive] != 4 || ops["chat.postEphemeral"] != 3 || ops["response_url"] != 2 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("records %v, want 4 interactions, 3 chat.postEphemeral and 2 "+
+			"response_url", ops)})
+	}
+	leaks := []probeRLValue{{"the verification token of a Slack press", verification}, {"a signed action id", signed},
+		{"the path of a response_url", "/actions/T0PROBE"}}
+	for _, sig := range sigs {
+		leaks = append(leaks, probeRLValue{"the value of X-Slack-Signature", sig})
+	}
+	return errors.Join(append(errs, probeRLLeaks(stored, leaks),
+		fmt.Errorf("request_log rows: %s", strings.Join(values, "\n")))...)
+}
+
+// lockedWriter is w written under mu, for log lines written by several goroutines and read by the probe.
+type lockedWriter struct {
+	w  io.Writer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// probeSlackConn is the Slack Connection of probeSlackPresses: conn, in http mode, with the Slack signing secret
+// secret.
+type probeSlackConn struct {
+	conn   slack.Conn
+	secret logging.Secret
+}
+
+func (p probeSlackConn) SlackPressConnection(_ context.Context, publicID string) (slack.Conn, logging.Secret, error) {
+	if publicID != p.conn.PublicID {
+		return slack.Conn{}, "", slack.ErrNoConnection
+	}
+	return p.conn, p.secret, nil
+}
+
+// probeSlackHandler handles each confirmed press with presses and then tells handled.
+type probeSlackHandler struct {
+	presses *slack.Presses
+	handled chan<- struct{}
+}
+
+func (h probeSlackHandler) Handle(ctx context.Context, c slack.Conn, payload []byte) {
+	h.presses.Handle(ctx, c, payload)
+	h.handled <- struct{}{}
+}
+
+// probeSlackBindings bind every press to the Root message of the Alert Group AGAAAAAAAAAAA1 on the Slack Destination 3.
+type probeSlackBindings struct{}
+
+func (probeSlackBindings) SlackPressBinding(_ context.Context, conn int64, _, _ string) (delivery.SlackBinding, error) {
+	return delivery.SlackBinding{Kind: buttons.SubjectRoot, GroupPublicID: "AGAAAAAAAAAAA1", AlertGroup: 1,
+		Destination: delivery.Destination{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: delivery.TypeSlack, Connection: &conn},
+		Language:    "en"}, nil
+}
+
+func (probeSlackBindings) SlackTestDestination(context.Context, int64, string, string) (delivery.Destination, bool,
+	error) {
+	return delivery.Destination{}, false, nil
 }
