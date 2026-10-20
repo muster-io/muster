@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2668,8 +2697,8 @@ not signed in. What is open is a short list of endpoints that cannot ask for a s
   and the page where a person sets a password from a setup link;</li>
 <li><a href="../integrations/alertmanager/">ingestion</a> and the <a href="../integrations/heartbeat/">Heartbeat</a>, which take an
   Integration token;</li>
-<li>the callbacks that Mattermost, Telegram and a <a href="../messengers/bridge/">Bridge</a> send to Muster, which each carry a
-  secret of their own;</li>
+<li>the callbacks that Mattermost, Slack, Telegram and a <a href="../messengers/bridge/">Bridge</a> send to Muster, which each
+  carry a secret or a signature of their own;</li>
 <li>the served API specification;</li>
 <li>the health checks and <code>/metrics</code>, on the internal listener, which is not meant to be reachable from outside the
   cluster.</li>
@@ -2746,8 +2775,8 @@ two places:</p>
   sign-in page there, use HTTPS or another browser.</li>
 </ul>
 <h2 id="link-your-messenger-accounts">Link your messenger accounts<a class="headerlink" href="#link-your-messenger-accounts" title="Permanent link">&para;</a></h2>
-<p>A button in Mattermost or Telegram acts as a Muster User only if the person who presses it has linked their messenger
-account to their User. People do it themselves, from their profile, as <a href="../messengers/account-links/">Link your messenger
+<p>A button in Mattermost, Slack or Telegram acts as a Muster User only if the person who presses it has linked their
+messenger account to their User. People do it themselves, from their profile, as <a href="../messengers/account-links/">Link your messenger
 accounts</a> describes. Admins cannot do it for them: they see the links of every User and
 can remove them, but they cannot create one for someone else. A press from an unlinked account changes nothing, and the
 person is answered privately with a link to their profile.</p>

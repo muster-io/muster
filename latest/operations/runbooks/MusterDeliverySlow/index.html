@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2776,10 +2805,11 @@ every Destination together. Changes made by Commands or timers are not measured,
 <li>Look for a Storm: <code>muster_storm_active</code> by <code>route</code>, the log line <code>storm_started</code> and <strong>Storms</strong> on the System
    status page (<code>/admin/system-status</code>). More than <code>route.storm_threshold</code> (20) new Alert Groups per minute on a
    Route fill the limiters.</li>
-<li>Check Muster's own limiters. Telegram: <code>destination.telegram.limiter</code> (10 requests per minute per Destination,
-   sends and edits together, in the channel and its discussion group) and <code>connection.telegram.limiter</code>
-   (15 messages per second per Connection). A busy Destination waits for its limiter, which is expected and not a
-   fault.</li>
+<li>Check Muster's own limiters. Telegram: <code>destination.telegram.limiter</code> (10 requests per minute per Destination, sends
+   and edits together, in the channel and its discussion group) and <code>connection.telegram.limiter</code> (15 messages per
+   second per Connection). Slack: <code>destination.slack.limiter</code> (30 requests per minute per Destination, sends and edits
+   together) and <code>connection.slack.limiter</code> (50 requests per minute per Connection). A busy Destination waits for its
+   limiter, which is expected and not a fault.</li>
 <li>Check the latency of the calls themselves:
    <code>histogram_quantile(0.95, sum by (le, outcome) (rate(muster_client_request_duration_seconds_bucket{job="muster",client="delivery"}[15m])))</code>.
    Slow calls point at the network, a proxy or the messenger.</li>

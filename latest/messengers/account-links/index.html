@@ -712,6 +712,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -1019,6 +1048,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Link Mattermost
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#link-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link Slack
       </span>
     </span>
   </a>
@@ -2793,6 +2833,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#link-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link Slack
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#link-through-a-bridge" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2896,15 +2947,15 @@
 
 
 <h1 id="link-your-messenger-accounts">Link your messenger accounts<a class="headerlink" href="#link-your-messenger-accounts" title="Permanent link">&para;</a></h1>
-<p>An <strong>Account link</strong> ties your Telegram account, your account on a Mattermost server, or your account on a messenger
-that Muster reaches through a <a href="../bridge/">Bridge</a>, to your Muster User. With it, a button you press under an Alert
-Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed in — and Mentions and
-footers in the messenger name you.</p>
+<p>An <strong>Account link</strong> ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
+or your account on a messenger that Muster reaches through a <a href="../bridge/">Bridge</a>, to your Muster User. With it, a button
+you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
+in — and Mentions and footers in the messenger name you.</p>
 <p>A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
-Mattermost Connection, since each Connection is its own server, and so does an account reached through a Bridge, per
-Bridge Connection. You have at most one Telegram account and one account per Mattermost or Bridge Connection; linking
-another one replaces the earlier link, and linking the same account again keeps its link and updates its username and
-name.</p>
+Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
+and an account reached through a Bridge, per Bridge Connection. You have at
+most one Telegram account and one account per Mattermost, Slack or Bridge Connection; linking another one replaces the
+earlier link, and linking the same account again keeps its link and updates its username and name.</p>
 <h2 id="why-links-start-in-your-profile">Why links start in your profile<a class="headerlink" href="#why-links-start-in-your-profile" title="Permanent link">&para;</a></h2>
 <p>Every link starts in your signed-in Muster session, and the secret travels from there to your messenger account —
 never the other way. Nobody can link your account by typing your name into a chat, and nobody can link their account
@@ -2938,6 +2989,28 @@ A new request replaces your earlier one. You can request 5 codes an hour, and on
 codes an hour, whoever asks (<code>account_link.mattermost_code_requests</code>); beyond that, wait until the oldest request is an hour old. A username the server does not
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.</p>
 <p>The bot must be allowed to open direct messages with you; see <a href="../mattermost/#direct-messages">Direct messages</a>.</p>
+<h2 id="link-slack">Link Slack<a class="headerlink" href="#link-slack" title="Permanent link">&para;</a></h2>
+<ol>
+<li>In your profile, open <strong>Messenger accounts</strong>, choose the Slack Connection, enter your Slack email or name and select
+   <strong>Send code</strong>. An email finds your account for sure; a name is compared with the name and the display name of each
+   account, regardless of case.</li>
+<li>The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
+   8-character code. It shows in the <strong>Messages</strong> tab of the bot's app, which is read-only, so you can read the code and
+   cannot write to the bot. If you did not ask for it, ignore it.</li>
+<li>Type the code into your profile within 10 minutes (<code>account_link.slack_code</code>); capital and small letters are the
+   same. The bot confirms "Linked to Muster user {your name}".</li>
+</ol>
+<p>If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
+Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
+and an account that is linked to another User is refused.</p>
+<p>A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
+A new request replaces your earlier one. You can request 5 codes an hour, and one Slack account gets at most 3 codes an
+hour, whoever asks (<code>account_link.slack_code_requests</code>); beyond that, wait until the oldest request is an hour old.</p>
+<p>The bot can send the code only while the Messages tab of its app is on. Slack documents that with it off it refuses the
+direct message, and then Muster answers that the Messages tab of the Slack app is turned off; the problem is
+<code>messages_tab_disabled</code>. Ask the admin of the Slack app to turn the tab on under <strong>App Home</strong>, then request a new code.
+The refused request still counts toward the limits above, so if you tried several times before the tab was on, you may
+have to wait up to an hour. See <a href="../slack/#what-the-manifest-sets">Connect Slack</a>.</p>
 <h2 id="link-through-a-bridge">Link through a Bridge<a class="headerlink" href="#link-through-a-bridge" title="Permanent link">&para;</a></h2>
 <p>A Bridge Connection reaches a messenger through a bridge, which tells Muster in its info what it can do for Account
 links. Every bridge takes a <strong>token</strong> that you send to its bot. A bridge that can look people up and start a direct
@@ -2978,21 +3051,24 @@ The limits are those of Mattermost: 5 attempts per code, a new request replaces 
 hour for you and at most 3 codes an hour for one account, whoever asks (<code>account_link.bridge_code_requests</code>). An account
 that is linked to another User is refused.</p>
 <h2 id="several-connections-of-one-messenger">Several Connections of one messenger<a class="headerlink" href="#several-connections-of-one-messenger" title="Permanent link">&para;</a></h2>
-<p>An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
-Telegram bot. What a link covers differs by messenger:</p>
+<p>An Organization may have several Connections of one messenger, such as two Mattermost bots on one server, two Slack apps
+or a second Telegram bot. What a link covers differs by messenger:</p>
 <ul>
 <li><strong>Mattermost links are per Connection.</strong> Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   <strong>Link Mattermost</strong> with each Connection. Your profile lists one row per Connection.</li>
-<li><strong>Bridge links are per Connection.</strong> Each Bridge Connection is its own Identity space, also when two Connections
-  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
-  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.</li>
+<li><strong>Slack links are per Connection.</strong> Each Slack Connection is its own Identity space, even when two Connections serve
+  the same workspace with two apps: two Connections need two links, made one after the other from <strong>Link Slack</strong> with
+  each Connection. Your profile lists one row per Connection.</li>
+<li><strong>Bridge links are per Connection.</strong> Each Bridge Connection is its own Identity space, also when two Connections reach
+  the same bridge with two bots: two Connections need two links, made one after the other, and a token started for one
+  of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.</li>
 <li><strong>A Telegram link is valid for all Telegram bots.</strong> Telegram has one Identity space, so the link you make through any
-  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
-  "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.</li>
+  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as "Telegram ·
+  @<username> · for all Telegram bots", with "linked via <Connection>" below.</li>
 </ul>
-<p>One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group.
-This is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
+<p>One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group. This
+is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
 Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
 Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.</p>
 <h2 id="unlink">Unlink<a class="headerlink" href="#unlink" title="Permanent link">&para;</a></h2>
@@ -3014,7 +3090,7 @@ from the web session only, as above. They cannot create a link for someone else.
 <tr>
 <td>An account without a link</td>
 <td>Nothing changes</td>
-<td>"Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret</td>
+<td>"Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost or Slack, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret</td>
 </tr>
 <tr>
 <td>A linked Viewer</td>

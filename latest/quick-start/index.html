@@ -812,6 +812,8 @@
       
         
       
+        
+      
     
     
     
@@ -934,6 +936,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2899,11 +2928,12 @@ that takes every Alert no other Route takes, and the Default route has no Destin
 <ul>
 <li><strong>Set the time zone.</strong> The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
   under <strong>Organization → General</strong>: see <a href="../configure/organization/#general">Organization settings</a>.</li>
-<li><strong>Connect a messenger.</strong> Connect <a href="../messengers/mattermost/">Mattermost</a> or <a href="../messengers/telegram/">Telegram</a>, add a
-  Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
-  <a href="../concepts/routes-and-group-keys/">Routes and Group keys</a>. Mattermost sends button presses to <code>MUSTER_PUBLIC_URL</code>
-  here, so the Mattermost server must reach that address: unless it reaches Muster at <code>http://localhost:8080</code>, put an
-  HTTPS reverse proxy in front of port 8080 and set <code>MUSTER_PUBLIC_URL</code> to its <code>https://</code> address first.</li>
+<li><strong>Connect a messenger.</strong> Connect <a href="../messengers/mattermost/">Mattermost</a>, <a href="../messengers/slack/">Slack</a> or
+  <a href="../messengers/telegram/">Telegram</a>, add a Destination for a channel, and add the Destination to the Default route or
+  to a Route of its own; see <a href="../concepts/routes-and-group-keys/">Routes and Group keys</a>. Mattermost sends button presses
+  to <code>MUSTER_PUBLIC_URL</code> here, so the Mattermost server must reach that address: unless it reaches Muster at
+  <code>http://localhost:8080</code>, put an HTTPS reverse proxy in front of port 8080 and set <code>MUSTER_PUBLIC_URL</code> to its
+  <code>https://</code> address first. Slack in Socket Mode needs no address of Muster that Slack can reach.</li>
 <li><strong>Use any other messenger through a Bridge.</strong> A <a href="../messengers/bridge/">Bridge</a> is a small service that connects
   Muster to a messenger it does not support natively. <a href="../messengers/write-a-bridge/">Write a bridge</a> with the library
   for Go, <a href="https://github.com/muster-io/muster-bridge-go">muster-bridge-go</a>, or for Python,

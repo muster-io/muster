@@ -1,0 +1,3523 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/messengers/slack/">
+      
+      
+      
+        <link rel="prev" href="../telegram-restricted-networks/">
+      
+      
+        <link rel="next" href="../proxies/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Connect Slack - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connect Slack
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Quick start
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Install
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/helm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install with Helm
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The database
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/versions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Requirements and tested versions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configure
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Configure
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/messages-and-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messages and templates
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/organization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Organization settings
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/api-tokens/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API tokens and automation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Integrations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Integrations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Grafana
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram-restricted-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#socket-mode-or-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Socket Mode or HTTP
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Socket Mode or HTTP">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-slack-app-per-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        One Slack app per Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-app-from-a-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the app from a manifest
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Create the app from a manifest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-manifest-for-socket-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest for Socket Mode
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-manifest-for-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest for HTTP
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-manifest-sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the manifest sets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The scopes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-the-app-and-create-the-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Install the app and create the tokens
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invite-the-bot-and-create-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Invite the bot and create Destinations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#link-accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link accounts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-answers-to-presses-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where answers to presses show
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-gets-notified" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Who gets notified
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Rate limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edits-and-deleted-root-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edits and deleted Root messages
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-test-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The test message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The proxy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Request log
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check from the command line
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proxies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Proxies
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../write-a-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_7">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../sign-in/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_8">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/oidc-keycloak/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/totp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  TOTP
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/closed-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Closed networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Concepts
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Concepts
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/alert-groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alert Groups
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/routes-and-group-keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Routes and Group keys
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/snapshot-semantics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Snapshot semantics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/loud-and-quiet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Loud and Quiet
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/statuses-and-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Statuses and commands
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/broken-destinations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Broken Destinations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_10">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Operations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/backup-and-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Backup and restore
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/upgrades/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Upgrades
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/key-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Key rotation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/high-availability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  High availability
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Monitoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/outgoing-heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/request-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Request log
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10_9" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../operations/runbooks/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runbooks
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_10_9" id="__nav_10_9_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_10_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_10_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Runbooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDown/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDown
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNoLeader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNoLeader
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryFailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryFailing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDestinationBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDestinationBroken
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterHeartbeatLost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliverySlow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliverySlow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryQueueGrowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryQueueGrowing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestBacklog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestBacklog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestRejected/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterTemplateError/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterTemplateError
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterClockSkew/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterClockSkew
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterLoginFailures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterSnapshotTruncated/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterSnapshotTruncated
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterOIDCSecretExpiring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterOIDCSecretExpiring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_11">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-values/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/bridge-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bridge protocol
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#socket-mode-or-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Socket Mode or HTTP
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Socket Mode or HTTP">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-slack-app-per-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        One Slack app per Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-app-from-a-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the app from a manifest
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Create the app from a manifest">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-manifest-for-socket-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest for Socket Mode
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-manifest-for-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The manifest for HTTP
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-manifest-sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the manifest sets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The scopes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-the-app-and-create-the-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Install the app and create the tokens
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invite-the-bot-and-create-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Invite the bot and create Destinations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#link-accounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Link accounts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-answers-to-presses-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Where answers to presses show
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-gets-notified" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Who gets notified
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Rate limits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edits-and-deleted-root-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edits and deleted Root messages
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-test-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The test message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The proxy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#request-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Request log
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check from the command line
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="connect-slack">Connect Slack<a class="headerlink" href="#connect-slack" title="Permanent link">&para;</a></h1>
+<p>Muster posts to Slack through the Web API with the <strong>bot</strong> of a Slack app that you create from a manifest and install in
+your workspace: one message per Alert Group, the <strong>Root message</strong>, which Muster edits as the Alert Group changes, and
+replies in its <strong>Thread</strong> for what happens later. People act on the Alert Group with the buttons of the message and its
+<strong>Snooze…</strong> menu. Muster uses no incoming webhook, no Events API subscription and no user token.</p>
+<p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code> and <code>MUSTER_INGEST_URL</code> is
+<code>https://ingest.muster.example.org</code>.</p>
+<h2 id="socket-mode-or-http">Socket Mode or HTTP<a class="headerlink" href="#socket-mode-or-http" title="Permanent link">&para;</a></h2>
+<p>A button press reaches Muster in one of two <strong>event modes</strong>, set on the Connection (<code>connection.slack.event_mode</code>).
+Choose before you create the app, because the app's manifest differs.</p>
+<dl>
+<dt>Socket Mode</dt>
+<dd>The Leader holds a WebSocket connection to Slack, so Slack needs no address of Muster: Muster only calls out. It is
+the way when Muster has no address that Slack can reach. It needs the app-level token. Only the Leader holds the
+socket, so a press made while the Leader changes is lost: the person sees Slack's error, and Muster does not count
+on Slack to send it again. A handover takes well under a minute; see
+<a href="../../operations/high-availability/">High availability</a>.</dd>
+<dt>HTTP</dt>
+<dd>
+<p>Slack posts every press to the Connection's callback address, which the Connection page shows:</p>
+<div class="highlight"><pre><span></span><code>https://ingest.muster.example.org/api/v1/callbacks/slack/CN…
+</code></pre></div>
+<p>Slack must reach this address over HTTPS. Any replica receives the press, so no press is lost while the Leader
+changes. It needs the app's Slack signing secret: Muster verifies the signature of every press with it, and
+refuses a request whose timestamp is further than <code>slack.request_tolerance</code> (5 minutes) from its own clock, so keep
+the clocks of Muster's nodes right. A request with a wrong or missing signature, a stale timestamp, an unknown
+Connection or a Connection in Socket Mode is answered <code>401</code> with the same body, which reveals nothing about which
+Connections exist; a body over 1 MiB, or one without a <code>payload</code>, is answered <code>400</code>.</p>
+<p>If Slack is the only client outside your network that reaches the ingest listener, expose only <code>/api/v1/callbacks/</code>
+on the address Slack reaches, for example with a reverse proxy that forwards that path alone to the ingest port.
+<code>MUSTER_INGEST_URL</code> is also the address of Alertmanagers and Heartbeats: when they come from outside too, publish
+their paths as well, or give Slack's callbacks a route of their own. See
+<a href="../../install/helm/#the-two-public-addresses">The two public addresses</a>.</p>
+</dd>
+</dl>
+<p>A Slack app sends its presses to the sockets alone while its Socket Mode is on, and over HTTP alone while it is off, so
+the app and the Connection must agree: a Connection receives presses only in its own mode.</p>
+<h3 id="one-slack-app-per-connection">One Slack app per Connection<a class="headerlink" href="#one-slack-app-per-connection" title="Permanent link">&para;</a></h3>
+<p>Slack hands each press to any one of the app's open socket connections, and Muster binds a press to a Destination of
+the Connection that receives it. Two Connections on one Slack app, in one Muster or in two, would therefore share its
+presses at random, and a press that reaches the wrong Connection is refused as "This button could not be verified".
+Over HTTP an app has one Request URL, so it serves one Connection. Create a Slack app for each Connection, a test copy
+of Muster included.</p>
+<p>Muster notices it. When Slack tells the Leader that the app has more socket connections than the Leader holds, another
+program is connected to the same app, usually a second Connection or Muster, or a script: the <strong>Check connection</strong> of a
+Connection in Socket Mode passes with the warning <code>another_client_connected</code>, the Connection page shows the same
+warning, <code>muster doctor</code> prints a <code>WARN</code> line, and the Leader logs
+<a href="../../reference/log-events/#slack_socket_shared"><code>slack_socket_shared</code></a>. Presses go on working, but some of them are
+lost to the other program. Muster takes the count at each <code>hello</code>: when a socket reconnects, at the planned refresh
+hours after the previous one, and when the Connection is saved with a change, which restarts its socket at once. So the
+warning can stay for hours after its cause is gone; to clear it, save the Connection with its app-level token entered
+again. How long Slack counts the connection of a Leader that crashed has not been verified.</p>
+<h2 id="create-the-app-from-a-manifest">Create the app from a manifest<a class="headerlink" href="#create-the-app-from-a-manifest" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Open <a href="https://api.slack.com/apps">Your Apps</a> in Slack, select <strong>Create New App → From a manifest</strong>, choose the
+   workspace and paste one of the manifests below, in YAML.</li>
+<li>Check the summary Slack shows and create the app.</li>
+</ol>
+<h3 id="the-manifest-for-socket-mode">The manifest for Socket Mode<a class="headerlink" href="#the-manifest-for-socket-mode" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">display_information</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster</span>
+<span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster alert groups</span>
+<span class="nt">features</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">app_home</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">home_tab_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">    </span><span class="nt">messages_tab_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">messages_tab_read_only_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">bot_user</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">display_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster</span>
+<span class="nt">oauth_config</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">scopes</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">bot</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">chat:write</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">channels:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">im:write</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read.email</span>
+<span class="nt">settings</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">interactivity</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">is_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">org_deploy_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">socket_mode_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">token_rotation_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<h3 id="the-manifest-for-http">The manifest for HTTP<a class="headerlink" href="#the-manifest-for-http" title="Permanent link">&para;</a></h3>
+<p>It differs from the first in the Interactivity Request URL, the callback address of the Connection, and in Socket Mode,
+which is off:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">display_information</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster</span>
+<span class="w">  </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster alert groups</span>
+<span class="nt">features</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">app_home</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">home_tab_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">    </span><span class="nt">messages_tab_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">messages_tab_read_only_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">bot_user</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">display_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Muster</span>
+<span class="nt">oauth_config</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">scopes</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">bot</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">chat:write</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">channels:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">im:write</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read.email</span>
+<span class="nt">settings</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">interactivity</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">is_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">    </span><span class="nt">request_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://ingest.muster.example.org/api/v1/callbacks/slack/CNAGK7M3QX9P2R</span>
+<span class="w">  </span><span class="nt">org_deploy_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">socket_mode_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">token_rotation_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<p>The Connection page shows its callback address only once the Connection is saved, and saving it needs the bot token of
+the installed app. Create the app with the address above, create the Connection, then copy its callback address into
+<strong>Interactivity &amp; Shortcuts → Request URL</strong> of the app.</p>
+<h3 id="what-the-manifest-sets">What the manifest sets<a class="headerlink" href="#what-the-manifest-sets" title="Permanent link">&para;</a></h3>
+<p>The app and its bot are named <strong>Muster</strong>. The bot posts under the name in the app's settings: Muster does not ask for
+<code>chat:write.customize</code>, so a name that a message carries would be ignored. To use another name, change both names in
+the manifest.</p>
+<dl>
+<dt>The Messages tab is on and read-only</dt>
+<dd>Account links send a person a code by direct message from the bot, and the direct messages of an app show in its
+Messages tab. Read-only means that the person reads the code and cannot write to the bot. Keep the tab on: Slack
+documents that with it off it refuses the bot's direct message, and the request for a code then fails with the
+problem <code>messages_tab_disabled</code> (<code>409</code>), which has not been seen yet on a real workspace. A refused request still
+counts toward the limits of Account links, 5 requests an hour for a person and 3 for one Slack account
+(<code>account_link.slack_code_requests</code>), so after you turn the tab on again, a person who tried several times may have
+to wait up to an hour. Turn it on under <strong>App Home → Show Tabs → Messages Tab</strong>. See <a href="../account-links/#link-slack">Link
+Slack</a>.</dd>
+<dt>The Home tab is off</dt>
+<dd>Muster publishes no Home tab.</dd>
+<dt>Interactivity is on</dt>
+<dd>Buttons and menus send nothing to Muster without it. Over HTTP it holds the Request URL.</dd>
+<dt>Socket Mode is on, or off for HTTP</dt>
+<dd>See <a href="#socket-mode-or-http">Socket Mode or HTTP</a>.</dd>
+<dt>Token rotation is off</dt>
+<dd>With rotation, the bot token expires and Slack issues a new one. Muster stores the token you enter and has no way to
+renew it, so a rotating token ends as <code>token_expired</code> and every Destination of the Connection becomes
+<a href="../../concepts/broken-destinations/">Broken</a>.</dd>
+<dt>The app is not deployed to an organization</dt>
+<dd>One Connection serves one app in one workspace.</dd>
+<dt>There is no event subscription</dt>
+<dd>Muster does not use the Events API: it hears only the presses of buttons and menus.</dd>
+</dl>
+<h3 id="the-scopes">The scopes<a class="headerlink" href="#the-scopes" title="Permanent link">&para;</a></h3>
+<p>Muster needs these six bot scopes and no other. <strong>Check connection</strong> reads the scopes Slack grants the token and fails
+with <code>missing_scope</code>, naming the missing ones.</p>
+<dl>
+<dt><code>chat:write</code></dt>
+<dd>Posts, edits and deletes the bot's own messages, and answers the people who press its buttons.</dd>
+<dt><code>channels:read</code></dt>
+<dd>Reads a public channel to check a Destination, and lists the public channels the bot is a member of.</dd>
+<dt><code>groups:read</code></dt>
+<dd>The same for private channels.</dd>
+<dt><code>im:write</code></dt>
+<dd>Lets the bot open a direct chat with a person. The Connection check fails without it. The code of an Account link
+is sent with <code>chat.postMessage</code> to the person's user id, which needs <code>chat:write</code>; whether Slack also needs
+<code>im:write</code> for that has not been verified, so Muster keeps the scope.</dd>
+<dt><code>users:read</code></dt>
+<dd>Finds a person by name for an Account link, and reads the app of the bot so that the check can tell whether both
+tokens belong to one app.</dd>
+<dt><code>users:read.email</code></dt>
+<dd>Finds a person by email for an Account link.</dd>
+</dl>
+<p>Muster never joins a channel on its own, so it asks for no <code>channels:join</code>: you invite the bot.</p>
+<h2 id="install-the-app-and-create-the-tokens">Install the app and create the tokens<a class="headerlink" href="#install-the-app-and-create-the-tokens" title="Permanent link">&para;</a></h2>
+<ol>
+<li>In the app's settings, open <strong>Install App</strong> and install it in the workspace. Slack then shows the <strong>Bot User OAuth
+   Token</strong> under <strong>OAuth &amp; Permissions</strong>; it starts with <code>xoxb-</code>. Copy it. Anyone with the token controls the bot.</li>
+<li>In Socket Mode, open <strong>Basic Information → App-Level Tokens</strong> and generate a token with the scope
+   <code>connections:write</code>. It starts with <code>xapp-</code>. Copy it. Anyone with this token can open sockets of the app and take
+   its presses.</li>
+<li>Over HTTP, open <strong>Basic Information → App Credentials</strong> and copy the <strong>Signing Secret</strong>. Anyone with it can send
+   Muster presses that pass the signature check.</li>
+</ol>
+<p>Muster stores all three secrets encrypted, never shows them again and writes them to no log line.</p>
+<h2 id="create-the-connection">Create the Connection<a class="headerlink" href="#create-the-connection" title="Permanent link">&para;</a></h2>
+<p>In Muster, create a <strong>Connection</strong> of type Slack. Enter a name, choose the event mode, and enter the bot token and, in
+Socket Mode, the app-level token, or over HTTP the Slack signing secret. A Slack Connection has no address field, since
+Slack's address is fixed. Then <strong>Check connection</strong>. The check runs in steps and shows the latency of each and whether
+it went through the proxy:</p>
+<ol>
+<li><strong>Token</strong>: <code>auth.test</code> with the bot token, which names the bot and the workspace and fails if the token is not a
+   bot's;</li>
+<li><strong>Scopes</strong>: every scope of the manifest is granted;</li>
+<li><strong>App-level token</strong>, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
+   connection for it. The check opens no WebSocket.</li>
+</ol>
+<p>Over HTTP no request can show that Slack reaches the callback address or that the Slack signing secret is right, because
+a bot cannot press its own button. The first press does: see <a href="#the-test-message">The test message</a>.</p>
+<p><strong>Check connection</strong> also works in the form before anything is saved. It checks the values in the form and saves
+nothing, and no bot name is recorded. A stored token goes to Slack only through the saved proxy: after a change of the
+proxy, type the tokens again to check, or save first.</p>
+<h2 id="invite-the-bot-and-create-destinations">Invite the bot and create Destinations<a class="headerlink" href="#invite-the-bot-and-create-destinations" title="Permanent link">&para;</a></h2>
+<p>A bot posts only to channels it is a member of. In Slack, invite the bot to each channel a Destination posts to, public
+or private:</p>
+<div class="highlight"><pre><span></span><code>/invite @Muster
+</code></pre></div>
+<p>In Muster, create a <strong>Destination</strong> of type Slack with the Connection and the channel. The form lists the public and
+private channels the bot is a member of; for a channel that is not listed, type its id as Slack shows it in the
+channel's details, <code>C…</code> or <code>G…</code>. A direct chat or a person cannot be a Destination. Saving runs the <strong>Destination
+check</strong>, which asks Slack about the channel with <code>conversations.info</code> and refuses a Destination that fails:</p>
+<ul>
+<li><code>channel_not_found</code>: no such channel, or a private channel the bot is not in;</li>
+<li><code>channel_archived</code>: the channel is archived;</li>
+<li><code>bot_not_in_channel</code>: "Invite the bot to the channel: /invite @{bot}", where <code>{bot}</code> is the bot's name as Slack
+  reports it for the bot token, such as <code>muster</code>.</li>
+</ul>
+<p>The bot's name appears in that hint only after <strong>Check connection</strong> has run on the saved Connection; before that it
+says only "Invite the bot to the channel."</p>
+<p><strong>Check</strong> on the Destination page runs the same check at any time. When Slack refuses the bot later, for example
+because someone removed it from the channel, the Destination becomes <strong>Broken</strong>; Muster runs the check every few
+minutes while nothing waits for the Destination, and ends the Broken state once it passes again, for example after
+someone invites the bot back. See <a href="../../concepts/broken-destinations/">Broken Destinations</a>.</p>
+<h2 id="link-accounts">Link accounts<a class="headerlink" href="#link-accounts" title="Permanent link">&para;</a></h2>
+<p>A button acts as a Muster User, and a Mention reaches a person, only through an Account link. The person enters their
+Slack email or name in their profile, and the bot sends a code by direct message, in the Messages tab of the app. The
+code has 8 characters, is valid for 10 minutes and allows 5 attempts (<code>account_link.slack_code</code>). See <a href="../account-links/#link-slack">Link
+Slack</a>.</p>
+<h2 id="where-answers-to-presses-show">Where answers to presses show<a class="headerlink" href="#where-answers-to-presses-show" title="Permanent link">&para;</a></h2>
+<p>A successful press is not answered: the Root message changes. Whatever the person who pressed must read — that the press
+was refused, that their Slack account is not linked to Muster yet, or that the button could not be verified — shows in
+the channel as a message only they can see, marked "Only visible to you". Unlike Mattermost, Slack needs no permission
+beyond <code>chat:write</code> for it. For a press on a Thread reply, such as a Reminder, the answer shows in the Thread. The one
+success that is answered is "Still on it", which changes no message.</p>
+<p>Slack does not guarantee such a message: the person must be active and in the channel. When Slack refuses it, Muster
+sends the same text to the press's <code>response_url</code>, on <code>hooks.slack.com</code>; an answer that fails both ways is logged and
+not tried again. Answers are in the language of the User the account is linked to, and in English for an account
+without a link.</p>
+<p>A replica handles at most 2 presses at a time (<code>slack.parallel_presses</code>); the others wait, already confirmed to Slack. A
+press whose deadline ends while it waits for a slot, 30 seconds after it was handed over (<code>slack.press_deadline</code>), is
+answered, in English, that it failed. At most 64 presses wait for a slot in a process (<code>slack.max_waiting_presses</code>): one
+more, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer and is
+logged. None of these bounds is configurable.</p>
+<h2 id="who-gets-notified">Who gets notified<a class="headerlink" href="#who-gets-notified" title="Permanent link">&para;</a></h2>
+<p>Slack cannot send a message without a notification: whom a new message notifies depends on each member's settings for
+the channel and the Thread. So, as in Mattermost, <strong>Quiet</strong> means "without a Mention", not "nobody is notified".</p>
+<ul>
+<li><strong>Edits are Quiet.</strong> An edit of the Root message carries no Mention, so a Loud change is always a new message: a new
+  Root message, or a reply in the Thread. The edit drops the Mentions that the Root message had; Slack may then remove
+  them from the person's list of mentions.</li>
+<li><strong>Mentions</strong> are <code>@channel</code> and <code>@here</code>, as the Destination's Mention settings ask, and the people chosen in them,
+  through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
+  Slack Destination takes neither <code>@all</code> nor groups. The footer of a Root message names a linked person without a
+  Mention.</li>
+<li><strong>Thread replies</strong> stay in the Thread: Muster never also broadcasts them to the channel.</li>
+<li><strong>Alert data and template text never mention anyone.</strong> An <code>&amp;</code>, <code>&lt;</code> or <code>&gt;</code> in a label or an annotation is escaped, and
+  so is <code>@</code>. A literal <code>&lt;!here&gt;</code> or <code>&lt;@U…&gt;</code> written in a template is shown as text and notifies nobody. Only the
+  Destination's Mention settings, <code>{{ mention "here" }}</code> and its siblings, and linked people notify.</li>
+</ul>
+<p>See <a href="../../concepts/loud-and-quiet/">Loud and Quiet</a>.</p>
+<h2 id="rate-limits">Rate limits<a class="headerlink" href="#rate-limits" title="Permanent link">&para;</a></h2>
+<p>Muster limits itself, and Slack limits it too.</p>
+<dl>
+<dt><code>connection.slack.limiter</code></dt>
+<dd>50 requests a minute for every call of the Connection to the Web API together, the minimum Slack documents for the
+methods that edit and delete.</dd>
+<dt><code>destination.slack.limiter</code></dt>
+<dd>30 requests a minute for the sends and edits of a Destination together, half of Slack's "one message per second per
+channel".</dd>
+</dl>
+<p>Slack limits each method per app and workspace. When it answers <code>429</code>, Muster holds every request of the Connection, for
+any of its Destinations, for the seconds of <code>Retry-After</code>; this is not counted as a failed attempt, and does not make a
+Destination Broken. A <code>429</code> without <code>Retry-After</code> counts as a transient failure. You can change both limiters.</p>
+<h2 id="edits-and-deleted-root-messages">Edits and deleted Root messages<a class="headerlink" href="#edits-and-deleted-root-messages" title="Permanent link">&para;</a></h2>
+<p>Muster edits a Root message for as long as its Alert Group is open, which can be days. Slack lets a
+bot edit its own messages, and no edit window is known for them. Whether a window that your workspace sets applies to
+the messages of a bot, hours or days old, has not been verified; an edit that Slack refuses that way ends that delivery
+as Not delivered and does not make the Destination Broken.</p>
+<p>When someone deletes a Root message, Muster finds out at its next edit, when Slack answers <code>message_not_found</code>. It
+checks that the bot is still in the channel and the channel is not archived, and then posts the Alert Group again once,
+Quietly, with a note. If the bot is gone or the channel archived, the Destination becomes Broken instead. A Root message
+that already had replies stays in the channel as "This message was deleted." with its replies, and Muster's later
+replies still go under it until the next edit finds it gone.</p>
+<p>A Root message deleted before it had any reply takes no reply: Slack posts a reply to it into the channel, as an
+ordinary message, and answers as if it had worked. Muster notices, deletes that message at once and posts the Alert
+Group again. The reply may stay in the channel for a moment. If Slack refuses the deletion, Muster does not try again:
+the stray reply stays until someone deletes it, and the delivery records why.</p>
+<h2 id="the-test-message">The test message<a class="headerlink" href="#the-test-message" title="Permanent link">&para;</a></h2>
+<p><strong>Send test message</strong> on the Destination page posts one message marked "🧪 Test message", with the buttons of its status,
+and <strong>Preview</strong> shows the message as Muster would send it. No Alert Group changes.</p>
+<p>A bot cannot press its own button in Slack, so the test message cannot prove that presses reach Muster, as Mattermost's
+does. Press a button of the test message yourself: Muster answers you "This is a test message; nothing was changed",
+even from an account without a link. That answer proves that presses reach Muster and, over HTTP, that the Slack
+signing secret is right.</p>
+<h2 id="the-proxy">The proxy<a class="headerlink" href="#the-proxy" title="Permanent link">&para;</a></h2>
+<p>A Slack Connection has a proxy section like the others; see <a href="../proxies/">Proxies</a>. The proxy must allow <code>CONNECT</code> to
+<code>slack.com</code>; in Socket Mode also to the hosts under <code>slack.com</code> that the socket uses; and to <code>hooks.slack.com</code>, where
+the fallback answers to presses go. Where only the proxy can resolve outside names and the Organization's outbound
+address policy is strict, add <code>slack.com</code> and <code>*.slack.com</code> to <strong>Allowed</strong>: the domain entry covers <code>hooks.slack.com</code>
+and the socket's hosts, but not <code>slack.com</code> itself. See <a href="../proxies/#what-the-outbound-address-policy-checks">Proxies</a>.</p>
+<p>Muster accepts a Socket Mode address only on <code>slack.com</code> or a host below it, and an answer address only on
+<code>hooks.slack.com</code>. If the socket cannot open, the Leader backs off (<code>slack.socket_backoff</code>, from 1 second up to 5
+minutes), logs <a href="../../reference/log-events/#slack_socket_failed"><code>slack_socket_failed</code></a>, and does not make any
+Destination Broken. It waits <code>slack.hello_timeout</code>, 10 seconds, for Slack's greeting on a new socket.</p>
+<h2 id="request-log">Request log<a class="headerlink" href="#request-log" title="Permanent link">&para;</a></h2>
+<p>The <strong>Request log</strong> of a Slack Connection records its calls to the Web API named as Slack names them, such as
+<code>chat.postMessage</code> and <code>apps.connections.open</code>. Over HTTP it records each press that reaches the callback address as
+<code>interactive</code>, with Muster's answer, refused ones included. In Socket Mode it records each envelope that carries an
+envelope id under the type of the envelope, with the socket's host as its address and Muster's confirmation as its
+answer; the app subscribes to no events, so only <code>interactive</code> envelopes arrive. Slack's greetings, disconnects and
+keep-alive frames are not recorded. The answers Muster sends to a press's <code>response_url</code> are recorded as <code>response_url</code>,
+with the address masked: look there when an answer never shows. Tokens, the Slack signing secret and the signature are
+masked, and so are the address of the socket, the <code>response_url</code> of a press, the signed ids of buttons and the code of
+an Account link. See <a href="../../operations/request-log/">Request log</a>.</p>
+<h2 id="check-from-the-command-line">Check from the command line<a class="headerlink" href="#check-from-the-command-line" title="Permanent link">&para;</a></h2>
+<p><code>muster doctor</code> prints one line per Slack Connection and per Slack Destination with the same checks, without sending
+anything, and a <code>WARN</code> line for a Connection whose app another program shares.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+  
+  
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+
+  </body>
+</html>

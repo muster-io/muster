@@ -777,6 +777,8 @@
       
         
       
+        
+      
     
     
     
@@ -899,6 +901,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2705,8 +2734,9 @@
 
 <h1 id="muster">Muster<a class="headerlink" href="#muster" title="Permanent link">&para;</a></h1>
 <p>Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It groups Alerts into Alert
-Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram, in any other
-messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.</p>
+Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in
+any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze
+Alert Groups.</p>
 <pre class="mermaid"><code>flowchart LR
   am["Alertmanager"] -- "Snapshots" --&gt; integration
   subgraph muster["Muster"]
@@ -2714,11 +2744,13 @@ messenger through a Bridge, or behind an outgoing webhook; and lets people ackno
   end
   subgraph destinations["Destinations"]
     mm["Mattermost"]
+    sl["Slack"]
     tg["Telegram"]
     br["Bridge"]
     wh["Outgoing webhook"]
   end
   groups --&gt; mm
+  groups --&gt; sl
   groups --&gt; tg
   groups --&gt; br
   groups --&gt; wh</code></pre>
@@ -2736,10 +2768,10 @@ of each Alert Group there up to date until the Alert Group is resolved.</p>
 <li><a href="integrations/alertmanager/">Integrations</a>: connect the Alertmanager of a cluster, connect
   <a href="integrations/grafana/">Grafana Alerting</a> directly or through an Alertmanager, and watch the path from Alertmanager
   with a <a href="integrations/heartbeat/">Heartbeat</a>.</li>
-<li><a href="messengers/">Messengers</a>: see what each Destination type can do, connect <a href="messengers/mattermost/">Mattermost</a> and
-  <a href="messengers/telegram/">Telegram</a>, reach any other messenger through a <a href="messengers/bridge/">Bridge</a> (and
-  <a href="messengers/write-a-bridge/">write one</a>), <a href="messengers/account-links/">link your messenger accounts</a>, and set a
-  <a href="messengers/proxies/">proxy</a> for a client.</li>
+<li><a href="messengers/">Messengers</a>: see what each Destination type can do, connect
+  <a href="messengers/mattermost/">Mattermost</a>, <a href="messengers/slack/">Slack</a> and <a href="messengers/telegram/">Telegram</a>, reach any
+  other messenger through a <a href="messengers/bridge/">Bridge</a> (and <a href="messengers/write-a-bridge/">write one</a>),
+  <a href="messengers/account-links/">link your messenger accounts</a>, and set a <a href="messengers/proxies/">proxy</a> for a client.</li>
 <li><a href="outgoing-webhooks/events/">Outgoing webhooks</a>: send the lifecycle events of Alert Groups in the
   <a href="outgoing-webhooks/events/">events mode</a>, or keep a message in any chat in the
   <a href="outgoing-webhooks/templates/">template mode</a>; <a href="outgoing-webhooks/recipes/">recipes</a> for a phone call, a status page,

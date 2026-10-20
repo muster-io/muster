@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2833,9 +2862,10 @@
 <p>Every change to an Alert Group is either <strong>Loud</strong> or <strong>Quiet</strong>. A Loud change should make people's devices ring. A Quiet
 change should only update what they see when they look. Muster fixes the loudness of every change; you decide only whom
 a Loud change <strong>Mentions</strong>.</p>
-<p>The rule behind it is simple, and it is the same in Mattermost and Telegram: <strong>an edit never notifies anybody.</strong> Editing
-a message, even to add a Mention, does not ring a phone. So a Loud change is always a <strong>new message</strong>, a new Root message
-or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a Mention.</p>
+<p>The rule behind it is simple, and it is the same in Mattermost, Slack and Telegram: <strong>an edit never notifies anybody.</strong>
+Editing a message, even to add a Mention, does not ring a phone. So a Loud change is always a <strong>new message</strong>, a new
+Root message or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a
+Mention.</p>
 <h2 id="which-changes-are-loud">Which changes are Loud<a class="headerlink" href="#which-changes-are-loud" title="Permanent link">&para;</a></h2>
 <dl>
 <dt>A new Alert Group starts</dt>
@@ -2928,6 +2958,11 @@ just lost the Alert Group.</p>
 <p>A Loud change is a new post, with its Mentions in the text of the post.</p>
 <p>A Quiet change is an edit, or a new post without a Mention.</p>
 </dd>
+<dt>Slack</dt>
+<dd>
+<p>A Loud change is a new message, a Root message or a reply in the Thread, with its Mentions.</p>
+<p>A Quiet change is an edit, or a new message without a Mention.</p>
+</dd>
 <dt>Telegram</dt>
 <dd>
 <p>A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.</p>
@@ -2951,6 +2986,10 @@ just lost the Alert Group.</p>
   person a follower. So Quiet means "without a Mention", not "nobody is notified". Mentions are in the text of the
   post and never in the attachment, because a Mention in an attachment notifies with an empty notification. See <a href="../../messengers/mattermost/#who-gets-notified">Who
   gets notified</a>.</li>
+<li><strong>Slack.</strong> Slack cannot send a message without a notification: whom a new message notifies depends on each member's
+  settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
+  no Mention, so it drops the Mentions of the message it edits. See <a href="../../messengers/slack/#who-gets-notified">Who gets
+  notified</a>.</li>
 <li><strong>Telegram.</strong> <code>disable_notification</code> silences the sound but does not remove the push. Only members of the channel's
   discussion group get Thread replies, and the automatic copy of every Root message rings them, even for a Quiet one.
   Tell the people on call to join the group and mute the channel itself. See <a href="../../messengers/telegram/#known-limitation-quiet-root-messages-ring-the-group">Known limitation: Quiet Root messages ring
@@ -2991,6 +3030,13 @@ or <strong>messenger groups</strong>. What a Destination type offers:</p>
 <td>Mattermost group names</td>
 </tr>
 <tr>
+<td>Slack</td>
+<td>yes</td>
+<td><code>@channel</code> or <code>@here</code></td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
 <td>Telegram</td>
 <td>yes</td>
 <td>no</td>
@@ -3021,6 +3067,7 @@ people who are Mentioned, and the Owner above all, link their accounts from thei
 accounts</a>. Muster renders a Mention in the messenger's own form:</p>
 <ul>
 <li>Mattermost: <code>@username</code>;</li>
+<li>Slack: a Mention of the person's Slack account;</li>
 <li>Telegram: a link to the person, whose text is the display name;</li>
 <li>Bridge: a marker that a bridge with <code>native_mentions</code> renders as the messenger's mention and any other bridge as the
   person's name.</li>

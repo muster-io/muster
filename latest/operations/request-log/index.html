@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2826,12 +2855,13 @@ an Alert Group's delivery: the Request log keeps the requests themselves, for a 
 <h2 id="what-is-recorded">What is recorded<a class="headerlink" href="#what-is-recorded" title="Permanent link">&para;</a></h2>
 <p>Each attempt of a request is a record of its own.</p>
 <p><strong>Requests Muster sends</strong> for a Connection or an outgoing webhook Destination: Root messages, their edits, Thread
-replies, final edits, Storm summaries and deletions; test messages, and the button press a Mattermost test makes
-through the bot; answers to people, such as ephemeral messages and callback answers; the requests of Account links,
-such as finding a person and sending a direct message; channel lists, bridge info and webhook registration; event
-polling (Telegram <code>getUpdates</code>, Bridge <code>pollEvents</code>); and the requests of checks and tests — the Connection check, the
-check before saving, also of a Connection that does not exist yet, the Destination check, the test message and the
-probe of a Broken Destination.</p>
+replies, final edits, Storm summaries and deletions; test messages, and the button press a Mattermost test makes through
+the bot (a Slack test makes none, because a bot cannot press its own button); answers to people, such as ephemeral
+messages and callback answers; the requests of Account links, such as finding a person and sending a direct message;
+channel lists, bridge info and webhook registration; event polling (Telegram <code>getUpdates</code>, Bridge <code>pollEvents</code>), and the
+request that opens a Slack Socket Mode connection; and the requests of checks and tests — the Connection check, the
+check before saving, also of a Connection that does not exist yet, the Destination check, the test message and the probe
+of a Broken Destination.</p>
 <p><strong>Requests that reach Muster</strong> on the ingest listener, each with the answer Muster gave, refused ones included — a bad
 signature, a wrong secret token, a Connection in the other event delivery mode:</p>
 <dl>
@@ -2844,15 +2874,22 @@ signature, a wrong secret token, a Connection in the other event delivery mode:<
 <dt><code>push</code></dt>
 <dt><code>/api/v1/callbacks/bridge/{connection_id}</code></dt>
 <dd>An event a bridge pushes.</dd>
+<dt><code>interactive</code></dt>
+<dt><code>/api/v1/callbacks/slack/{connection_id}</code></dt>
+<dd>A button press in Slack, in the HTTP event mode. In Socket Mode there is no request to Muster: each envelope that
+carries an envelope id is recorded as received under its own type, with the socket's host as its URL, the
+envelope as its request and Muster's confirmation as its answer, without a status; the app subscribes to no events,
+so only <code>interactive</code> envelopes arrive. Slack's <code>hello</code>, <code>disconnect</code> and keep-alive frames are not recorded.</dd>
 </dl>
 <p>A record holds:</p>
 <ul>
 <li>the time, and the direction: <strong>Sent</strong> (→) or <strong>Received</strong> (←);</li>
 <li>the operation as its protocol names it: the method of the Telegram Bot API (<code>sendMessage</code>, <code>editMessageText</code>,
   <code>getUpdates</code>), the operation of Mattermost's REST API in lower camel case (<code>createPost</code>, <code>patchPost</code>, <code>getPing</code>), the
-  operation of the Bridge protocol (<code>getInfo</code>, <code>postMessage</code>, <code>pollEvents</code>), <code>event</code> or the request of a template
-  (<code>create</code>, <code>update</code>, <code>open_thread</code>, <code>reply_in_thread</code>) for an outgoing webhook, and <code>press</code>, <code>update</code> or <code>push</code> for
-  requests that reached Muster;</li>
+  operation of the Bridge protocol (<code>getInfo</code>, <code>postMessage</code>, <code>pollEvents</code>), the method of Slack's Web API as Slack
+  names it (<code>chat.postMessage</code>, <code>chat.update</code>, <code>apps.connections.open</code>), <code>response_url</code> for an answer sent to a press's
+  <code>response_url</code>, <code>event</code> or the request of a template (<code>create</code>, <code>update</code>, <code>open_thread</code>, <code>reply_in_thread</code>) for an
+  outgoing webhook, and <code>press</code>, <code>update</code>, <code>push</code> or <code>interactive</code> for requests that reached Muster;</li>
 <li>the method, the URL, the request headers and body, and the answer's status, headers and body — none for a request
   that got no answer;</li>
 <li>the latency in milliseconds, the path — direct or through the proxy — and the attempt;</li>
@@ -2904,13 +2941,16 @@ Every masked value reads <code>[redacted]</code>.</p>
   a Telegram URL, the proxy password, an outgoing webhook's Secrets and Signing secret, a bridge's push secret, a
   secret in a query.</li>
 <li><strong>Headers whose values are always masked</strong>, whatever they hold: <code>Authorization</code>, <code>Proxy-Authorization</code>, <code>Cookie</code>,
-  <code>Set-Cookie</code>, <code>X-Telegram-Bot-Api-Secret-Token</code> and <code>webhook-signature</code>, the signature header of outgoing webhooks
-  and of pushed Bridge events.</li>
+  <code>Set-Cookie</code>, <code>X-Telegram-Bot-Api-Secret-Token</code>, <code>X-Slack-Signature</code> and <code>webhook-signature</code>, the signature header of
+  outgoing webhooks and of pushed Bridge events.</li>
 <li><strong>The URL</strong> keeps no user information, and the path of a Connection's base URL, which may be a secret — such as the
   path of a bridge behind a reverse proxy — is shown as <code>[redacted]</code>, as in errors.</li>
-<li><strong>Values that authenticate a person</strong>: the signed action ids of buttons, which authenticate a Mattermost press, and
-  the tokens and codes of Account links — <code>/start &lt;token&gt;</code> in a Telegram update, the <code>token</code> of an <code>account_link</code>
-  event, the code in a direct message.</li>
+<li><strong>Values that authenticate a person</strong>: the signed action ids of buttons, which authenticate a Mattermost or a Slack
+  press, and the tokens and codes of Account links — <code>/start &lt;token&gt;</code> in a Telegram update, the <code>token</code> of an
+  <code>account_link</code> event, the code in a direct message.</li>
+<li><strong>What Slack sends and answers with</strong>: the bot token and the app-level token, the Slack signing secret, the address
+  that <code>apps.connections.open</code> answers with, whose single-use <code>ticket</code> opens a socket, the <code>response_url</code> of a press,
+  and the legacy verification <code>token</code> that every Slack payload still carries.</li>
 </ul>
 <p>Headers and bodies are untrusted text. The record view shows them as plain text and never renders HTML or Markdown.</p>
 <h2 id="who-may-read-it">Who may read it<a class="headerlink" href="#who-may-read-it" title="Permanent link">&para;</a></h2>
@@ -2953,6 +2993,11 @@ Destination test.</p>
   means that the Mattermost server does not reach Muster: see
   <a href="../../messengers/mattermost/#let-button-presses-reach-muster">Let button presses reach Muster</a>. A <code>press</code> that Muster
   answered shows the answer the person got, such as the text that their account is not linked.</li>
+<li><strong>Button presses in Slack do nothing.</strong> In the HTTP event mode, filter the Connection's Request log by <strong>Received</strong>.
+  No <code>interactive</code> at all means that Slack does not reach Muster: see <a href="../../messengers/slack/#socket-mode-or-http">Socket Mode or
+  HTTP</a>. An <code>interactive</code> answered <code>401</code> means a wrong Slack signing secret,
+  a clock further than <code>slack.request_tolerance</code> from Slack's, or a Connection in Socket Mode. In Socket Mode, an
+  <code>interactive</code> is recorded for each press, and the Connection page says whether another program shares the app.</li>
 <li><strong>A Root message looks wrong.</strong> On the Alert Group page, open <strong>Requests</strong> of that Destination: the <code>createPost</code>,
   <code>sendMessage</code> or <code>postMessage</code> shows the body Muster sent and what the messenger answered.</li>
 <li><strong>A bridge refuses a message.</strong> The Connection's Request log shows the <code>postMessage</code>, the problem the bridge answered

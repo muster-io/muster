@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2796,8 +2825,8 @@ that would carry it.</p>
 <li>Compare with all outbound calls of the delivery client class:
    <code>sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))</code>. Failures across
    every Destination point at the network, a proxy or DNS rather than one messenger.</li>
-<li>Press <strong>Check</strong> on the Destination page, or run <code>muster doctor</code>, which prints one line per Mattermost and Telegram
-   Destination (<code>destination &lt;name&gt;</code>) with the result of its check.</li>
+<li>Press <strong>Check</strong> on the Destination page, or run <code>muster doctor</code>, which prints one line per Mattermost, Slack,
+   Telegram and Bridge Destination (<code>destination &lt;name&gt;</code>) with the result of its check.</li>
 </ol>
 <h2 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
 <ul>

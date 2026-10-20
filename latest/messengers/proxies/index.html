@@ -14,7 +14,7 @@
       
       
       
-        <link rel="prev" href="../telegram-restricted-networks/">
+        <link rel="prev" href="../slack/">
       
       
         <link rel="next" href="../bridge/">
@@ -712,6 +712,8 @@
       
         
       
+        
+      
     
     
     
@@ -850,6 +852,33 @@
                   
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
     
   
   
@@ -960,6 +989,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Telegram
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Slack
       </span>
     </span>
   </a>
@@ -2753,6 +2793,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Slack
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2787,7 +2838,7 @@ straight. <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and <code>NO_PROXY</
 </thead>
 <tbody>
 <tr>
-<td>a Mattermost, Telegram or Bridge Connection</td>
+<td>a Mattermost, Slack, Telegram or Bridge Connection</td>
 <td>the Connection's proxy section</td>
 </tr>
 <tr>
@@ -2870,6 +2921,12 @@ matches an allowed entry passes. A request that passes is sent without an addres
 <p>Telegram is often reached through a proxy where it is blocked. <a href="../telegram-restricted-networks/">Telegram in restricted
 networks</a> shows the proxy on the Connection, and the alternatives: a reverse proxy
 under your own domain and a self-hosted Bot API server.</p>
+<h2 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h2>
+<p>A Slack Connection has no address field, since Slack's address is fixed, so a proxy sees only Slack's hosts. It must
+allow <code>CONNECT</code> to <code>slack.com</code>; in Socket Mode also to the hosts under <code>slack.com</code> that the socket uses; and to
+<code>hooks.slack.com</code>, where Muster sends the answer to a press when it cannot send it in the channel. When only the proxy
+can resolve outside names and the policy is strict, add <code>slack.com</code> and <code>*.slack.com</code> to <strong>Allowed</strong>: the domain entry
+covers the socket's hosts and <code>hooks.slack.com</code>, but not <code>slack.com</code> itself. See <a href="../slack/#the-proxy">Connect Slack</a>.</p>
 
 
 

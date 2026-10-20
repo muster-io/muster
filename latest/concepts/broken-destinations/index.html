@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2864,6 +2893,9 @@ minutes</strong> (<code>delivery.transient_budget</code>) the Destination become
 <ul>
 <li><strong>Mattermost</strong>: <code>401</code> or <code>403</code>, such as an invalid token or a bot removed from the channel, and <code>404</code> for the channel,
   which is not found or archived.</li>
+<li><strong>Slack</strong>: a token that Slack refuses (<code>invalid_auth</code>, <code>token_revoked</code>, <code>token_expired</code> and the like), a missing
+  scope, and a channel the bot cannot use: <code>channel_not_found</code>, <code>not_in_channel</code> for a bot removed from the channel, and
+  <code>is_archived</code>. A <code>429</code> is not Fatal: Muster holds the whole Connection for the seconds Slack asks.</li>
 <li><strong>Telegram</strong>: <code>401</code>, and "bot was kicked" or missing rights, such as a bot that lost its admin rights in the channel.</li>
 <li><strong>Bridge</strong>: the bridge answers <code>forbidden</code>, for example because the bot was removed from the channel; the bridge's own
   text becomes the reason. A bridge that does not answer at all becomes Broken through the Transient budget.</li>
@@ -2873,7 +2905,9 @@ minutes</strong> (<code>delivery.transient_budget</code>) the Destination become
 <p>Several things look like trouble and do <strong>not</strong> make a Destination Broken:</p>
 <ul>
 <li>A deleted Root message. Muster posts the Alert Group again once, Quietly, with the note "The previous message was
-  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone.</li>
+  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone. In Slack
+  this holds while the bot is still in the channel and the channel is not archived; see <a href="../../messengers/slack/#edits-and-deleted-root-messages">Edits and deleted Root
+  messages</a>.</li>
 <li>A Telegram Thread that lost the automatic copy of its Root message. The delivery state shows "Thread not attached".</li>
 <li>A delivery that ends as Not delivered, such as a template that failed or a request the receiver rejected with <code>400</code>.</li>
 <li>A Bridge Connection whose bridge cannot be reached. The Connection does not become Broken itself; its Destinations do,
@@ -2966,6 +3000,9 @@ similar from the outside, so here is the whole picture.</p>
 <dl>
 <dt>Telegram</dt>
 <dd>None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.</dd>
+<dt>Slack</dt>
+<dd>None known for a bot's own messages. Whether a window that a workspace sets applies to a bot's messages hours or
+days old has not been verified; an edit Slack refuses ends that delivery as Not delivered.</dd>
 <dt>Mattermost</dt>
 <dd>The server setting <code>ServiceSettings.PostEditTimeLimit</code>, which is unlimited (<code>-1</code>) by default. Keep the default. If
 an administrator sets a limit, Muster's edits of older Root messages may be refused, and what Mattermost then

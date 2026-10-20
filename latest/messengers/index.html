@@ -712,6 +712,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2640,18 +2669,19 @@
 
 <h1 id="messengers">Messengers<a class="headerlink" href="#messengers" title="Permanent link">&para;</a></h1>
 <p>Muster delivers Alert Groups to <strong>Destinations</strong>. A Destination is a place where Alert Groups arrive: a channel of a
-messenger, or an outgoing webhook. There are four types:</p>
+messenger, or an outgoing webhook. There are five types:</p>
 <ul>
 <li><strong>Mattermost</strong>, through a bot account on your Mattermost server;</li>
+<li><strong>Slack</strong>, through the bot of a Slack app, to a channel the bot is a member of;</li>
 <li><strong>Telegram</strong>, through a bot, to a channel with comments;</li>
 <li><strong>Bridge</strong>, for any other messenger: a small service that you or someone else writes speaks the Bridge protocol with
   Muster and talks to the messenger;</li>
 <li><strong>Outgoing webhook</strong>, which sends the lifecycle events of Alert Groups, or requests you build from templates, to any HTTP
   endpoint.</li>
 </ul>
-<p>A <strong>Connection</strong> holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, a Telegram bot, or a
-Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection; the Destination carries its own
-address, Secrets and proxy.</p>
+<p>A <strong>Connection</strong> holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, the bot of a
+Slack app, a Telegram bot, or a Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection;
+the Destination carries its own address, Secrets and proxy.</p>
 <p>To start, create the Connection, check it, create a Destination for a channel, and add the Destination to a Route. A Route
 decides which Alert Groups reach which Destinations; see <a href="../concepts/routes-and-group-keys/">Routes and Group keys</a>.</p>
 <h2 id="what-each-destination-type-can-do">What each Destination type can do<a class="headerlink" href="#what-each-destination-type-can-do" title="Permanent link">&para;</a></h2>
@@ -2663,6 +2693,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes</li>
 <li>Telegram — yes</li>
 <li>Bridge — yes</li>
 <li>Outgoing webhook, events mode — no</li>
@@ -2673,6 +2704,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes</li>
 <li>Telegram — yes</li>
 <li>Bridge — yes</li>
 <li>Outgoing webhook, events mode — no: one request per event</li>
@@ -2683,6 +2715,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes, no window known</li>
 <li>Telegram — yes</li>
 <li>Bridge — yes, until the bridge's edit window</li>
 <li>Outgoing webhook, events mode — no</li>
@@ -2693,6 +2726,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes, with the Snooze menu</li>
 <li>Telegram — yes</li>
 <li>Bridge — if the bridge declares <code>buttons</code></li>
 <li>Outgoing webhook, events mode — no</li>
@@ -2703,6 +2737,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — the web UI and the API</li>
+<li>Slack — the web UI and the API</li>
 <li>Telegram — the web UI and the API</li>
 <li>Bridge — <a href="../concepts/statuses-and-commands/#text-commands">Text commands</a> in the Thread if the bridge declares
   <code>thread_messages</code>; otherwise the web UI and the API</li>
@@ -2714,6 +2749,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — replies under the Root message</li>
+<li>Slack — replies under the Root message</li>
 <li>Telegram — the comments of the Root message, in the channel's discussion group</li>
 <li>Bridge — replies under the Root message</li>
 <li>Outgoing webhook, events mode — no: each event is separate</li>
@@ -2724,6 +2760,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — a new post with Mentions</li>
+<li>Slack — a new message with Mentions</li>
 <li>Telegram — a new message</li>
 <li>Bridge — a new message that the bridge posts with <code>notify</code></li>
 <li>Outgoing webhook, events mode — <code>notify</code> is true</li>
@@ -2734,6 +2771,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — an edit, or a post without a Mention</li>
+<li>Slack — an edit, or a message without a Mention</li>
 <li>Telegram — an edit, or a message sent with <code>disable_notification</code></li>
 <li>Bridge — an edit, or a message without a notification if the bridge declares <code>quiet_messages</code></li>
 <li>Outgoing webhook, events mode — <code>notify</code> is false</li>
@@ -2744,6 +2782,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — nobody, <code>@channel</code> <code>@all</code> <code>@here</code>, users, Mattermost groups</li>
+<li>Slack — nobody, <code>@channel</code> <code>@here</code>, users</li>
 <li>Telegram — nobody, users</li>
 <li>Bridge — nobody, users</li>
 <li>Outgoing webhook, events mode — nobody, everyone, users, groups, as data</li>
@@ -2754,6 +2793,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes: a code the bot sends by direct message</li>
+<li>Slack — yes: a code the bot sends by direct message</li>
 <li>Telegram — yes: a link that opens the bot</li>
 <li>Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages</li>
 <li>Outgoing webhook, events mode — not needed: no one presses anything</li>
@@ -2764,6 +2804,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — Connection 5 requests/s; Destination the same by default</li>
+<li>Slack — Connection 50 requests/min; Destination 30 requests/min, sends and edits together</li>
 <li>Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together</li>
 <li>Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares</li>
 <li>Outgoing webhook, events mode — Destination 5 requests/s</li>
@@ -2774,6 +2815,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — none by default; the server setting <code>PostEditTimeLimit</code> is unlimited, so keep it</li>
+<li>Slack — none known for a bot's messages</li>
 <li>Telegram — none for the bot's own messages</li>
 <li>Bridge — the bridge declares it, or none; Muster publishes a new Root message past it</li>
 <li>Outgoing webhook, events mode — not applicable</li>
@@ -2784,6 +2826,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — one Storm summary per Route</li>
+<li>Slack — one Storm summary per Route</li>
 <li>Telegram — one Storm summary per Route</li>
 <li>Bridge — one Storm summary per Route</li>
 <li>Outgoing webhook, events mode — every event is sent, no summary</li>
@@ -2794,6 +2837,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — on the Connection</li>
+<li>Slack — on the Connection</li>
 <li>Telegram — on the Connection</li>
 <li>Bridge — on the Connection</li>
 <li>Outgoing webhook, events mode — on the Destination</li>
@@ -2804,6 +2848,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes, <code>conversations.info</code></li>
 <li>Telegram — yes</li>
 <li>Bridge — yes, <code>checkChannel</code>, which posts nothing</li>
 <li>Outgoing webhook, events mode — no</li>
@@ -2814,6 +2859,7 @@ features.</p>
 <dd>
 <ul>
 <li>Mattermost — yes</li>
+<li>Slack — yes, the test message cannot press its own button</li>
 <li>Telegram — yes</li>
 <li>Bridge — yes</li>
 <li>Outgoing webhook, events mode — yes, sends the event <code>test</code></li>
@@ -2823,11 +2869,15 @@ features.</p>
 </dl>
 <p>Notes on the entries:</p>
 <ul>
-<li><strong>Rate limits.</strong> These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
-  default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of
-  all Connections to one server below that together. A Telegram chat takes about 20 messages and edits per minute, which is
-  why its Destination limiter is half of that. A bridge says its own limits in its info, and its <code>rate_limited</code> answers
-  always win. A <code>429</code> from a messenger holds the Destinations that share it, for as long as it asks.</li>
+<li><strong>Rate limits.</strong> These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off
+  by default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the
+  limiters of all Connections to one server below that together. Slack limits each method per app and workspace, and
+  about one message per second per channel; its Connection limiter is 50 requests a minute and its Destination limiter</li>
+<li>A Telegram chat takes about 20 messages and edits per minute, which is why its Destination limiter is half of
+  that. A bridge says its own limits in its info, and its <code>rate_limited</code> answers always win. A <code>429</code> from a messenger
+  holds the Destinations that share it, for as long as it asks.</li>
+<li><strong>Slack and Quiet.</strong> Slack cannot send a message without a notification, so Quiet means "without a Mention"; an edit
+  carries no Mention. See <a href="slack/#who-gets-notified">Connect Slack</a>.</li>
 <li><strong>Account links.</strong> Pressing a button as a Muster user, and being Mentioned, need an Account link. See <a href="account-links/">Link your
   messenger accounts</a>.</li>
 <li><strong>Loud and Quiet.</strong> Edits never notify anybody, so every Loud change is a new message. See <a href="../concepts/loud-and-quiet/">Loud and
@@ -2841,6 +2891,8 @@ features.</p>
 <ul>
 <li><a href="mattermost/">Connect Mattermost</a>: the bot account, the setting that lets the server call Muster for button presses,
   and who gets notified.</li>
+<li><a href="slack/">Connect Slack</a>: the app and its manifests for Socket Mode and for HTTP, the tokens, the bot in the
+  channels, and who gets notified.</li>
 <li><a href="telegram/">Connect Telegram</a>: the bot, a channel with comments, long polling or a webhook;
   <a href="telegram-restricted-networks/">Telegram in restricted networks</a> for networks where it is blocked.</li>
 <li><a href="bridge/">Connect a messenger through a bridge</a>, and <a href="write-a-bridge/">Write a bridge</a> for a messenger Muster does not

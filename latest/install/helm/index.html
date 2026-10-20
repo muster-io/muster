@@ -847,6 +847,8 @@
       
         
       
+        
+      
     
     
     
@@ -969,6 +971,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2974,7 +3003,8 @@ system. The readiness probe checks only the database, and a startup probe gives 
 <dt><code>ingestURL</code></dt>
 <dd>
 <p>environment variable: <code>MUSTER_INGEST_URL</code></p>
-<p>Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.</p>
+<p>Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook, and the button
+presses of Slack Connections in the HTTP event mode.</p>
 </dd>
 </dl>
 <p><code>ingestURL</code> defaults to <code>publicURL</code>. Muster never derives either from an Ingress or a route: set them to the addresses

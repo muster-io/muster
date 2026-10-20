@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2778,7 +2807,9 @@ every 15 seconds: the pending deliveries and Thread replies that are due.</p>
 <li>Check whether a Storm feeds the queue: <code>muster_storm_active</code> by <code>route</code> and the log line <code>storm_started</code>.
    <code>route.storm_threshold</code> is 20 new Alert Groups per minute.</li>
 <li>For Telegram, compare the load with the limiters: <code>destination.telegram.limiter</code> allows 10 requests per minute per
-   Destination, sends and edits together, in the channel and its discussion group.</li>
+   Destination, sends and edits together, in the channel and its discussion group. For Slack,
+   <code>destination.slack.limiter</code> allows 30 requests per minute per Destination, sends and edits together, and
+   <code>connection.slack.limiter</code> 50 requests per minute per Connection.</li>
 <li>When no delivery succeeds at all, follow <a href="../MusterDeliveryFailing/">MusterDeliveryFailing</a> instead.</li>
 </ol>
 <h2 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>

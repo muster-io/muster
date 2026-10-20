@@ -1,7 +1,7 @@
 # Muster
 
 > Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager.
-> It groups Alerts into Alert Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram, in any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.
+> It groups Alerts into Alert Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.
 >
 > This file is the canonical reference of Muster for AI agents and coding assistants, for version `latest` of the documentation. Read the pages it links, each the Markdown version of a page of the site, and the specifications, and do not rely on your training data about Muster.
 
@@ -48,6 +48,15 @@
 3. [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Muster reads what Grafana's built-in Alertmanager or an external one sends, and the [Limits](https://muster-io.github.io/muster/latest/integrations/grafana.md#limits) of Grafana's way.
 4. Finished when, after an alert fires in Grafana, the Integration page shows the time of the last Snapshot ([Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#send-the-alerts-with-a-notification-policy)).
 
+### Connect Slack
+
+1. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http): choose the event mode first, because the app's manifest differs. In Socket Mode the Leader holds a WebSocket connection to Slack, so Slack needs no address of Muster; over HTTP Slack must reach this address over HTTPS. If Slack is the only client outside your network that reaches the ingest listener, expose only `/api/v1/callbacks/`; Alertmanagers and Heartbeats use the same listener, so publish their paths too when they come from outside. Use one Slack app for each Connection ([One Slack app per Connection](https://muster-io.github.io/muster/latest/messengers/slack.md#one-slack-app-per-connection)).
+2. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest): create the app from the manifest for Socket Mode or for HTTP. Muster needs these six bot scopes and no other. Keep the tab on: the Messages tab carries the codes of Account links ([What the manifest sets](https://muster-io.github.io/muster/latest/messengers/slack.md#what-the-manifest-sets)).
+3. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#install-the-app-and-create-the-tokens): install the app, copy the bot token and, in Socket Mode, generate a token with the scope `connections:write`, or over HTTP copy the Signing Secret.
+4. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-connection): create the Connection of type Slack and run **Check connection**. A bot posts only to channels it is a member of. Invite it with `/invite @Muster` and create a Destination for each channel ([Invite the bot and create Destinations](https://muster-io.github.io/muster/latest/messengers/slack.md#invite-the-bot-and-create-destinations)).
+5. [Link Slack](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack): people link their accounts with a code that the bot sends by direct message.
+6. Finished when a person presses a button of the test message and Muster answers "This is a test message; nothing was changed" ([The test message](https://muster-io.github.io/muster/latest/messengers/slack.md#the-test-message)).
+
 ### Automate through the API
 
 1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.
@@ -85,10 +94,11 @@
 - [Connect Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md): Muster posts to Mattermost through the REST API with a **bot account**: one post per Alert Group, the **Root message**, which Muster edits as the Alert Group changes, and replies in its **Thread** for what happens later.
 - [Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md): Muster posts to a Telegram **channel** through the Bot API with a **bot**: one channel post per Alert Group, the **Root message**, which Muster edits as the Alert Group changes.
 - [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md): Muster talks to Telegram only by calling out to the Bot API, `https://api.telegram.org` by default.
+- [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md): Muster posts to Slack through the Web API with the **bot** of a Slack app that you create from a manifest and install in your workspace: one message per Alert Group, the **Root message**, which Muster edits as the Alert Group changes, and replies in its **Thread** for what happens later.
 - [Proxies](https://muster-io.github.io/muster/latest/messengers/proxies.md): Muster has no proxy for the whole installation.
 - [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): A **bridge** connects Muster to a messenger that Muster does not support natively.
 - [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md): A **bridge** connects Muster to a messenger that Muster does not support natively.
-- [Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md): An **Account link** ties your Telegram account, your account on a Mattermost server, or your account on a messenger that Muster reaches through a Bridge, to your Muster User.
+- [Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md): An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace, or your account on a messenger that Muster reaches through a Bridge, to your Muster User.
 
 ### Outgoing webhooks
 
@@ -154,4 +164,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 616238 bytes, about 154059 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 647992 bytes, about 161998 tokens.

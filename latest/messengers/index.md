@@ -1,18 +1,19 @@
 # Messengers
 
 Muster delivers Alert Groups to **Destinations**. A Destination is a place where Alert Groups arrive: a channel of a
-messenger, or an outgoing webhook. There are four types:
+messenger, or an outgoing webhook. There are five types:
 
 - **Mattermost**, through a bot account on your Mattermost server;
+- **Slack**, through the bot of a Slack app, to a channel the bot is a member of;
 - **Telegram**, through a bot, to a channel with comments;
 - **Bridge**, for any other messenger: a small service that you or someone else writes speaks the Bridge protocol with
   Muster and talks to the messenger;
 - **Outgoing webhook**, which sends the lifecycle events of Alert Groups, or requests you build from templates, to any HTTP
   endpoint.
 
-A **Connection** holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, a Telegram bot, or a
-Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection; the Destination carries its own
-address, Secrets and proxy.
+A **Connection** holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, the bot of a
+Slack app, a Telegram bot, or a Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection;
+the Destination carries its own address, Secrets and proxy.
 
 To start, create the Connection, check it, create a Destination for a channel, and add the Destination to a Route. A Route
 decides which Alert Groups reach which Destinations; see [Routes and Group keys](../concepts/routes-and-group-keys.md).
@@ -25,6 +26,7 @@ features.
 
 Needs a Connection
 :   - Mattermost — yes
+    - Slack — yes
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — no
@@ -32,6 +34,7 @@ Needs a Connection
 
 One message per Alert Group, kept up to date
 :   - Mattermost — yes
+    - Slack — yes
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — no: one request per event
@@ -39,6 +42,7 @@ One message per Alert Group, kept up to date
 
 Edits of the Root message
 :   - Mattermost — yes
+    - Slack — yes, no window known
     - Telegram — yes
     - Bridge — yes, until the bridge's edit window
     - Outgoing webhook, events mode — no
@@ -46,6 +50,7 @@ Edits of the Root message
 
 Buttons
 :   - Mattermost — yes
+    - Slack — yes, with the Snooze menu
     - Telegram — yes
     - Bridge — if the bridge declares `buttons`
     - Outgoing webhook, events mode — no
@@ -53,6 +58,7 @@ Buttons
 
 Without buttons
 :   - Mattermost — the web UI and the API
+    - Slack — the web UI and the API
     - Telegram — the web UI and the API
     - Bridge — [Text commands](../concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares
       `thread_messages`; otherwise the web UI and the API
@@ -61,6 +67,7 @@ Without buttons
 
 Thread
 :   - Mattermost — replies under the Root message
+    - Slack — replies under the Root message
     - Telegram — the comments of the Root message, in the channel's discussion group
     - Bridge — replies under the Root message
     - Outgoing webhook, events mode — no: each event is separate
@@ -68,6 +75,7 @@ Thread
 
 Loud
 :   - Mattermost — a new post with Mentions
+    - Slack — a new message with Mentions
     - Telegram — a new message
     - Bridge — a new message that the bridge posts with `notify`
     - Outgoing webhook, events mode — `notify` is true
@@ -75,6 +83,7 @@ Loud
 
 Quiet
 :   - Mattermost — an edit, or a post without a Mention
+    - Slack — an edit, or a message without a Mention
     - Telegram — an edit, or a message sent with `disable_notification`
     - Bridge — an edit, or a message without a notification if the bridge declares `quiet_messages`
     - Outgoing webhook, events mode — `notify` is false
@@ -82,6 +91,7 @@ Quiet
 
 Mentions
 :   - Mattermost — nobody, `@channel` `@all` `@here`, users, Mattermost groups
+    - Slack — nobody, `@channel` `@here`, users
     - Telegram — nobody, users
     - Bridge — nobody, users
     - Outgoing webhook, events mode — nobody, everyone, users, groups, as data
@@ -89,6 +99,7 @@ Mentions
 
 Account links
 :   - Mattermost — yes: a code the bot sends by direct message
+    - Slack — yes: a code the bot sends by direct message
     - Telegram — yes: a link that opens the bot
     - Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages
     - Outgoing webhook, events mode — not needed: no one presses anything
@@ -96,6 +107,7 @@ Account links
 
 Rate limits
 :   - Mattermost — Connection 5 requests/s; Destination the same by default
+    - Slack — Connection 50 requests/min; Destination 30 requests/min, sends and edits together
     - Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together
     - Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares
     - Outgoing webhook, events mode — Destination 5 requests/s
@@ -103,6 +115,7 @@ Rate limits
 
 Edit window
 :   - Mattermost — none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it
+    - Slack — none known for a bot's messages
     - Telegram — none for the bot's own messages
     - Bridge — the bridge declares it, or none; Muster publishes a new Root message past it
     - Outgoing webhook, events mode — not applicable
@@ -110,6 +123,7 @@ Edit window
 
 Storms
 :   - Mattermost — one Storm summary per Route
+    - Slack — one Storm summary per Route
     - Telegram — one Storm summary per Route
     - Bridge — one Storm summary per Route
     - Outgoing webhook, events mode — every event is sent, no summary
@@ -117,6 +131,7 @@ Storms
 
 Proxy
 :   - Mattermost — on the Connection
+    - Slack — on the Connection
     - Telegram — on the Connection
     - Bridge — on the Connection
     - Outgoing webhook, events mode — on the Destination
@@ -124,6 +139,7 @@ Proxy
 
 Destination check
 :   - Mattermost — yes
+    - Slack — yes, `conversations.info`
     - Telegram — yes
     - Bridge — yes, `checkChannel`, which posts nothing
     - Outgoing webhook, events mode — no
@@ -131,6 +147,7 @@ Destination check
 
 Test message and preview
 :   - Mattermost — yes
+    - Slack — yes, the test message cannot press its own button
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — yes, sends the event `test`
@@ -138,11 +155,15 @@ Test message and preview
 
 Notes on the entries:
 
-- **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
-  default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of
-  all Connections to one server below that together. A Telegram chat takes about 20 messages and edits per minute, which is
-  why its Destination limiter is half of that. A bridge says its own limits in its info, and its `rate_limited` answers
-  always win. A `429` from a messenger holds the Destinations that share it, for as long as it asks.
+- **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off
+  by default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the
+  limiters of all Connections to one server below that together. Slack limits each method per app and workspace, and
+  about one message per second per channel; its Connection limiter is 50 requests a minute and its Destination limiter
+  30. A Telegram chat takes about 20 messages and edits per minute, which is why its Destination limiter is half of
+  that. A bridge says its own limits in its info, and its `rate_limited` answers always win. A `429` from a messenger
+  holds the Destinations that share it, for as long as it asks.
+- **Slack and Quiet.** Slack cannot send a message without a notification, so Quiet means "without a Mention"; an edit
+  carries no Mention. See [Connect Slack](slack.md#who-gets-notified).
 - **Account links.** Pressing a button as a Muster user, and being Mentioned, need an Account link. See [Link your
   messenger accounts](account-links.md).
 - **Loud and Quiet.** Edits never notify anybody, so every Loud change is a new message. See [Loud and
@@ -156,6 +177,8 @@ Notes on the entries:
 
 - [Connect Mattermost](mattermost.md): the bot account, the setting that lets the server call Muster for button presses,
   and who gets notified.
+- [Connect Slack](slack.md): the app and its manifests for Socket Mode and for HTTP, the tokens, the bot in the
+  channels, and who gets notified.
 - [Connect Telegram](telegram.md): the bot, a channel with comments, long polling or a webhook;
   [Telegram in restricted networks](telegram-restricted-networks.md) for networks where it is blocked.
 - [Connect a messenger through a bridge](bridge.md), and [Write a bridge](write-a-bridge.md) for a messenger Muster does not

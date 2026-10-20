@@ -6,8 +6,9 @@ The index of this text, with the rules for AI agents, is https://muster-io.githu
 # Muster
 
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It groups Alerts into Alert
-Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Telegram, in any other
-messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze Alert Groups.
+Groups, the problems people act on; keeps one editable message per Alert Group in Mattermost, in Slack, in Telegram, in
+any other messenger through a Bridge, or behind an outgoing webhook; and lets people acknowledge, resolve and snooze
+Alert Groups.
 
 ```mermaid
 flowchart LR
@@ -17,11 +18,13 @@ flowchart LR
   end
   subgraph destinations["Destinations"]
     mm["Mattermost"]
+    sl["Slack"]
     tg["Telegram"]
     br["Bridge"]
     wh["Outgoing webhook"]
   end
   groups --> mm
+  groups --> sl
   groups --> tg
   groups --> br
   groups --> wh
@@ -43,10 +46,10 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Integrations](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): connect the Alertmanager of a cluster, connect
   [Grafana Alerting](https://muster-io.github.io/muster/latest/integrations/grafana.md) directly or through an Alertmanager, and watch the path from Alertmanager
   with a [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
-- [Messengers](https://muster-io.github.io/muster/latest/messengers/index.md): see what each Destination type can do, connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md) and
-  [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), reach any other messenger through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) (and
-  [write one](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md)), [link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md), and set a
-  [proxy](https://muster-io.github.io/muster/latest/messengers/proxies.md) for a client.
+- [Messengers](https://muster-io.github.io/muster/latest/messengers/index.md): see what each Destination type can do, connect
+  [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) and [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), reach any
+  other messenger through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) (and [write one](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md)),
+  [link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md), and set a [proxy](https://muster-io.github.io/muster/latest/messengers/proxies.md) for a client.
 - [Outgoing webhooks](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md): send the lifecycle events of Alert Groups in the
   [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md); [recipes](https://muster-io.github.io/muster/latest/outgoing-webhooks/recipes.md) for a phone call, a status page,
@@ -234,11 +237,12 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 - **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
   under **Organization → General**: see [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#general).
-- **Connect a messenger.** Connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md) or [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), add a
-  Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
-  [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md). Mattermost sends button presses to `MUSTER_PUBLIC_URL`
-  here, so the Mattermost server must reach that address: unless it reaches Muster at `http://localhost:8080`, put an
-  HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its `https://` address first.
+- **Connect a messenger.** Connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) or
+  [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md), add a Destination for a channel, and add the Destination to the Default route or
+  to a Route of its own; see [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md). Mattermost sends button presses
+  to `MUSTER_PUBLIC_URL` here, so the Mattermost server must reach that address: unless it reaches Muster at
+  `http://localhost:8080`, put an HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its
+  `https://` address first. Slack in Socket Mode needs no address of Muster that Slack can reach.
 - **Use any other messenger through a Bridge.** A [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) is a small service that connects
   Muster to a messenger it does not support natively. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md) with the library
   for Go, [muster-bridge-go](https://github.com/muster-io/muster-bridge-go), or for Python,
@@ -420,7 +424,8 @@ Muster has two addresses that other systems use, and the chart takes both as val
 `ingestURL`
 :   environment variable: `MUSTER_INGEST_URL`
 
-    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.
+    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook, and the button
+    presses of Slack Connections in the HTTP event mode.
 
 `ingestURL` defaults to `publicURL`. Muster never derives either from an Ingress or a route: set them to the addresses
 that people and machines really use, or the links it builds will be wrong.
@@ -738,6 +743,10 @@ Mattermost
 :   11.2.2, a test server on the **development stand**, through REST API v4 with a bot account. CI runs the same
     behaviour against a fake Mattermost server. See [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md).
 
+Slack
+:   Slack's cloud Web API and Socket Mode, on a **development stand**: a free workspace with a test app and a test
+    channel. CI runs against a fake. See [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md).
+
 Telegram
 :   The cloud Bot API 10.3, on a **development stand**, with a test bot and a test channel. CI runs against a fake. See
     [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md).
@@ -831,10 +840,11 @@ Choosing **Custom** fills the editor with the source of the built-in template in
 from what people see today and edit it. Choosing **Built-in** again keeps your text until you leave the page.
 
 Each editor has a **Preview** under it. Choose the **Sample** it renders against: a **Built-in example**, the **Recent
-snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost or
-Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of the Route
-(up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not parse, or
-that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and column.
+snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost,
+Slack or Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
+the Route (up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not
+parse, or that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and
+column.
 
 The Outgoing webhook Destinations have templates of their own, written the same way: see
 [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md).
@@ -1860,18 +1870,19 @@ staleness either; a shorter one does, which is at most the timeout against at le
 # Messengers
 
 Muster delivers Alert Groups to **Destinations**. A Destination is a place where Alert Groups arrive: a channel of a
-messenger, or an outgoing webhook. There are four types:
+messenger, or an outgoing webhook. There are five types:
 
 - **Mattermost**, through a bot account on your Mattermost server;
+- **Slack**, through the bot of a Slack app, to a channel the bot is a member of;
 - **Telegram**, through a bot, to a channel with comments;
 - **Bridge**, for any other messenger: a small service that you or someone else writes speaks the Bridge protocol with
   Muster and talks to the messenger;
 - **Outgoing webhook**, which sends the lifecycle events of Alert Groups, or requests you build from templates, to any HTTP
   endpoint.
 
-A **Connection** holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, a Telegram bot, or a
-Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection; the Destination carries its own
-address, Secrets and proxy.
+A **Connection** holds the credentials Muster uses to reach one messenger: a bot on a Mattermost server, the bot of a
+Slack app, a Telegram bot, or a Bridge. Many Destinations can share a Connection. An outgoing webhook has no Connection;
+the Destination carries its own address, Secrets and proxy.
 
 To start, create the Connection, check it, create a Destination for a channel, and add the Destination to a Route. A Route
 decides which Alert Groups reach which Destinations; see [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md).
@@ -1884,6 +1895,7 @@ features.
 
 Needs a Connection
 :   - Mattermost — yes
+    - Slack — yes
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — no
@@ -1891,6 +1903,7 @@ Needs a Connection
 
 One message per Alert Group, kept up to date
 :   - Mattermost — yes
+    - Slack — yes
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — no: one request per event
@@ -1898,6 +1911,7 @@ One message per Alert Group, kept up to date
 
 Edits of the Root message
 :   - Mattermost — yes
+    - Slack — yes, no window known
     - Telegram — yes
     - Bridge — yes, until the bridge's edit window
     - Outgoing webhook, events mode — no
@@ -1905,6 +1919,7 @@ Edits of the Root message
 
 Buttons
 :   - Mattermost — yes
+    - Slack — yes, with the Snooze menu
     - Telegram — yes
     - Bridge — if the bridge declares `buttons`
     - Outgoing webhook, events mode — no
@@ -1912,6 +1927,7 @@ Buttons
 
 Without buttons
 :   - Mattermost — the web UI and the API
+    - Slack — the web UI and the API
     - Telegram — the web UI and the API
     - Bridge — [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) in the Thread if the bridge declares
       `thread_messages`; otherwise the web UI and the API
@@ -1920,6 +1936,7 @@ Without buttons
 
 Thread
 :   - Mattermost — replies under the Root message
+    - Slack — replies under the Root message
     - Telegram — the comments of the Root message, in the channel's discussion group
     - Bridge — replies under the Root message
     - Outgoing webhook, events mode — no: each event is separate
@@ -1927,6 +1944,7 @@ Thread
 
 Loud
 :   - Mattermost — a new post with Mentions
+    - Slack — a new message with Mentions
     - Telegram — a new message
     - Bridge — a new message that the bridge posts with `notify`
     - Outgoing webhook, events mode — `notify` is true
@@ -1934,6 +1952,7 @@ Loud
 
 Quiet
 :   - Mattermost — an edit, or a post without a Mention
+    - Slack — an edit, or a message without a Mention
     - Telegram — an edit, or a message sent with `disable_notification`
     - Bridge — an edit, or a message without a notification if the bridge declares `quiet_messages`
     - Outgoing webhook, events mode — `notify` is false
@@ -1941,6 +1960,7 @@ Quiet
 
 Mentions
 :   - Mattermost — nobody, `@channel` `@all` `@here`, users, Mattermost groups
+    - Slack — nobody, `@channel` `@here`, users
     - Telegram — nobody, users
     - Bridge — nobody, users
     - Outgoing webhook, events mode — nobody, everyone, users, groups, as data
@@ -1948,6 +1968,7 @@ Mentions
 
 Account links
 :   - Mattermost — yes: a code the bot sends by direct message
+    - Slack — yes: a code the bot sends by direct message
     - Telegram — yes: a link that opens the bot
     - Bridge — yes: a token sent to the bot, and a code if the bridge can find people and send direct messages
     - Outgoing webhook, events mode — not needed: no one presses anything
@@ -1955,6 +1976,7 @@ Account links
 
 Rate limits
 :   - Mattermost — Connection 5 requests/s; Destination the same by default
+    - Slack — Connection 50 requests/min; Destination 30 requests/min, sends and edits together
     - Telegram — Connection 15 messages/s; Destination 10 requests/min, sends and edits together
     - Bridge — Connection 10 requests/s, Destination 30 requests/min, or half of what the bridge's info declares
     - Outgoing webhook, events mode — Destination 5 requests/s
@@ -1962,6 +1984,7 @@ Rate limits
 
 Edit window
 :   - Mattermost — none by default; the server setting `PostEditTimeLimit` is unlimited, so keep it
+    - Slack — none known for a bot's messages
     - Telegram — none for the bot's own messages
     - Bridge — the bridge declares it, or none; Muster publishes a new Root message past it
     - Outgoing webhook, events mode — not applicable
@@ -1969,6 +1992,7 @@ Edit window
 
 Storms
 :   - Mattermost — one Storm summary per Route
+    - Slack — one Storm summary per Route
     - Telegram — one Storm summary per Route
     - Bridge — one Storm summary per Route
     - Outgoing webhook, events mode — every event is sent, no summary
@@ -1976,6 +2000,7 @@ Storms
 
 Proxy
 :   - Mattermost — on the Connection
+    - Slack — on the Connection
     - Telegram — on the Connection
     - Bridge — on the Connection
     - Outgoing webhook, events mode — on the Destination
@@ -1983,6 +2008,7 @@ Proxy
 
 Destination check
 :   - Mattermost — yes
+    - Slack — yes, `conversations.info`
     - Telegram — yes
     - Bridge — yes, `checkChannel`, which posts nothing
     - Outgoing webhook, events mode — no
@@ -1990,6 +2016,7 @@ Destination check
 
 Test message and preview
 :   - Mattermost — yes
+    - Slack — yes, the test message cannot press its own button
     - Telegram — yes
     - Bridge — yes
     - Outgoing webhook, events mode — yes, sends the event `test`
@@ -1997,11 +2024,15 @@ Test message and preview
 
 Notes on the entries:
 
-- **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off by
-  default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the limiters of
-  all Connections to one server below that together. A Telegram chat takes about 20 messages and edits per minute, which is
-  why its Destination limiter is half of that. A bridge says its own limits in its info, and its `rate_limited` answers
-  always win. A `429` from a messenger holds the Destinations that share it, for as long as it asks.
+- **Rate limits.** These are the defaults of the limiters, and you can change them. Mattermost's own rate limit is off
+  by default; when an administrator turns it on, it allows 10 requests per second per client address, so keep the
+  limiters of all Connections to one server below that together. Slack limits each method per app and workspace, and
+  about one message per second per channel; its Connection limiter is 50 requests a minute and its Destination limiter
+  30. A Telegram chat takes about 20 messages and edits per minute, which is why its Destination limiter is half of
+  that. A bridge says its own limits in its info, and its `rate_limited` answers always win. A `429` from a messenger
+  holds the Destinations that share it, for as long as it asks.
+- **Slack and Quiet.** Slack cannot send a message without a notification, so Quiet means "without a Mention"; an edit
+  carries no Mention. See [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#who-gets-notified).
 - **Account links.** Pressing a button as a Muster user, and being Mentioned, need an Account link. See [Link your
   messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md).
 - **Loud and Quiet.** Edits never notify anybody, so every Loud change is a new message. See [Loud and
@@ -2015,6 +2046,8 @@ Notes on the entries:
 
 - [Connect Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md): the bot account, the setting that lets the server call Muster for button presses,
   and who gets notified.
+- [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md): the app and its manifests for Socket Mode and for HTTP, the tokens, the bot in the
+  channels, and who gets notified.
 - [Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md): the bot, a channel with comments, long polling or a webhook;
   [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md) for networks where it is blocked.
 - [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md), and [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md) for a messenger Muster does not
@@ -2545,6 +2578,386 @@ See also Telegram's [`logOut`](https://core.telegram.org/bots/api#logout),
 [`close`](https://core.telegram.org/bots/api#close) and
 [Using a Local Bot API Server](https://core.telegram.org/bots/api#using-a-local-bot-api-server).
 
+<!-- Source: https://muster-io.github.io/muster/latest/messengers/slack.md -->
+# Connect Slack
+
+Muster posts to Slack through the Web API with the **bot** of a Slack app that you create from a manifest and install in
+your workspace: one message per Alert Group, the **Root message**, which Muster edits as the Alert Group changes, and
+replies in its **Thread** for what happens later. People act on the Alert Group with the buttons of the message and its
+**Snooze…** menu. Muster uses no incoming webhook, no Events API subscription and no user token.
+
+In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and `MUSTER_INGEST_URL` is
+`https://ingest.muster.example.org`.
+
+## Socket Mode or HTTP
+
+A button press reaches Muster in one of two **event modes**, set on the Connection (`connection.slack.event_mode`).
+Choose before you create the app, because the app's manifest differs.
+
+Socket Mode
+:   The Leader holds a WebSocket connection to Slack, so Slack needs no address of Muster: Muster only calls out. It is
+    the way when Muster has no address that Slack can reach. It needs the app-level token. Only the Leader holds the
+    socket, so a press made while the Leader changes is lost: the person sees Slack's error, and Muster does not count
+    on Slack to send it again. A handover takes well under a minute; see
+    [High availability](https://muster-io.github.io/muster/latest/operations/high-availability.md).
+
+HTTP
+:   Slack posts every press to the Connection's callback address, which the Connection page shows:
+
+    ```text
+    https://ingest.muster.example.org/api/v1/callbacks/slack/CN…
+    ```
+
+    Slack must reach this address over HTTPS. Any replica receives the press, so no press is lost while the Leader
+    changes. It needs the app's Slack signing secret: Muster verifies the signature of every press with it, and
+    refuses a request whose timestamp is further than `slack.request_tolerance` (5 minutes) from its own clock, so keep
+    the clocks of Muster's nodes right. A request with a wrong or missing signature, a stale timestamp, an unknown
+    Connection or a Connection in Socket Mode is answered `401` with the same body, which reveals nothing about which
+    Connections exist; a body over 1 MiB, or one without a `payload`, is answered `400`.
+
+    If Slack is the only client outside your network that reaches the ingest listener, expose only `/api/v1/callbacks/`
+    on the address Slack reaches, for example with a reverse proxy that forwards that path alone to the ingest port.
+    `MUSTER_INGEST_URL` is also the address of Alertmanagers and Heartbeats: when they come from outside too, publish
+    their paths as well, or give Slack's callbacks a route of their own. See
+    [The two public addresses](https://muster-io.github.io/muster/latest/install/helm.md#the-two-public-addresses).
+
+A Slack app sends its presses to the sockets alone while its Socket Mode is on, and over HTTP alone while it is off, so
+the app and the Connection must agree: a Connection receives presses only in its own mode.
+
+### One Slack app per Connection
+
+Slack hands each press to any one of the app's open socket connections, and Muster binds a press to a Destination of
+the Connection that receives it. Two Connections on one Slack app, in one Muster or in two, would therefore share its
+presses at random, and a press that reaches the wrong Connection is refused as "This button could not be verified".
+Over HTTP an app has one Request URL, so it serves one Connection. Create a Slack app for each Connection, a test copy
+of Muster included.
+
+Muster notices it. When Slack tells the Leader that the app has more socket connections than the Leader holds, another
+program is connected to the same app, usually a second Connection or Muster, or a script: the **Check connection** of a
+Connection in Socket Mode passes with the warning `another_client_connected`, the Connection page shows the same
+warning, `muster doctor` prints a `WARN` line, and the Leader logs
+[`slack_socket_shared`](https://muster-io.github.io/muster/latest/reference/log-events.md#slack_socket_shared). Presses go on working, but some of them are
+lost to the other program. Muster takes the count at each `hello`: when a socket reconnects, at the planned refresh
+hours after the previous one, and when the Connection is saved with a change, which restarts its socket at once. So the
+warning can stay for hours after its cause is gone; to clear it, save the Connection with its app-level token entered
+again. How long Slack counts the connection of a Leader that crashed has not been verified.
+
+## Create the app from a manifest
+
+1. Open [Your Apps](https://api.slack.com/apps) in Slack, select **Create New App → From a manifest**, choose the
+   workspace and paste one of the manifests below, in YAML.
+2. Check the summary Slack shows and create the app.
+
+### The manifest for Socket Mode
+
+```yaml
+display_information:
+  name: Muster
+  description: Muster alert groups
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: Muster
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - channels:read
+      - groups:read
+      - im:write
+      - users:read
+      - users:read.email
+settings:
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+### The manifest for HTTP
+
+It differs from the first in the Interactivity Request URL, the callback address of the Connection, and in Socket Mode,
+which is off:
+
+```yaml
+display_information:
+  name: Muster
+  description: Muster alert groups
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: Muster
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - channels:read
+      - groups:read
+      - im:write
+      - users:read
+      - users:read.email
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://ingest.muster.example.org/api/v1/callbacks/slack/CNAGK7M3QX9P2R
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+```
+
+The Connection page shows its callback address only once the Connection is saved, and saving it needs the bot token of
+the installed app. Create the app with the address above, create the Connection, then copy its callback address into
+**Interactivity & Shortcuts → Request URL** of the app.
+
+### What the manifest sets
+
+The app and its bot are named **Muster**. The bot posts under the name in the app's settings: Muster does not ask for
+`chat:write.customize`, so a name that a message carries would be ignored. To use another name, change both names in
+the manifest.
+
+The Messages tab is on and read-only
+:   Account links send a person a code by direct message from the bot, and the direct messages of an app show in its
+    Messages tab. Read-only means that the person reads the code and cannot write to the bot. Keep the tab on: Slack
+    documents that with it off it refuses the bot's direct message, and the request for a code then fails with the
+    problem `messages_tab_disabled` (`409`), which has not been seen yet on a real workspace. A refused request still
+    counts toward the limits of Account links, 5 requests an hour for a person and 3 for one Slack account
+    (`account_link.slack_code_requests`), so after you turn the tab on again, a person who tried several times may have
+    to wait up to an hour. Turn it on under **App Home → Show Tabs → Messages Tab**. See [Link
+    Slack](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack).
+
+The Home tab is off
+:   Muster publishes no Home tab.
+
+Interactivity is on
+:   Buttons and menus send nothing to Muster without it. Over HTTP it holds the Request URL.
+
+Socket Mode is on, or off for HTTP
+:   See [Socket Mode or HTTP](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http).
+
+Token rotation is off
+:   With rotation, the bot token expires and Slack issues a new one. Muster stores the token you enter and has no way to
+    renew it, so a rotating token ends as `token_expired` and every Destination of the Connection becomes
+    [Broken](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md).
+
+The app is not deployed to an organization
+:   One Connection serves one app in one workspace.
+
+There is no event subscription
+:   Muster does not use the Events API: it hears only the presses of buttons and menus.
+
+### The scopes
+
+Muster needs these six bot scopes and no other. **Check connection** reads the scopes Slack grants the token and fails
+with `missing_scope`, naming the missing ones.
+
+`chat:write`
+:   Posts, edits and deletes the bot's own messages, and answers the people who press its buttons.
+
+`channels:read`
+:   Reads a public channel to check a Destination, and lists the public channels the bot is a member of.
+
+`groups:read`
+:   The same for private channels.
+
+`im:write`
+:   Lets the bot open a direct chat with a person. The Connection check fails without it. The code of an Account link
+    is sent with `chat.postMessage` to the person's user id, which needs `chat:write`; whether Slack also needs
+    `im:write` for that has not been verified, so Muster keeps the scope.
+
+`users:read`
+:   Finds a person by name for an Account link, and reads the app of the bot so that the check can tell whether both
+    tokens belong to one app.
+
+`users:read.email`
+:   Finds a person by email for an Account link.
+
+Muster never joins a channel on its own, so it asks for no `channels:join`: you invite the bot.
+
+## Install the app and create the tokens
+
+1. In the app's settings, open **Install App** and install it in the workspace. Slack then shows the **Bot User OAuth
+   Token** under **OAuth & Permissions**; it starts with `xoxb-`. Copy it. Anyone with the token controls the bot.
+2. In Socket Mode, open **Basic Information → App-Level Tokens** and generate a token with the scope
+   `connections:write`. It starts with `xapp-`. Copy it. Anyone with this token can open sockets of the app and take
+   its presses.
+3. Over HTTP, open **Basic Information → App Credentials** and copy the **Signing Secret**. Anyone with it can send
+   Muster presses that pass the signature check.
+
+Muster stores all three secrets encrypted, never shows them again and writes them to no log line.
+
+## Create the Connection
+
+In Muster, create a **Connection** of type Slack. Enter a name, choose the event mode, and enter the bot token and, in
+Socket Mode, the app-level token, or over HTTP the Slack signing secret. A Slack Connection has no address field, since
+Slack's address is fixed. Then **Check connection**. The check runs in steps and shows the latency of each and whether
+it went through the proxy:
+
+1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not a
+   bot's;
+2. **Scopes**: every scope of the manifest is granted;
+3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
+   connection for it. The check opens no WebSocket.
+
+Over HTTP no request can show that Slack reaches the callback address or that the Slack signing secret is right, because
+a bot cannot press its own button. The first press does: see [The test message](https://muster-io.github.io/muster/latest/messengers/slack.md#the-test-message).
+
+**Check connection** also works in the form before anything is saved. It checks the values in the form and saves
+nothing, and no bot name is recorded. A stored token goes to Slack only through the saved proxy: after a change of the
+proxy, type the tokens again to check, or save first.
+
+## Invite the bot and create Destinations
+
+A bot posts only to channels it is a member of. In Slack, invite the bot to each channel a Destination posts to, public
+or private:
+
+```text
+/invite @Muster
+```
+
+In Muster, create a **Destination** of type Slack with the Connection and the channel. The form lists the public and
+private channels the bot is a member of; for a channel that is not listed, type its id as Slack shows it in the
+channel's details, `C…` or `G…`. A direct chat or a person cannot be a Destination. Saving runs the **Destination
+check**, which asks Slack about the channel with `conversations.info` and refuses a Destination that fails:
+
+- `channel_not_found`: no such channel, or a private channel the bot is not in;
+- `channel_archived`: the channel is archived;
+- `bot_not_in_channel`: "Invite the bot to the channel: /invite @{bot}", where `{bot}` is the bot's name as Slack
+  reports it for the bot token, such as `muster`.
+
+The bot's name appears in that hint only after **Check connection** has run on the saved Connection; before that it
+says only "Invite the bot to the channel."
+
+**Check** on the Destination page runs the same check at any time. When Slack refuses the bot later, for example
+because someone removed it from the channel, the Destination becomes **Broken**; Muster runs the check every few
+minutes while nothing waits for the Destination, and ends the Broken state once it passes again, for example after
+someone invites the bot back. See [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md).
+
+## Link accounts
+
+A button acts as a Muster User, and a Mention reaches a person, only through an Account link. The person enters their
+Slack email or name in their profile, and the bot sends a code by direct message, in the Messages tab of the app. The
+code has 8 characters, is valid for 10 minutes and allows 5 attempts (`account_link.slack_code`). See [Link
+Slack](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack).
+
+## Where answers to presses show
+
+A successful press is not answered: the Root message changes. Whatever the person who pressed must read — that the press
+was refused, that their Slack account is not linked to Muster yet, or that the button could not be verified — shows in
+the channel as a message only they can see, marked "Only visible to you". Unlike Mattermost, Slack needs no permission
+beyond `chat:write` for it. For a press on a Thread reply, such as a Reminder, the answer shows in the Thread. The one
+success that is answered is "Still on it", which changes no message.
+
+Slack does not guarantee such a message: the person must be active and in the channel. When Slack refuses it, Muster
+sends the same text to the press's `response_url`, on `hooks.slack.com`; an answer that fails both ways is logged and
+not tried again. Answers are in the language of the User the account is linked to, and in English for an account
+without a link.
+
+A replica handles at most 2 presses at a time (`slack.parallel_presses`); the others wait, already confirmed to Slack. A
+press whose deadline ends while it waits for a slot, 30 seconds after it was handed over (`slack.press_deadline`), is
+answered, in English, that it failed. At most 64 presses wait for a slot in a process (`slack.max_waiting_presses`): one
+more, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer and is
+logged. None of these bounds is configurable.
+
+## Who gets notified
+
+Slack cannot send a message without a notification: whom a new message notifies depends on each member's settings for
+the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Mention", not "nobody is notified".
+
+- **Edits are Quiet.** An edit of the Root message carries no Mention, so a Loud change is always a new message: a new
+  Root message, or a reply in the Thread. The edit drops the Mentions that the Root message had; Slack may then remove
+  them from the person's list of mentions.
+- **Mentions** are `@channel` and `@here`, as the Destination's Mention settings ask, and the people chosen in them,
+  through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
+  Slack Destination takes neither `@all` nor groups. The footer of a Root message names a linked person without a
+  Mention.
+- **Thread replies** stay in the Thread: Muster never also broadcasts them to the channel.
+- **Alert data and template text never mention anyone.** An `&`, `<` or `>` in a label or an annotation is escaped, and
+  so is `@`. A literal `<!here>` or `<@U…>` written in a template is shown as text and notifies nobody. Only the
+  Destination's Mention settings, `{{ mention "here" }}` and its siblings, and linked people notify.
+
+See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md).
+
+## Rate limits
+
+Muster limits itself, and Slack limits it too.
+
+`connection.slack.limiter`
+:   50 requests a minute for every call of the Connection to the Web API together, the minimum Slack documents for the
+    methods that edit and delete.
+
+`destination.slack.limiter`
+:   30 requests a minute for the sends and edits of a Destination together, half of Slack's "one message per second per
+    channel".
+
+Slack limits each method per app and workspace. When it answers `429`, Muster holds every request of the Connection, for
+any of its Destinations, for the seconds of `Retry-After`; this is not counted as a failed attempt, and does not make a
+Destination Broken. A `429` without `Retry-After` counts as a transient failure. You can change both limiters.
+
+## Edits and deleted Root messages
+
+Muster edits a Root message for as long as its Alert Group is open, which can be days. Slack lets a
+bot edit its own messages, and no edit window is known for them. Whether a window that your workspace sets applies to
+the messages of a bot, hours or days old, has not been verified; an edit that Slack refuses that way ends that delivery
+as Not delivered and does not make the Destination Broken.
+
+When someone deletes a Root message, Muster finds out at its next edit, when Slack answers `message_not_found`. It
+checks that the bot is still in the channel and the channel is not archived, and then posts the Alert Group again once,
+Quietly, with a note. If the bot is gone or the channel archived, the Destination becomes Broken instead. A Root message
+that already had replies stays in the channel as "This message was deleted." with its replies, and Muster's later
+replies still go under it until the next edit finds it gone.
+
+A Root message deleted before it had any reply takes no reply: Slack posts a reply to it into the channel, as an
+ordinary message, and answers as if it had worked. Muster notices, deletes that message at once and posts the Alert
+Group again. The reply may stay in the channel for a moment. If Slack refuses the deletion, Muster does not try again:
+the stray reply stays until someone deletes it, and the delivery records why.
+
+## The test message
+
+**Send test message** on the Destination page posts one message marked "🧪 Test message", with the buttons of its status,
+and **Preview** shows the message as Muster would send it. No Alert Group changes.
+
+A bot cannot press its own button in Slack, so the test message cannot prove that presses reach Muster, as Mattermost's
+does. Press a button of the test message yourself: Muster answers you "This is a test message; nothing was changed",
+even from an account without a link. That answer proves that presses reach Muster and, over HTTP, that the Slack
+signing secret is right.
+
+## The proxy
+
+A Slack Connection has a proxy section like the others; see [Proxies](https://muster-io.github.io/muster/latest/messengers/proxies.md). The proxy must allow `CONNECT` to
+`slack.com`; in Socket Mode also to the hosts under `slack.com` that the socket uses; and to `hooks.slack.com`, where
+the fallback answers to presses go. Where only the proxy can resolve outside names and the Organization's outbound
+address policy is strict, add `slack.com` and `*.slack.com` to **Allowed**: the domain entry covers `hooks.slack.com`
+and the socket's hosts, but not `slack.com` itself. See [Proxies](https://muster-io.github.io/muster/latest/messengers/proxies.md#what-the-outbound-address-policy-checks).
+
+Muster accepts a Socket Mode address only on `slack.com` or a host below it, and an answer address only on
+`hooks.slack.com`. If the socket cannot open, the Leader backs off (`slack.socket_backoff`, from 1 second up to 5
+minutes), logs [`slack_socket_failed`](https://muster-io.github.io/muster/latest/reference/log-events.md#slack_socket_failed), and does not make any
+Destination Broken. It waits `slack.hello_timeout`, 10 seconds, for Slack's greeting on a new socket.
+
+## Request log
+
+The **Request log** of a Slack Connection records its calls to the Web API named as Slack names them, such as
+`chat.postMessage` and `apps.connections.open`. Over HTTP it records each press that reaches the callback address as
+`interactive`, with Muster's answer, refused ones included. In Socket Mode it records each envelope that carries an
+envelope id under the type of the envelope, with the socket's host as its address and Muster's confirmation as its
+answer; the app subscribes to no events, so only `interactive` envelopes arrive. Slack's greetings, disconnects and
+keep-alive frames are not recorded. The answers Muster sends to a press's `response_url` are recorded as `response_url`,
+with the address masked: look there when an answer never shows. Tokens, the Slack signing secret and the signature are
+masked, and so are the address of the socket, the `response_url` of a press, the signed ids of buttons and the code of
+an Account link. See [Request log](https://muster-io.github.io/muster/latest/operations/request-log.md).
+
+## Check from the command line
+
+`muster doctor` prints one line per Slack Connection and per Slack Destination with the same checks, without sending
+anything, and a `WARN` line for a Connection whose app another program shares.
+
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/proxies.md -->
 # Proxies
 
@@ -2556,7 +2969,7 @@ straight. `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are **never read**, in any 
 
 | Client | Where |
 |---|---|
-| a Mattermost, Telegram or Bridge Connection | the Connection's proxy section |
+| a Mattermost, Slack, Telegram or Bridge Connection | the Connection's proxy section |
 | an outgoing webhook Destination | the Destination's proxy section |
 | the identity provider (OpenID Connect) | the OIDC settings |
 | the Organization's outgoing heartbeat | its settings |
@@ -2617,6 +3030,14 @@ Telegram is often reached through a proxy where it is blocked. [Telegram in rest
 networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md) shows the proxy on the Connection, and the alternatives: a reverse proxy
 under your own domain and a self-hosted Bot API server.
 
+## Slack
+
+A Slack Connection has no address field, since Slack's address is fixed, so a proxy sees only Slack's hosts. It must
+allow `CONNECT` to `slack.com`; in Socket Mode also to the hosts under `slack.com` that the socket uses; and to
+`hooks.slack.com`, where Muster sends the answer to a press when it cannot send it in the channel. When only the proxy
+can resolve outside names and the policy is strict, add `slack.com` and `*.slack.com` to **Allowed**: the domain entry
+covers the socket's hosts and `hooks.slack.com`, but not `slack.com` itself. See [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#the-proxy).
+
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/bridge.md -->
 # Connect a messenger through a bridge
 
@@ -2625,7 +3046,7 @@ speaks the Bridge protocol with Muster on one side and talks to your messenger o
 message as an **envelope** — the status, the title, a link, the text and the buttons — and the bridge renders the
 envelope in its messenger. A **Bridge Connection** is one bot of your messenger behind one bridge: one token is one
 bot. Muster posts one **Root message** per Alert Group to a channel of that messenger, edits it as the Alert Group
-changes, and replies in its **Thread** for what happens later, as it does for Mattermost and Telegram.
+changes, and replies in its **Thread** for what happens later, as it does for Mattermost, Slack and Telegram.
 
 To write a bridge, read [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md); the protocol itself is the
 [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) reference.
@@ -2884,10 +3305,10 @@ read [Connect a messenger through a bridge](https://muster-io.github.io/muster/l
 
 ## What a bridge is, and when to write one
 
-Muster has native support for [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md) and [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md). For any other messenger, Muster
-talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit and reply to
-messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge reports it back
-to Muster as an **event**.
+Muster has native support for [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) and [Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md). For any other
+messenger, Muster talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit
+and reply to messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge
+reports it back to Muster as an **event**.
 
 Write a bridge when your team uses a messenger with a bot API that Muster does not support. A bridge does not need to
 live in Muster's repository, and it may stay closed: the protocol is MIT licensed (see [Licence](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#licence)).
@@ -4707,16 +5128,16 @@ with secrets masked. Open a record for the request with its headers and body, an
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/account-links.md -->
 # Link your messenger accounts
 
-An **Account link** ties your Telegram account, your account on a Mattermost server, or your account on a messenger
-that Muster reaches through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md), to your Muster User. With it, a button you press under an Alert
-Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed in — and Mentions and
-footers in the messenger name you.
+An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
+or your account on a messenger that Muster reaches through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md), to your Muster User. With it, a button
+you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
+in — and Mentions and footers in the messenger name you.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
-Mattermost Connection, since each Connection is its own server, and so does an account reached through a Bridge, per
-Bridge Connection. You have at most one Telegram account and one account per Mattermost or Bridge Connection; linking
-another one replaces the earlier link, and linking the same account again keeps its link and updates its username and
-name.
+Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
+and an account reached through a Bridge, per Bridge Connection. You have at
+most one Telegram account and one account per Mattermost, Slack or Bridge Connection; linking another one replaces the
+earlier link, and linking the same account again keeps its link and updates its username and name.
 
 ## Why links start in your profile
 
@@ -4755,6 +5176,31 @@ codes an hour, whoever asks (`account_link.mattermost_code_requests`); beyond th
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](https://muster-io.github.io/muster/latest/messengers/mattermost.md#direct-messages).
+
+## Link Slack
+
+1. In your profile, open **Messenger accounts**, choose the Slack Connection, enter your Slack email or name and select
+   **Send code**. An email finds your account for sure; a name is compared with the name and the display name of each
+   account, regardless of case.
+2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
+   8-character code. It shows in the **Messages** tab of the bot's app, which is read-only, so you can read the code and
+   cannot write to the bot. If you did not ask for it, ignore it.
+3. Type the code into your profile within 10 minutes (`account_link.slack_code`); capital and small letters are the
+   same. The bot confirms "Linked to Muster user {your name}".
+
+If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
+Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
+and an account that is linked to another User is refused.
+
+A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
+A new request replaces your earlier one. You can request 5 codes an hour, and one Slack account gets at most 3 codes an
+hour, whoever asks (`account_link.slack_code_requests`); beyond that, wait until the oldest request is an hour old.
+
+The bot can send the code only while the Messages tab of its app is on. Slack documents that with it off it refuses the
+direct message, and then Muster answers that the Messages tab of the Slack app is turned off; the problem is
+`messages_tab_disabled`. Ask the admin of the Slack app to turn the tab on under **App Home**, then request a new code.
+The refused request still counts toward the limits above, so if you tried several times before the tab was on, you may
+have to wait up to an hour. See [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#what-the-manifest-sets).
 
 ## Link through a Bridge
 
@@ -4803,21 +5249,24 @@ that is linked to another User is refused.
 
 ## Several Connections of one messenger
 
-An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
-Telegram bot. What a link covers differs by messenger:
+An Organization may have several Connections of one messenger, such as two Mattermost bots on one server, two Slack apps
+or a second Telegram bot. What a link covers differs by messenger:
 
 - **Mattermost links are per Connection.** Each Mattermost Connection is its own Identity space, even when two
   Connections use bots on the same server: two bots on one server need two links, made one after the other from
   **Link Mattermost** with each Connection. Your profile lists one row per Connection.
-- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections
-  reach the same bridge with two bots: two Connections need two links, made one after the other, and a token started
-  for one of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
+- **Slack links are per Connection.** Each Slack Connection is its own Identity space, even when two Connections serve
+  the same workspace with two apps: two Connections need two links, made one after the other from **Link Slack** with
+  each Connection. Your profile lists one row per Connection.
+- **Bridge links are per Connection.** Each Bridge Connection is its own Identity space, also when two Connections reach
+  the same bridge with two bots: two Connections need two links, made one after the other, and a token started for one
+  of them links nothing when you send it to the other's bot. Your profile lists one row per Connection.
 - **A Telegram link is valid for all Telegram bots.** Telegram has one Identity space, so the link you make through any
-  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
-  "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.
+  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as "Telegram ·
+  @<username> · for all Telegram bots", with "linked via <Connection>" below.
 
-One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group.
-This is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
+One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group. This
+is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
 Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
 Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.
 
@@ -4835,7 +5284,7 @@ from the web session only, as above. They cannot create a link for someone else.
 
 | Who pressed | What happens | The private answer |
 |---|---|---|
-| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret |
+| An account without a link | Nothing changes | "Your Telegram account is not linked to Muster. Link it in your profile: {link}" — or the same for Mattermost or Slack, and "Your account is not linked to Muster. Link it in your profile: {link}" through a Bridge; the link goes to your profile and carries no secret |
 | A linked Viewer | Nothing changes | "You are not permitted to do this" |
 | A linked User who is disabled | Nothing changes | "Your Muster account is disabled" |
 | A linked Responder or Admin | The Command runs as that User | "Done: {command}", or why it was refused |
@@ -4975,8 +5424,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 
 `actor`
 :   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
-    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`), or `system` with the `reason`,
-    for example `timer`.
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`), or `system` with the
+    `reason`, for example `timer`.
 
 `alert_group`
 :   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
@@ -5666,8 +6115,8 @@ not signed in. What is open is a short list of endpoints that cannot ask for a s
   and the page where a person sets a password from a setup link;
 - [ingestion](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) and the [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md), which take an
   Integration token;
-- the callbacks that Mattermost, Telegram and a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) send to Muster, which each carry a
-  secret of their own;
+- the callbacks that Mattermost, Slack, Telegram and a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md) send to Muster, which each
+  carry a secret or a signature of their own;
 - the served API specification;
 - the health checks and `/metrics`, on the internal listener, which is not meant to be reachable from outside the
   cluster.
@@ -5737,8 +6186,8 @@ There are two ways out:
 
 ## Link your messenger accounts
 
-A button in Mattermost or Telegram acts as a Muster User only if the person who presses it has linked their messenger
-account to their User. People do it themselves, from their profile, as [Link your messenger
+A button in Mattermost, Slack or Telegram acts as a Muster User only if the person who presses it has linked their
+messenger account to their User. People do it themselves, from their profile, as [Link your messenger
 accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md) describes. Admins cannot do it for them: they see the links of every User and
 can remove them, but they cannot create one for someone else. A press from an unlinked account changes nothing, and the
 person is answered privately with a link to their profile.
@@ -6566,9 +7015,10 @@ Every change to an Alert Group is either **Loud** or **Quiet**. A Loud change sh
 change should only update what they see when they look. Muster fixes the loudness of every change; you decide only whom
 a Loud change **Mentions**.
 
-The rule behind it is simple, and it is the same in Mattermost and Telegram: **an edit never notifies anybody.** Editing
-a message, even to add a Mention, does not ring a phone. So a Loud change is always a **new message**, a new Root message
-or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a Mention.
+The rule behind it is simple, and it is the same in Mattermost, Slack and Telegram: **an edit never notifies anybody.**
+Editing a message, even to add a Mention, does not ring a phone. So a Loud change is always a **new message**, a new
+Root message or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a
+Mention.
 
 ## Which changes are Loud
 
@@ -6655,6 +7105,11 @@ Mattermost
 
     A Quiet change is an edit, or a new post without a Mention.
 
+Slack
+:   A Loud change is a new message, a Root message or a reply in the Thread, with its Mentions.
+
+    A Quiet change is an edit, or a new message without a Mention.
+
 Telegram
 :   A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.
 
@@ -6677,6 +7132,10 @@ A few details:
   person a follower. So Quiet means "without a Mention", not "nobody is notified". Mentions are in the text of the
   post and never in the attachment, because a Mention in an attachment notifies with an empty notification. See [Who
   gets notified](https://muster-io.github.io/muster/latest/messengers/mattermost.md#who-gets-notified).
+- **Slack.** Slack cannot send a message without a notification: whom a new message notifies depends on each member's
+  settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
+  no Mention, so it drops the Mentions of the message it edits. See [Who gets
+  notified](https://muster-io.github.io/muster/latest/messengers/slack.md#who-gets-notified).
 - **Telegram.** `disable_notification` silences the sound but does not remove the push. Only members of the channel's
   discussion group get Thread replies, and the automatic copy of every Root message rings them, even for a Quiet one.
   Tell the people on call to join the group and mute the channel itself. See [Known limitation: Quiet Root messages ring
@@ -6705,6 +7164,7 @@ or **messenger groups**. What a Destination type offers:
 | Destination | Nobody | Everyone in the chat | Chosen users | Messenger groups |
 |---|---|---|---|---|
 | Mattermost | yes | `@channel`, `@all` or `@here` | yes | Mattermost group names |
+| Slack | yes | `@channel` or `@here` | yes | no |
 | Telegram | yes | no | yes | no |
 | Bridge | yes | no | yes | no |
 | Outgoing webhook | yes | yes, as data | yes, as data | yes, as data |
@@ -6719,6 +7179,7 @@ people who are Mentioned, and the Owner above all, link their accounts from thei
 accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md). Muster renders a Mention in the messenger's own form:
 
 - Mattermost: `@username`;
+- Slack: a Mention of the person's Slack account;
 - Telegram: a link to the person, whose text is the display name;
 - Bridge: a marker that a bridge with `native_mentions` renders as the messenger's mention and any other bridge as the
   person's name.
@@ -6964,7 +7425,8 @@ two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until M
 Alert Group offers no Snooze button, and a Route without Snooze durations offers no preset either, because an empty
 `route.snooze_durations` means no Snooze from messengers. Telegram shows the presets on a row of their own under the
 durations, and a bridge with a limit on buttons drops them first; see
-[Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts).
+[Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts). Slack offers the durations and then the presets as the options of
+one **Snooze…** menu, since its web client folds the buttons beyond five in a row.
 
 The labels are part of the message. After a change of `organization.workday_start` or `organization.week_start`, each
 Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
@@ -6993,6 +7455,9 @@ API
 
 Mattermost
 :   how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it
+
+Slack
+:   how: a button on the message, and the **Snooze…** menu with the durations and then the presets · notes: the same
 
 Telegram
 :   how: an inline button on the message · notes: the same
@@ -7167,6 +7632,9 @@ What is Fatal depends on the messenger:
 
 - **Mattermost**: `401` or `403`, such as an invalid token or a bot removed from the channel, and `404` for the channel,
   which is not found or archived.
+- **Slack**: a token that Slack refuses (`invalid_auth`, `token_revoked`, `token_expired` and the like), a missing
+  scope, and a channel the bot cannot use: `channel_not_found`, `not_in_channel` for a bot removed from the channel, and
+  `is_archived`. A `429` is not Fatal: Muster holds the whole Connection for the seconds Slack asks.
 - **Telegram**: `401`, and "bot was kicked" or missing rights, such as a bot that lost its admin rights in the channel.
 - **Bridge**: the bridge answers `forbidden`, for example because the bot was removed from the channel; the bridge's own
   text becomes the reason. A bridge that does not answer at all becomes Broken through the Transient budget.
@@ -7176,7 +7644,9 @@ What is Fatal depends on the messenger:
 Several things look like trouble and do **not** make a Destination Broken:
 
 - A deleted Root message. Muster posts the Alert Group again once, Quietly, with the note "The previous message was
-  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone.
+  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone. In Slack
+  this holds while the bot is still in the channel and the channel is not archived; see [Edits and deleted Root
+  messages](https://muster-io.github.io/muster/latest/messengers/slack.md#edits-and-deleted-root-messages).
 - A Telegram Thread that lost the automatic copy of its Root message. The delivery state shows "Thread not attached".
 - A delivery that ends as Not delivered, such as a template that failed or a request the receiver rejected with `400`.
 - A Bridge Connection whose bridge cannot be reached. The Connection does not become Broken itself; its Destinations do,
@@ -7256,6 +7726,10 @@ similar from the outside, so here is the whole picture.
 
 Telegram
 :   None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.
+
+Slack
+:   None known for a bot's own messages. Whether a window that a workspace sets applies to a bot's messages hours or
+    days old has not been verified; an edit Slack refuses ends that delivery as Not delivered.
 
 Mattermost
 :   The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If
@@ -8063,12 +8537,13 @@ an Alert Group's delivery: the Request log keeps the requests themselves, for a 
 Each attempt of a request is a record of its own.
 
 **Requests Muster sends** for a Connection or an outgoing webhook Destination: Root messages, their edits, Thread
-replies, final edits, Storm summaries and deletions; test messages, and the button press a Mattermost test makes
-through the bot; answers to people, such as ephemeral messages and callback answers; the requests of Account links,
-such as finding a person and sending a direct message; channel lists, bridge info and webhook registration; event
-polling (Telegram `getUpdates`, Bridge `pollEvents`); and the requests of checks and tests — the Connection check, the
-check before saving, also of a Connection that does not exist yet, the Destination check, the test message and the
-probe of a Broken Destination.
+replies, final edits, Storm summaries and deletions; test messages, and the button press a Mattermost test makes through
+the bot (a Slack test makes none, because a bot cannot press its own button); answers to people, such as ephemeral
+messages and callback answers; the requests of Account links, such as finding a person and sending a direct message;
+channel lists, bridge info and webhook registration; event polling (Telegram `getUpdates`, Bridge `pollEvents`), and the
+request that opens a Slack Socket Mode connection; and the requests of checks and tests — the Connection check, the
+check before saving, also of a Connection that does not exist yet, the Destination check, the test message and the probe
+of a Broken Destination.
 
 **Requests that reach Muster** on the ingest listener, each with the answer Muster gave, refused ones included — a bad
 signature, a wrong secret token, a Connection in the other event delivery mode:
@@ -8085,14 +8560,22 @@ signature, a wrong secret token, a Connection in the other event delivery mode:
 `/api/v1/callbacks/bridge/{connection_id}`
 :   An event a bridge pushes.
 
+`interactive`
+`/api/v1/callbacks/slack/{connection_id}`
+:   A button press in Slack, in the HTTP event mode. In Socket Mode there is no request to Muster: each envelope that
+    carries an envelope id is recorded as received under its own type, with the socket's host as its URL, the
+    envelope as its request and Muster's confirmation as its answer, without a status; the app subscribes to no events,
+    so only `interactive` envelopes arrive. Slack's `hello`, `disconnect` and keep-alive frames are not recorded.
+
 A record holds:
 
 - the time, and the direction: **Sent** (→) or **Received** (←);
 - the operation as its protocol names it: the method of the Telegram Bot API (`sendMessage`, `editMessageText`,
   `getUpdates`), the operation of Mattermost's REST API in lower camel case (`createPost`, `patchPost`, `getPing`), the
-  operation of the Bridge protocol (`getInfo`, `postMessage`, `pollEvents`), `event` or the request of a template
-  (`create`, `update`, `open_thread`, `reply_in_thread`) for an outgoing webhook, and `press`, `update` or `push` for
-  requests that reached Muster;
+  operation of the Bridge protocol (`getInfo`, `postMessage`, `pollEvents`), the method of Slack's Web API as Slack
+  names it (`chat.postMessage`, `chat.update`, `apps.connections.open`), `response_url` for an answer sent to a press's
+  `response_url`, `event` or the request of a template (`create`, `update`, `open_thread`, `reply_in_thread`) for an
+  outgoing webhook, and `press`, `update`, `push` or `interactive` for requests that reached Muster;
 - the method, the URL, the request headers and body, and the answer's status, headers and body — none for a request
   that got no answer;
 - the latency in milliseconds, the path — direct or through the proxy — and the attempt;
@@ -8147,13 +8630,16 @@ Every masked value reads `[redacted]`.
   a Telegram URL, the proxy password, an outgoing webhook's Secrets and Signing secret, a bridge's push secret, a
   secret in a query.
 - **Headers whose values are always masked**, whatever they hold: `Authorization`, `Proxy-Authorization`, `Cookie`,
-  `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token` and `webhook-signature`, the signature header of outgoing webhooks
-  and of pushed Bridge events.
+  `Set-Cookie`, `X-Telegram-Bot-Api-Secret-Token`, `X-Slack-Signature` and `webhook-signature`, the signature header of
+  outgoing webhooks and of pushed Bridge events.
 - **The URL** keeps no user information, and the path of a Connection's base URL, which may be a secret — such as the
   path of a bridge behind a reverse proxy — is shown as `[redacted]`, as in errors.
-- **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost press, and
-  the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an `account_link`
-  event, the code in a direct message.
+- **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
+  press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
+  `account_link` event, the code in a direct message.
+- **What Slack sends and answers with**: the bot token and the app-level token, the Slack signing secret, the address
+  that `apps.connections.open` answers with, whose single-use `ticket` opens a socket, the `response_url` of a press,
+  and the legacy verification `token` that every Slack payload still carries.
 
 Headers and bodies are untrusted text. The record view shows them as plain text and never renders HTML or Markdown.
 
@@ -8202,6 +8688,11 @@ Destination test.
   means that the Mattermost server does not reach Muster: see
   [Let button presses reach Muster](https://muster-io.github.io/muster/latest/messengers/mattermost.md#let-button-presses-reach-muster). A `press` that Muster
   answered shows the answer the person got, such as the text that their account is not linked.
+- **Button presses in Slack do nothing.** In the HTTP event mode, filter the Connection's Request log by **Received**.
+  No `interactive` at all means that Slack does not reach Muster: see [Socket Mode or
+  HTTP](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http). An `interactive` answered `401` means a wrong Slack signing secret,
+  a clock further than `slack.request_tolerance` from Slack's, or a Connection in Socket Mode. In Socket Mode, an
+  `interactive` is recorded for each press, and the Connection page says whether another program shares the app.
 - **A Root message looks wrong.** On the Alert Group page, open **Requests** of that Destination: the `createPost`,
   `sendMessage` or `postMessage` shows the body Muster sent and what the messenger answered.
 - **A bridge refuses a message.** The Connection's Request log shows the `postMessage`, the problem the bridge answered
@@ -8445,8 +8936,8 @@ from 2 s up to 5 min) and marks the Destination Broken only when the Transient b
 5. Compare with all outbound calls of the delivery client class:
    `sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))`. Failures across
    every Destination point at the network, a proxy or DNS rather than one messenger.
-6. Press **Check** on the Destination page, or run `muster doctor`, which prints one line per Mattermost and Telegram
-   Destination (`destination <name>`) with the result of its check.
+6. Press **Check** on the Destination page, or run `muster doctor`, which prints one line per Mattermost, Slack,
+   Telegram and Bridge Destination (`destination <name>`) with the result of its check.
 
 ## Fix
 
@@ -8512,12 +9003,18 @@ This alert has two sources with the same name, severity `critical` and this page
 ## Fix
 
 - `cause` `fatal`: fix what the reason names. Typical cases are a revoked bot token (replace it on the Connection),
-  a bot that lost its admin rights in a Telegram channel or its discussion group, a deleted channel or chat, or an
-  outgoing webhook that answers with a permanent error. Then press **Check**: a check that passes ends the Broken
+  a bot that lost its admin rights in a Telegram channel or its discussion group, a bot removed from a Slack channel
+  (invite it again with `/invite`) or a Slack channel that was archived, a deleted channel or chat, or an outgoing
+  webhook that answers with a permanent error. Then press **Check**: a check that passes ends the Broken
   state at once.
 - `cause` `unavailable`: the messenger or the path to it was down long enough to use up the Transient budget. Fix the
   network, the proxy of the Connection or the **Outbound addresses** (`/admin/organization/outbound`); the next probe
   ends the Broken state by itself, or press **Check** to end it now.
+- Slack answers `429`: it limits each method per app and workspace. Muster holds the whole Connection for the seconds
+  of `Retry-After` and does not count that as a failed attempt, so a `429` with `Retry-After` does not make a
+  Destination Broken. A `429` without it counts as a transient failure, and enough of them use up the Transient budget
+  (`cause` `unavailable`): lower the limiters or spread the load. See [Rate
+  limits](https://muster-io.github.io/muster/latest/messengers/slack.md#rate-limits).
 - Telegram is unreachable from your network: see
   [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md).
 - **Send test message** on the Destination page also ends the Broken state when every step succeeds.
@@ -8616,10 +9113,11 @@ every Destination together. Changes made by Commands or timers are not measured,
 3. Look for a Storm: `muster_storm_active` by `route`, the log line `storm_started` and **Storms** on the System
    status page (`/admin/system-status`). More than `route.storm_threshold` (20) new Alert Groups per minute on a
    Route fill the limiters.
-4. Check Muster's own limiters. Telegram: `destination.telegram.limiter` (10 requests per minute per Destination,
-   sends and edits together, in the channel and its discussion group) and `connection.telegram.limiter`
-   (15 messages per second per Connection). A busy Destination waits for its limiter, which is expected and not a
-   fault.
+4. Check Muster's own limiters. Telegram: `destination.telegram.limiter` (10 requests per minute per Destination, sends
+   and edits together, in the channel and its discussion group) and `connection.telegram.limiter` (15 messages per
+   second per Connection). Slack: `destination.slack.limiter` (30 requests per minute per Destination, sends and edits
+   together) and `connection.slack.limiter` (50 requests per minute per Connection). A busy Destination waits for its
+   limiter, which is expected and not a fault.
 5. Check the latency of the calls themselves:
    `histogram_quantile(0.95, sum by (le, outcome) (rate(muster_client_request_duration_seconds_bucket{job="muster",client="delivery"}[15m])))`.
    Slow calls point at the network, a proxy or the messenger.
@@ -8667,7 +9165,9 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
 3. Check whether a Storm feeds the queue: `muster_storm_active` by `route` and the log line `storm_started`.
    `route.storm_threshold` is 20 new Alert Groups per minute.
 4. For Telegram, compare the load with the limiters: `destination.telegram.limiter` allows 10 requests per minute per
-   Destination, sends and edits together, in the channel and its discussion group.
+   Destination, sends and edits together, in the channel and its discussion group. For Slack,
+   `destination.slack.limiter` allows 30 requests per minute per Destination, sends and edits together, and
+   `connection.slack.limiter` 50 requests per minute per Connection.
 5. When no delivery succeeds at all, follow [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md) instead.
 
 ## Fix

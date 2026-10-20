@@ -712,6 +712,8 @@
       
         
       
+        
+      
     
     
     
@@ -834,6 +836,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -3455,10 +3484,10 @@ write one. It starts with the bridge libraries, which do the protocol's part of 
 <strong>Bridge protocol</strong> step by step for a bridge written without a library. If you run a bridge that somebody else wrote,
 read <a href="../bridge/">Connect a messenger through a bridge</a> instead.</p>
 <h2 id="what-a-bridge-is-and-when-to-write-one">What a bridge is, and when to write one<a class="headerlink" href="#what-a-bridge-is-and-when-to-write-one" title="Permanent link">&para;</a></h2>
-<p>Muster has native support for <a href="../mattermost/">Mattermost</a> and <a href="../telegram/">Telegram</a>. For any other messenger, Muster
-talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit and reply to
-messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge reports it back
-to Muster as an <strong>event</strong>.</p>
+<p>Muster has native support for <a href="../mattermost/">Mattermost</a>, <a href="../slack/">Slack</a> and <a href="../telegram/">Telegram</a>. For any other
+messenger, Muster talks to a bridge: a small HTTP service that you write and run. Muster calls the bridge to post, edit
+and reply to messages. The bridge calls the messenger. When people press a button or write in a Thread, the bridge
+reports it back to Muster as an <strong>event</strong>.</p>
 <p>Write a bridge when your team uses a messenger with a bot API that Muster does not support. A bridge does not need to
 live in Muster's repository, and it may stay closed: the protocol is MIT licensed (see <a href="#licence">Licence</a>).</p>
 <pre class="mermaid"><code>flowchart TB

@@ -710,6 +710,8 @@
       
         
       
+        
+      
     
     
     
@@ -832,6 +834,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2802,12 +2831,18 @@ outgoing webhook.</p>
 <h2 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>cause</code> <code>fatal</code>: fix what the reason names. Typical cases are a revoked bot token (replace it on the Connection),
-  a bot that lost its admin rights in a Telegram channel or its discussion group, a deleted channel or chat, or an
-  outgoing webhook that answers with a permanent error. Then press <strong>Check</strong>: a check that passes ends the Broken
+  a bot that lost its admin rights in a Telegram channel or its discussion group, a bot removed from a Slack channel
+  (invite it again with <code>/invite</code>) or a Slack channel that was archived, a deleted channel or chat, or an outgoing
+  webhook that answers with a permanent error. Then press <strong>Check</strong>: a check that passes ends the Broken
   state at once.</li>
 <li><code>cause</code> <code>unavailable</code>: the messenger or the path to it was down long enough to use up the Transient budget. Fix the
   network, the proxy of the Connection or the <strong>Outbound addresses</strong> (<code>/admin/organization/outbound</code>); the next probe
   ends the Broken state by itself, or press <strong>Check</strong> to end it now.</li>
+<li>Slack answers <code>429</code>: it limits each method per app and workspace. Muster holds the whole Connection for the seconds
+  of <code>Retry-After</code> and does not count that as a failed attempt, so a <code>429</code> with <code>Retry-After</code> does not make a
+  Destination Broken. A <code>429</code> without it counts as a transient failure, and enough of them use up the Transient budget
+  (<code>cause</code> <code>unavailable</code>): lower the limiters or spread the load. See <a href="../../../messengers/slack/#rate-limits">Rate
+  limits</a>.</li>
 <li>Telegram is unreachable from your network: see
   <a href="../../../messengers/telegram-restricted-networks/">Telegram in restricted networks</a>.</li>
 <li><strong>Send test message</strong> on the Destination page also ends the Broken state when every step succeeds.</li>

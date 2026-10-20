@@ -814,6 +814,8 @@
       
         
       
+        
+      
     
     
     
@@ -936,6 +938,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
 
     
   </span>
@@ -2796,10 +2825,11 @@ relative: see <a href="../organization/#general">Organization settings</a>.</p>
 <p>Choosing <strong>Custom</strong> fills the editor with the source of the built-in template in the Route's language, so you start
 from what people see today and edit it. Choosing <strong>Built-in</strong> again keeps your text until you leave the page.</p>
 <p>Each editor has a <strong>Preview</strong> under it. Choose the <strong>Sample</strong> it renders against: a <strong>Built-in example</strong>, the <strong>Recent
-snapshots of this route</strong>, or the Stored Snapshots of one Integration; and the <strong>Markup of the preview</strong>, Mattermost or
-Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of the Route
-(up to 20, <code>template.dry_run_sample</code>, or the built-in example when there are none). A template that does not parse, or
-that calls a function Muster does not have, is <strong>not saved</strong>: the editor marks the error at its line and column.</p>
+snapshots of this route</strong>, or the Stored Snapshots of one Integration; and the <strong>Markup of the preview</strong>, Mattermost,
+Slack or Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
+the Route (up to 20, <code>template.dry_run_sample</code>, or the built-in example when there are none). A template that does not
+parse, or that calls a function Muster does not have, is <strong>not saved</strong>: the editor marks the error at its line and
+column.</p>
 <p>The Outgoing webhook Destinations have templates of their own, written the same way: see
 <a href="../../outgoing-webhooks/templates/">template mode</a>.</p>
 <h2 id="the-template-language">The template language<a class="headerlink" href="#the-template-language" title="Permanent link">&para;</a></h2>

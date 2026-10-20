@@ -64,6 +64,9 @@
         <loc>https://muster-io.github.io/muster/messengers/proxies/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/messengers/slack/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/messengers/telegram-restricted-networks/</loc>
       </url>
       <url>
