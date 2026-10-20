@@ -105,18 +105,18 @@ issue: 312
 Playwright against `muster dev` at 1280 and 360 px wide, signed in as the Admin:
 
 1. Connections → New → Slack: name "ui", bot token `xoxb-muster-dev-slack-token-b`, Socket Mode, app-level token
-   `xapp-muster-dev-slack-token-b`; "Check connection" shows "token ✓ · scopes ✓ · app_token ✓" and "Fake bot B",
-   "Fake workspace B"; Save. Switch to HTTP: the app-level token field is gone, "Slack signing secret" and "Slack sends
-   button presses to http://localhost:8081/api/v1/callbacks/slack/CN…" appear. Expected visible text in Russian with
-   the language switched: «Проверить подключение», «Режим событий».
+   `xapp-muster-dev-slack-token-b`; "Check connection" shows "token ✓ · scopes ✓ · app_token ✓" and
+   "muster-dev-bot-b", "Fake workspace B"; Save. Switch to HTTP: the app-level token field is gone, "Slack signing
+   secret" and "Slack sends button presses to http://localhost:8081/api/v1/callbacks/slack/CN…" appear. Expected
+   visible text in Russian with the language switched: «Проверить подключение», «Режим событий».
 2. With `extra_connections` 1 on the fake server and a refresh of the socket, the page of "ui" in Socket Mode shows
    "Another program is connected to this Slack app through Socket Mode".
 3. The edit form with only the proxy changed to the fake HTTP proxy: "Check connection" shows the step "dry_probe ✓"
    alone; the fake records no request with `xoxb-muster-dev-slack-token-b` (S-087's pattern).
 4. Destinations → New → Slack, Connection "ui": the picker lists "alerts" and not "other"; typing `C0FAKEOTHER` and
-   Save shows "Invite the bot to the channel: /invite @Fake bot B"; picking "alerts" saves "#alerts"; "Check" shows
-   the item channel ✓; "Send test message" shows the step message and "Slack does not let a bot press its own button,
-   so this test does not check presses."; Preview shows a red bar, "Ack" in green, "Resolve" and "Snooze…".
+   Save shows "Invite the bot to the channel: /invite @muster-dev-bot-b"; picking "alerts" saves "#alerts"; "Check"
+   shows the item channel ✓; "Send test message" shows the step message and "Slack does not let a bot press its own
+   button, so this test does not check presses."; Preview shows a red bar, "Ack" in green, "Resolve" and "Snooze…".
 5. Profile → Messenger accounts → Link Slack → "ui": `alice@example.org`, "Send code"; the code from
    `/_fake/dms?user=U0FAKEALICE`; the list shows "Slack · ui · Alice Smith"; Unlink removes it. "nobody" shows "No
    Slack account with this email or name was found."
