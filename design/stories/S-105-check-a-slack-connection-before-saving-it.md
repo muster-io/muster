@@ -45,7 +45,7 @@ issue: 314
   `ConnectionDraft`; the description of `checkConnectionDraft` names Slack; `ConnectionCheckStep.name` describes
   `dry_probe` for Slack, and `NullableConnectionCheckCode` the code `not_slack` that S-097 added.
 - **Operation**: `checkConnectionDraft` (`POST /connections/checks`, `connections:write`, interactive) for the type;
-  the `422` at `/type` of S-097 for a Slack draft is gone.
+  the `400` of S-097 for a Slack draft, a request matching no member of `ConnectionDraft`, is gone.
 - **Draft check** (`internal/connections/draft.go`): a Slack draft's route — the address is Slack's, so only the proxy
   can differ from the saved Connection; a token typed in the draft goes with the draft's proxy; a stored token only
   when the draft's proxy equals the saved one; otherwise only the dry probe. The steps are those of `checkConnection`
@@ -70,7 +70,7 @@ issue: 314
 ```sh
 make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011; the Connection "sl" (C) as in S-097, in `socket` mode, no proxy
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake; FP=127.0.0.1:18091/_fake
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake; FP=127.0.0.1:18091/_fake
 
 # a new Connection: the typed tokens, nothing stored
 N0=$(curl -s -b jar $API/connections | jq '.items | length')

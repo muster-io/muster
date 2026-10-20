@@ -326,6 +326,31 @@ var encryptedFields = map[string]encryptedField{
 				Ciphertext: u.ciphertext, KeyID: u.keyID, PreviousKeyID: u.previous})
 		},
 	},
+	"connections.slack_app_token": {
+		list: func(ctx context.Context, q *dbgen.Queries, org int64, key string) ([]EncryptedValue, error) {
+			rows, err := q.ListRotateSlackAppToken(ctx, dbgen.ListRotateSlackAppTokenParams{OrgID: org, KeyID: key})
+			return values(rows, err, func(r dbgen.ListRotateSlackAppTokenRow) EncryptedValue {
+				return EncryptedValue{Row: RowKey{ID: r.ID}, Ciphertext: r.Ciphertext, KeyID: r.KeyID}
+			})
+		},
+		update: func(ctx context.Context, q *dbgen.Queries, org int64, u update) (int64, error) {
+			return q.ReencryptSlackAppToken(ctx, dbgen.ReencryptSlackAppTokenParams{OrgID: org, ID: u.row.ID,
+				Ciphertext: u.ciphertext, KeyID: u.keyID, PreviousKeyID: u.previous})
+		},
+	},
+	"connections.slack_signing_secret": {
+		list: func(ctx context.Context, q *dbgen.Queries, org int64, key string) ([]EncryptedValue, error) {
+			rows, err := q.ListRotateSlackSigningSecret(ctx, dbgen.ListRotateSlackSigningSecretParams{OrgID: org,
+				KeyID: key})
+			return values(rows, err, func(r dbgen.ListRotateSlackSigningSecretRow) EncryptedValue {
+				return EncryptedValue{Row: RowKey{ID: r.ID}, Ciphertext: r.Ciphertext, KeyID: r.KeyID}
+			})
+		},
+		update: func(ctx context.Context, q *dbgen.Queries, org int64, u update) (int64, error) {
+			return q.ReencryptSlackSigningSecret(ctx, dbgen.ReencryptSlackSigningSecretParams{OrgID: org,
+				ID: u.row.ID, Ciphertext: u.ciphertext, KeyID: u.keyID, PreviousKeyID: u.previous})
+		},
+	},
 	"destinations.proxy_password": {
 		list: func(ctx context.Context, q *dbgen.Queries, org int64, key string) ([]EncryptedValue, error) {
 			rows, err := q.ListRotateDestinationProxyPassword(ctx, dbgen.ListRotateDestinationProxyPasswordParams{
@@ -388,8 +413,8 @@ var rotationOrder = []string{
 	"oidc_settings.client_secret", "oidc_settings.proxy_password", "oidc_auth_requests.code_verifier",
 	"users.oidc_offline_token", "user_totp.seed", "user_totp.pending_seed", "connections.bot_token",
 	"connections.proxy_password", "connections.telegram_webhook_secret", "connections.bridge_push_secret",
-	"destinations.proxy_password", "destinations.signing_secret", "destinations.previous_signing_secret",
-	"destination_secrets.value",
+	"connections.slack_app_token", "connections.slack_signing_secret", "destinations.proxy_password",
+	"destinations.signing_secret", "destinations.previous_signing_secret", "destination_secrets.value",
 }
 
 // EncryptedFields are the fields rotation re-encrypts, in its order: every field of the encrypted_values view.

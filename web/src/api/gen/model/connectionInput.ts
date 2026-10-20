@@ -19,9 +19,10 @@
  */
 import type { BridgeConnectionInput } from './bridgeConnectionInput';
 import type { MattermostConnectionInput } from './mattermostConnectionInput';
+import type { SlackConnectionInput } from './slackConnectionInput';
 import type { TelegramConnectionInput } from './telegramConnectionInput';
 
 /**
  * A Connection as written; `type` selects the variant and cannot change on update.
  */
-export type ConnectionInput = MattermostConnectionInput | TelegramConnectionInput | BridgeConnectionInput;
+export type ConnectionInput = MattermostConnectionInput | TelegramConnectionInput | BridgeConnectionInput | SlackConnectionInput;

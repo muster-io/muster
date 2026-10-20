@@ -143,7 +143,7 @@ issue: 310
 make dev > dev.log 2>&1 &
 # as in S-100: the session, FAM, NOTIFY, ADV, AG, FIRE, LINK, PRESS and the Route "sl" with the Destination "alerts" (D)
 # of the Connection "sl" (C), switched back to `socket` mode; Alice linked as U0FAKEALICE
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake
 ETAG() { curl -s -b jar $API/connections/$C | jq -r .etag; }
 curl -s -X PUT $FS/config -d '{"request_url":{"b":null}}' > /dev/null
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"slack","name":"sl","event_mode":"socket",
@@ -185,7 +185,7 @@ grep -c 'ticket=[^[]\|xapp-muster-dev-slack-token-b' dev.log                    
 # C-24.AC-3: the socket through the fake HTTP proxy, by CONNECT
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"slack","name":"sl","event_mode":"socket",
   "proxy":{"enabled":true,"type":"http","address":"127.0.0.1:18091"},"limiter":{"limit":50,"per_seconds":60}}' > /dev/null; sleep 3
-curl -s 127.0.0.1:18091/_fake/requests | jq -r '[.[].target] | unique | join(",")'   # 127.0.0.1:18095: every connection, the socket's included
+curl -s 127.0.0.1:18091/_fake/requests | jq -r '[.[].target] | unique | join(",")'   # 127.0.0.1:18097: every connection, the socket's included
 
 # C-24.FR-17: the banner without a Leader names Slack (the web test), and the chart rule
 make rules-test > /dev/null && echo ok                                              # ok

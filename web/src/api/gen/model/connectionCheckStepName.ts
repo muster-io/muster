@@ -28,4 +28,6 @@ export const ConnectionCheckStepName = {
   get_webhook_info: 'get_webhook_info',
   info: 'info',
   event_delivery: 'event_delivery',
+  scopes: 'scopes',
+  app_token: 'app_token',
 } as const;

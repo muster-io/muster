@@ -28,6 +28,8 @@ import (
 	"github.com/muster-io/muster/internal/devmode/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
+	"github.com/muster-io/muster/internal/logging"
 )
 
 type mapEnv map[string]string
@@ -270,10 +272,31 @@ func get(t *testing.T, url string, headers ...string) int {
 	return resp.StatusCode
 }
 
+// slackAuthTest posts auth.test to the fake Slack server at base with token, none when empty, and returns the answer.
+func slackAuthTest(t *testing.T, base, token string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+"/api/auth.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s/api/auth.test: %v", base, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Errorf("auth.test = %d, %v", resp.StatusCode, err)
+	}
+	return string(body)
+}
+
 var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0",
 	MattermostSecond: "127.0.0.1:0", Telegram: "127.0.0.1:0", OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0",
-	Bridge:    "127.0.0.1:0",
-	HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
+	Bridge: "127.0.0.1:0", Slack: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -289,7 +312,7 @@ func TestRun(t *testing.T) {
 		})
 	}()
 
-	got := waitFor(t, out, 9, done)
+	got := waitFor(t, out, 10, done)
 	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
@@ -299,6 +322,7 @@ func TestRun(t *testing.T) {
 		`muster dev: fake SOCKS5 proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake webhook receiver (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake bridge (http://127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake Slack (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
 	m := re.FindStringSubmatch(got)
 	if m == nil {
@@ -312,8 +336,8 @@ func TestRun(t *testing.T) {
 			t.Errorf("GET %s/_fake/requests = %d", proxy, status)
 		}
 	}
-	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver, second Mattermost, bridge
-	m = []string{m[0], m[1], m[2], m[9], m[4], m[7], m[3], m[8]}
+	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver, second Mattermost, bridge, Slack
+	m = []string{m[0], m[1], m[2], m[10], m[4], m[7], m[3], m[8], m[9]}
 	for _, base := range m[1:] {
 		if status := get(t, base+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", base, status)
@@ -342,6 +366,15 @@ func TestRun(t *testing.T) {
 	}
 	if status := get(t, m[7]+"/v1/info", "Authorization", "Bearer nope"); status != http.StatusUnauthorized {
 		t.Errorf("bridge info with another token = %d", status)
+	}
+	for _, token := range []string{devmode.SlackConnectionBotToken, devmode.SlackConnectionAppToken,
+		devmode.SlackSecondBotToken, devmode.SlackSecondAppToken} {
+		if body := slackAuthTest(t, m[8], token); !strings.Contains(body, `"ok":true`) {
+			t.Errorf("Slack auth.test with %s = %s", token, body)
+		}
+	}
+	if body := slackAuthTest(t, m[8], ""); !strings.Contains(body, `"error":"not_authed"`) {
+		t.Errorf("Slack auth.test without a token = %s", body)
 	}
 
 	cancel()
@@ -395,7 +428,7 @@ func TestRunServeFails(t *testing.T) {
 	if !errors.Is(err, failed) {
 		t.Errorf("Run = %v, want the error of serve", err)
 	}
-	if len(fakes) != 7 {
+	if len(fakes) != 8 {
 		t.Fatalf("the fake servers were not running while serving: %q", out.String())
 	}
 	for _, base := range fakes {
@@ -436,7 +469,7 @@ func TestStartFakes(t *testing.T) {
 	}
 	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065",
 		MattermostSecond: "127.0.0.1:18066", Telegram: "127.0.0.1:18081", OIDC: "127.0.0.1:18090",
-		Webhook: "127.0.0.1:18093", Bridge: "127.0.0.1:18094", HTTPProxy: "127.0.0.1:18091",
+		Webhook: "127.0.0.1:18093", Bridge: "127.0.0.1:18094", Slack: "127.0.0.1:18097", HTTPProxy: "127.0.0.1:18091",
 		SOCKSProxy: "127.0.0.1:18092"}
 	if devmode.FakeAddresses() != want {
 		t.Errorf("FakeAddresses() = %+v, want %+v", devmode.FakeAddresses(), want)
@@ -685,6 +718,66 @@ func TestRunBusyBridgePort(t *testing.T) {
 	}
 }
 
+// TestSlackDemo is C-01.FR-13: the demo Connection "Dev Slack" on the fake Slack server's first app, with its
+// published bot token and app-level token; it has no address, Slack's being fixed.
+func TestSlackDemo(t *testing.T) {
+	d := devmode.SlackDemo()
+	if d.Type != connections.TypeSlack || d.Name != "Dev Slack" || d.ServerURL != "" || d.BaseURL != "" ||
+		string(d.BotToken) != "xoxb-muster-dev-slack-token" || string(d.AppToken) != "xapp-muster-dev-slack-token" ||
+		devmode.SlackConnectionBotToken != fakeslack.BotToken || devmode.SlackConnectionAppToken != fakeslack.AppToken {
+		t.Errorf("SlackDemo() = %+v", d)
+	}
+}
+
+// TestSlackRoute is C-24.FR-1 under `muster dev`: a Slack Connection whose bot token is one of the fake Slack server's
+// published bot tokens calls the fake server on its fixed address; any other token, an app-level token included, calls
+// Slack.
+func TestSlackRoute(t *testing.T) {
+	tests := []struct {
+		token string
+		want  string
+	}{
+		{fakeslack.BotToken, "http://127.0.0.1:18097/api/"},
+		{fakeslack.SecondBotToken, "http://127.0.0.1:18097/api/"},
+		{fakeslack.AppToken, ""},
+		{fakeslack.SecondAppToken, ""},
+		{"xoxb-other", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := devmode.SlackRoute(logging.Secret(tt.token)); got != tt.want {
+			t.Errorf("SlackRoute(%q) = %q, want %q", tt.token, got, tt.want)
+		}
+	}
+	if devmode.SlackBaseURL != "http://"+devmode.SlackAddr+"/api/" {
+		t.Errorf("SlackBaseURL = %q", devmode.SlackBaseURL)
+	}
+}
+
+// TestRunBusySlackPort: a busy port of the fake Slack server fails the start, naming it, and closes the fakes already
+// started.
+func TestRunBusySlackPort(t *testing.T) {
+	var lc net.ListenConfig
+	busy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	addrs := anyPort
+	addrs.Slack = busy.Addr().String()
+	var out bytes.Buffer
+	err = devmode.Run(t.Context(), &out, addrs, func(context.Context) error {
+		t.Error("Muster ran although the fake Slack server could not start")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "start the fake Slack on "+busy.Addr().String()) {
+		t.Errorf("Run = %v, want an error naming the fake Slack server and its address", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("printed %q before failing", out.String())
+	}
+}
+
 // TestStartFakesAllowsLoopback is F-022: `muster dev` lets the fake Mattermost call button presses back on loopback.
 func TestStartFakesAllowsLoopback(t *testing.T) {
 	f, err := devmode.StartFakes(t.Context(), anyPort)
@@ -730,8 +823,11 @@ func TestRunBusySecondMattermostPort(t *testing.T) {
 func TestSecondBotTokens(t *testing.T) {
 	if devmode.MattermostSecondBotToken != "muster-dev-mattermost-token-b" ||
 		devmode.TelegramSecondBotToken != "234567:dev-telegram-token-b" ||
-		devmode.BridgeSecondBotToken != "muster-dev-bridge-token-b" {
-		t.Errorf("second bot tokens %q, %q, %q", devmode.MattermostSecondBotToken, devmode.TelegramSecondBotToken,
-			devmode.BridgeSecondBotToken)
+		devmode.BridgeSecondBotToken != "muster-dev-bridge-token-b" ||
+		devmode.SlackSecondBotToken != "xoxb-muster-dev-slack-token-b" ||
+		devmode.SlackSecondAppToken != "xapp-muster-dev-slack-token-b" {
+		t.Errorf("second bot tokens %q, %q, %q, %q, %q", devmode.MattermostSecondBotToken,
+			devmode.TelegramSecondBotToken, devmode.BridgeSecondBotToken, devmode.SlackSecondBotToken,
+			devmode.SlackSecondAppToken)
 	}
 }

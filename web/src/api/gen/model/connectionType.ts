@@ -25,4 +25,5 @@ export const ConnectionType = {
   mattermost: 'mattermost',
   telegram: 'telegram',
   bridge: 'bridge',
+  slack: 'slack',
 } as const;

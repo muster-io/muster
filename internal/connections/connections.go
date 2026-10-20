@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package connections holds the Connections of C-13.FR-1, FR-6, C-14.FR-1 and C-22.FR-1: a messenger server, bot or
-// bridge that Destinations post through. A Mattermost Connection has a name, the server URL, a bot token (encrypted,
-// write-only), a proxy and its limiter; a Telegram Connection has a name, a bot token, the Bot API base URL, a proxy,
-// its limiter and its update mode, long polling or webhook; a Bridge Connection has a name, the bridge's base URL, a
-// token, its event delivery mode, poll or push, a push secret in push mode, a proxy, its limiter and the last info its
-// check read. The package checks a Connection — the token of a Mattermost one, the steps with the dry probe of a
-// Telegram one, the info of a Bridge — lists the channels a Mattermost bot sees, and runs the Destination check of a
-// Mattermost channel for the Destination write path, each on the interactive path (C-11.FR-2); it also checks a draft
-// of a Connection before it is saved, storing nothing (C-13.FR-14, draft.go). It sets and deletes the webhook of a
-// Telegram Connection when its update mode changes, and serves the Telegram Connections to the Leader's poller and to
-// the webhook endpoint. A Connection used by a Destination that is not deleted cannot be deleted; deleting one wipes
-// its secrets and abandons the final edits still pending for its deleted Destinations (C-11.FR-14). Every change is
-// recorded in the Audit log and announced with the live hint connection.
+// Package connections holds the Connections of C-13.FR-1, FR-6, C-14.FR-1, C-22.FR-1 and C-24.FR-1: a messenger server,
+// bot or bridge that Destinations post through. A Mattermost Connection has a name, the server URL, a bot token
+// (encrypted, write-only), a proxy and its limiter; a Telegram Connection has a name, a bot token, the Bot API base
+// URL, a proxy, its limiter and its update mode, long polling or webhook; a Bridge Connection has a name, the bridge's
+// base URL, a token, its event delivery mode, poll or push, a push secret in push mode, a proxy, its limiter and the
+// last info its check read; a Slack Connection has a name, a bot token, the event mode, socket or http, an app-level
+// token in socket mode and a Slack signing secret in http mode, a proxy and its limiter, and what its check learned.
+// The package checks a Connection — the token of a Mattermost one, the steps with the dry probe of a Telegram one, the
+// info of a Bridge, the tokens and scopes of a Slack one (slack.go) — lists the channels a Mattermost bot sees, and
+// runs the Destination check of a Mattermost channel for the Destination write path, each on the interactive path
+// (C-11.FR-2); it also checks a draft of a Connection before it is saved, storing nothing (C-13.FR-14, draft.go). It
+// sets and deletes the webhook of a Telegram Connection when its update mode changes, and serves the Telegram
+// Connections to the Leader's poller and to the webhook endpoint. A Connection used by a Destination that is not
+// deleted cannot be deleted; deleting one wipes its secrets and abandons the final edits still pending for its deleted
+// Destinations (C-11.FR-14). Every change is recorded in the Audit log and announced with the live hint connection.
 package connections
 
 import (
@@ -48,6 +50,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 )
 
@@ -119,7 +122,7 @@ var (
 	ErrVersionMismatch = errors.New("the connection changed since it was read")
 	// ErrInUse is the deletion of a Connection that a Destination that is not deleted uses (C-13.FR-6).
 	ErrInUse = errors.New("destinations use the connection")
-	// ErrNotMattermost is a Mattermost operation, such as the channel list, on a Telegram or Bridge Connection.
+	// ErrNotMattermost is a Mattermost operation, such as the channel list, on a Telegram, Bridge or Slack Connection.
 	ErrNotMattermost = errors.New("the connection is not a mattermost connection")
 	// errNotTelegram is a Telegram operation on a Mattermost Connection.
 	errNotTelegram = errors.New("the connection is not a telegram connection")
@@ -166,47 +169,58 @@ type Limiter struct {
 // Connection is a Connection as the API reads it; its secrets show only their status. ServerURL is a Mattermost
 // Connection's; BotAPIBaseURL, UpdateMode and Warnings are a Telegram Connection's; BridgeBaseURL, EventDelivery,
 // PushSecret, BridgeInfo — the last info its check read, as the bridge sent it, nil before — and BridgeInfoReadAt are a
-// Bridge Connection's.
+// Bridge Connection's; EventMode, AppToken, SlackSigningSecret and what its last passing check learned —
+// SlackTeamID, SlackTeamName and SlackAppID, nil before — are a Slack Connection's.
 type Connection struct {
-	ID               int64
-	PublicID         string
-	Type             string
-	Name             string
-	ServerURL        string
-	BotAPIBaseURL    string
-	UpdateMode       string
-	Warnings         []string
-	BridgeBaseURL    string
-	EventDelivery    string
-	PushSecret       keyring.SecretStatus
-	BridgeInfo       json.RawMessage
-	BridgeInfoReadAt *time.Time
-	BotToken         keyring.SecretStatus
-	BotUsername      *string
-	BotUserID        *string
-	Proxy            proxyconf.Config
-	ProxyPassword    keyring.SecretStatus
-	Limiter          Limiter
-	DestinationCount int64
-	CreatedAt        time.Time
-	Version          int64
+	ID                 int64
+	PublicID           string
+	Type               string
+	Name               string
+	ServerURL          string
+	BotAPIBaseURL      string
+	UpdateMode         string
+	Warnings           []string
+	BridgeBaseURL      string
+	EventDelivery      string
+	PushSecret         keyring.SecretStatus
+	BridgeInfo         json.RawMessage
+	BridgeInfoReadAt   *time.Time
+	EventMode          string
+	AppToken           keyring.SecretStatus
+	SlackSigningSecret keyring.SecretStatus
+	SlackTeamID        *string
+	SlackTeamName      *string
+	SlackAppID         *string
+	BotToken           keyring.SecretStatus
+	BotUsername        *string
+	BotUserID          *string
+	Proxy              proxyconf.Config
+	ProxyPassword      keyring.SecretStatus
+	Limiter            Limiter
+	DestinationCount   int64
+	CreatedAt          time.Time
+	Version            int64
 }
 
 // Input is what createConnection and updateConnection write. An omitted bot token keeps the stored one on an update and
 // is required on a creation. ServerURL is a Mattermost Connection's; BotAPIBaseURL and UpdateMode a Telegram one's;
-// BridgeBaseURL, EventDelivery and PushSecret a Bridge Connection's, whose omitted push secret keeps the stored one.
+// BridgeBaseURL, EventDelivery and PushSecret a Bridge Connection's, whose omitted push secret keeps the stored one;
+// EventMode, AppToken and SlackSigningSecret a Slack Connection's, whose omitted secrets keep the stored ones.
 type Input struct {
-	Type          string
-	Name          string
-	ServerURL     string
-	BotAPIBaseURL string
-	UpdateMode    string
-	BridgeBaseURL string
-	EventDelivery string
-	PushSecret    keyring.SecretInput
-	BotToken      keyring.SecretInput
-	Proxy         proxyconf.Input
-	Limiter       Limiter
+	Type               string
+	Name               string
+	ServerURL          string
+	BotAPIBaseURL      string
+	UpdateMode         string
+	BridgeBaseURL      string
+	EventDelivery      string
+	PushSecret         keyring.SecretInput
+	EventMode          string
+	AppToken           keyring.SecretInput
+	SlackSigningSecret keyring.SecretInput
+	BotToken           keyring.SecretInput
+	Proxy              proxyconf.Input
+	Limiter            Limiter
 }
 
 // ListFilter selects a page of Connections, of a type when set, in the order they were created, after the id After.
@@ -240,6 +254,7 @@ type Queries interface {
 	UpdateConnection(ctx context.Context, arg dbgen.UpdateConnectionParams) error
 	SetBotIdentity(ctx context.Context, arg dbgen.SetBotIdentityParams) error
 	SetBridgeInfo(ctx context.Context, arg dbgen.SetBridgeInfoParams) (int64, error)
+	SetSlackIdentity(ctx context.Context, arg dbgen.SetSlackIdentityParams) (int64, error)
 	CountConnectionDestinations(ctx context.Context, arg dbgen.CountConnectionDestinationsParams) (int64, error)
 	MarkConnectionDeleted(ctx context.Context, arg dbgen.MarkConnectionDeletedParams) error
 	ListPollingConnections(ctx context.Context, orgID int64) ([]dbgen.ListPollingConnectionsRow, error)
@@ -312,9 +327,12 @@ type Config struct {
 	Audit   *audit.Writer
 	// Clocks: the business clock dates the rows, the real clock measures the latency of a check.
 	Clocks clock.Clocks
-	// Network is what the Mattermost, Telegram and Bridge clients need: the outbound address policy, the logger and a
-	// resolver.
+	// Network is what the Mattermost, Telegram, Bridge and Slack clients need: the outbound address policy, the logger
+	// and a resolver.
 	Network mattermost.Network
+	// SlackRoute is, under muster dev, where a Slack Connection's requests go instead of Slack by its bot token: the
+	// fake Slack server for its published tokens; nil sends every request to Slack.
+	SlackRoute slack.Route
 	// Interactive is the interactive path, which the checks and the channel list take their limiter tokens from.
 	Interactive Interactive
 	// IngestURL is MUSTER_INGEST_URL, the base of the callback address and of the webhook of a Telegram Connection.
@@ -417,13 +435,15 @@ type view struct {
 	UpdateMode    string           `json:"update_mode,omitempty"`
 	BaseURL       string           `json:"base_url,omitempty"`
 	EventDelivery string           `json:"event_delivery,omitempty"`
+	EventMode     string           `json:"event_mode,omitempty"`
 	Proxy         proxyconf.Config `json:"proxy"`
 	Limiter       Limiter          `json:"limiter"`
 }
 
 func viewOf(c Connection) view {
 	return view{Name: c.Name, ServerURL: c.ServerURL, BotAPIBaseURL: c.BotAPIBaseURL, UpdateMode: c.UpdateMode,
-		BaseURL: c.BridgeBaseURL, EventDelivery: c.EventDelivery, Proxy: c.Proxy, Limiter: c.Limiter}
+		BaseURL: c.BridgeBaseURL, EventDelivery: c.EventDelivery, EventMode: c.EventMode, Proxy: c.Proxy,
+		Limiter: c.Limiter}
 }
 
 func resourceOf(c Connection) audit.Resource {
@@ -434,9 +454,9 @@ func resourceOf(c Connection) audit.Resource {
 // creation.
 func check(in *Input, stored *Connection) error {
 	switch {
-	case in.Type != TypeMattermost && in.Type != TypeTelegram && in.Type != TypeBridge:
+	case in.Type != TypeMattermost && in.Type != TypeTelegram && in.Type != TypeBridge && in.Type != TypeSlack:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat,
-			Detail: "The type is not mattermost, telegram or bridge."}
+			Detail: "The type is not mattermost, telegram, bridge or slack."}
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Connection cannot change."}
 	}
@@ -472,16 +492,24 @@ func check(in *Input, stored *Connection) error {
 	case stored != nil && in.Type == TypeBridge && in.BridgeBaseURL != stored.BridgeBaseURL && !in.BotToken.Given:
 		return &FieldError{Pointer: "/bot_token", Code: CodeRequired, Detail: "A new base URL needs the bot token again."}
 	}
-	if in.Type == TypeBridge {
+	switch in.Type {
+	case TypeBridge:
 		return checkPushSecret(*in, stored)
+	case TypeSlack:
+		return checkSlackSecrets(*in, stored)
 	}
 	return nil
 }
 
 // checkAddress validates and normalizes where the Connection of in calls: the server URL of a Mattermost Connection;
 // the Bot API base URL (C-14.FR-10), stored without its trailing slashes, and the update mode of a Telegram one; the
-// base URL and the event delivery mode of a Bridge (checkBridgeAddress).
+// base URL and the event delivery mode of a Bridge (checkBridgeAddress); the event mode of a Slack Connection, whose
+// address is Slack's (checkSlackAddress).
 func checkAddress(in *Input) error {
+	if in.Type == TypeSlack {
+		return checkSlackAddress(in)
+	}
+	in.EventMode = ""
 	if in.Type == TypeBridge {
 		return checkBridgeAddress(in)
 	}
@@ -551,10 +579,11 @@ func proxy(in proxyconf.Input, stored proxyconf.Config) (proxyconf.Config, error
 	return p, err
 }
 
-// Create creates a Mattermost Connection (C-13.FR-1), a Telegram one (C-14.FR-1) or a Bridge (C-22.FR-1). The bot
-// token and the push secret of a Bridge are encrypted with the active key and never returned. A Telegram Connection
-// created in the webhook mode gets a new secret token and its webhook is set before the creation commits; when
-// setWebhook fails, nothing is created.
+// Create creates a Mattermost Connection (C-13.FR-1), a Telegram one (C-14.FR-1), a Bridge (C-22.FR-1) or a Slack one
+// (C-24.FR-1). The bot token, the push secret of a Bridge and the app-level token and Slack signing secret of a Slack
+// Connection are encrypted with the active key and never returned. A Telegram Connection created in the webhook mode
+// gets a new secret token and its webhook is set before the creation commits; when setWebhook fails, nothing is
+// created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection, error) {
 	if err := check(&in, nil); err != nil {
 		return Connection{}, err
@@ -584,6 +613,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 		if created.PushSecret.Set {
 			diff = append(diff, audit.Change{Pointer: "/push_secret", SecretChanged: true})
 		}
+		diff = append(diff, slackSecretsCreated(created)...)
 		return s.record(ctx, q, r, ActionCreated, created, diff)
 	})
 	if err != nil {
@@ -609,6 +639,10 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 	if err != nil {
 		return Connection{}, "", err
 	}
+	app, signing, _, err := s.slackSecrets(in, keyring.StoredSecret{}, keyring.StoredSecret{}, now)
+	if err != nil {
+		return Connection{}, "", err
+	}
 	id := publicid.New(publicid.Connection)
 	if _, err := q.InsertConnection(ctx, dbgen.InsertConnectionParams{OrgID: s.cfg.OrgID, PublicID: id, Type: in.Type,
 		Name: in.Name, ServerUrl: nonEmpty(in.ServerURL), BotApiBaseUrl: nonEmpty(in.BotAPIBaseURL),
@@ -616,8 +650,11 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 		WebhookSecretKeyID: nonEmpty(hook.KeyID), WebhookSecretUpdatedAt: timestamp(hook.UpdatedAt),
 		BridgeBaseUrl: nonEmpty(in.BridgeBaseURL), EventDelivery: nonEmpty(in.EventDelivery),
 		PushSecretCiphertext: push.Ciphertext, PushSecretKeyID: nonEmpty(push.KeyID),
-		PushSecretUpdatedAt: timestamp(push.UpdatedAt), BotTokenCiphertext: token.Ciphertext,
-		BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: now,
+		PushSecretUpdatedAt: timestamp(push.UpdatedAt), SlackEventMode: nonEmpty(in.EventMode),
+		SlackAppTokenCiphertext: app.Ciphertext, SlackAppTokenKeyID: nonEmpty(app.KeyID),
+		SlackAppTokenUpdatedAt: timestamp(app.UpdatedAt), SlackSigningSecretCiphertext: signing.Ciphertext,
+		SlackSigningSecretKeyID: nonEmpty(signing.KeyID), SlackSigningSecretUpdatedAt: timestamp(signing.UpdatedAt),
+		BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: now,
 		Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: nonEmpty(password.KeyID),
 		ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt), LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
@@ -632,12 +669,13 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.C
 }
 
 // Update replaces the configured fields of the Connection publicID; a non-nil version must be its current one
-// (If-Match). An omitted bot token, proxy password or push secret keeps the stored one, except that a new server URL,
-// Bot API base URL or bridge base URL needs the bot token again, so that the stored one never reaches another server;
-// a new address or bot token forgets the bot that the last check found, and a Bridge's info and events cursor. An
-// update that changes nothing writes nothing. A Telegram Connection that enters the webhook mode, or changes its base
-// URL or bot token in it, gets a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run
-// before the update commits, and when they fail nothing is saved.
+// (If-Match). An omitted bot token, proxy password, push secret, app-level token or Slack signing secret keeps the
+// stored one, except that a new server URL, Bot API base URL or bridge base URL needs the bot token again, so that the
+// stored one never reaches another server; a new address or bot token forgets the bot that the last check found, a
+// Bridge's info and events cursor, and the workspace and app that a Slack check found. An update that changes nothing
+// writes nothing. A Telegram Connection that enters the webhook mode, or changes its base URL or bot token in it, gets
+// a new secret token and setWebhook; one that leaves it gets deleteWebhook; both run before the update commits, and
+// when they fail nothing is saved.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
@@ -688,10 +726,15 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if pushChanged {
 			secretDiff = append(secretDiff, audit.Change{Pointer: "/push_secret", SecretChanged: true})
 		}
+		app, signing, slackDiff, err := s.slackSecrets(in, storedSlackAppToken(row), storedSlackSigningSecret(row), now)
+		if err != nil {
+			return err
+		}
+		secretDiff = append(secretDiff, slackDiff...)
 		after := before
 		after.Name, after.ServerURL, after.BotAPIBaseURL, after.UpdateMode = in.Name, in.ServerURL, in.BotAPIBaseURL,
 			in.UpdateMode
-		after.BridgeBaseURL, after.EventDelivery = in.BridgeBaseURL, in.EventDelivery
+		after.BridgeBaseURL, after.EventDelivery, after.EventMode = in.BridgeBaseURL, in.EventDelivery, in.EventMode
 		after.Proxy, after.Limiter = p, in.Limiter
 		diff := append(audit.Diff(viewOf(before), viewOf(after)), secretDiff...)
 		if len(diff) == 0 {
@@ -714,8 +757,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			WebhookSecretKeyID: nonEmpty(hook.KeyID), WebhookSecretUpdatedAt: timestamp(hook.UpdatedAt),
 			BridgeBaseUrl: nonEmpty(in.BridgeBaseURL), EventDelivery: nonEmpty(in.EventDelivery),
 			PushSecretCiphertext: push.Ciphertext, PushSecretKeyID: nonEmpty(push.KeyID),
-			PushSecretUpdatedAt: timestamp(push.UpdatedAt),
-			BotTokenCiphertext:  token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
+			PushSecretUpdatedAt: timestamp(push.UpdatedAt), SlackEventMode: nonEmpty(in.EventMode),
+			SlackAppTokenCiphertext: app.Ciphertext, SlackAppTokenKeyID: nonEmpty(app.KeyID),
+			SlackAppTokenUpdatedAt: timestamp(app.UpdatedAt), SlackSigningSecretCiphertext: signing.Ciphertext,
+			SlackSigningSecretKeyID: nonEmpty(signing.KeyID), SlackSigningSecretUpdatedAt: timestamp(signing.UpdatedAt),
+			BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
 			ForgetBot: in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
 				in.BridgeBaseURL != before.BridgeBaseURL || in.BotToken.Given,
 			ForgetUpdates: in.BotToken.Given,
@@ -916,12 +962,14 @@ type Step struct {
 }
 
 // Called reports whether the step made a call, so that its Latency is that call's: not when it was skipped, nor for
-// StepEventDelivery, which only reads the info that the step info read.
-func (s Step) Called() bool { return !s.Skipped && s.Name != StepEventDelivery }
+// StepEventDelivery, which only reads the info that the step info read, nor for StepScopes, which reads the header of
+// the answer of the step token.
+func (s Step) Called() bool { return !s.Skipped && s.Name != StepEventDelivery && s.Name != StepScopes }
 
 // CheckResult is the result of a Connection check: its steps and the bot's username once the token works; for a
 // Telegram Connection, once getWebhookInfo answered, whether a webhook is set and how many updates wait; for a Bridge,
-// marked by Bridge, the info that its step info read, as the bridge sent it, nil when that step failed.
+// marked by Bridge, the info that its step info read, as the bridge sent it, nil when that step failed; for a Slack
+// Connection, what the step token found, with the app of the step app_token, nil when token failed.
 type CheckResult struct {
 	OK      bool
 	Steps   []Step
@@ -932,6 +980,7 @@ type CheckResult struct {
 	PendingUpdates *int64
 	Bridge         bool
 	Info           json.RawMessage
+	Slack          *SlackIdentity
 	// Run is the check run its requests share in the Request log (C-23.FR-5).
 	Run string
 }
@@ -941,14 +990,15 @@ type CheckResult struct {
 const WarningPressAnswersInThread = "press_answers_in_thread"
 
 // Check runs the Connection check of the Connection publicID on the interactive path, limited by the Connection. A
-// Telegram Connection is checked in steps by checkTelegram, against the unsaved baseURL when it is set, and a Bridge
-// by checkBridge, which takes no baseURL. A Mattermost one (C-13.FR-2), which takes no baseURL either, is checked
-// with GET /api/v4/users/me with the bot token. A token that works records the bot's username and user id on the
-// Connection; a 401 fails with "The bot token is not valid." and mattermost.CodeTokenInvalid, any other failure with
-// the code of mattermost.Result.FailureCode. No limiter token within the budget is a *delivery.LimitedError. Once the
-// token works, a read of the bot's roles tells whether it may make ephemeral posts; when it may not, the check passes
-// with WarningPressAnswersInThread (D284, F-064); a failed read adds nothing. Its requests are recorded as the kind
-// connection_check under one check run, which the result names (C-23.FR-2, FR-5).
+// Telegram Connection is checked in steps by checkTelegram, against the unsaved baseURL when it is set, a Bridge by
+// checkBridge and a Slack Connection by checkSlack, which take no baseURL. A Mattermost one (C-13.FR-2), which takes no
+// baseURL either, is checked with GET /api/v4/users/me with the bot token. A token that works records the bot's
+// username and user id on the Connection; a 401 fails with "The bot token is not valid." and
+// mattermost.CodeTokenInvalid, any other failure with the code of mattermost.Result.FailureCode. No limiter token
+// within the budget is a *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether it may
+// make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a failed read
+// adds nothing. Its requests are recorded as the kind connection_check under one check run, which the result names
+// (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
 	ctx, run := outbound.StartCheck(ctx, outbound.CheckConnection, 0)
 	res, err := s.check(ctx, publicID, baseURL)
@@ -969,6 +1019,8 @@ func (s *Service) check(ctx context.Context, publicID string, baseURL *string) (
 		return s.checkTelegram(ctx, row, baseURL)
 	case TypeBridge:
 		return s.checkBridge(ctx, row, baseURL)
+	case TypeSlack:
+		return s.checkSlack(ctx, row, baseURL)
 	}
 	if baseURL != nil {
 		return CheckResult{}, &FieldError{Pointer: "/base_url", Code: CodeUnsupported,
@@ -1048,7 +1100,7 @@ type Channel struct {
 
 // Channels lists the channels the bot of the Mattermost Connection publicID belongs to, team by team, through the
 // interactive path: the bot's teams, the team teamID only when it is set, then the bot's channels of each, those whose
-// name or display name contains q when it is set, case-insensitively. A Telegram or Bridge Connection is
+// name or display name contains q when it is set, case-insensitively. A Telegram, Bridge or Slack Connection is
 // ErrNotMattermost; a refused call a *MessengerError.
 func (s *Service) Channels(ctx context.Context, publicID, teamID, q string) ([]Channel, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
@@ -1164,13 +1216,16 @@ func (s *Service) learnBot(ctx context.Context, row dbgen.GetConnectionRow, bot 
 
 // Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server, or, with the type telegram, a
 // Telegram one to the fake Bot API in the long-polling mode, or, with the type bridge, a Bridge to the fake bridge
-// (BaseURL) in poll mode.
+// (BaseURL) in poll mode, or, with the type slack, a Slack Connection in socket mode with the fake Slack server's bot
+// token and app-level token (AppToken), such as "Dev Slack", whose requests the route of `muster dev` sends to the
+// fake server.
 type Demo struct {
 	Type      string
 	Name      string
 	ServerURL string
 	BaseURL   string
 	BotToken  logging.Secret
+	AppToken  logging.Secret
 }
 
 // EnsureDemo creates the demo Connection d unless a Connection that is not deleted has its name, as a start-up step of
@@ -1199,6 +1254,10 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 			in = Input{Type: TypeBridge, Name: d.Name, BridgeBaseURL: d.BaseURL, EventDelivery: EventDeliveryPoll,
 				BotToken: keyring.Replace(d.BotToken),
 				Limiter:  Limiter{Limit: BridgeDefaultLimit, PerSeconds: BridgeDefaultPerSeconds}}
+		case TypeSlack:
+			in = Input{Type: TypeSlack, Name: d.Name, EventMode: EventModeSocket, BotToken: keyring.Replace(d.BotToken),
+				AppToken: keyring.Replace(d.AppToken),
+				Limiter:  Limiter{Limit: SlackDefaultLimit, PerSeconds: SlackDefaultPerSeconds}}
 		}
 		if err := check(&in, nil); err != nil {
 			return err
@@ -1208,6 +1267,7 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 			return err
 		}
 		diff := append(audit.Created(viewOf(c)), audit.Change{Pointer: "/bot_token", SecretChanged: true})
+		diff = append(diff, slackSecretsCreated(c)...)
 		if err := s.cfg.Audit.Record(ctx, q, audit.Entry{OrgID: s.cfg.OrgID, Actor: by.Actor, Transport: by.Transport,
 			Action: ActionCreated, Resource: resourceOf(c), Diff: diff,
 			Details: map[string]any{"development_demo": true}}); err != nil {
@@ -1231,6 +1291,9 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 		ServerURL: r.MattermostServerUrl.String, BotAPIBaseURL: r.TelegramBotApiBaseUrl.String,
 		UpdateMode: r.TelegramUpdateMode.String, Warnings: warnings, BridgeBaseURL: r.BridgeBaseUrl.String,
 		EventDelivery: r.BridgeEventDelivery.String, PushSecret: storedPushSecret(r).Status(),
+		EventMode: r.SlackEventMode.String, AppToken: storedSlackAppToken(r).Status(),
+		SlackSigningSecret: storedSlackSigningSecret(r).Status(), SlackTeamID: textOf(r.SlackTeamID),
+		SlackTeamName: textOf(r.SlackTeamName), SlackAppID: textOf(r.SlackAppID),
 		BotToken: storedToken(r).Status(), BotUsername: textOf(r.BotUsername),
 		BotUserID: textOf(r.BotUserID), Proxy: p, ProxyPassword: storedPassword(r).Status(),
 		Limiter:          Limiter{Limit: r.LimiterLimit, PerSeconds: r.LimiterPerSeconds},

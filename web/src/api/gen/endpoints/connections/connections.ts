@@ -196,7 +196,7 @@ export const getCreateConnectionUrl = () => {
 }
 
 /**
- * `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+ * `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
  * @summary Create Connection
  */
 export const createConnection = async (connectionInput: ConnectionInput, options?: Parameters<typeof apiFetch>[1]): Promise<Connection> => {
@@ -635,7 +635,7 @@ export const useDeleteConnection = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnection = async (connectionId: string,
@@ -732,7 +732,7 @@ export const useCheckConnection = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary List channels visible to the bot
  */
 export const listConnectionChannels = async (connectionId: string,

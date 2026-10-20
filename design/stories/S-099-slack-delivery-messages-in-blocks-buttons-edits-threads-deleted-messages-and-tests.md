@@ -147,7 +147,7 @@ make dev > dev.log 2>&1 &
 # S-020 and S-028; the On-call policy in P as in S-025, with its ack timeout and Reminders off; the Connection "sl" (C)
 # and the Destination "alerts" on C0FAKEALERTS (D) as in S-098. Messages are picked by their summary line, so the
 # database need not be fresh.
-API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FS=127.0.0.1:18095/_fake
+API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FS=127.0.0.1:18097/_fake
 R=$(curl -s "${H[@]}" $API/routes -d "{\"name\":\"sl\",\"matchers\":[{\"label\":\"team\",\"op\":\"=\",\"value\":\"sl\"}],\"urgent\":false,
   \"group_key\":[\"alertname\"],\"destination_ids\":[\"$D\"],\"policy\":$P}" | jq -r .id)
 # FIRE <group> <alertname> <pod> [note]: one firing Alert in a new Alertmanager group, notified at once

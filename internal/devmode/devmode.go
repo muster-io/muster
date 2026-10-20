@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
-// replace them, the fake Alertmanager, Mattermost (two servers), Telegram and OIDC servers, the fake webhook receiver,
-// the fake bridge and the fake HTTP and SOCKS5 proxies on fixed loopback addresses, the demo OIDC configuration, and
-// Muster itself in the same process, against the development database and migrated on start, with the demo
-// Integration that the fake Alertmanager sends to and the demo Connections to the fakes; and the development clock that
-// every replica of the development database shares.
+// replace them, the fake Alertmanager, Mattermost (two servers), Telegram, Slack and OIDC servers, the fake webhook
+// receiver, the fake bridge and the fake HTTP and SOCKS5 proxies on fixed loopback addresses, the demo OIDC
+// configuration, and Muster itself in the same process, against the development database and migrated on start, with
+// the demo Integration that the fake Alertmanager sends to and the demo Connections to the fakes, whose Slack requests
+// go to the fake Slack server (SlackRoute); and the development clock that every replica of the development database
+// shares.
 package devmode
 
 import (
@@ -33,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeoidc"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/fakes/fakewebhook"
 	"github.com/muster-io/muster/internal/integrations"
@@ -75,6 +77,7 @@ const (
 	SOCKSProxyAddr       = "127.0.0.1:18092"
 	WebhookAddr          = "127.0.0.1:18093"
 	BridgeAddr           = "127.0.0.1:18094"
+	SlackAddr            = "127.0.0.1:18097"
 	// LoopbackNetwork is added to the allowed networks of the development database, so that Muster may call the
 	// fakes; a real installation keeps the standard policy.
 	LoopbackNetwork = "127.0.0.0/8"
@@ -165,15 +168,15 @@ func Apply(env Env, replica bool) (Applied, error) {
 
 // Addresses are the listen addresses of the fake servers and the fake proxies.
 type Addresses struct {
-	Alertmanager, Mattermost, MattermostSecond, Telegram, OIDC, Webhook, Bridge string
-	HTTPProxy, SOCKSProxy                                                       string
+	Alertmanager, Mattermost, MattermostSecond, Telegram, OIDC, Webhook, Bridge, Slack string
+	HTTPProxy, SOCKSProxy                                                              string
 }
 
 // FakeAddresses are the fixed addresses that later checks and the second replica rely on.
 func FakeAddresses() Addresses {
 	return Addresses{Alertmanager: AlertmanagerAddr, Mattermost: MattermostAddr,
 		MattermostSecond: MattermostSecondAddr, Telegram: TelegramAddr, OIDC: OIDCAddr, Webhook: WebhookAddr,
-		Bridge: BridgeAddr, HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
+		Bridge: BridgeAddr, Slack: SlackAddr, HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
 }
 
 // OIDCDemo is the demo OIDC configuration that `muster dev` stores at its first start on a database: OIDC against the
@@ -211,12 +214,14 @@ const (
 )
 
 // The published tokens of the second bots, which `muster dev` serves but configures no Connection for: the second bot
-// of the fake Mattermost servers, of the fake Telegram server and of the fake bridge. Tests and checks create their
-// Connections through the API.
+// of the fake Mattermost servers, of the fake Telegram server and of the fake bridge, and the bot token and app-level
+// token of the fake Slack server's second app. Tests and checks create their Connections through the API.
 const (
 	MattermostSecondBotToken = fakemattermost.SecondBotToken
 	TelegramSecondBotToken   = faketelegram.SecondBotToken
 	BridgeSecondBotToken     = fakebridge.SecondToken
+	SlackSecondBotToken      = fakeslack.SecondBotToken
+	SlackSecondAppToken      = fakeslack.SecondAppToken
 )
 
 // TelegramDemo is the demo Connection "Dev Telegram", to the fake Telegram server in the long-polling mode, without
@@ -237,6 +242,35 @@ const (
 func BridgeDemo() connections.Demo {
 	return connections.Demo{Type: connections.TypeBridge, Name: BridgeConnectionName, BaseURL: "http://" + BridgeAddr,
 		BotToken: logging.Secret(BridgeConnectionBotToken)}
+}
+
+// The demo Slack Connection that `muster dev` ensures at start: "Dev Slack" on the fake Slack server's first app, in
+// socket mode, with its published bot token and app-level token.
+const (
+	SlackConnectionName     = "Dev Slack"
+	SlackConnectionBotToken = fakeslack.BotToken
+	SlackConnectionAppToken = fakeslack.AppToken
+)
+
+// SlackDemo is the demo Connection "Dev Slack", on the fake Slack server's first app in socket mode, without
+// Destinations; SlackRoute sends its requests to the fake server.
+func SlackDemo() connections.Demo {
+	return connections.Demo{Type: connections.TypeSlack, Name: SlackConnectionName,
+		BotToken: logging.Secret(SlackConnectionBotToken), AppToken: logging.Secret(SlackConnectionAppToken)}
+}
+
+// SlackBaseURL is where `muster dev` sends the Web API requests of a Slack Connection of the fake Slack server's
+// published tokens.
+const SlackBaseURL = "http://" + SlackAddr + "/api/"
+
+// SlackRoute is the Slack route of `muster dev` (C-01.FR-13): a Slack Connection whose bot token is one of the fake
+// Slack server's published bot tokens calls the fake server at SlackBaseURL, with its bot token and its app-level token
+// alike; any other calls Slack.
+func SlackRoute(botToken logging.Secret) string {
+	if fakeslack.PublishedBotToken(string(botToken)) {
+		return SlackBaseURL
+	}
+	return ""
 }
 
 // TelegramCopyDelay is how long after a channel post its automatic copy reaches the bot in `muster dev`, about a
@@ -284,13 +318,14 @@ type Fakes struct {
 	OIDC             *fakeoidc.Fake
 	Webhook          *fakewebhook.Fake
 	Bridge           *fakebridge.Fake
+	Slack            *fakeslack.Fake
 	HTTPProxy        *fakeproxy.Server
 	SOCKSProxy       *fakeproxy.Server
 }
 
 func (f *Fakes) servers() []*fakeserver.Server {
 	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.MattermostSecond.Server, f.Telegram.Server,
-		f.OIDC.Server, f.Webhook.Server, f.Bridge.Server}
+		f.OIDC.Server, f.Webhook.Server, f.Bridge.Server, f.Slack.Server}
 }
 
 // StartFakes starts the fake servers and the fake proxies, both fake Mattermost servers allowing presses to call back
@@ -304,12 +339,13 @@ func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 		OIDC:             fakeoidc.New(),
 		Webhook:          fakewebhook.New(),
 		Bridge:           fakebridge.New(),
+		Slack:            fakeslack.New(),
 	}
 	f.Mattermost.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
 	f.MattermostSecond.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
 	f.Telegram.SetCopyDelay(TelegramCopyDelay)
 	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.MattermostSecond, addrs.Telegram, addrs.OIDC,
-		addrs.Webhook, addrs.Bridge}
+		addrs.Webhook, addrs.Bridge, addrs.Slack}
 	for i, s := range f.servers() {
 		if err := s.Start(ctx, listen[i]); err != nil {
 			name := "fake " + s.Name()
@@ -378,6 +414,7 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.C
 	fmt.Fprintf(w, "muster dev: fake SOCKS5 proxy %s\n", f.SOCKSProxy.Addr())
 	fmt.Fprintf(w, "muster dev: fake webhook receiver %s\n", f.Webhook.URL())
 	fmt.Fprintf(w, "muster dev: fake bridge %s\n", f.Bridge.URL())
+	fmt.Fprintf(w, "muster dev: fake Slack %s\n", f.Slack.URL())
 	fmt.Fprintf(w, "muster dev: fake Telegram %s\n", f.Telegram.URL())
 	serveErr := serve(ctx)
 	if err := f.Close(context.WithoutCancel(ctx)); err != nil {

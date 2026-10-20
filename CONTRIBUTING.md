@@ -58,15 +58,22 @@ The Makefile is the only entry point:
 | `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
 
-`muster dev` starts the fake Alertmanager, Mattermost and Telegram servers on `127.0.0.1:19093`, `127.0.0.1:18065`
-and `127.0.0.1:18081`, a second fake Mattermost server on `127.0.0.1:18066` and the fake bridge on `127.0.0.1:18094`,
-and prints their addresses; each records its requests at `/_fake/requests` and takes scripted faults at
-`/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second bot, with the published tokens
-`muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, so that several Connections of one messenger can be
-tried; `muster dev` creates no Connection for them. The fake bridge serves two bots as well: `muster-dev-bridge-token`,
-which the demo Connection "Dev Bridge" uses in poll mode, and `muster-dev-bridge-token-b`, for which `muster dev`
-creates no Connection; `/_fake/config` changes what its `info` says, such as the protocol version, the features or
-the event delivery modes. Muster itself joins them with the runtime, which a later story adds: from the runtime on,
+`muster dev` starts the fake Alertmanager, Mattermost and Telegram servers on `127.0.0.1:19093`, `127.0.0.1:18065` and
+`127.0.0.1:18081`, a second fake Mattermost server on `127.0.0.1:18066`, the fake bridge on `127.0.0.1:18094` and the
+fake Slack server on `127.0.0.1:18097`, and prints their addresses; each records its requests at `/_fake/requests` and
+takes scripted faults at `/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second bot, with
+the published tokens `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, so that several Connections of
+one messenger can be tried; `muster dev` creates no Connection for them. The fake bridge serves two bots as well:
+`muster-dev-bridge-token`, which the demo Connection "Dev Bridge" uses in poll mode, and `muster-dev-bridge-token-b`,
+for which `muster dev` creates no Connection; `/_fake/config` changes what its `info` says, such as the protocol
+version, the features or the event delivery modes. The fake Slack server serves two Slack apps, each a workspace with a
+bot, so that Slack Connections can be tried without a workspace: the bot token `xoxb-muster-dev-slack-token` with the
+app-level token `xapp-muster-dev-slack-token`, which the demo Connection "Dev Slack" uses in `socket` mode, and
+`xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;
+their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under
+`muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
+`/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's and the app of each
+token. Muster itself joins them with the runtime, which a later story adds: from the runtime on,
 `muster dev` also listens on `:8080` (app), `:8081` (ingest) and `:8082` (internal) and connects to the development
 database, and `muster dev --replica` runs an additional replica on `:9080`, `:9081` and `:9082`, without fake servers,
 against the same database; until then the replica only prints that it started and waits. Every `MUSTER_*` variable

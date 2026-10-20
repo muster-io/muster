@@ -11,7 +11,8 @@
 // The form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. The tab "Request log" (C-23.FR-6) lists the Connection's requests, with the tab and its
-// filters in the URL; the form stays mounted behind it, so that its changes last.
+// filters in the URL; the form stays mounted behind it, so that its changes last. A Slack Connection (C-24.FR-1) shows
+// its name, its bot and "Delete" only, until its form and check exist: no other type's form may save it.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -50,10 +51,19 @@ export const Route = createFileRoute("/connections/$connectionId")({
   component: ConnectionPage,
 });
 
+/**
+ * The types whose Connections the page edits with the form. A Slack Connection has no form yet, and no other type's form
+ * may save it; neither has a type this SPA does not know.
+ */
+const FORM_TYPES: ReadonlySet<Connection["type"]> = new Set(["mattermost", "telegram", "bridge"]);
+
 /** The bot's name as its messenger writes it: Telegram with an @; none for a Bridge. */
 function botName(c: Connection): string | undefined {
   if (c.type === "bridge") {
     return undefined;
+  }
+  if (c.type === "slack") {
+    return c.bot_name || undefined;
   }
   if (c.bot_username === undefined || c.bot_username === null || c.bot_username === "") {
     return undefined;
@@ -221,11 +231,11 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}
         </p>
-      ) : (
+      ) : FORM_TYPES.has(connection.type) ? (
         <RequestLogTabs search={search} onSearch={onSearch} scope={{ connection: connection.id }}>
           <EditForm current={connection} />
         </RequestLogTabs>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -29,6 +29,7 @@ files_touched:
   - internal/connections/connections_test.go
   - internal/connections/query.sql
   - internal/connections/doctor.go
+  - internal/connections/bridge_test.go
   - internal/accountlinks/query.sql
   - internal/api/connections.go
   - internal/api/connections_test.go
@@ -46,22 +47,31 @@ files_touched:
   - web/src/routes/connections.index.tsx
   - web/src/routes/connections.$connectionId.tsx
   - web/src/components/connection-form.tsx
+  - web/src/components/connection-form.test.tsx
   - web/src/components/connection-check.tsx
+  - web/src/components/connection-check.test.tsx
   - web/src/components/destination-label.ts
+  - web/src/components/destination-label.test.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
+  - design/stories/S-105-check-a-slack-connection-before-saving-it.md
+  - design/stories/S-098-slack-destinations-channel-check-channel-list-doctor-and-mention-settings.md
+  - design/stories/S-099-slack-delivery-messages-in-blocks-buttons-edits-threads-deleted-messages-and-tests.md
+  - design/stories/S-100-slack-presses-over-http-signed-callback-answers-and-reminder-buttons.md
+  - design/stories/S-101-slack-socket-mode-held-by-the-leader-envelopes-refresh-and-shared-app-warning.md
+  - design/stories/S-102-slack-account-links-by-code-by-direct-message-and-mentions-of-linked-people.md
 acceptance:
   - "[C-24.FR-1] A Slack Connection is created with a name, a write-only `bot_token`, the event mode (`connection.slack.event_mode`, `socket` by default), a write-only `app_token` required in `socket` mode, a write-only `slack_signing_secret` required in `http` mode, a proxy and its limiter (`connection.slack.limiter`); reads return `bot_token_status`, `app_token_status`, `slack_signing_secret_status`, the read-only `callback_url` `MUSTER_INGEST_URL/api/v1/callbacks/slack/<public_id>`, and `bot_name`, `bot_user_id`, `team_id`, `team_name` and `app_id`, null before the first successful check and again after the bot token is replaced; the Connection has no address field."
   - "[C-24.FR-1] `createConnection` and `updateConnection` refuse with 422 — `required`, or `invalid_format` for a prefix — at the field's pointer a Slack Connection in `socket` mode without an app-level token, stored or typed, one in `http` mode without a Slack signing secret, a `bot_token` that does not start with `xoxb-` and an `app_token` that does not start with `xapp-`; a change of the event mode keeps the other mode's stored secret; the Audit log records `secret_changed` for each of the three secrets without its value."
   - "[C-24.FR-1] `muster secrets rotate-key` re-encrypts the app-level token and the Slack signing secret like every Secret: `encrypted_values` lists `connections.slack_app_token` and `connections.slack_signing_secret`, the registry of `internal/keyring/rotate.go` has both, and `TestIntegrationRotation` rotates a Slack Connection's three secrets; the bot token keeps the field `connections.bot_token`."
-  - "[C-24.FR-1] With `slack` in the `Connection` union the SPA's type check passes: the Connections list names a Slack Connection \"Slack\" from a locale key and its Connection page shows its name and Delete but no form, until S-103 adds the form; `addressChanged` of the Connection form has a `slack` branch that compares the proxy only."
+  - "[C-24.FR-1] With `slack` in the `Connection` union the SPA's type check passes: the Connections list names a Slack Connection \"Slack\" from a locale key and its Connection page shows its name and Delete but no form, until S-103 adds the form; `addressChanged` of the Connection form has a `slack` branch that answers false: Slack's address is fixed, and a change of the proxy asks for no token again, as for the other types."
   - "[C-24.FR-2, C-24.AC-1] `checkConnection` of a Slack Connection runs through the interactive path the steps `token` — `auth.test` with the bot token, which returns `bot_name` and the workspace — `scopes`, which reads the `x-oauth-scopes` of that answer and makes no request, and in `socket` mode `app_token` — `auth.test` with the app-level token and `bots.info` with the bot token, whose `app_id`s must be equal — each with its latency and path; a passing check stores what it learned on the Connection, and the result's `slack` names the workspace, the bot's user id and the app's id."
   - "[C-24.FR-2, C-24.AC-1] Against the fake Slack server: a revoked bot token fails `token` with `token_invalid` and \"Slack refused the token.\"; a user token (an `auth.test` answer without `bot_id`) fails it with `wrong_token_type` and \"This is not a bot token.\"; a bot without `users:read.email` fails `scopes` with `missing_scope` and \"The bot token lacks the scopes users:read.email.\"; an app-level token of the second app fails `app_token` with `app_mismatch` and \"The app-level token belongs to another Slack app than the bot token.\"; a Connection in `http` mode has no step `app_token`; `checkCodeText` translates the four codes in English and Russian."
   - "[C-24.FR-8] `slack.Classify` maps every answer as C-24.FR-8 says — a case per `error` of the list, `429` with and without `Retry-After`, a `5xx`, a timeout and an `ok: false` answer with HTTP `200` — keeps `needed` of `missing_scope` in the reason, and keeps Slack's `error` as masked, untrusted text (`classify_test.go`)."
   - "[C-24.FR-1] The client sends a stored token only to `https://slack.com/api/<method>`, write methods with a JSON body and read methods form-encoded, `Authorization: Bearer` on each, through the outbound package with the Connection's proxy in the caller's client class; under `muster dev` a Connection whose bot token is one of the fake Slack server's published tokens is served by the fake server instead, and any other by Slack (`client_test.go`)."
   - "[C-24.FR-14, C-23.FR-2] The Request log records each request of the check with the method as its operation (`auth.test`, `bots.info`) and the bot token and the app-level token replaced by `[redacted]` in its headers."
   - "[C-24.AC-3] With an HTTP proxy on the Connection, every request of the check reaches the fake Slack server only through the fake proxy; with the fake answering after the check stopped waiting, the bot token, the app-level token and the Slack signing secret appear in no log line and no error returned by the API (`secretleak.go` probe `slack_connections`)."
-  - "[C-01.FR-13] The fake Slack server answers `auth.test`, `bots.info` and `apps.connections.open` for two apps with published tokens, sets `x-oauth-scopes` and `x-accepted-oauth-scopes`, answers errors as `200` `ok: false` and `429` with `Retry-After` when told to; `muster dev` starts it on `127.0.0.1:18095`, prints its address before \"fake Telegram\" and creates the demo Connection \"Dev Slack\" in `socket` mode; the end-to-end harness waits for it; `listLinkableConnections` leaves Slack Connections out until S-102 and `muster doctor` skips them until S-098."
+  - "[C-01.FR-13] The fake Slack server answers `auth.test`, `bots.info` and `apps.connections.open` for two apps with published tokens, sets `x-oauth-scopes` and `x-accepted-oauth-scopes`, answers errors as `200` `ok: false` and `429` with `Retry-After` when told to; `muster dev` starts it on `127.0.0.1:18097`, prints its address before \"fake Telegram\" and creates the demo Connection \"Dev Slack\" in `socket` mode; the end-to-end harness waits for it; `listLinkableConnections` leaves Slack Connections out until S-102 and `muster doctor` skips them until S-098."
 verify: "make ci test-integration"
 operator_attention: false
 issue: 306
@@ -88,8 +98,8 @@ issue: 306
 - Presses over HTTP and the answers to people (S-100); Socket Mode, `apps.connections.open` in the check, the warning
   `another_client_connected` and the masking of the socket's `ticket` (S-101).
 - Account links and Mentions of linked people (S-102).
-- The check before saving of a Slack Connection and its dry probe (S-103, with the form that uses it), the pages and
-  labels (S-103), the documentation page (S-104).
+- The check before saving of a Slack Connection and its dry probe (S-105), the pages, the form that uses that check
+  and the labels (S-103), the documentation page (S-104).
 - Interim states until later stories: the profile offers no Slack Connection for linking (S-102); a Slack Connection's
   page has no form and no check (S-103); `muster doctor` skips Slack Connections (S-098); "Dev Slack" receives no
   presses (S-101).
@@ -104,13 +114,13 @@ issue: 306
   `app_token` and `slack_signing_secret`, write-only, and `proxy`), joined to the discriminators; the secret fields
   follow the `<field>` / `<field>_status` pattern; `ConnectionCheckStep.name` gains `scopes` and `app_token`;
   `NullableConnectionCheckCode` gains `wrong_token_type`, `missing_scope`, `app_mismatch` and `not_slack` (for the dry
-  probe of S-103), and its description names them; `ConnectionCheckResult` gains `slack` (`team_id`, `team_name`,
+  probe of S-105), and its description names them; `ConnectionCheckResult` gains `slack` (`team_id`, `team_name`,
   `bot_user_id`, `app_id`), null for the other types.
 - **Operations implemented for the type**: `listConnections`, `createConnection`, `getConnection`,
   `updateConnection`, `deleteConnection` (`connections:read` / `:write`), `checkConnection` (`connections:write`,
   interactive). `listConnectionChannels` answers `409` for a Slack Connection until S-098; `checkConnectionDraft`
-  answers `422` at `/type` for a Slack draft until S-103. `listLinkableConnections` leaves out `type = 'slack'` until
-  S-102 (`internal/accountlinks/query.sql`).
+  answers `400` for a Slack draft, since the request matches no member of `ConnectionDraft`, until S-105.
+  `listLinkableConnections` leaves out `type = 'slack'` until S-102 (`internal/accountlinks/query.sql`).
 - **Schema** (migration `0016_slack_connections`, expand only, `schema.md`): `connections.type` accepts `slack`; new
   columns `slack_event_mode` (`socket`, `http`), `slack_app_token_ciphertext`, `_key_id`, `_updated_at`,
   `slack_signing_secret_ciphertext`, `_key_id`, `_updated_at`, the learned `slack_team_id`, `slack_team_name`,
@@ -128,8 +138,9 @@ issue: 306
   with the associated data of their fields; Audit log entries as for the other types; a new bot token forgets the
   learned bot, workspace and app, as a new Mattermost token forgets the bot; `deleteConnection` follows S-039.
   `muster doctor` (`doctor.go`) skips Slack Connections until S-098.
-- **Client** (`internal/slack/client.go`, `classify.go`): `Call(ctx, method, args)` to `https://slack.com/api/<method>`
-  with `Authorization: Bearer`, JSON for the write methods (`chat.*`, `conversations.open`) and
+- **Client** (`internal/slack/client.go`, `classify.go`): `Call(ctx, class, method, args)` with the bot token and
+  `CallApp(ctx, class, method, args)` with the app-level token, to `https://slack.com/api/<method>` with
+  `Authorization: Bearer`, JSON for the write methods (`chat.*`, `conversations.open`) and
   `application/x-www-form-urlencoded` for the others, through `internal/outbound` with the Connection's proxy, in the
   caller's client class, a connect timeout of 5 s and a call timeout of 10 s; it decodes `ok`, `error`, `needed`,
   `warning` and `response_metadata`, keeps the `x-oauth-scopes` header, registers each token for redaction and names
@@ -149,14 +160,15 @@ issue: 306
   member gets explicit branches — the name "Slack" («Slack») from `connections.types.slack`, no address, the bot's name
   as the account; the Connection page renders its form for Mattermost, Telegram and Bridge only, so no other form saves
   a Slack Connection; `checkCodeText` and the step names gain the new codes and steps, translated: "Slack refused the
-  token." is `token_invalid`'s existing text; "This is not a bot token.", "The bot token lacks the scopes {scopes}." («У
+  token." is the server's step message under `token_invalid`, shown as the detail, while the SPA's text for
+  `token_invalid` stays generic; "This is not a bot token.", "The bot token lacks the scopes {scopes}." («У
   токена бота нет прав {scopes}.»), "The app-level token belongs to another Slack app than the bot token." and "The
   address answered, but not as Slack's API." for `not_slack`.
-- **Fake Slack server** (`internal/fakes/fakeslack`, `127.0.0.1:18095`): two apps, each a workspace, a bot and an
+- **Fake Slack server** (`internal/fakes/fakeslack`, `127.0.0.1:18097`): two apps, each a workspace, a bot and an
   app-level token — the published `xoxb-muster-dev-slack-token` with `xapp-muster-dev-slack-token`, used by the demo
   Connection, and `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates
   no Connection — and the published Slack signing secrets `muster-dev-slack-signing-secret` and `…-b`; `/api/auth.test`,
-  `/api/bots.info` and `/api/apps.connections.open` (answering a `ws://127.0.0.1:18095/link/?ticket=…` address that
+  `/api/bots.info` and `/api/apps.connections.open` (answering a `ws://127.0.0.1:18097/link/?ticket=…` address that
   S-101 serves), each with `x-oauth-scopes` and `x-accepted-oauth-scopes`; errors as `200` `ok: false`; control
   endpoints `/_fake/config` (scopes per app, revoked tokens, a user token, the app of each token), `/_fake/requests`
   and `/_fake/faults` (an error answer, a `429` with `Retry-After`, a delay) of the fake-server harness.
@@ -182,7 +194,7 @@ issue: 306
 ```sh
 make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake
 
 # C-24.FR-1, FR-2, AC-1: a Connection and its check against the fake server (the second app)
 C=$(curl -s "${H[@]}" $API/connections -d '{"type":"slack","name":"sl","event_mode":"socket",
@@ -264,8 +276,12 @@ None.
 - `scopes` reads the header of the `token` step's answer (F-071), so the check makes no extra request for it.
 - The Slack signing secret is never sent anywhere, so a stored one needs no address rule; only presses prove it (S-100).
 - The fake server's published tokens follow Slack's prefixes, so the prefix rule of C-24.FR-1 applies to them too.
-- With 43 files the story is at the edge of the size signal; its parts — the type, the client and the fake — are each
-  needed for the live check of the others. The check before saving moves to S-103, with the form that uses it.
+- With 53 files the story is at the edge of the size signal; its parts — the type, the client and the fake — are each
+  needed for the live check of the others, and five of the files are the later Slack stories, whose only change is the
+  fake Slack server's address. The check before saving moves to S-105; the form that uses it is S-103.
+- The fake Slack server listens on `127.0.0.1:18097`, not on `127.0.0.1:18095` as this contract first said: `:18095`
+  is the example bridge's address (S-083 to S-086 and the end-to-end test beside `muster dev`), and `:18096` its push
+  listener. S-098 to S-102 and S-105 name the fake's address in their Verification, so they change with it.
 - While S-097 rolls out, a replica of the previous version reads a Slack row as an unknown type and fails its checks;
   this ends when every replica runs the new version.
 
@@ -274,7 +290,7 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-24.FR-1 | partial | the API, the client and key rotation; the page is S-103 |
-| C-24.FR-2 | partial | `token`, `scopes` and `app_token` without `apps.connections.open`; the socket part and the warning are S-101, the dry probe and the check before saving S-103, the page S-103 |
+| C-24.FR-2 | partial | `token`, `scopes` and `app_token` without `apps.connections.open`; the socket part and the warning are S-101, the dry probe and the check before saving S-105, the page S-103 |
 | C-24.FR-8 | partial | the classification; delivery's use of it is S-099 |
 | C-24.FR-14 | partial | the requests of the check; delivery S-099, presses S-100, the socket S-101 |
 | C-24.AC-1 | full | |

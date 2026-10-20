@@ -31,7 +31,7 @@ export const listConnectionsQueryLimitMax = 500;
 export const ListConnectionsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.'),
   "limit": zod.int().min(1).max(listConnectionsQueryLimitMax).default(listConnectionsQueryLimitDefault).describe('Page size (`api.page_size`).'),
-  "type": zod.enum(['mattermost', 'telegram', 'bridge']).optional().describe('Filter by type.')
+  "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']).optional().describe('Filter by type.')
 })
 
 
@@ -71,6 +71,10 @@ export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax =
 
 
 export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
+
+export const listConnectionsResponseItemsItemFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ListConnectionsResponse = zod.object({
@@ -212,14 +216,60 @@ export const ListConnectionsResponse = zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(listConnectionsResponseItemsItemFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "app_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "slack_signing_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('Where Slack posts the button presses of this Connection in `http` mode, `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity Request URL of the Slack app. Slack\'s own address is fixed, so the Connection has no address field.'),
+  "bot_name": zod.string().nullable().describe('The bot\'s name (`user` of `auth.test`), as the last successful Connection check found it; null before one and after the bot token changed.'),
+  "bot_user_id": zod.string().nullable().describe('The bot\'s user id (`U…`); null as `bot_name`.'),
+  "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
+  "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection; `type` selects the variant.')),
   "next_cursor": zod.string().nullable()
 })
 
 /**
- * `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
+ * `type` selects Mattermost, Telegram, Bridge or Slack. The bot token, the push secret, the app-level token and the Slack signing secret are write-only Secrets.
  * @summary Create Connection
  */
+
+
+
 
 
 
@@ -291,6 +341,27 @@ export const CreateConnectionBody = zod.union([zod.object({
 }).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "bot_token": zod.string().optional().describe('Write-only Secret, the bot token (`xoxb-…`). Omit on update to keep the stored one; a new one forgets what the last check learned.'),
+  "app_token": zod.string().optional().describe('Write-only Secret, the app-level token (`xapp-…`, with the scope `connections:write`); required in `socket` mode, sent now or stored. Omit on update to keep the stored one; a change to `http` keeps it.'),
+  "slack_signing_secret": zod.string().optional().describe('Write-only Secret, the Slack signing secret of the app; required in `http` mode, sent now or stored. Omit on update to keep the stored one; a change to `socket` keeps it. It is never sent anywhere.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection as written; `type` selects the variant and cannot change on update.')
 
 
@@ -330,6 +401,10 @@ export const createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
+
+export const createConnectionResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const CreateConnectionResponse = zod.union([zod.object({
@@ -470,6 +545,49 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(createConnectionResponseFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "app_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "slack_signing_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('Where Slack posts the button presses of this Connection in `http` mode, `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity Request URL of the Slack app. Slack\'s own address is fixed, so the Connection has no address field.'),
+  "bot_name": zod.string().nullable().describe('The bot\'s name (`user` of `auth.test`), as the last successful Connection check found it; null before one and after the bot token changed.'),
+  "bot_user_id": zod.string().nullable().describe('The bot\'s user id (`U…`); null as `bot_name`.'),
+  "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
+  "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -552,13 +670,13 @@ export const checkConnectionDraftResponseRequestLogRunRegExp = new RegExp('^[A-H
 export const CheckConnectionDraftResponse = zod.object({
   "ok": zod.boolean(),
   "steps": zod.array(zod.object({
-  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery']),
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token']),
   "ok": zod.boolean(),
   "skipped": zod.boolean().optional(),
-  "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.'),
+  "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.'),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code\'s text.'),
-  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
+  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal('wrong_token_type'),zod.literal('missing_scope'),zod.literal('app_mismatch'),zod.literal('not_slack'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot\'s: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack\'s JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
@@ -603,6 +721,12 @@ export const CheckConnectionDraftResponse = zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
+  "slack": zod.union([zod.object({
+  "team_id": zod.string().describe('The workspace\'s id (`T…`).'),
+  "team_name": zod.string().describe('The workspace\'s name.'),
+  "bot_user_id": zod.string().describe('The bot\'s user id (`U…`).'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`); null in `http` mode, which has no step `app_token`, and when that step failed.')
+}).describe('What a check of a Slack Connection found.'),zod.null()]).optional().describe('Slack only. What the step `token` found — the workspace and the bot — and the app that the step `app_token` found, stored on the Connection by a passing `checkConnection`; null when `token` failed, and for the other types.'),
   "request_log_run": zod.string().regex(checkConnectionDraftResponseRequestLogRunRegExp).describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.')
 })
 
@@ -653,6 +777,10 @@ export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
+
+export const getConnectionResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const GetConnectionResponse = zod.union([zod.object({
@@ -793,6 +921,49 @@ export const GetConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(getConnectionResponseFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "app_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "slack_signing_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('Where Slack posts the button presses of this Connection in `http` mode, `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity Request URL of the Slack app. Slack\'s own address is fixed, so the Connection has no address field.'),
+  "bot_name": zod.string().nullable().describe('The bot\'s name (`user` of `auth.test`), as the last successful Connection check found it; null before one and after the bot token changed.'),
+  "bot_user_id": zod.string().nullable().describe('The bot\'s user id (`U…`); null as `bot_name`.'),
+  "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
+  "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -809,6 +980,9 @@ export const UpdateConnectionParams = zod.object({
 export const UpdateConnectionHeader = zod.object({
   "If-Match": zod.string().describe('ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.')
 })
+
+
+
 
 
 
@@ -881,6 +1055,27 @@ export const UpdateConnectionBody = zod.union([zod.object({
 }).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "bot_token": zod.string().optional().describe('Write-only Secret, the bot token (`xoxb-…`). Omit on update to keep the stored one; a new one forgets what the last check learned.'),
+  "app_token": zod.string().optional().describe('Write-only Secret, the app-level token (`xapp-…`, with the scope `connections:write`); required in `socket` mode, sent now or stored. Omit on update to keep the stored one; a change to `http` keeps it.'),
+  "slack_signing_secret": zod.string().optional().describe('Write-only Secret, the Slack signing secret of the app; required in `http` mode, sent now or stored. Omit on update to keep the stored one; a change to `socket` keeps it. It is never sent anywhere.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection as written; `type` selects the variant and cannot change on update.')
 
 
@@ -920,6 +1115,10 @@ export const updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
+
+export const updateConnectionResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const UpdateConnectionResponse = zod.union([zod.object({
@@ -1060,6 +1259,49 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
+})),zod.object({
+  "type": zod.enum(['slack']),
+  "name": zod.string().min(1),
+  "event_mode": zod.enum(['socket', 'http']).describe('How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection\'s `callback_url`, signed with the Slack signing secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(updateConnectionResponseFourTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "app_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "slack_signing_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('Where Slack posts the button presses of this Connection in `http` mode, `<MUSTER_INGEST_URL>/api/v1/callbacks/slack/<id>` on the ingest listener; enter it as the Interactivity Request URL of the Slack app. Slack\'s own address is fixed, so the Connection has no address field.'),
+  "bot_name": zod.string().nullable().describe('The bot\'s name (`user` of `auth.test`), as the last successful Connection check found it; null before one and after the bot token changed.'),
+  "bot_user_id": zod.string().nullable().describe('The bot\'s user id (`U…`); null as `bot_name`.'),
+  "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
+  "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['slack'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -1080,7 +1322,7 @@ export const DeleteConnectionHeader = zod.object({
 export const DeleteConnectionResponse = zod.void()
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address, without the token: a stored token is sent only to the saved address of its Connection, through its saved proxy; `checkConnectionDraft` checks an unsaved address with the token typed again. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. A Slack Connection is checked in steps: `token` calls `auth.test` with the bot token and finds the bot and the workspace; `scopes` reads the `x-oauth-scopes` of that answer, which must name `chat:write`, `channels:read`, `groups:read`, `im:write`, `users:read` and `users:read.email`; in `socket` mode `app_token` calls `auth.test` with the app-level token and `bots.info` with the bot token, whose app ids must be equal. A passing check stores what it found and returns it as `slack`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnectionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1125,13 +1367,13 @@ export const checkConnectionResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP
 export const CheckConnectionResponse = zod.object({
   "ok": zod.boolean(),
   "steps": zod.array(zod.object({
-  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery']),
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token']),
   "ok": zod.boolean(),
   "skipped": zod.boolean().optional(),
-  "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.'),
+  "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.'),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code\'s text.'),
-  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
+  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal('wrong_token_type'),zod.literal('missing_scope'),zod.literal('app_mismatch'),zod.literal('not_slack'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot\'s: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack\'s JSON; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
@@ -1176,11 +1418,17 @@ export const CheckConnectionResponse = zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
+  "slack": zod.union([zod.object({
+  "team_id": zod.string().describe('The workspace\'s id (`T…`).'),
+  "team_name": zod.string().describe('The workspace\'s name.'),
+  "bot_user_id": zod.string().describe('The bot\'s user id (`U…`).'),
+  "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`); null in `http` mode, which has no step `app_token`, and when that step failed.')
+}).describe('What a check of a Slack Connection found.'),zod.null()]).optional().describe('Slack only. What the step `token` found — the workspace and the bot — and the app that the step `app_token` found, stored on the Connection by a passing `checkConnection`; null when `token` failed, and for the other types.'),
   "request_log_run": zod.string().regex(checkConnectionResponseRequestLogRunRegExp).describe('The check run of the requests this check made (`CR…`); `listRequestLog` with `run` lists them.')
 })
 
 /**
- * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram, Bridge or Slack Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id, and the channel list of a Slack Connection is not there yet. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary List channels visible to the bot
  */
 export const listConnectionChannelsPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

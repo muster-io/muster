@@ -7,7 +7,8 @@
 // duplicate chats — a Telegram @channel and its numeric chat id are one chat, one Mattermost channel id on two servers
 // is two. A Bridge Destination reads its messenger from the info of its Connection, "Bridge" until a check read it,
 // and two Bridge Destinations of one channel through Connections to the same base URL are one chat. The Connections
-// list names a Connection by its messenger and the host it calls (C-22.FR-1).
+// list names a Connection by its messenger and the host it calls (C-22.FR-1), a Slack Connection "Slack" with its
+// bot's name once a check found it (C-24.FR-1).
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -19,6 +20,7 @@ import type {
   MattermostConnection,
   MattermostDestination,
   RequestTemplate,
+  SlackConnection,
   TelegramConnection,
   TelegramDestination,
   WebhookDestination,
@@ -116,6 +118,30 @@ function brConnection(
     proxy: { enabled: false },
     destination_count: 1,
     created_at: "2026-10-17T09:00:00Z",
+    etag: '"1"',
+  };
+}
+
+function slackConnection(id: string, name: string, botName: string | null): SlackConnection {
+  const set = { set: true, updated_at: "2026-10-20T09:00:00Z" };
+  return {
+    id,
+    type: "slack",
+    name,
+    event_mode: "socket",
+    limiter: { limit: 50, per_seconds: 60 },
+    bot_token_status: set,
+    app_token_status: set,
+    slack_signing_secret_status: { set: false },
+    callback_url: `http://127.0.0.1:8081/api/v1/callbacks/slack/${id}`,
+    bot_name: botName,
+    bot_user_id: botName === null ? null : "U0000000001",
+    team_id: botName === null ? null : "T0000000001",
+    team_name: botName === null ? null : "Fake workspace",
+    app_id: botName === null ? null : "A0000000001",
+    proxy: { enabled: false },
+    destination_count: 0,
+    created_at: "2026-10-20T09:00:00Z",
     etag: '"1"',
   };
 }
@@ -361,6 +387,17 @@ describe("the Connections list", () => {
     await i18n.changeLanguage("ru");
     expect(connectionMessengerName(i18n.t, byId("CN000000000BRU"))).toBe("Мост");
     expect(bridgeMessengerName(i18n.t, undefined)).toBe("Мост");
+  });
+
+  test("names a Slack Connection Slack, with its bot once a check found it and no address", async () => {
+    const checked = slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot");
+    const unchecked = slackConnection("CN000000000SLU", "slack-unchecked", null);
+    expect(connectionMessengerName(i18n.t, checked)).toBe("Slack");
+    expect(connectionAccount(checked)).toBe("muster-dev-slack-bot");
+    expect(connectionAccount(unchecked)).toBeUndefined();
+    expect(connectionAccount({ ...unchecked, bot_name: "" })).toBeUndefined();
+    await i18n.changeLanguage("ru");
+    expect(connectionMessengerName(i18n.t, unchecked)).toBe("Slack");
   });
 });
 

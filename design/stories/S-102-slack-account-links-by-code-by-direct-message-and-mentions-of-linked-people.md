@@ -111,7 +111,7 @@ issue: 311
 make dev > dev.log 2>&1 &
 # as in S-101: the Connection "sl" (C) in socket mode, the Destination "alerts" (D), the Route "sl", FIRE, AG, PRESS;
 # Alice's session in `ajar` (`AH`), as the Admin's in S-011; the link rows of S-100 removed
-API=localhost:8080/api/v1; FS=127.0.0.1:18095/_fake
+API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake
 psql "$MUSTER_DATABASE_URL" -qc "DELETE FROM account_links WHERE messenger = 'slack'"
 curl -s -b ajar $API/me/account-links/connections | jq -r '[.items[] | select(.messenger == "slack") | .name] | sort | join(",")'   # Dev Slack,sl
 

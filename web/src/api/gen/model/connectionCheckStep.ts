@@ -26,7 +26,7 @@ export interface ConnectionCheckStep {
   ok: boolean;
   skipped?: boolean;
   /**
-     * How long the step's request took; null for a step that made no request: one that was skipped, and `event_delivery`, which only reads the info that the step `info` read.
+     * How long the step's request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.
      * @nullable
      */
   latency_ms?: number | null;
