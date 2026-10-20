@@ -91,6 +91,9 @@ const AUDITED: Record<string, readonly string[]> = {
     "/base_url",
     "/event_delivery",
     "/push_secret",
+    "/event_mode",
+    "/app_token",
+    "/slack_signing_secret",
     "/bot_token",
     "/limiter/limit",
     "/limiter/per_seconds",
@@ -165,6 +168,16 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "connection", "/push_secret")).toBe("Секрет push-отправки");
     expect(fieldLabel(i18n.t, "connection", "/bot_api_base_url")).toBe("Базовый URL Bot API");
     expect(fieldLabel(i18n.t, "connection", "/update_mode")).toBe("Режим получения обновлений");
+  });
+
+  test("names the fields of a Slack Connection as its form does, its secrets among them", async () => {
+    expect(fieldLabel(i18n.t, "connection", "/event_mode")).toBe("Event mode");
+    expect(fieldLabel(i18n.t, "connection", "/app_token")).toBe("App-level token");
+    expect(fieldLabel(i18n.t, "connection", "/slack_signing_secret")).toBe("Slack signing secret");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "connection", "/event_mode")).toBe("Режим событий");
+    expect(fieldLabel(i18n.t, "connection", "/app_token")).toBe("Токен уровня приложения");
+    expect(fieldLabel(i18n.t, "connection", "/slack_signing_secret")).toBe("Секрет подписи Slack");
   });
 
   test("names the Destinations and the delivery fields of a Route", async () => {

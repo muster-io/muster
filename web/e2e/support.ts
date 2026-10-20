@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Helpers of the end-to-end specs: the API as the development Admin, the database of the run, the fake IdP and the fake
-// bridge of `muster dev`, TOTP codes and the layout checks.
+// Helpers of the end-to-end specs: the API as the development Admin, the database of the run, the fake IdP, the fake
+// bridge and the fake Slack server of `muster dev`, TOTP codes and the layout checks.
 
 import { createHmac } from "node:crypto";
 
@@ -30,6 +30,12 @@ export const FBR = `${BRIDGE_URL}/_fake`;
 export const BRIDGE_TOKEN = "muster-dev-bridge-token";
 /** The published token of the fake bridge's second bot, for which `muster dev` creates no Connection. */
 export const BRIDGE_SECOND_TOKEN = "muster-dev-bridge-token-b";
+/** The fake Slack server of `muster dev` and its control API. */
+export const SLACK_URL = "http://127.0.0.1:18097";
+export const FSL = `${SLACK_URL}/_fake`;
+/** The published tokens of the fake Slack server's second app, b, for which `muster dev` creates no Connection. */
+export const SLACK_SECOND_BOT_TOKEN = "xoxb-muster-dev-slack-token-b";
+export const SLACK_SECOND_APP_TOKEN = "xapp-muster-dev-slack-token-b";
 /** The ingestion endpoint that the fake Alertmanager's receivers send to. */
 export const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 const CLOCK = "http://localhost:8082/_dev/clock";
@@ -181,6 +187,49 @@ export async function resetFakeBridge(): Promise<void> {
   });
 }
 
+/** Calls the control API of the fake Slack server and returns its answer, null for none. */
+export async function fsl<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${FSL}${path}`, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  expect(res.ok, `${method} ${path}: ${res.status} ${text}`).toBe(true);
+  return parse<T>(text === "" ? "null" : text);
+}
+
+/**
+ * Puts back what the specs change in the configuration of the fake Slack server's second app: its default scopes and
+ * channels — "alerts" with the bot, "other" without —, no other program connected to it, no request_url.
+ */
+export async function resetFakeSlack(): Promise<void> {
+  await fsl("PUT", "/config", {
+    scopes: { b: null },
+    channels: { b: null },
+    extra_connections: { b: null },
+    request_url: { b: null },
+    revoked: [],
+  });
+}
+
+/**
+ * Creates the Slack Connection name to the fake Slack server's second app, in Socket Mode, and checks it, so that Muster
+ * knows its bot, workspace and app. Returns its id.
+ */
+export async function createSlackConnection(admin: Api, name = "ui"): Promise<string> {
+  const created = await admin.call<{ id: string }>("POST", "/api/v1/connections", {
+    type: "slack",
+    name,
+    event_mode: "socket",
+    bot_token: SLACK_SECOND_BOT_TOKEN,
+    app_token: SLACK_SECOND_APP_TOKEN,
+    proxy: { enabled: false },
+    limiter: { limit: 50, per_seconds: 60 },
+  });
+  await checkConnection(admin, created.id);
+  return created.id;
+}
+
 interface NamedConnection {
   id: string;
   name: string;
@@ -223,6 +272,16 @@ export async function createBridgeConnection(admin: Api, name = "br"): Promise<s
 
 /** Deletes every Connection named name, after the Destinations that use it, whatever an earlier run left. */
 export async function removeBridgeConnection(admin: Api, name = "br"): Promise<void> {
+  await removeConnectionNamed(admin, name);
+}
+
+/** Deletes every Slack Connection named name, after the Destinations that use it, whatever an earlier run left. */
+export async function removeSlackConnection(admin: Api, name = "ui"): Promise<void> {
+  await removeConnectionNamed(admin, name);
+}
+
+/** Deletes every Connection named name, after the Destinations that use it. */
+async function removeConnectionNamed(admin: Api, name: string): Promise<void> {
   const connections = await admin.call<{ items: NamedConnection[] }>(
     "GET",
     "/api/v1/connections?limit=500",

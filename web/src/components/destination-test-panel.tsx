@@ -11,8 +11,9 @@
 // The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
 // and when a step failed the Destination stays Broken, which the result explains, the button press included. The hint
 // above the button says what the test of each type sends; a Bridge sends one test message through the bridge, and Slack
-// one to its channel. A result names its check run, and "Requests of this check" opens the requests it made
-// (C-23.FR-6).
+// one to its channel, whose result says beside its one step that Slack does not let a bot press its own button, so that
+// a person's press on the test message checks presses (C-24.FR-13, AC-16). A result names its check run, and "Requests
+// of this check" opens the requests it made (C-23.FR-6).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -249,7 +250,19 @@ export function testPassed(result: DestinationTestResult): boolean {
   return result.steps.length > 0 && result.steps.every((s) => s.error_class === "none");
 }
 
-export function TestResult({ result }: { result: DestinationTestResult }) {
+/** What the result of a type's test says beside its steps: Slack's, that the test cannot press its own button. */
+function testNote(t: TFunction, type: DestinationType): string | null {
+  return type === "slack" ? t("destinationTest.slackPressNote") : null;
+}
+
+export function TestResult({
+  result,
+  note = null,
+}: {
+  result: DestinationTestResult;
+  /** A note beside the steps, such as Slack's about presses. */
+  note?: string | null;
+}) {
   const { t } = useTranslation();
   const passed = testPassed(result);
   const broken = stillBrokenText(t, result);
@@ -275,6 +288,14 @@ export function TestResult({ result }: { result: DestinationTestResult }) {
       {result.steps.map((step, index) => (
         <StepBlock key={`${step.name}-${index}`} step={step} />
       ))}
+      {note !== null && (
+        <p
+          className="rounded-lg border bg-card px-4 py-2.5 text-sm wrap-anywhere"
+          data-testid="test-note"
+        >
+          {note}
+        </p>
+      )}
     </div>
   );
 }
@@ -378,7 +399,7 @@ export function DestinationTestPanel({
           {refusal}
         </div>
       )}
-      {test.isSuccess && <TestResult result={test.data} />}
+      {test.isSuccess && <TestResult result={test.data} note={testNote(t, destination.type)} />}
       {test.isSuccess && (
         <div>
           <RequestLogButton

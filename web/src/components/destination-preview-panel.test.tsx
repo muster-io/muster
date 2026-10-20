@@ -22,6 +22,7 @@ import type {
   DestinationPreviewItem,
   Permission,
   Session,
+  SlackDestination,
   TelegramDestination,
 } from "../api/gen/model";
 import i18n from "../i18n";
@@ -30,6 +31,7 @@ import {
   DestinationPreviewPanel,
   frameDocument,
   mattermostNodes,
+  slackMessageNodes,
   telegramButtons,
   telegramMessageNodes,
 } from "./destination-preview-panel";
@@ -279,6 +281,209 @@ describe("frame documents", () => {
     expect(telegramButtons("not json")).toEqual([]);
     expect(telegramButtons(null)).toEqual([]);
     expect(telegramButtons('{"reply_markup":{"inline_keyboard":"x"}}')).toEqual([]);
+  });
+});
+
+const SLACK_BODY = {
+  channel: "C0FAKEALERTS",
+  text: "🔴 #1 HighErrorRate",
+  blocks: [
+    {
+      type: "section",
+      block_id: "muster_summary",
+      text: { type: "mrkdwn", text: "🔴 #1 HighErrorRate <script>alert(1)</script>" },
+    },
+  ],
+  attachments: [
+    {
+      color: "#d32f2f",
+      fallback: "🔴 #1 HighErrorRate",
+      blocks: [
+        {
+          type: "section",
+          block_id: "muster_heading",
+          text: {
+            type: "mrkdwn",
+            text: "*<http://localhost:8080/alert-groups/AG1|#1 HighErrorRate>*",
+          },
+        },
+        {
+          type: "section",
+          block_id: "muster_body",
+          text: {
+            type: "mrkdwn",
+            text: "cluster: prod\nnote: &lt;!here&gt; <img src=x onerror=alert(1)>",
+          },
+        },
+        {
+          type: "context",
+          block_id: "muster_context",
+          elements: [{ type: "plain_text", text: "Muster v1.2.3" }],
+        },
+        {
+          type: "actions",
+          block_id: "muster_actions",
+          elements: [
+            {
+              type: "button",
+              action_id: "ack",
+              text: { type: "plain_text", text: "Ack" },
+              value: "[redacted]",
+              style: "primary",
+            },
+            {
+              type: "button",
+              action_id: "resolve",
+              text: { type: "plain_text", text: "Resolve" },
+              value: "[redacted]",
+            },
+            {
+              type: "static_select",
+              action_id: "snooze",
+              placeholder: { type: "plain_text", text: "Snooze…" },
+              options: [{ text: { type: "plain_text", text: "1h" }, value: "[redacted]" }],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  unfurl_links: false,
+  unfurl_media: false,
+};
+
+const SLACK_ITEM: DestinationPreviewItem = {
+  name: "message",
+  format: "json",
+  text: JSON.stringify(SLACK_BODY, null, 2),
+  request: {
+    method: "POST",
+    url: "https://slack.com/api/chat.postMessage",
+    headers: [
+      { name: "Authorization", value: "Bearer [redacted]" },
+      { name: "Content-Type", value: "application/json; charset=utf-8" },
+    ],
+    body: JSON.stringify(SLACK_BODY),
+  },
+};
+
+const SLACK_DESTINATION: SlackDestination = {
+  id: ID,
+  type: "slack",
+  name: "slack-alerts",
+  connection_id: "CN0000000000SL",
+  channel_id: "C0FAKEALERTS",
+  channel_name: "alerts",
+  mentions: defaultMentions(),
+  limiter: { limit: 30, per_seconds: 60 },
+  health: { state: "healthy" },
+  routes: [],
+  created_at: "2026-10-20T09:30:00Z",
+  etag: '"1"',
+};
+
+describe("the frame of a Slack message", () => {
+  test("draws the summary, the colour bar, the sections as plain text and the buttons, never as markup", () => {
+    const html = frameDocument("en", [], (doc) => slackMessageNodes(doc, SLACK_ITEM));
+    expectInert(html);
+    const body = frameBody(html);
+    expect(body.textContent).toContain("🔴 #1 HighErrorRate <script>alert(1)</script>");
+    // mrkdwn is shown as Slack shows it, as text: the link as its label, the escaped Mention literally.
+    expect(body.textContent).toContain("#1 HighErrorRate");
+    expect(body.textContent).not.toContain("|#1 HighErrorRate>");
+    expect(body.textContent).toContain("note: <!here> <img src=x onerror=alert(1)>");
+    expect(body.textContent).toContain("Muster v1.2.3");
+    const bar = body.querySelector(".border-l-4");
+    expect(bar?.className).toContain("border-l-[#d32f2f]");
+    const buttons = Array.from(body.querySelectorAll("button"));
+    expect(buttons.map((b) => b.textContent)).toEqual(["Ack", "Resolve", "Snooze… ▾"]);
+    expect(buttons.every((b) => b.disabled)).toBe(true);
+    // Slack draws primary green.
+    expect(buttons[0]?.className).toContain("bg-[#007a5a]");
+    expect(buttons[1]?.className).not.toContain("bg-[#007a5a]");
+  });
+
+  test("shows the mrkdwn of a Root message as Slack does: links as labels, no bold markers, alert data literal", () => {
+    // The shape of internal/slack/testdata/layout/root_firing_loud.json: the heading linked to the Alert Group, the body
+    // with escaped alert data, whose `*` are followed by a zero-width space, and the line of links.
+    const fixture = {
+      ...SLACK_ITEM,
+      text: JSON.stringify({
+        text: "🔴 #12 DiskFull",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "🔴 #12 DiskFull" } }],
+        attachments: [
+          {
+            color: "#d32f2f",
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "*<http://localhost:8080/alert-groups/AG0000000000A1|#12 DiskFull>*",
+                },
+              },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "note: @\u200bchannel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *\u200by*\u200b &lt;https://evil.example|z&gt; &amp;\n<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook> · <https://example.org/plain>",
+                },
+              },
+              {
+                type: "context",
+                elements: [{ type: "plain_text", text: "Muster *v1* &amp; <b>" }],
+              },
+            ],
+          },
+        ],
+      }),
+    };
+    const html = frameDocument("en", [], (doc) => slackMessageNodes(doc, fixture));
+    expectInert(html);
+    const body = frameBody(html);
+    const sections = Array.from(body.querySelectorAll(".border-l-4 > div")).map(
+      (d) => d.textContent,
+    );
+    expect(sections[0]).toBe("#12 DiskFull");
+    expect(sections[1]).toBe(
+      "note: @\u200bchannel <!here> <b>x</b> *\u200by*\u200b <https://evil.example|z> &Open in Muster · Runbook · https://example.org/plain",
+    );
+    // A plain_text object is shown as it is.
+    expect(sections[2]).toBe("Muster *v1* &amp; <b>");
+    // Everything is text: the escaped Mention and markup are characters, never elements.
+    expect(body.querySelectorAll("b, a, strong")).toHaveLength(0);
+  });
+
+  test("gives another colour a neutral bar, and shows the text of a body without blocks", () => {
+    const other = { ...SLACK_ITEM, text: JSON.stringify({ text: "plain", attachments: [] }) };
+    expect(
+      frameBody(frameDocument("en", [], (doc) => slackMessageNodes(doc, other))).textContent,
+    ).toBe("plain");
+    const odd = {
+      ...SLACK_ITEM,
+      text: JSON.stringify({ attachments: [{ color: "#123456", blocks: [] }] }),
+    };
+    const body = frameBody(frameDocument("en", [], (doc) => slackMessageNodes(doc, odd)));
+    expect(body.querySelector(".border-l-4")?.className).toContain("border-l-muted-foreground");
+  });
+
+  test("shows a Slack Destination's message in the sandboxed frame, with its request", async () => {
+    fakeApi({ items: [SLACK_ITEM] });
+    await render(
+      providers(
+        <DestinationPreviewPanel
+          destination={SLACK_DESTINATION}
+          source={EXAMPLE}
+          onSourceGone={() => undefined}
+        />,
+      ),
+    );
+    const frame = page.getByTitle("Root message in slack-alerts");
+    await expect.element(frame).toBeVisible();
+    const el = frame.element();
+    expect(el.getAttribute("sandbox")).toBe("");
+    expectInert(el.getAttribute("srcdoc") ?? "");
+    await expect.element(page.getByText("Request", { exact: true })).toBeVisible();
   });
 });
 

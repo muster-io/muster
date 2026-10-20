@@ -167,8 +167,9 @@ function linkRuleField(t: TFunction, pointer: string): string | undefined {
 }
 
 /**
- * The names of the changed fields of a Connection of any type, as its form names them; the token, the push secret and
- * the proxy password are Secrets. The diff does not say the Connection's type, so the token is named for all three.
+ * The names of the changed fields of a Connection of any type, as its form names them; the token, the push secret, the
+ * Slack app-level token and signing secret and the proxy password are Secrets. The diff does not say the Connection's
+ * type, so the token is named for all of them.
  */
 function connectionField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -186,6 +187,12 @@ function connectionField(t: TFunction, pointer: string): string | undefined {
       return t("connections.bridge.eventDelivery");
     case "/push_secret":
       return t("connections.bridge.pushSecret");
+    case "/event_mode":
+      return t("connections.slack.eventMode");
+    case "/app_token":
+      return t("connections.slack.appToken");
+    case "/slack_signing_secret":
+      return t("connections.slack.signingSecret");
     case "/bot_token":
       return t("audit.fields.token");
     case "/limiter/limit":

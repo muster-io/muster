@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-1, FR-3, FR-17): its
-// messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its Routes, and its form
-// — Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge, which shows the
-// channel's name it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
-// destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
-// destinations:write. A Slack Destination shows its name, health with the Broken banner and its Routes, but no form,
-// check, test or preview yet.
+// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-1, FR-3, FR-17;
+// C-24.FR-3, FR-13): its messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its
+// Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge or
+// Slack, which show the channel's name they found, or the outgoing webhook, followed by its Secrets and its Signing
+// secret — read-only without destinations:write; "Check" with destinations:test for the types that have a Destination
+// check, and "Delete" with destinations:write.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -35,6 +34,7 @@ import type {
   BridgeDestination,
   Destination,
   MattermostDestination,
+  SlackDestination,
   TelegramDestination,
   WebhookDestination,
 } from "../api/gen/model";
@@ -56,6 +56,7 @@ import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { RequestLogTabs } from "../components/request-log";
 import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
 import { SigningSecret } from "../components/signing-secret";
+import { SLACK_KIND } from "../components/slack-destination-fields";
 import { StatusTabs } from "../components/status-tabs";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
 import { EXAMPLE, type PickedSource, TestSourcePicker } from "../components/test-source-picker";
@@ -76,17 +77,22 @@ type Editable =
   | MattermostDestination
   | TelegramDestination
   | BridgeDestination
+  | SlackDestination
   | WebhookDestination;
 
 function isEditable(d: Destination): d is Editable {
   return (
-    d.type === "mattermost" || d.type === "telegram" || d.type === "bridge" || d.type === "webhook"
+    d.type === "mattermost" ||
+    d.type === "telegram" ||
+    d.type === "bridge" ||
+    d.type === "slack" ||
+    d.type === "webhook"
   );
 }
 
 /** The types with a Destination check; the outgoing webhook has none. */
 function hasCheck(d: Destination): boolean {
-  return d.type === "mattermost" || d.type === "telegram" || d.type === "bridge";
+  return d.type !== "webhook";
 }
 
 /** The version of the form: health is not part of it, so a change of health alone never replaces the form. */
@@ -98,11 +104,14 @@ function EditForm<V>({
   current,
   kind,
   onDirtyChange,
+  slackBot,
 }: {
   current: Editable;
   kind: DestinationKind<V>;
   /** Tells the page whether the form has unsaved changes. */
   onDirtyChange: (dirty: boolean) => void;
+  /** The bot of a Slack Destination's Connection, which the check names; undefined for another type. */
+  slackBot?: string | null;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -142,7 +151,9 @@ function EditForm<V>({
           </AlertDescription>
         </Alert>
       )}
-      {canTest && hasCheck(current) && <DestinationCheck destination={current} dirty={dirty} />}
+      {canTest && hasCheck(current) && (
+        <DestinationCheck destination={current} dirty={dirty} slackBot={slackBot} />
+      )}
       <DestinationForm
         key={formKey}
         kind={kind}
@@ -395,8 +406,15 @@ function DestinationView({ destinationId }: { destinationId: string }) {
                 <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
               ) : destination.type === "bridge" ? (
                 <EditForm current={destination} kind={BRIDGE_KIND} onDirtyChange={setDirty} />
+              ) : destination.type === "slack" ? (
+                <EditForm
+                  current={destination}
+                  kind={SLACK_KIND}
+                  onDirtyChange={setDirty}
+                  slackBot={connection?.type === "slack" ? connection.bot_name : null}
+                />
               ) : null}
-              {canTest && destination.type !== "slack" && (
+              {canTest && (
                 <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
               )}
             </>

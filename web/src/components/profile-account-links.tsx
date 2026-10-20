@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // "Messenger accounts" of the profile (C-18.FR-2, FR-3, FR-6, FR-10, C-03.FR-12): the signed-in user's Account links
-// with "Unlink", "Link Telegram" and "Link Mattermost" for the Connections of each messenger, and "Link through
-// {Connection}" for each Bridge Connection (C-22.FR-15). The Connections come from listLinkableConnections, which needs
+// with "Unlink", "Link Telegram", "Link Mattermost" and "Link Slack" (C-24.FR-12) for the Connections of each messenger,
+// and "Link through {Connection}" for each Bridge Connection (C-22.FR-15). The Connections come from listLinkableConnections, which needs
 // no Permission and gives their id, name and messenger, and for a Bridge how it links; the profile reads the
 // Connections themselves only for the messenger a Bridge link names, with connections:read. The account-links hint
 // keeps the list current when a bot links an account. With a Telegram link the button reads "Relink Telegram"; a hint
@@ -22,6 +22,7 @@ import { problemText } from "../lib/api";
 import { AccountLinksTable, accountName } from "./account-links-table";
 import { LinkBridgeDialog } from "./link-bridge-dialog";
 import { LinkMattermostDialog } from "./link-mattermost-dialog";
+import { LinkSlackDialog } from "./link-slack-dialog";
 import { LinkTelegramDialog } from "./link-telegram-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 
@@ -34,6 +35,7 @@ export function ProfileAccountLinks() {
   const telegram = all.filter((c) => c.messenger === "telegram");
   const mattermost = all.filter((c) => c.messenger === "mattermost");
   const bridge = all.filter((c) => c.messenger === "bridge");
+  const slack = all.filter((c) => c.messenger === "slack");
   const items = links.data?.items ?? [];
   return (
     <Card className="lg:col-span-2">
@@ -64,7 +66,10 @@ export function ProfileAccountLinks() {
             {problemText(t, connections.error)}
           </p>
         )}
-        {(telegram.length > 0 || mattermost.length > 0 || bridge.length > 0) && (
+        {(telegram.length > 0 ||
+          mattermost.length > 0 ||
+          slack.length > 0 ||
+          bridge.length > 0) && (
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap gap-2">
               {telegram.length > 0 && (
@@ -74,6 +79,7 @@ export function ProfileAccountLinks() {
                 />
               )}
               {mattermost.length > 0 && <LinkMattermostDialog connections={mattermost} />}
+              {slack.length > 0 && <LinkSlackDialog connections={slack} />}
               {bridge.map((c) => (
                 <LinkBridgeDialog key={c.id} connection={c} />
               ))}

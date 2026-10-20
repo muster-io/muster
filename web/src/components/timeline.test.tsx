@@ -279,6 +279,12 @@ describe("entryText", () => {
     );
   });
 
+  test("names the Transport slack Slack, in English and Russian", async () => {
+    expect(actorText(i18n.t, { ...ALICE, transport: "slack" })).toBe("Alice Smith via Slack");
+    await i18n.changeLanguage("ru");
+    expect(actorText(i18n.t, { ...ALICE, transport: "slack" })).toBe("Alice Smith через Slack");
+  });
+
   test("names the Transport bridge Bridge, and Мост in Russian", async () => {
     expect(actorText(i18n.t, { ...ALICE, transport: "bridge" })).toBe("Alice Smith via Bridge");
     await i18n.changeLanguage("ru");

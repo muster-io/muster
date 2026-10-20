@@ -15,8 +15,6 @@ files_touched:
   - web/src/components/connection-form.test.tsx
   - web/src/components/connection-check.tsx
   - web/src/components/callback-hint.tsx
-  - web/src/components/destination-form.tsx
-  - web/src/components/destination-form.test.tsx
   - web/src/components/destination-check.tsx
   - web/src/components/destination-label.ts
   - web/src/components/destination-preview-panel.tsx
@@ -28,7 +26,12 @@ files_touched:
   - web/src/components/profile-account-links.tsx
   - web/src/components/account-links-table.tsx
   - web/src/components/timeline.tsx
+  - web/src/components/timeline.test.tsx
   - web/src/components/template-preview.tsx
+  - web/src/components/template-preview.test.tsx
+  - web/src/components/audit-diff.tsx
+  - web/src/components/audit-diff.test.tsx
+  - web/src/components/destination-label.test.ts
   - web/src/components/request-record.tsx
   - web/src/components/request-record.test.tsx
   - web/src/components/request-log.tsx
@@ -36,7 +39,6 @@ files_touched:
   - web/src/routes/connections.$connectionId.tsx
   - web/src/routes/destinations.new.tsx
   - web/src/routes/destinations.$destinationId.tsx
-  - web/src/routes/admin.audit-log.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/slack-connection.spec.ts
@@ -44,6 +46,7 @@ files_touched:
   - web/e2e/account-links.spec.ts
   - web/e2e/connection-checks.spec.ts
   - web/e2e/support.ts
+  - web/e2e/telegram-connection.spec.ts
 acceptance:
   - "[C-24.FR-2, C-24.AC-2, C-13.FR-14] \"Check connection\" in the Slack create form, with the fake server's tokens, shows the steps `token`, `scopes` and `app_token` and the bot, the workspace and the app, and afterwards no Connection exists; in the edit form of a saved Slack Connection with only the proxy changed it shows the step `dry_probe` alone, and with the tokens typed again the three steps through the new proxy — through `checkConnectionDraft` of S-105 (`web/e2e/connection-checks.spec.ts`)."
   - "[C-24.FR-1, C-24.FR-2, C-24.AC-18] Connections → New → Slack shows the name, the bot token, the event mode — Socket Mode with the app-level token, or HTTP with the Slack signing secret, the callback address and the hint of reference.md — the proxy form and the limiter, with \"Check connection\" before saving; a saved Slack Connection's page shows the same with its secrets write-only, the step-by-step check with the bot, the workspace and the app, the Socket Mode hint, and while the Leader's last `hello` counted another connection the warning of reference.md; Delete is offered while no Destination uses it."
@@ -91,6 +94,31 @@ issue: 312
   element from the request body, never as markup. `destination-check.tsx` passes an item's `missing_scopes` to
   `checkCodeText` and `CheckDetail` (D396), with a component test; a refused save names the scopes only in the problem's
   English `detail` unless this story adds `missing_scopes` to the problem's error items.
+- **Added while implementing** (each a gap the backend stories left for this one):
+  - `audit-diff.tsx` (and its test) holds the Audit log's field labels, not `admin.audit-log.tsx`: it names
+    `/event_mode`, `/app_token` and `/slack_signing_secret`; `admin.audit-log.tsx` already names the Transport `slack`.
+  - `destination-label.test.ts`: the Connections list names a Slack Connection's bot and its workspace.
+  - `timeline.test.tsx`, `template-preview.test.tsx`: the Transport `slack` is "Slack" (it showed as "Muster"), and the
+    preview's Slack option.
+  - The step `app_token` names a refused or wrong token as the app-level token ("The app-level token is not valid.",
+    "This is not an app-level token."), not the bot's (S-097).
+  - A draft whose bot token is typed but whose app-level token goes nowhere skips `app_token` after passing steps; the
+    step says to type the app-level token, or, on a saved Connection with a changed proxy, that the stored one goes only
+    with the stored bot token through the saved proxy (S-105).
+  - The `mrkdwn` preview shows its output as text with the note that a Mention written in a template (`<!here>`,
+    `<!channel>`, `<@U…>`) notifies nobody, since the preview does not neutralize it as delivery does (S-099).
+  - A Socket Mode envelope's record (method `WEBSOCKET`, no status) is "Confirmed" in the list and shows Muster's
+    confirmation as its answer (S-101).
+  - The channel picker reads the bot's channels once per Connection, without `q`, and filters them by name in the
+    browser, a leading `#` dropped, as the Mattermost picker does: each list makes the server read up to five pages of
+    `conversations.list` with the Connection's limiter, which delivery shares, so a keystroke must not ask again. The
+    note of a truncated list points to entering the channel id.
+  - The skipped `app_token` step of a draft says to type the app-level token when the saved Connection stores none, and
+    that the stored one goes only with the stored bot token through the saved proxy when it stores one
+    (`app_token_status.set`), whatever the form.
+  - `web/e2e/telegram-connection.spec.ts`: it asserts `connections.hint`, which now names Slack.
+  - "Link Slack" names `messages_tab_disabled` if the server ever sends it (a field code or the problem's code): the
+    backend does not map Slack's `messages_tab_disabled` yet, which is left to a follow-up.
 - **Texts**: every string through i18next in `en.json` and `ru.json`, the texts of reference.md among them.
 - **End-to-end** (`web/e2e/`): `slack-connection.spec.ts` (create in both modes, check, the shared warning by the fake's
   `extra_connections`, the check before saving), `slack-destination.spec.ts` (picker, refusal, save, Check, test with
@@ -112,7 +140,8 @@ Playwright against `muster dev` at 1280 and 360 px wide, signed in as the Admin:
 
 1. Connections → New → Slack: name "ui", bot token `xoxb-muster-dev-slack-token-b`, Socket Mode, app-level token
    `xapp-muster-dev-slack-token-b`; "Check connection" shows "token ✓ · scopes ✓ · app_token ✓" and
-   "muster-dev-bot-b", "Fake workspace B"; Save. Switch to HTTP: the app-level token field is gone, "Slack signing
+   "muster-dev-bot-b", "Fake workspace B"; Save; "Check connection" on the saved page, which stores the bot's name
+   that step 4's refusal names. Switch to HTTP: the app-level token field is gone, "Slack signing
    secret" and "Slack sends button presses to http://localhost:8081/api/v1/callbacks/slack/CN…" appear. Expected
    visible text in Russian with the language switched: «Проверить подключение», «Режим событий».
 2. With `extra_connections` 1 on the fake server and a refresh of the socket, the page of "ui" in Socket Mode shows
@@ -142,8 +171,10 @@ None.
 - Suggested commit: `feat(web): add slack connection and destination pages and linking slack accounts`.
 - The operation of the check before saving is S-105, a backend story, so that this one stays a frontend story; the
   panel here only sends the form's draft.
-- With 37 files the story stays under the size signal; the Connection and Destination halves share the check panels
+- With 40 files the story stays under the size signal; the Connection and Destination halves share the check panels
   and the labels, which splitting would touch twice.
+- Until a check of the saved Connection has stored the bot's name, a channel without the bot is refused with "Invite
+  the bot to the channel." without the bot, as the server's own text is.
 - The live part types no token: Playwright traces record what is typed, so a real token never goes through a form in
   a recorded run.
 

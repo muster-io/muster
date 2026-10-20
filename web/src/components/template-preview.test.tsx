@@ -14,6 +14,7 @@ import { render } from "vitest-browser-react";
 import type { TemplatePreviewResult } from "../api/gen/model";
 import i18n from "../i18n";
 import {
+  FormatSwitch,
   MarkdownText,
   TemplatePreview,
   safeUrl,
@@ -118,6 +119,39 @@ describe("TemplatePreview", () => {
       .toHaveTextContent("<b>#1 HighErrorRate</b> <i>Error rate above 5%</i>");
     expect(document.querySelector("b")).toBeNull();
     await expect.element(page.getByText("Shortened to fit")).toBeVisible();
+  });
+
+  test("shows Slack's mrkdwn as its text, with the note that a Mention in a template notifies nobody", async () => {
+    await renderPreview("root_message", {
+      valid: true,
+      output: "*#1 HighErrorRate* <!here> <@U0FAKEALICE>",
+      format: "mrkdwn",
+      truncated: false,
+      sample: "stored_snapshot",
+      errors: [],
+    });
+    await expect
+      .element(page.getByTestId("template-preview-output"))
+      .toHaveTextContent("*#1 HighErrorRate* <!here> <@U0FAKEALICE>");
+    expect(document.querySelector("strong")).toBeNull();
+    await expect
+      .element(page.getByTestId("template-preview-mrkdwn-note"))
+      .toHaveTextContent(
+        "Shown as the mrkdwn Slack receives. A Mention written in the template, such as <!here>, <!channel> or <@U…>, is sent so that it notifies nobody: only the Destination's Mention settings notify.",
+      );
+  });
+
+  test("offers Slack's markup beside Mattermost's and Telegram's", async () => {
+    const onChange = vi.fn();
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <FormatSwitch name="format" value="markdown" onChange={onChange} />
+      </I18nextProvider>,
+    );
+    await expect.element(page.getByRole("radio", { name: "Mattermost" })).toBeChecked();
+    await expect.element(page.getByRole("radio", { name: "Telegram" })).toBeVisible();
+    await page.getByRole("radio", { name: "Slack" }).click();
+    expect(onChange).toHaveBeenCalledWith("mrkdwn");
   });
 
   test("shows the error of a failed template in place of the message", async () => {
