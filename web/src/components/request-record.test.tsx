@@ -7,7 +7,9 @@
 // attempt, the links to the Destination, the Alert Group and the requests of its check, the copy buttons, also on a
 // plain-http installation, and the time in the user's time zone. Headers, bodies and URLs are text: markup in them is
 // shown, never rendered, and [redacted] stays as it is. A record of a Connection that the reader may not open says why.
-// The request and the answer stand side by side from 1024 px. English and Russian.
+// The request and the answer stand side by side from 1024 px. An envelope of Slack's Socket Mode (C-24.AC-17) shows the
+// envelope as its request and Muster's confirmation as its answer, without a status, and the list calls it confirmed,
+// never "No answer". English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -28,6 +30,7 @@ import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 // The dialog is laid out by its classes, as in the application.
 // oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for its side effect
 import "../styles.css";
+import { statusText } from "./request-log";
 import { RequestRecordDialog } from "./request-record";
 
 const ALL: Permission[] = ["connections:read", "destinations:read", "alert-groups:read"];
@@ -390,6 +393,68 @@ describe("the record of a request", () => {
     await expect
       .element(page.getByTestId("record-error-text"))
       .toHaveTextContent("Post http://127.0.0.1:18065/api/v4/posts: context deadline exceeded");
+  });
+
+  test("shows an envelope of Slack's Socket Mode with Muster's confirmation as its answer, without a status", async () => {
+    const envelope =
+      '{"envelope_id":"e1","type":"interactive","payload":{"type":"block_actions","actions":[{"value":"[redacted]"}]}}';
+    const confirmation = '{"envelope_id":"e1"}';
+    const summary: RequestRecordSummary = {
+      ...SUMMARY,
+      id: "RQ0000000000EN",
+      direction: "inbound",
+      operation: "interactive",
+      method: "WEBSOCKET",
+      url: "wss://127.0.0.1:18097/link/",
+      status: null,
+      check: null,
+      check_run: null,
+      connection_id: "CN0000000000SL",
+      destination: null,
+      alert_group: null,
+    };
+    const record: RequestRecord = {
+      ...summary,
+      request_headers: {},
+      request_body: envelope,
+      request_body_bytes: envelope.length,
+      response_headers: null,
+      response_body: confirmation,
+      response_body_bytes: confirmation.length,
+      error: null,
+    };
+    // The list's status column: confirmed, not "No answer", and not a failure.
+    expect(statusText(i18n.t, summary)).toBe("Confirmed");
+    expect(statusText(i18n.t, { ...summary, error_class: "transient" })).not.toBe("Confirmed");
+    expect(statusText(i18n.t, { ...summary, method: "POST" })).toBe("No answer");
+    serve(() => json(200, record));
+    const screen = await renderRecord(summary);
+    await expect
+      .element(page.getByTestId("record-request-line"))
+      .toHaveTextContent("WEBSOCKET wss://127.0.0.1:18097/link/");
+    await expect.element(page.getByTestId("record-request-body")).toBeVisible();
+    expect(page.getByTestId("record-request-body").element().textContent).toContain(
+      '"type": "interactive"',
+    );
+    await expect
+      .element(page.getByTestId("record-status"))
+      .toHaveTextContent(
+        "Muster confirmed this Socket Mode envelope. A confirmation has no status.",
+      );
+    expect(page.getByTestId("record-response-body").element().textContent).toContain(
+      '"envelope_id": "e1"',
+    );
+    expect(document.body.textContent).not.toContain("No answer");
+    await screen.unmount();
+
+    await i18n.changeLanguage("ru");
+    expect(statusText(i18n.t, summary)).toBe("Подтверждено");
+    await renderRecord(summary);
+    await expect
+      .element(page.getByTestId("record-status"))
+      .toHaveTextContent(
+        "Muster подтвердил этот конверт Socket Mode. У подтверждения нет статуса.",
+      );
   });
 
   test("shows headers, bodies and URLs as text, never as markup", async () => {

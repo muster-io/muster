@@ -2,10 +2,12 @@
 // Copyright The Muster Authors
 
 // The live preview of a template (C-12.FR-5, AC-6): previewTemplate with the template a short while after the text
-// stops changing, rendered against the chosen sample, in Mattermost Markdown or Telegram HTML. The output is untrusted:
-// a Mattermost result is drawn from a small subset of Markdown into elements, never as HTML, and links open only when
-// they are http(s), in a new tab; a Telegram result is shown as its HTML text. A template that fails shows its error in
-// place of the message, and the editor marks it.
+// stops changing, rendered against the chosen sample, in Mattermost Markdown, Telegram HTML or Slack's mrkdwn
+// (C-24.FR-7). The output is untrusted: a Mattermost result is drawn from a small subset of Markdown into elements,
+// never as HTML, and links open only when they are http(s), in a new tab; a Telegram result is shown as its HTML text,
+// and a Slack result as its mrkdwn text, with the note that a Mention written in a template, such as <!here>, notifies
+// nobody: only the Destination's Mention settings do (C-12.FR-8). A template that fails shows its error in place of
+// the message, and the editor marks it.
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -23,8 +25,8 @@ import { type Sample, sampleFields } from "./sample-picker";
 import { positionedErrorText } from "./template-editor";
 import { cn } from "./ui/utils";
 
-/** The markup of a preview: Mattermost Markdown or Telegram HTML. */
-export type PreviewFormat = "markdown" | "html";
+/** The markup of a preview: Mattermost Markdown, Telegram HTML or Slack's mrkdwn. */
+export type PreviewFormat = "markdown" | "html" | "mrkdwn";
 
 /** How long the preview waits after the last change of the text before it renders. */
 export const PREVIEW_DELAY_MS = 400;
@@ -285,7 +287,7 @@ export function MarkdownText({ text }: { text: string }) {
   return <div className="flex flex-col gap-1 text-sm wrap-anywhere">{blocks}</div>;
 }
 
-/** The radio pair that switches a preview between Mattermost and Telegram markup. */
+/** The radio buttons that switch a preview between Mattermost, Telegram and Slack markup. */
 export function FormatSwitch({
   name,
   value,
@@ -299,6 +301,7 @@ export function FormatSwitch({
   const options: [PreviewFormat, string][] = [
     ["markdown", t("templates.preview.mattermost")],
     ["html", t("templates.preview.telegram")],
+    ["mrkdwn", t("templates.preview.slack")],
   ];
   return (
     <fieldset className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -344,6 +347,22 @@ function Output({ result, kind }: { result: TemplatePreviewResult; kind: Templat
       >
         {output}
       </pre>
+    );
+  }
+  if (result.format === "mrkdwn") {
+    // Shown as the text Slack receives; a Mention written in the template is sent so that it notifies nobody.
+    return (
+      <div className="flex flex-col gap-1">
+        <pre
+          className="font-mono text-xs leading-5 wrap-anywhere whitespace-pre-wrap"
+          data-testid="template-preview-output"
+        >
+          {output}
+        </pre>
+        <p className="text-xs text-muted-foreground" data-testid="template-preview-mrkdwn-note">
+          {t("templates.preview.mrkdwnNote")}
+        </p>
+      </div>
     );
   }
   return (

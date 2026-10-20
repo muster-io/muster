@@ -9,7 +9,11 @@
 // would appear. An outgoing webhook shows each request — the event, or "Create", "Update", "Open thread" and "Reply in
 // thread" — with its method, URL, headers and body; a request whose template fails shows its error. A Bridge shows the
 // envelope Muster would post to the bridge, the item "message" in the format json, as formatted JSON text
-// (C-22.FR-17): the bridge renders it in its messenger's markup, so the page draws no message of its own.
+// (C-22.FR-17): the bridge renders it in its messenger's markup, so the page draws no message of its own. A Slack
+// Destination's item is the body of chat.postMessage as JSON (C-24.FR-13), drawn element by element from it — the
+// summary section, the attachment with the colour bar of its status, its sections and context as the plain text Slack
+// shows for their mrkdwn — links as their labels, no bold markers, escaped alert data as its literal characters — and
+// its buttons, `primary` green and `danger` red, with the Snooze menu as a closed menu.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -21,6 +25,7 @@ import type {
   Destination,
   DestinationPreviewItem,
   DestinationPreviewItemName,
+  DestinationType,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { CodeText, RenderedRequest } from "./rendered-request";
@@ -378,6 +383,124 @@ export function telegramMessageNodes(
   return out;
 }
 
+/**
+ * The colour bars of a Slack attachment, by the colours Muster sends for the statuses (C-12.FR-1): classes the page's
+ * stylesheet has, since the frame takes no inline style; any other colour gets a neutral bar.
+ */
+const SLACK_BARS: Readonly<Record<string, string>> = {
+  "#d32f2f": "border-l-[#d32f2f]",
+  "#f57c00": "border-l-[#f57c00]",
+  "#388e3c": "border-l-[#388e3c]",
+  "#9e9e9e": "border-l-[#9e9e9e]",
+  "#6a1b9a": "border-l-[#6a1b9a]",
+};
+
+/** The look of a Slack button by its style: Slack draws `primary` green and `danger` red. */
+const SLACK_BUTTONS: Readonly<Record<string, string>> = {
+  primary: "border-[#007a5a] bg-[#007a5a] text-white",
+  danger: "border-[#e01e5a] bg-[#e01e5a] text-white",
+};
+
+/** A link of Slack's mrkdwn: <url|label> or <url>, for a web or mail address only. */
+const MRKDWN_LINK = /<((?:https?:\/\/|mailto:)[^<>|\s]+)(?:\|([^<>]*))?>/g;
+
+/** A bold span of mrkdwn; a `*` followed by the zero-width space of escaped alert data never pairs (C-24.FR-7). */
+const MRKDWN_BOLD = /\*(?!\u200b)([^*\n]+?)\*(?!\u200b)/g;
+
+/**
+ * The text a reader of Slack sees in mrkdwn, as plain text: a link becomes its label, or its address without one, the
+ * bold markers go, and the entities &lt;, &gt; and &amp; of escaped alert data become their characters — last, so that
+ * an escaped <!here> or <https://…|x> stays the literal text it is in Slack, never a Mention or a link.
+ */
+export function mrkdwnText(text: string): string {
+  return text
+    .replace(MRKDWN_LINK, (_match, url: string, label: string | undefined) =>
+      label === undefined || label === "" ? url : label,
+    )
+    .replace(MRKDWN_BOLD, "$1")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+/** The text of a Block Kit text object as plain text: a mrkdwn one as Slack shows it, a plain_text one as it is. */
+function blockText(value: unknown): string {
+  const object = record(value);
+  const text = str(object.text);
+  return object.type === "mrkdwn" ? mrkdwnText(text) : text;
+}
+
+/** One element of an actions block: a button with its style, or the Snooze menu, closed, with its placeholder. */
+function slackElement(doc: Document, value: unknown): Node[] {
+  const element = record(value);
+  const button = doc.createElement("button");
+  button.type = "button";
+  button.disabled = true;
+  const base = "rounded-md border px-2.5 py-1 text-xs font-medium";
+  if (element.type === "button") {
+    const style = str(element.style);
+    button.className = `${base} ${SLACK_BUTTONS[style] ?? "bg-card text-foreground"}`;
+    button.textContent = blockText(element.text);
+    return [button];
+  }
+  if (element.type === "static_select") {
+    button.className = `${base} bg-card text-foreground`;
+    button.textContent = `${blockText(element.placeholder)} ▾`;
+    return [button];
+  }
+  return [];
+}
+
+/** A Slack block: a section's text, a context's elements and an actions block's buttons, every text as plain text. */
+function slackBlock(doc: Document, value: unknown): Node[] {
+  const b = record(value);
+  switch (b.type) {
+    case "section": {
+      const text = blockText(b.text);
+      return text === "" ? [] : [block(doc, "", textNodes(doc, text))];
+    }
+    case "context": {
+      const texts = arrayOf(b.elements)
+        .map(blockText)
+        .filter((text) => text !== "");
+      return texts.length === 0
+        ? []
+        : [block(doc, "text-xs text-muted-foreground", textNodes(doc, texts.join(" ")))];
+    }
+    case "actions": {
+      const row = doc.createElement("div");
+      row.className = "flex flex-wrap gap-1.5";
+      row.append(...arrayOf(b.elements).flatMap((e) => slackElement(doc, e)));
+      return [row];
+    }
+    default:
+      return [];
+  }
+}
+
+/**
+ * A Slack Root message from the body of chat.postMessage: its blocks, then each attachment with the colour bar of its
+ * status and its blocks; a body without blocks shows its text.
+ */
+export function slackMessageNodes(doc: Document, item: DestinationPreviewItem): Node[] {
+  const body = jsonBody(item.text);
+  const out = arrayOf(body.blocks).flatMap((b) => slackBlock(doc, b));
+  for (const a of arrayOf(body.attachments).map(record)) {
+    const bar = SLACK_BARS[str(a.color).toLowerCase()] ?? "border-l-muted-foreground";
+    out.push(
+      block(
+        doc,
+        `flex flex-col gap-1.5 border-l-4 pl-3 ${bar}`,
+        arrayOf(a.blocks).flatMap((b) => slackBlock(doc, b)),
+      ),
+    );
+  }
+  if (out.length === 0) {
+    out.push(block(doc, "", textNodes(doc, str(body.text))));
+  }
+  return out;
+}
+
 /** The stylesheets of the page, by their own paths, for the frame to look like the page. */
 function pageStylesheets(): string[] {
   return Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
@@ -404,18 +527,29 @@ export function frameDocument(
   return `<!doctype html>${doc.documentElement.outerHTML}`;
 }
 
-function MessageFrame({ item, title }: { item: DestinationPreviewItem; title: string }) {
+function MessageFrame({
+  item,
+  title,
+  slack = false,
+}: {
+  item: DestinationPreviewItem;
+  title: string;
+  /** The item is the body of a Slack message. */
+  slack?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const expandable = t("destinationPreview.expandable");
   const lang = i18n.resolvedLanguage ?? "en";
   const html = useMemo(
     () =>
       frameDocument(lang, pageStylesheets(), (doc) =>
-        item.format === "html"
-          ? telegramMessageNodes(doc, item, { expandable })
-          : mattermostNodes(doc, item),
+        slack
+          ? slackMessageNodes(doc, item)
+          : item.format === "html"
+            ? telegramMessageNodes(doc, item, { expandable })
+            : mattermostNodes(doc, item),
       ),
-    [item, lang, expandable],
+    [item, lang, expandable, slack],
   );
   return (
     <iframe
@@ -432,15 +566,18 @@ function MessageFrame({ item, title }: { item: DestinationPreviewItem; title: st
 function PreviewItem({
   item,
   destinationName,
+  type,
 }: {
   item: DestinationPreviewItem;
   destinationName: string;
+  type: DestinationType;
 }) {
   const { t } = useTranslation();
   const headingId = useId();
   const name = previewItemName(t, item.name);
+  const slack = type === "slack" && item.format === "json";
   const message =
-    (item.format === "markdown" || item.format === "html") &&
+    (item.format === "markdown" || item.format === "html" || slack) &&
     item.text !== null &&
     item.text !== undefined;
   let body: ReactNode;
@@ -449,6 +586,7 @@ function PreviewItem({
       <>
         <MessageFrame
           item={item}
+          slack={slack}
           title={t("destinationPreview.frameTitle", { destination: destinationName })}
         />
         {item.request !== undefined && (
@@ -549,7 +687,12 @@ export function DestinationPreviewPanel({
     body = <p className="text-sm text-muted-foreground">{t("destinationPreview.empty")}</p>;
   } else {
     body = query.data.items.map((item, index) => (
-      <PreviewItem key={`${item.name}-${index}`} item={item} destinationName={destination.name} />
+      <PreviewItem
+        key={`${item.name}-${index}`}
+        item={item}
+        destinationName={destination.name}
+        type={destination.type}
+      />
     ));
   }
   return (

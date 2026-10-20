@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1, FR-2, FR-18): its form, read-only without
-// connections:write; for Mattermost the callback address with its hint, for a Bridge in push mode the same in its form;
+// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1, FR-2, FR-18; C-24.FR-1, FR-2): its form, read-only
+// without connections:write; for Mattermost the callback address with its hint, for a Bridge in push mode and Slack in
+// HTTP mode the same in its form;
 // "Check connection" and "Delete" with connections:write. The check reads the saved Connection while the form holds no
 // changes, and checks the form's values as a draft while it does (C-13.FR-14), which saves nothing: the server sends
 // the stored token only to the saved address through the saved proxy. A Bridge Connection shows what its bridge offers,
@@ -11,8 +12,9 @@
 // The form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. The tab "Request log" (C-23.FR-6) lists the Connection's requests, with the tab and its
-// filters in the URL; the form stays mounted behind it, so that its changes last. A Slack Connection (C-24.FR-1) shows
-// its name, its bot and "Delete" only, until its form and check exist: no other type's form may save it.
+// filters in the URL; the form stays mounted behind it, so that its changes last. A Slack Connection shows what its last
+// check learned — the bot, the workspace and the app — and, while the Leader's last Socket Mode hello counted another
+// connection of its app, the warning that another program shares its presses.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -40,6 +42,7 @@ import {
   draftErrorText,
 } from "../components/connection-form";
 import { RequestLogTabs } from "../components/request-log";
+import { SlackConnectionInfo, SlackSharedAppWarning } from "../components/slack-connection-fields";
 import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
@@ -51,11 +54,13 @@ export const Route = createFileRoute("/connections/$connectionId")({
   component: ConnectionPage,
 });
 
-/**
- * The types whose Connections the page edits with the form. A Slack Connection has no form yet, and no other type's form
- * may save it; neither has a type this SPA does not know.
- */
-const FORM_TYPES: ReadonlySet<Connection["type"]> = new Set(["mattermost", "telegram", "bridge"]);
+/** The types whose Connections the page edits with the form; a type this SPA does not know has none. */
+const FORM_TYPES: ReadonlySet<Connection["type"]> = new Set([
+  "mattermost",
+  "telegram",
+  "bridge",
+  "slack",
+]);
 
 /** The bot's name as its messenger writes it: Telegram with an @; none for a Bridge. */
 function botName(c: Connection): string | undefined {
@@ -210,16 +215,19 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
             <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
               {connection?.name ?? t("connections.edit.title")}
             </h1>
-            {connection !== undefined && connection.type !== "bridge" && (
-              <p
-                className="text-sm wrap-anywhere text-muted-foreground"
-                data-testid="connection-bot"
-              >
-                {botName(connection) === undefined
-                  ? t("connections.edit.botUnknown")
-                  : t("connections.edit.bot", { bot: botName(connection) })}
-              </p>
-            )}
+            {connection?.type === "slack" && <SlackConnectionInfo connection={connection} />}
+            {connection !== undefined &&
+              connection.type !== "bridge" &&
+              connection.type !== "slack" && (
+                <p
+                  className="text-sm wrap-anywhere text-muted-foreground"
+                  data-testid="connection-bot"
+                >
+                  {botName(connection) === undefined
+                    ? t("connections.edit.botUnknown")
+                    : t("connections.edit.bot", { bot: botName(connection) })}
+                </p>
+              )}
           </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && connection !== undefined && (
@@ -233,6 +241,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         </p>
       ) : FORM_TYPES.has(connection.type) ? (
         <RequestLogTabs search={search} onSearch={onSearch} scope={{ connection: connection.id }}>
+          {connection.type === "slack" && <SlackSharedAppWarning connection={connection} />}
           <EditForm current={connection} />
         </RequestLogTabs>
       ) : null}

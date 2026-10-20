@@ -71,10 +71,14 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return t("timeline.transport.telegram");
     case "bridge":
       return t("timeline.transport.bridge");
+    case "slack":
+      return t("timeline.transport.slack");
     case "cli":
       return t("timeline.transport.cli");
-    default:
+    case "system":
       return t("timeline.transport.system");
+    default:
+      return unreachable(transport);
   }
 }
 

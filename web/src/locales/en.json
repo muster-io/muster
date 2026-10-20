@@ -90,6 +90,29 @@
       "confirm": "Remove this link? Presses from {{account}} will no longer act as {{user}}.",
       "label": "Remove {{account}}"
     },
+    "slack": {
+      "attemptsLeft_one": "{{count}} attempt left",
+      "attemptsLeft_other": "{{count}} attempts left",
+      "code": "Enter the code the bot sent you in Slack",
+      "confirm": "Link",
+      "errors": {
+        "codeInvalid": "The code is wrong or no longer valid. Request a new code.",
+        "connectionGone": "This Connection no longer exists. Close the dialog and choose another one.",
+        "directMessageRefused": "The bot cannot send a direct message to this account. Enter the email or name of a person's account.",
+        "handleAmbiguous": "Several Slack accounts have this name. Enter the email instead.",
+        "handleNotFound": "No Slack account with this email or name was found.",
+        "linkedElsewhere": "This account is linked to another user. Its owner or an admin can unlink it.",
+        "messagesTabDisabled": "The Messages tab of the Slack app is turned off, so the bot cannot send you the code. Ask the admin of the Slack app to turn on the Messages tab under App Home, then request a new code.",
+        "tooManyCodes_one": "Too many codes were requested. Try again in {{count}} minute.",
+        "tooManyCodes_other": "Too many codes were requested. Try again in {{count}} minutes."
+      },
+      "handle": "Your Slack email or name",
+      "handleHint": "An email finds your account for sure; a name is compared with the name and the display name of each account.",
+      "hint": "The bot sends a code to your Slack account in a direct message, in the app's Messages tab.",
+      "newCode": "Request a new code",
+      "send": "Send code",
+      "start": "Link Slack"
+    },
     "telegram": {
       "expired": "This link has expired.",
       "expires": "This link works once and expires at {{time}}.",
@@ -444,6 +467,7 @@
   "checks": {
     "codes": {
       "appMismatch": "The app-level token belongs to another Slack app than the bot token.",
+      "appTokenInvalid": "The app-level token is not valid.",
       "blocked": "The outbound address policy blocks this address.",
       "botMayNotEdit": "The bot may not edit messages in the channel.",
       "botMayNotPost": "The bot may not post messages in the channel.",
@@ -462,6 +486,7 @@
       "missingScope": "The bot token lacks the scopes {{scopes}}.",
       "missingScopeUnnamed": "The bot token lacks scopes that Muster needs.",
       "notAChannel": "This chat is not a channel.",
+      "notAppToken": "This is not an app-level token.",
       "notBotApi": "This is not a Bot API.",
       "notBridge": "The address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem.",
       "notMattermost": "The address answers, but not as a Mattermost server.",
@@ -680,6 +705,8 @@
         "telegram": "The address answers as a Bot API."
       },
       "running": "Checking…",
+      "skippedAppToken": "Skipped: type the app-level token to check it",
+      "skippedAppTokenRetype": "Skipped: type the app-level token too, or save first: the stored one goes to Slack only with the stored bot token through the saved proxy",
       "skippedEarlier": "Skipped: an earlier step failed",
       "skippedNoToken": "Skipped: type the bot token to check it",
       "skippedRetype": "Skipped: type the bot token again to check the new address or proxy, or save first",
@@ -751,12 +778,28 @@
       "serverUrlHint": "The address of the Mattermost server, such as https://mattermost.example.org.",
       "telegram": "Telegram"
     },
-    "hint": "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, or a bridge to a messenger that Muster has no native support for.",
+    "hint": "How Muster reaches messengers: a bot account on a Mattermost server, a Telegram bot, the bot of a Slack app, or a bridge to a messenger that Muster has no native support for.",
     "list": {
       "empty": "No Connections yet."
     },
     "slack": {
-      "limiterHint": "At most this many requests go to Slack's Web API through this Connection. When Slack asks Muster to wait, Muster waits as long as it asks."
+      "app": "App: {{id}}",
+      "appToken": "App-level token",
+      "appTokenFormat": "Enter the app-level token of the Slack app, which starts with xapp-.",
+      "appTokenHint": "Starts with xapp- and has the scope connections:write. The Leader opens the Socket Mode connection with it.",
+      "botTokenFormat": "Enter the bot token of the Slack app, which starts with xoxb-.",
+      "eventMode": "Event mode",
+      "httpHint": "Slack sends button presses to {{address}}. Enter it as the Interactivity Request URL of the Slack app, and the app's Slack signing secret here. A press on a test message checks both.",
+      "httpModeHint": "Slack sends button presses to Muster's ingest address, which it must reach; no press is lost while the Leader changes.",
+      "limiterHint": "At most this many requests go to Slack's Web API through this Connection. When Slack asks Muster to wait, Muster waits as long as it asks.",
+      "modes": {
+        "http": "HTTP",
+        "socket": "Socket Mode"
+      },
+      "signingSecret": "Slack signing secret",
+      "signingSecretHint": "From the Basic Information page of the Slack app. Muster checks the signature of every press with it and sends it nowhere.",
+      "socketHint": "The Leader holds the Socket Mode connection, so Slack needs no address of Muster. Presses made while the Leader changes are lost; use HTTP if that matters.",
+      "workspace": "Workspace: {{name}}"
     },
     "telegram": {
       "baseUrlHint": "A self-hosted Bot API server keeps the bot on that server only. Do not call api.telegram.org with this token from anywhere else: even getMe moves the bot back to Telegram's cloud, and presses and comments start to go missing without an error.",
@@ -944,6 +987,27 @@
       "title": "Signing secret",
       "value": "Secret"
     },
+    "slack": {
+      "channel": "Channel",
+      "channelHint": "The list shows the public and private channels the bot is a member of: invite the bot to a channel with /invite to send there.",
+      "channelId": "Channel id",
+      "channelIdFormat": "Enter the channel id as Slack shows it in the channel's details: C or G, then upper-case letters and digits, such as C0123456789.",
+      "channelIdHint": "As Slack shows it in the channel's details, C… or G…; picking a channel fills it in.",
+      "chooseChannel": "Choose a channel",
+      "chooseConnection": "Choose a Connection",
+      "connection": "Connection",
+      "filter": "Filter channels",
+      "filterPlaceholder": "Channel name",
+      "inviteBot": "Invite the bot to the channel: /invite @{{bot}}",
+      "inviteBotUnnamed": "Invite the bot to the channel.",
+      "limiterHint": "At most this many sends and edits go to the channel. Slack allows about one message per second per channel.",
+      "needsConnectionsWrite": "Only someone who may change Connections can pick from the bot's channels: the list comes from Slack through the bot. Enter the channel id instead.",
+      "noChannels": "The bot is a member of no channel yet: invite it with /invite.",
+      "noConnections": "There is no Slack Connection yet: create one under Connections first.",
+      "noMatch": "No channel of the bot matches “{{filter}}”.",
+      "privateChannel": "{{name}} (private)",
+      "truncated": "Slack has more channels than the list shows: filter by name, or enter the channel id."
+    },
     "telegram": {
       "channel": "Channel",
       "channelFound": "Channel:",
@@ -1069,6 +1133,7 @@
     "responseStatus": "Response status: {{status}}",
     "send": "Send test message",
     "sending": "Sending…",
+    "slackPressNote": "Slack does not let a bot press its own button, so this test does not check presses. Press a button on the test message: once the press reaches Muster, it answers that nothing was changed.",
     "source": {
       "alertGroups": "Recent Alert Groups",
       "example": "Example",
@@ -1453,6 +1518,7 @@
     },
     "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
     "everyoneHintBridge": "A Bridge has no mention of the whole chat and no groups: only the chosen users are mentioned, through their accounts linked to this Connection.",
+    "everyoneHintSlack": "Whom in the channel to mention as a whole: nobody, @channel or @here; Slack's @everyone and groups are not offered. Chosen users are mentioned through their Slack accounts linked to this Connection.",
     "everyoneHintTelegram": "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
     "everyoneHintWebhook": "Muster sends mentions as data the receiver formats: everyone, groups by name and users with their login. Chosen users and groups are mentioned as well.",
     "groupPlaceholder": "Mattermost group",
@@ -1795,6 +1861,7 @@
       "outbound": "Sent"
     },
     "empty": "No requests in the last 7 days.",
+    "envelopeConfirmed": "Confirmed",
     "errorClasses": {
       "blocked": "Blocked by the outbound address policy",
       "fatal": "Refused",
@@ -1832,6 +1899,7 @@
       "destination": "Destination",
       "direct": "Direct",
       "direction": "Direction",
+      "envelopeConfirmation": "Muster confirmed this Socket Mode envelope. A confirmation has no status.",
       "error": "Error",
       "errorClass": "Error class",
       "errorCode": "What failed",
@@ -2377,7 +2445,9 @@
       "failed": "The template failed:",
       "markup": "Markup of the preview",
       "mattermost": "Mattermost",
+      "mrkdwnNote": "Shown as the mrkdwn Slack receives. A Mention written in the template, such as <!here>, <!channel> or <@U…>, is sent so that it notifies nobody: only the Destination's Mention settings notify.",
       "noLink": "The template renders no link for this sample.",
+      "slack": "Slack",
       "telegram": "Telegram",
       "title": "Preview",
       "truncated": "Shortened to fit"
@@ -2496,6 +2566,7 @@
       "bridge": "Bridge",
       "cli": "the CLI",
       "mattermost": "Mattermost",
+      "slack": "Slack",
       "system": "Muster",
       "telegram": "Telegram",
       "ui": "the UI"

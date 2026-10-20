@@ -9,8 +9,12 @@
 // draft, which never changes the bot the page names: another server URL gets only the ping, without a token; another
 // path prefix fails the dry probe and the fake records no request with a token under it; only the proxy changed gets
 // the dry probe through the proxy and asks for the token again, which, typed, runs every step; a base URL that is not a
-// bridge fails with its text, and the stored token reaches no fake but the saved address. An Admin reading Russian sees
-// the same at phone width. No page scrolls sideways at 360 px, on the create and the edit page, in English and Russian;
+// bridge fails with its text, and the stored token reaches no fake but the saved address. A Slack draft (C-24.FR-2,
+// AC-2): the create form checks "Token", "Scopes" and "App-level token" with the second app's tokens, the bot, the
+// workspace and the app, and saves nothing; on the page of the spec's own Slack Connection "ui" only the proxy changed
+// gets the dry probe alone through the proxy, and the fake Slack server sees no request with the stored bot token; the
+// bot token typed again runs "Token" and "Scopes" through the proxy and says why "App-level token" was skipped, and both
+// tokens typed run every step. An Admin reading Russian sees the same at phone width. No page scrolls sideways at 360 px, on the create and the edit page, in English and Russian;
 // no Content Security Policy violation.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
@@ -21,15 +25,21 @@ import {
   BRIDGE_TOKEN,
   BRIDGE_URL,
   FMM,
+  FSL,
   FMM2,
   FTG,
   MM_SECOND_TOKEN,
   MM_TOKEN,
+  SLACK_SECOND_APP_TOKEN,
+  SLACK_SECOND_BOT_TOKEN,
   TG_SECOND_TOKEN,
   adminApi,
   connectionNamed,
+  createSlackConnection,
   expectNoHorizontalScroll,
+  removeSlackConnection,
   resetFakeBridge,
+  resetFakeSlack,
   shot,
   signIn,
   signInAdmin,
@@ -351,6 +361,121 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     expect(await saved(admin)).toEqual(before);
     expect(csp).toEqual([]);
   } finally {
+    await admin.dispose();
+  }
+});
+
+/** Opens the input of a secret of the form: "Set a value" on a new Connection, "Replace" on a saved one. */
+async function typeSecret(page: Page, testId: string, label: string, value: string) {
+  await page
+    .getByTestId(testId)
+    .getByRole("button", { name: /^(Set a value|Replace)$/ })
+    .click();
+  await page.getByLabel(label, { exact: true }).fill(value);
+}
+
+const APP_TOKEN_RETYPE =
+  "Skipped: type the app-level token too, or save first: the stored one goes to Slack only with the stored bot token through the saved proxy";
+
+test("checks Slack drafts: the typed tokens, and only the dry probe for a new proxy", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  try {
+    await resetFakeSlack();
+    await removeSlackConnection(admin, "ui");
+    await signInAdmin(page);
+    const before = await saved(admin);
+
+    // A new Slack Connection with the second app's tokens: three steps, and nothing saved.
+    await page.goto("/connections/new");
+    await page.getByRole("radio", { name: "Slack", exact: true }).check();
+    await expect(page.getByTestId("connection-check-draft")).toHaveText(DRAFT);
+    // Without a token: the dry probe alone.
+    await checkButton(page).click();
+    await expect(summary(page)).toHaveText("The address answers as Slack's Web API.");
+    await expect(steps(page)).toHaveText([
+      /^Dry probe without the token: ok · \d+ ms · direct$/,
+      `Token: ${NO_TOKEN}`,
+      `Scopes: ${NO_TOKEN}`,
+      `App-level token: ${NO_TOKEN}`,
+    ]);
+    await typeSecret(page, "secret-connection-bot-token", "Bot token", SLACK_SECOND_BOT_TOKEN);
+    await typeSecret(
+      page,
+      "secret-connection-app-token",
+      "App-level token",
+      SLACK_SECOND_APP_TOKEN,
+    );
+    await checkButton(page).click();
+    await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
+    await expect(steps(page)).toHaveText([
+      /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      "Scopes: ok · direct",
+      /^App-level token: ok · \d+ ms · direct · App: A0MUSTERDEVB$/,
+    ]);
+    await shot(page, "connection-checks-new-slack");
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expectNoHorizontalScroll(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/connections");
+    expect(await saved(admin)).toEqual(before);
+
+    // The saved "ui" with only the proxy changed: the dry probe alone, through the proxy; no stored token goes anywhere.
+    const id = await createSlackConnection(admin, "ui");
+    await page.goto(`/connections/${id}`);
+    await expect(page.getByTestId("connection-bot")).toHaveText(/^Bot: muster-dev-bot-b/);
+    await page.getByLabel("Use a proxy").check();
+    await page.getByLabel("Address", { exact: true }).fill(HTTP_PROXY);
+    await forget(FSL);
+    await forget(FPROXY);
+    await checkButton(page).click();
+    await expect(summary(page)).toHaveText("The address answers as Slack's Web API.");
+    await expect(steps(page)).toHaveText([
+      /^Dry probe without the token: ok · \d+ ms · through the proxy$/,
+      `Token: ${RETYPE}`,
+      `Scopes: ${RETYPE}`,
+      `App-level token: ${RETYPE}`,
+    ]);
+    await shot(page, "connection-checks-edit-slack-proxy");
+    expect((await recorded(FPROXY)).length).toBeGreaterThan(0);
+    expect(
+      (await recorded(FSL)).filter((r) => carries(r, SLACK_SECOND_BOT_TOKEN)).map((r) => r.path),
+    ).toEqual([]);
+
+    // The bot token typed again: "Token" and "Scopes" through the proxy; the stored app-level token goes nowhere.
+    await typeSecret(page, "secret-connection-bot-token", "Bot token", SLACK_SECOND_BOT_TOKEN);
+    await checkButton(page).click();
+    await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
+    await expect(steps(page)).toHaveText([
+      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      "Scopes: ok · through the proxy",
+      `App-level token: ${APP_TOKEN_RETYPE}`,
+    ]);
+    // Both tokens typed: every step through the proxy.
+    await typeSecret(
+      page,
+      "secret-connection-app-token",
+      "App-level token",
+      SLACK_SECOND_APP_TOKEN,
+    );
+    await checkButton(page).click();
+    await expect(steps(page)).toHaveText([
+      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      "Scopes: ok · through the proxy",
+      /^App-level token: ok · \d+ ms · through the proxy · App: A0MUSTERDEVB$/,
+    ]);
+    // A draft never warns about another program on the app.
+    await expect(page.getByTestId("connection-check-warning")).toHaveCount(0);
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expectNoHorizontalScroll(page);
+    await shot(page, "connection-checks-edit-slack-360");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    expect(csp).toEqual([]);
+  } finally {
+    await removeSlackConnection(admin, "ui");
     await admin.dispose();
   }
 });

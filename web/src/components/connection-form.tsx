@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The form of a Connection (C-13.FR-1, C-14.FR-1, C-22.FR-1): its name, where it calls — the server URL of Mattermost,
-// the Bot API base URL and the update mode of Telegram, or the base URL, the event delivery mode and, in push mode, the
-// push secret and the callback address of a Bridge in their type slot — the write-only bot token, the proxy form and
-// the limiter, which a Bridge Connection may take from the rate its bridge declares (C-22.FR-18). The bot token and the
-// push secret are never shown: a read gives only whether they are set and when they changed, and a save sends them only
-// when they were replaced. The stored token is sent only to the address it was entered for, so a new server URL or base
+// The form of a Connection (C-13.FR-1, C-14.FR-1, C-22.FR-1, C-24.FR-1): its name, where it calls — the server URL of
+// Mattermost, the Bot API base URL and the update mode of Telegram, or the base URL, the event delivery mode and, in
+// push mode, the push secret and the callback address of a Bridge in their type slot; Slack's address is fixed, and its
+// slot holds the event mode with the app-level token in Socket Mode or the Slack signing secret and the callback
+// address in HTTP mode — the write-only bot token, the proxy form and the limiter, which a Bridge Connection may take
+// from the rate its bridge declares (C-22.FR-18). The tokens and the secrets are never shown: a read gives only whether
+// they are set and when they changed, and a save sends them only when they were replaced, a Slack Connection only the
+// secret of its event mode. The stored token is sent only to the address it was entered for, so a new server URL or base
 // URL needs the token again. The form reports its values as they are typed, which the check of a Connection sends as a
-// draft before anything is saved (C-13.FR-14): the type's address, the proxy, the token only when one is typed, and the
-// saved Connection an edit holds. Without connections:write the form only shows the Connection. The delete dialog
+// draft before anything is saved (C-13.FR-14): the type's address, the proxy, the token only when one is typed — and for
+// Slack the event mode and, in Socket Mode, the app-level token when one is typed —, and the saved Connection an edit
+// holds. Without connections:write the form only shows the Connection. The delete dialog
 // refuses a Connection that Destinations use (in_use).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +34,8 @@ import type {
   Connection,
   ConnectionDraft,
   ConnectionInput,
+  SlackConnectionInput,
+  SlackEventMode,
   TelegramUpdateMode,
 } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
@@ -58,6 +63,12 @@ import {
   proxyValues,
 } from "./proxy-form";
 import { KEEP_SECRET, type SecretChange, SecretField } from "./secret-field";
+import {
+  APP_TOKEN_PREFIX,
+  BOT_TOKEN_PREFIX,
+  DEFAULT_EVENT_MODE,
+  SlackConnectionFields,
+} from "./slack-connection-fields";
 import {
   DEFAULT_BOT_API_BASE_URL,
   DEFAULT_UPDATE_MODE,
@@ -112,6 +123,12 @@ export interface ConnectionValues {
   event_delivery: BridgeEventDelivery;
   /** Bridge, in push mode. */
   push_secret: SecretChange;
+  /** Slack. */
+  event_mode: SlackEventMode;
+  /** Slack, in Socket Mode. */
+  app_token: SecretChange;
+  /** Slack, in HTTP mode. */
+  slack_signing_secret: SecretChange;
   bot_token: SecretChange;
   proxy: ProxyValues;
   limiter: LimiterValues;
@@ -147,6 +164,9 @@ export function connectionValues(
     base_url: bridge?.base_url ?? "",
     event_delivery: bridge?.event_delivery ?? DEFAULT_EVENT_DELIVERY,
     push_secret: KEEP_SECRET,
+    event_mode: c?.type === "slack" ? c.event_mode : DEFAULT_EVENT_MODE,
+    app_token: KEEP_SECRET,
+    slack_signing_secret: KEEP_SECRET,
     bot_token: KEEP_SECRET,
     proxy: proxyValues(c?.proxy),
     limiter: limiterValues(c?.limiter ?? defaultLimiter(type)),
@@ -181,6 +201,17 @@ function typeInput(v: ConnectionValues): ConnectionInput {
     }
     return bridge;
   }
+  if (v.type === "slack") {
+    const slack: SlackConnectionInput = { type: "slack", ...common, event_mode: v.event_mode };
+    // Only the secret of the event mode goes; the server keeps the other one.
+    if (v.event_mode === "socket" && v.app_token.mode === "replace") {
+      slack.app_token = v.app_token.value;
+    }
+    if (v.event_mode === "http" && v.slack_signing_secret.mode === "replace") {
+      slack.slack_signing_secret = v.slack_signing_secret.value;
+    }
+    return slack;
+  }
   return { type: "mattermost", ...common, server_url: v.server_url.trim() };
 }
 
@@ -199,7 +230,8 @@ export function connectionInput(v: ConnectionValues): ConnectionInput {
 /**
  * The draft that the check of the form's values sends (C-13.FR-14): the type's address as a save sends it, the proxy, the
  * bot token only when one is typed, and the saved Connection of an edit, whose stored token the server uses only for its
- * saved address and proxy.
+ * saved address and proxy. A Slack draft has no address: it sends its event mode and, in Socket Mode, the app-level
+ * token only when one is typed (C-24.FR-2).
  */
 export function connectionDraft(
   v: ConnectionValues,
@@ -229,6 +261,17 @@ export function connectionDraft(
         event_delivery: v.event_delivery,
         ...common,
       };
+    case "slack": {
+      const app = v.app_token;
+      return {
+        type: "slack",
+        event_mode: v.event_mode,
+        ...(v.event_mode === "socket" && app.mode === "replace" && app.value !== ""
+          ? { app_token: app.value }
+          : {}),
+        ...common,
+      };
+    }
     default:
       return { type: "mattermost", server_url: v.server_url.trim(), ...common };
   }
@@ -303,6 +346,54 @@ export const BRIDGE_BASE_URL_FORMAT = "bridge_base_url_format";
 /** The code of a push secret that is not whsec_ followed by base64. */
 export const PUSH_SECRET_FORMAT = "push_secret_format";
 
+/** The code of a Slack bot token that does not start with xoxb-. */
+export const SLACK_BOT_TOKEN_FORMAT = "slack_bot_token_format";
+
+/** The code of a Slack app-level token that does not start with xapp-. */
+export const SLACK_APP_TOKEN_FORMAT = "slack_app_token_format";
+
+/** A Secret that a mode needs: typed now and not empty, or stored and kept. */
+function secretMissing(change: SecretChange, stored: boolean): string | undefined {
+  if (change.mode === "replace") {
+    return change.value === "" ? "required" : undefined;
+  }
+  return change.mode === "keep" && stored ? undefined : "required";
+}
+
+/**
+ * The checks of a Slack Connection's tokens and secrets (C-24.FR-1): the bot token starts with xoxb-, the app-level
+ * token with xapp-; Socket Mode needs an app-level token and HTTP mode the Slack signing secret, sent now or stored.
+ */
+function slackErrors(v: ConnectionValues, stored: Connection | undefined): ConnectionErrors {
+  const errors: ConnectionErrors = {};
+  const saved = stored?.type === "slack" ? stored : undefined;
+  if (
+    v.bot_token.mode === "replace" &&
+    v.bot_token.value !== "" &&
+    !v.bot_token.value.startsWith(BOT_TOKEN_PREFIX)
+  ) {
+    errors["/bot_token"] = SLACK_BOT_TOKEN_FORMAT;
+  }
+  if (v.event_mode === "socket") {
+    const app = v.app_token;
+    const missing = secretMissing(app, saved?.app_token_status.set === true);
+    if (missing !== undefined) {
+      errors["/app_token"] = missing;
+    } else if (app.mode === "replace" && !app.value.startsWith(APP_TOKEN_PREFIX)) {
+      errors["/app_token"] = SLACK_APP_TOKEN_FORMAT;
+    }
+  } else {
+    const missing = secretMissing(
+      v.slack_signing_secret,
+      saved?.slack_signing_secret_status.set === true,
+    );
+    if (missing !== undefined) {
+      errors["/slack_signing_secret"] = missing;
+    }
+  }
+  return errors;
+}
+
 /** The checks of a Bridge's base URL and, in push mode, of its push secret: one sent now, or one stored. */
 function bridgeErrors(v: ConnectionValues, stored: Connection | undefined): ConnectionErrors {
   const errors: ConnectionErrors = {};
@@ -346,6 +437,8 @@ export function connectionErrors(
     }
   } else if (v.type === "bridge") {
     Object.assign(errors, bridgeErrors(v, stored));
+  } else if (v.type === "slack") {
+    Object.assign(errors, slackErrors(v, stored));
   } else if (v.server_url.trim() === "") {
     errors["/server_url"] = "required";
   } else if (!isServerUrl(v.server_url)) {
@@ -369,27 +462,37 @@ export function connectionErrors(
   return errors;
 }
 
-/** The pointer of the address of a type. */
-function addressPointer(type: ConnectionType): string {
+/** The pointer of the address of a type; Slack's address is fixed, so a Slack Connection has none. */
+function addressPointer(type: ConnectionType): string | undefined {
   switch (type) {
     case "telegram":
       return "/bot_api_base_url";
     case "bridge":
       return "/base_url";
+    case "slack":
+      return undefined;
     default:
       return "/server_url";
   }
 }
 
+/** The codes of a typed token that the check of a Slack draft refuses as a save does. */
+const DRAFT_TOKEN_CODES: ReadonlySet<string> = new Set([
+  SLACK_BOT_TOKEN_FORMAT,
+  SLACK_APP_TOKEN_FORMAT,
+]);
+
 /**
- * The errors of connectionErrors that a check of the form's values would be refused for: the type's address and the
- * proxy. The name, the limiter and a token the new address needs again are left to the save.
+ * The errors of connectionErrors that a check of the form's values would be refused for: the type's address, the proxy
+ * and a Slack token typed in the wrong form. The name, the limiter, a missing secret and a token the new address needs
+ * again are left to the save.
  */
 export function draftErrors(v: ConnectionValues, stored: Connection | undefined): ConnectionErrors {
   const address = addressPointer(v.type);
   return Object.fromEntries(
     Object.entries(connectionErrors(v, stored)).filter(
-      ([pointer]) => pointer === address || pointer.startsWith("/proxy/"),
+      ([pointer, code]) =>
+        pointer === address || pointer.startsWith("/proxy/") || DRAFT_TOKEN_CODES.has(code),
     ),
   );
 }
@@ -410,6 +513,10 @@ export function draftFieldLabel(
       return t("connections.fields.botApiBaseUrl");
     case "/base_url":
       return kind === "bridge" ? t("connections.bridge.baseUrl") : undefined;
+    case "/bot_token":
+      return kind === "slack" ? t("connections.fields.botToken") : undefined;
+    case "/app_token":
+      return t("connections.slack.appToken");
     default:
       return undefined;
   }
@@ -462,6 +569,11 @@ export function serverErrors(err: unknown, serverUrlChanged: boolean): Connectio
       errors["/base_url"] = BRIDGE_BASE_URL_FORMAT;
     } else if (item.pointer === "/push_secret" && item.code === "invalid_format") {
       errors["/push_secret"] = PUSH_SECRET_FORMAT;
+    } else if (item.pointer === "/bot_token" && item.code === "invalid_format") {
+      // Only a Slack bot token has a form the server checks.
+      errors["/bot_token"] = SLACK_BOT_TOKEN_FORMAT;
+    } else if (item.pointer === "/app_token" && item.code === "invalid_format") {
+      errors["/app_token"] = SLACK_APP_TOKEN_FORMAT;
     } else {
       errors[item.pointer] = item.code;
     }
@@ -502,6 +614,10 @@ export function connectionErrorText(
       return t("connections.bridge.baseUrlFormat");
     case PUSH_SECRET_FORMAT:
       return t("connections.bridge.pushSecretFormat");
+    case SLACK_BOT_TOKEN_FORMAT:
+      return t("connections.slack.botTokenFormat");
+    case SLACK_APP_TOKEN_FORMAT:
+      return t("connections.slack.appTokenFormat");
     case WEBHOOK_CALL_FAILED:
       return detail === undefined
         ? t("connections.errors.webhookCallFailedNoDetail")
@@ -513,7 +629,7 @@ export function connectionErrorText(
 
 /** The pointers of the fields that show their errors themselves. */
 const SHOWN =
-  /^\/(name|server_url|bot_api_base_url|update_mode|base_url|event_delivery|push_secret|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
+  /^\/(name|server_url|bot_api_base_url|update_mode|base_url|event_delivery|push_secret|event_mode|app_token|slack_signing_secret|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
 
 function isOutdated(err: unknown): boolean {
   return isStale(err) || (isApiError(err) && err.status === 428);
@@ -622,9 +738,14 @@ export function ConnectionForm({
           return;
         }
         const field = name.split(".")[0];
-        // Another event delivery mode takes the push secret's problem with it: polling has no push secret.
+        // Another event delivery mode takes the push secret's problem with it: polling has no push secret; another
+        // Slack event mode the problem of the other mode's secret.
         const prefixes =
-          field === "event_delivery" ? ["/event_delivery", "/push_secret"] : [`/${field}`];
+          field === "event_delivery"
+            ? ["/event_delivery", "/push_secret"]
+            : field === "event_mode"
+              ? ["/event_mode", "/app_token", "/slack_signing_secret"]
+              : [`/${field}`];
         setErrors((current) => {
           const kept = Object.entries(current).filter(
             ([pointer]) => !prefixes.some((prefix) => pointer.startsWith(prefix)),
@@ -815,6 +936,52 @@ export function ConnectionForm({
                               }
                             : undefined
                         }
+                      />
+                    )}
+                  />
+                )}
+              />
+            )}
+            {kind === "slack" && (
+              <Controller
+                control={form.control}
+                name="event_mode"
+                render={({ field: mode }) => (
+                  <Controller
+                    control={form.control}
+                    name="app_token"
+                    render={({ field: app }) => (
+                      <Controller
+                        control={form.control}
+                        name="slack_signing_secret"
+                        render={({ field: signing }) => (
+                          <SlackConnectionFields
+                            id={ID}
+                            eventMode={mode.value}
+                            onEventModeChange={mode.onChange}
+                            appToken={app.value}
+                            onAppTokenChange={app.onChange}
+                            signingSecret={signing.value}
+                            onSigningSecretChange={signing.onChange}
+                            appTokenStatus={
+                              connection?.type === "slack" ? connection.app_token_status : undefined
+                            }
+                            signingSecretStatus={
+                              connection?.type === "slack"
+                                ? connection.slack_signing_secret_status
+                                : undefined
+                            }
+                            callbackUrl={
+                              connection?.type === "slack" ? connection.callback_url : undefined
+                            }
+                            errors={{
+                              eventMode: err("/event_mode"),
+                              appToken: err("/app_token"),
+                              signingSecret: err("/slack_signing_secret"),
+                            }}
+                            disabled={readOnly}
+                          />
+                        )}
                       />
                     )}
                   />

@@ -7,7 +7,8 @@
 // @<username> · for all Telegram bots" with "linked via <Connection>" and the last use on its secondary line. A Bridge
 // link belongs to its Connection too and reads "<messenger> · <display name> · via <Connection>" with the last use on
 // its secondary line (C-22.FR-15): the messenger is the one the Connection's bridge names in its info, read with
-// connections:read, and "Bridge" without it. With remove, each row has a button ("Unlink" on the profile, "Remove" on
+// connections:read, and "Bridge" without it. A Slack link belongs to its Connection as a Mattermost link does and reads
+// "Slack · <Connection> · <display name>" with its last use (C-24.FR-12). With remove, each row has a button ("Unlink" on the profile, "Remove" on
 // the user page) that asks first.
 
 import { useMutation } from "@tanstack/react-query";
@@ -61,11 +62,15 @@ export function linkMessenger(
 
 /**
  * The account of a link as people know it: "@username", or the external id when the messenger gave no username; a
- * Bridge account by its display name, else its handle or external id as the bridge reported them.
+ * Bridge account by its display name, else its handle or external id as the bridge reported them; a Slack account by
+ * its display name, which Mentions show, else "@name" or its user id.
  */
 export function accountName(link: AccountLink): string {
   if (link.messenger === "bridge") {
     return link.display_name || link.username || link.external_id;
+  }
+  if (link.messenger === "slack" && link.display_name) {
+    return link.display_name;
   }
   return link.username ? `@${link.username}` : link.external_id;
 }

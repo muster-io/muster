@@ -4,7 +4,8 @@
 // A record of the Request log (C-23.FR-6): the request — method, URL, headers, body — and the answer — status, headers,
 // body —, side by side from 1024 px and one under the other below, with when it was made in the user's time zone, its
 // direction, latency, path and attempt, the kind of check, what failed, and the links to the Destination, the Alert
-// Group and the requests of its check. The server masks every secret before a record is written; headers, bodies and
+// Group and the requests of its check. An envelope of Slack's Socket Mode (C-24.FR-14, AC-17) shows the envelope as its
+// request and Muster's confirmation as its answer, without a status. The server masks every secret before a record is written; headers, bodies and
 // URLs are untrusted text and are shown as text only, a JSON body indented to be read, a cut body marked with its full
 // size, and each has a copy button, which copies the raw text also on a plain-http installation. A record of a
 // Connection needs the permission to read Connections, which a Destination's list does not: the dialog then says so
@@ -36,6 +37,17 @@ import { COPIED_MS } from "./setup-link-dialog";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
+
+/** The method of the record of an envelope received over a Slack Socket Mode connection, which has no HTTP method. */
+export const WEBSOCKET = "WEBSOCKET";
+
+/**
+ * Whether a record is an envelope of Slack's Socket Mode (C-24.FR-14): received over the socket, with the envelope as
+ * its request and Muster's confirmation as its answer, without a status.
+ */
+export function isEnvelope(record: Pick<RequestRecordSummary, "method" | "direction">): boolean {
+  return record.method === WEBSOCKET && record.direction === "inbound";
+}
 
 /** The accessible name of a direction: "Sent" for a request Muster made, "Received" for one that reached it. */
 function directionText(t: TFunction, direction: RequestDirection): string {
@@ -419,7 +431,20 @@ function AnswerPart({ record }: { record: RequestRecord }) {
   const { t } = useTranslation();
   return (
     <Part title={t("requestLog.record.answer")}>
-      {record.status === null ? (
+      {isEnvelope(record) ? (
+        // An envelope of Slack's Socket Mode has no status: Muster's answer is its confirmation (C-24.FR-14).
+        <>
+          <p className="text-sm text-muted-foreground" data-testid="record-status">
+            {t("requestLog.record.envelopeConfirmation")}
+          </p>
+          <Body
+            text={record.response_body ?? ""}
+            truncated={record.response_body_truncated}
+            bytes={record.response_body_bytes}
+            testId="record-response-body"
+          />
+        </>
+      ) : record.status === null ? (
         <p className="text-sm text-muted-foreground" data-testid="record-status">
           {t("requestLog.record.noAnswer")}
         </p>
