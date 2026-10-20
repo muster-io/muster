@@ -1124,8 +1124,9 @@ func TestBridgeDestinationAPI(t *testing.T) {
 // channel id — a string the spec does not pattern, so that the domain refuses a D… or U… with 422 invalid_format, not
 // request validation with 400 — its Mention settings and limiter, and reads with channel_name; the type filter selects
 // it; a save its check refuses is 422 destination_check_failed with the check_code and the text that names the bot,
-// a missing scope at /connection_id; checkDestination answers its item channel with missing_scopes (D396); and its
-// test and preview answer 501 until S-099.
+// a missing scope at /connection_id; checkDestination answers its item channel with missing_scopes (D396); its test
+// answers the one step message and its preview the item message in the format json, the body of chat.postMessage with
+// its request (C-24.FR-13).
 func TestSlackDestinationAPI(t *testing.T) {
 	x, fd, _ := newDestinationsAPI(t)
 	ft := x.srv.tokens.(*fakeTokens)
@@ -1232,13 +1233,35 @@ func TestSlackDestinationAPI(t *testing.T) {
 	if a.status != http.StatusOK || strings.Contains(string(a.body), "missing_scopes") {
 		t.Errorf("a passing check = %d %s", a.status, a.body)
 	}
-	fd.testErr = errors.Join(destinations.ErrNoTester, errors.New("slack"))
-	for _, op := range []string{"tests", "previews"} {
-		a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/"+op,
-			`{"source":{"kind":"example"}}`)
-		if a.status != http.StatusNotImplemented || !strings.HasSuffix(a.json(t)["type"].(string), "/not-implemented") {
-			t.Errorf("%s = %d %s", op, a.status, a.body)
-		}
+	sent, answer := `{"channel":"C0FAKEALERTS","text":"🧪 Test message · 🔴 #3 CheckoutLatency"}`, `{"ok":true,"ts":"1.000001"}`
+	fd.test = destinations.TestResult{Health: destinations.Health{State: "healthy"}, Steps: []delivery.TestStep{{
+		Name: "message", Request: &delivery.TestRequest{Method: http.MethodPost,
+			URL:     "https://slack.com/api/chat.postMessage",
+			Headers: [][2]string{{"Authorization", "Bearer [redacted]"}}, Body: &sent}, ResponseStatus: 200,
+		ResponseBody: &answer, ErrorClass: "none"}}}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/tests",
+		`{"source":{"kind":"example"}}`)
+	var tested gen.DestinationTestResult
+	decodeInto(t, a, &tested)
+	if a.status != http.StatusOK || len(tested.Steps) != 1 || tested.Steps[0].Name != "message" ||
+		tested.Steps[0].ErrorClass != gen.DeliveryErrorClassNone ||
+		tested.Steps[0].Request.Url != "https://slack.com/api/chat.postMessage" ||
+		tested.Steps[0].ResponseBody.MustGet() != answer {
+		t.Errorf("test = %d %s", a.status, a.body)
+	}
+	body = `{"channel":"C0FAKEALERTS","text":"🔴 #3 CheckoutLatency"}`
+	fd.preview = []delivery.PreviewItem{{Name: "message", Format: "json", Text: &body,
+		Request: &delivery.TestRequest{Method: http.MethodPost, URL: "https://slack.com/api/chat.postMessage",
+			Headers: [][2]string{{"Authorization", "Bearer [redacted]"}}, Body: &body}}}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA5/previews",
+		`{"source":{"kind":"example"}}`)
+	items, _ = a.json(t)["items"].([]any)
+	if a.status != http.StatusOK || len(items) != 1 {
+		t.Fatalf("preview = %d %s", a.status, a.body)
+	}
+	if item := items[0].(map[string]any); item["name"] != "message" || item["format"] != "json" ||
+		item["text"] != body || item["request"].(map[string]any)["body"] != body {
+		t.Errorf("preview = %d %s", a.status, a.body)
 	}
 }
 

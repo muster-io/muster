@@ -59,6 +59,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
@@ -554,12 +555,13 @@ type process struct {
 	roles       auth.Roles
 	// links are the Account links, which map the presses of both messengers to their Users.
 	links *accountlinks.Service
-	// mattermost, telegram and bridge are the adapters of the messenger Destinations, which the delivery worker and
-	// the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by the
-	// callback of any replica, with the test that waits for it.
+	// mattermost, telegram, bridge and slack are the adapters of the messenger Destinations, which the delivery worker
+	// and the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by
+	// the callback of any replica, with the test that waits for it.
 	mattermost  *mattermost.Adapter
 	telegram    *telegram.Adapter
 	bridge      *bridge.Adapter
+	slack       *slack.Adapter
 	testPresses *mattermost.PressWaits
 	// updates routes the updates of Telegram Connections, from the Leader's poller or the webhook endpoint, and poller
 	// is the long polling the Leader task telegram_polling runs.
@@ -755,8 +757,9 @@ func (p *process) serve(ctx context.Context) error {
 	return nil
 }
 
-// messengerAdapters makes the adapters of the Mattermost, Telegram and Bridge Destinations once, over the Connections,
-// with the public and ingest addresses of the configuration: the delivery worker and the Destination tests share them.
+// messengerAdapters makes the adapters of the Mattermost, Telegram, Bridge and Slack Destinations once, over the
+// Connections, with the public and ingest addresses of the configuration: the delivery worker and the Destination tests
+// share them.
 func (p *process) messengerAdapters() {
 	if p.mattermost == nil {
 		p.mattermost = &mattermost.Adapter{Targets: p.connections, PublicURL: p.cfg.PublicURL.String(),
@@ -767,6 +770,9 @@ func (p *process) messengerAdapters() {
 	}
 	if p.bridge == nil {
 		p.bridge = &bridge.Adapter{Targets: p.connections}
+	}
+	if p.slack == nil {
+		p.slack = &slack.Adapter{Targets: p.connections, Version: buildinfo.Version}
 	}
 }
 
@@ -990,6 +996,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			destinations.TypeTelegram: &telegram.Tester{Adapter: p.telegram, Path: interactive, Renderer: p.renderer,
 				Real: p.clocks.Real},
 			destinations.TypeBridge: &bridge.Tester{Adapter: p.bridge, Path: interactive, Renderer: p.renderer,
+				Real: p.clocks.Real},
+			destinations.TypeSlack: &slack.Tester{Adapter: p.slack, Path: interactive, Renderer: p.renderer,
 				Real: p.clocks.Real},
 			destinations.TypeWebhook: &webhooks.Tester{Adapter: p.requests, Path: interactive, Data: p.renderer,
 				DB: pool},
@@ -1393,7 +1401,7 @@ func (p *process) configureWorker() {
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.messengerAdapters()
 	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: p.mattermost, delivery.TypeTelegram: p.telegram,
-		delivery.TypeBridge: p.bridge, delivery.TypeWebhook: p.requests}
+		delivery.TypeBridge: p.bridge, delivery.TypeSlack: p.slack, delivery.TypeWebhook: p.requests}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}

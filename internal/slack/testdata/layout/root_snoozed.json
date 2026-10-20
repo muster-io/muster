@@ -1,0 +1,85 @@
+{
+  "attachments": [
+    {
+      "color": "#9e9e9e",
+      "fallback": "⚪ #12 DiskFull",
+      "blocks": [
+        {
+          "type": "section",
+          "block_id": "muster_heading",
+          "text": {
+            "type": "mrkdwn",
+            "text": "*<http://localhost:8080/alert-groups/AG0000000000A1|#12 DiskFull>*"
+          }
+        },
+        {
+          "type": "section",
+          "block_id": "muster_body",
+          "text": {
+            "type": "mrkdwn",
+            "text": "a · Started 2026-10-20 11:50 UTC\ncluster: a\nnote: @​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;\nteam: sl\n_Disk almost full_\n• pod: i1\n• ~pod: i2~\n<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>\n🔁 Reopened ×1\nSnoozed by Alice Smith until 2026-10-20 16:00 UTC"
+          }
+        },
+        {
+          "type": "context",
+          "block_id": "muster_context",
+          "elements": [
+            {
+              "type": "plain_text",
+              "text": "Muster v1.2.3"
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "block_id": "muster_actions",
+          "elements": [
+            {
+              "type": "button",
+              "action_id": "ack",
+              "text": {
+                "type": "plain_text",
+                "text": "Ack"
+              },
+              "value": "AXJBRzAwMDAwMDAwMDBBMWEAABEiMxjmKk1appoyP0Vd9DyCKvk",
+              "style": "primary"
+            },
+            {
+              "type": "button",
+              "action_id": "unsnooze",
+              "text": {
+                "type": "plain_text",
+                "text": "Unsnooze"
+              },
+              "value": "AXJBRzAwMDAwMDAwMDBBMW4AABEiMxacLejMJQAMpaTKkTsU9Yk"
+            },
+            {
+              "type": "button",
+              "action_id": "resolve",
+              "text": {
+                "type": "plain_text",
+                "text": "Resolve"
+              },
+              "value": "AXJBRzAwMDAwMDAwMDBBMXIAABEiM2u-A6enIR0eehcAUfPGJfg"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "type": "section",
+      "block_id": "muster_summary",
+      "text": {
+        "type": "mrkdwn",
+        "text": "⚪ #12 DiskFull"
+      }
+    }
+  ],
+  "channel": "C0FAKEALERTS",
+  "text": "⚪ #12 DiskFull",
+  "ts": "1.000001",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

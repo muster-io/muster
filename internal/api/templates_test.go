@@ -46,9 +46,10 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 // The token of the preview tests, with templates:preview.
 const previewToken = "mstr_pat_templates_preview"
 
-// TestPreviewTemplateAPI is previewTemplate (C-12.FR-5, C-12.AC-2): the request reaches the renderer with its
-// fields; a template that fails answers 200 with valid false, its errors with line and column and no output; an
-// unknown Route, Alert Group or Stored Snapshot is 404, a kind without previews 400; templates:preview is needed.
+// TestPreviewTemplateAPI is previewTemplate (C-12.FR-5, C-12.AC-2, C-24.FR-7): the request reaches the renderer with
+// its fields, the markup mrkdwn included; a template that fails answers 200 with valid false, its errors with line and
+// column and no output; an unknown Route, Alert Group or Stored Snapshot is 404, a kind without previews or an unknown
+// markup 400; templates:preview is needed.
 func TestPreviewTemplateAPI(t *testing.T) {
 	x, ft, _, _ := newTokensAPI(t)
 	ft.idents[previewToken] = &auth.Identity{Session: ft.idents[fullToken].Session,
@@ -96,5 +97,18 @@ func TestPreviewTemplateAPI(t *testing.T) {
 	if a := x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews", `{"kind":"nope","template":""}`); a.status !=
 		http.StatusBadRequest {
 		t.Errorf("an unknown kind = %d", a.status)
+	}
+	// Slack's mrkdwn (C-24.FR-7) reaches the renderer and is answered; a markup the spec does not name is refused.
+	n := len(fake.reqs)
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"","format":"mrkdwn"}`)
+	if out := a.json(t); a.status != http.StatusOK || out["format"] != "mrkdwn" || len(fake.reqs) != n+1 ||
+		fake.reqs[n].Format != messages.MarkupMrkdwn {
+		t.Errorf("mrkdwn = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"","format":"slack"}`); a.status != http.StatusBadRequest ||
+		len(fake.reqs) != n+1 {
+		t.Errorf("an unknown format = %d %s", a.status, a.body)
 	}
 }

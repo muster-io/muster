@@ -81,6 +81,7 @@ const (
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
 	TypeBridge     = "bridge"
+	TypeSlack      = "slack"
 )
 
 // Destination is a Destination as delivery calls it: Connection is the internal id of its Connection, nil for an

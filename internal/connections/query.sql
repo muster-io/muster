@@ -228,6 +228,21 @@ FROM destinations d
 JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
 WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'bridge' AND c.deleted_at IS NULL;
 
+-- GetSlackDestinationTarget reads where a Slack Destination posts — its channel id — with the Connection it posts
+-- through, that Connection's secrets as stored, its version, which its client is cached for, and the workspace address
+-- and the bot's name that its last passing check stored. A deleted Destination is read too, since its final edit still
+-- runs; its Connection must not be deleted.
+-- name: GetSlackDestinationTarget :one
+SELECT d.slack_channel_id, c.id, c.public_id, c.type, c.name, c.bot_token_ciphertext, c.bot_token_key_id,
+       c.bot_token_updated_at, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
+       c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at, c.proxy,
+       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version,
+       c.slack_team_url, c.bot_username
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'slack' AND c.org_id = @org_id
+  AND c.deleted_at IS NULL;
+
 -- ListBridgeDestinations lists the Bridge Destinations that are not deleted, in id order, with their Connection and
 -- channel, for muster doctor.
 -- name: ListBridgeDestinations :many

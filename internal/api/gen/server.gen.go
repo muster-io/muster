@@ -2756,6 +2756,7 @@ const (
 	TemplatePreviewRequestFormatHtml        TemplatePreviewRequestFormat = "html"
 	TemplatePreviewRequestFormatLessThannil TemplatePreviewRequestFormat = "<nil>"
 	TemplatePreviewRequestFormatMarkdown    TemplatePreviewRequestFormat = "markdown"
+	TemplatePreviewRequestFormatMrkdwn      TemplatePreviewRequestFormat = "mrkdwn"
 )
 
 // Valid indicates whether the value is a known member of the TemplatePreviewRequestFormat enum.
@@ -2769,6 +2770,8 @@ func (e TemplatePreviewRequestFormat) Valid() bool {
 		return true
 	case TemplatePreviewRequestFormatMarkdown:
 		return true
+	case TemplatePreviewRequestFormatMrkdwn:
+		return true
 	default:
 		return false
 	}
@@ -2780,6 +2783,7 @@ const (
 	TemplatePreviewResultFormatHtml        TemplatePreviewResultFormat = "html"
 	TemplatePreviewResultFormatLessThannil TemplatePreviewResultFormat = "<nil>"
 	TemplatePreviewResultFormatMarkdown    TemplatePreviewResultFormat = "markdown"
+	TemplatePreviewResultFormatMrkdwn      TemplatePreviewResultFormat = "mrkdwn"
 )
 
 // Valid indicates whether the value is a known member of the TemplatePreviewResultFormat enum.
@@ -2792,6 +2796,8 @@ func (e TemplatePreviewResultFormat) Valid() bool {
 	case TemplatePreviewResultFormatLessThannil:
 		return true
 	case TemplatePreviewResultFormatMarkdown:
+		return true
+	case TemplatePreviewResultFormatMrkdwn:
 		return true
 	default:
 		return false
@@ -4532,7 +4538,7 @@ type DestinationPreviewItem struct {
 	// Request A request as it would be or was sent, with Secrets, the Signing secret and tokens masked.
 	Request *RenderedRequest `json:"request,omitempty"`
 
-	// Text The rendered Root message text; for a Bridge, the envelope as JSON.
+	// Text The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.
 	Text nullable.Nullable[string] `json:"text,omitempty"`
 }
 
@@ -4602,7 +4608,7 @@ type DestinationTestResult struct {
 	// RequestLogRun The check run of the requests this test made (`CR…`); `listRequestLog` with `run` and the Destination lists them.
 	RequestLogRun PublicId `json:"request_log_run"`
 
-	// Steps The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires.
+	// Steps The `message` step for a messenger — alone for Telegram, a Bridge and Slack — followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires.
 	Steps []TestStep `json:"steps"`
 }
 
@@ -7086,7 +7092,7 @@ type TemplatePreviewRequest struct {
 	// AlertGroupId A `public_id` in the format of `PublicId`, or null.
 	AlertGroupId nullable.Nullable[NullablePublicId] `json:"alert_group_id,omitempty"`
 
-	// Format The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
+	// Format The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body, `mrkdwn` as in Slack. Ignored for `link_rule` and `webhook_request`, which have no markup.
 	Format nullable.Nullable[TemplatePreviewRequestFormat] `json:"format,omitempty"`
 	Kind   TemplateKind                                    `json:"kind"`
 
@@ -7106,7 +7112,7 @@ type TemplatePreviewRequest struct {
 	Template string `json:"template"`
 }
 
-// TemplatePreviewRequestFormat The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
+// TemplatePreviewRequestFormat The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body, `mrkdwn` as in Slack. Ignored for `link_rule` and `webhook_request`, which have no markup.
 type TemplatePreviewRequestFormat string
 
 // TemplatePreviewResult defines model for TemplatePreviewResult.
@@ -7158,7 +7164,7 @@ type TestStep struct {
 	ErrorCode nullable.Nullable[NullableTestStepErrorCode] `json:"error_code,omitempty"`
 	Extracted *map[string]string                           `json:"extracted,omitempty"`
 
-	// Name `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook.
+	// Name `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook. A Slack Destination's `message` is sent with `chat.postMessage`.
 	Name TestStepName `json:"name"`
 
 	// Request A request as it would be or was sent, with Secrets, the Signing secret and tokens masked.
@@ -7169,7 +7175,7 @@ type TestStep struct {
 	ResponseStatus nullable.Nullable[int]    `json:"response_status,omitempty"`
 }
 
-// TestStepName `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook.
+// TestStepName `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook. A Slack Destination's `message` is sent with `chat.postMessage`.
 type TestStepName string
 
 // TimelineActor Who caused the entry. `system` entries carry the reason in `reason`.

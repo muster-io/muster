@@ -120,3 +120,22 @@ func TestErrorIsMaskedUntrusted(t *testing.T) {
 		t.Fatal("the token leaked")
 	}
 }
+
+// TestOutcomeGoneCandidateIsUnknown covers C-24.FR-8: an edit answered message_not_found is a Gone-candidate, which a
+// Result alone — every call but the adapter's edit — takes as unknown, with Slack's error; only the adapter, after
+// reading the channel, makes it Gone or Fatal (adapter_test.go).
+func TestOutcomeGoneCandidateIsUnknown(t *testing.T) {
+	s := startStandIn(t, answerJSON(http.StatusOK, `{"ok":false,"error":"message_not_found"}`))
+	c := newClient(t, network(t, nil), settings(s.base()))
+	r := c.updateMessage(t.Context(), outbound.ClassDelivery, outgoing{Channel: "C1", TS: "1.000001", Text: "x"})
+	o := r.Outcome()
+	if r.Classification.Class != ClassGoneCandidate || r.ErrorCode != "message_not_found" ||
+		o.Kind != delivery.OutcomeUnknown || o.Error != "message_not_found" || o.Status != http.StatusOK ||
+		!strings.Contains(string(r.Body), `"message_not_found"`) {
+		t.Fatalf("result %+v, outcome %+v", r, o)
+	}
+	if c := Classify(Answer{Status: http.StatusOK, Error: "message_not_found"}); c.Class != ClassGoneCandidate ||
+		c.Reason != "message_not_found" {
+		t.Fatalf("classification %+v", c)
+	}
+}

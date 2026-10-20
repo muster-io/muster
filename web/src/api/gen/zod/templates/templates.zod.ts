@@ -32,7 +32,7 @@ export const previewTemplateBodyAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Z
 export const PreviewTemplateBody = zod.object({
   "kind": zod.enum(['root_message', 'line', 'ack_timeout_notice', 'link_rule', 'webhook_request']),
   "template": zod.string().describe('The template to render; empty renders what a Route without a template of the kind shows, and the result returns the source of the built-in template.'),
-  "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('commonmark'),zod.literal(null)]).nullish().describe('The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge\'s envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.'),
+  "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('commonmark'),zod.literal('mrkdwn'),zod.literal(null)]).nullish().describe('The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge\'s envelope body, `mrkdwn` as in Slack. Ignored for `link_rule` and `webhook_request`, which have no markup.'),
   "route_id": zod.string().regex(previewTemplateBodyRouteIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "stored_snapshot_id": zod.string().nullish().describe('A recent Stored Snapshot as the sample. Without a sample the most recent ones the Route took are used (`template.dry_run_sample`), or a built-in example.'),
   "alert_group_id": zod.string().regex(previewTemplateBodyAlertGroupIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
@@ -48,7 +48,7 @@ export const PreviewTemplateResponse = zod.object({
   "valid": zod.boolean(),
   "output": zod.string().nullish().describe('Rendered text; null when the template failed.'),
   "truncated": zod.boolean().optional().describe('The output was shortened to the length limit.'),
-  "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('commonmark'),zod.literal(null)]).nullish().describe('The markup of `output`; null for kinds without markup.'),
+  "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('commonmark'),zod.literal('mrkdwn'),zod.literal(null)]).nullish().describe('The markup of `output`; null for kinds without markup.'),
   "source": zod.string().nullish().describe('The source of the rendered template — the request\'s `template`, or for an empty one the built-in template of the kind in the preview\'s language, for an editor to start from; null for `link_rule` and `webhook_request`, which have no built-in template.'),
   "sample": zod.union([zod.literal('stored_snapshot'),zod.literal('alert_group'),zod.literal('example'),zod.literal(null)]).nullish(),
   "errors": zod.array(zod.object({

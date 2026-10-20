@@ -22,6 +22,7 @@
   "button.acknowledge": "Ack",
   "button.resolve": "Resolve",
   "button.snooze": "Snooze {duration}",
+  "button.snoozeMenu": "Snooze…",
   "button.snoozeTomorrow": "Until tomorrow {time}",
   "button.snoozeWeekStart": "Until {day} {time}",
   "button.snoozeWeekStartDay.monday": "Monday",

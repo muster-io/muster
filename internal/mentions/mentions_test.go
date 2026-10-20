@@ -375,7 +375,8 @@ func TestNames(t *testing.T) {
 	conn := int64(3)
 	if IdentitySpace(TypeTelegram, &conn) != "telegram" || IdentitySpace(TypeMattermost, &conn) != "mattermost:3" ||
 		IdentitySpace(TypeMattermost, nil) != "" || IdentitySpace(TypeWebhook, nil) != "" ||
-		IdentitySpace(TypeBridge, &conn) != "bridge:3" || IdentitySpace(TypeBridge, nil) != "" {
+		IdentitySpace(TypeBridge, &conn) != "bridge:3" || IdentitySpace(TypeBridge, nil) != "" ||
+		IdentitySpace(TypeSlack, &conn) != "slack:3" || IdentitySpace(TypeSlack, nil) != "" {
 		t.Error("identity spaces")
 	}
 	f := newFake()
@@ -497,7 +498,8 @@ func TestValidateSlack(t *testing.T) {
 }
 
 // TestResolveSlack covers C-24.FR-6: a Slack Destination's Mentions resolve into channel and here and its Users, and
-// leave out all and groups that settings stored before the rule would carry; its identity space is none until S-102.
+// leave out all and groups that settings stored before the rule would carry; its identity space is the Slack links of
+// its Connection, in which a User without a link has no username and is named by their display name.
 func TestResolveSlack(t *testing.T) {
 	f := newFake()
 	s := newService(f)
@@ -513,7 +515,10 @@ func TestResolveSlack(t *testing.T) {
 	if err != nil || describe(got) != "everyone:here,user:Alice Smith,everyone:channel" {
 		t.Errorf("slack = %s, %v", describe(got), err)
 	}
-	if IdentitySpace(TypeSlack, &conn) != "" {
+	if u := got[1].User; u == nil || u.Username != "" || u.Display() != "Alice Smith" {
+		t.Errorf("a User without a Slack link = %+v", u)
+	}
+	if IdentitySpace(TypeSlack, &conn) != "slack:3" || IdentitySpace(TypeSlack, nil) != "" {
 		t.Errorf("identity space %q", IdentitySpace(TypeSlack, &conn))
 	}
 }

@@ -12,6 +12,7 @@ files_touched:
   - internal/slack/adapter_test.go
   - internal/slack/layout.go
   - internal/slack/layout_test.go
+  - internal/slack/testdata/**
   - internal/slack/testmsg.go
   - internal/slack/testmsg_test.go
   - internal/slack/client.go
@@ -22,13 +23,14 @@ files_touched:
   - internal/messages/safe_test.go
   - internal/messages/render.go
   - internal/messages/render_test.go
-  - internal/messages/preview.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/delivery/delivery.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
   - internal/delivery/live_test.go
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
   - internal/connections/slack.go
   - internal/connections/slack_test.go
   - internal/connections/query.sql
@@ -36,21 +38,20 @@ files_touched:
   - internal/destinations/preview.go
   - internal/mentions/mentions.go
   - internal/mentions/mentions_test.go
-  - internal/api/templates.go
   - internal/api/templates_test.go
+  - internal/api/destinations_test.go
   - internal/fakes/fakeslack/fakeslack.go
   - internal/fakes/fakeslack/messages.go
   - internal/fakes/fakeslack/fakeslack_test.go
   - internal/runtime/runtime.go
   - internal/archlint/secretleak.go
   - test/e2e/slack_test.go
-  - web/src/components/template-preview.tsx
 acceptance:
   - "[C-24.FR-4, C-24.AC-5] A new Alert Group creates, through the delivery worker, one `chat.postMessage` whose `text` and top `section` are the summary line — the status emoji, `#N` and the title — with one attachment in the firing colour whose blocks are a `section` with the heading linked to the Alert Group page, a `section` with the body whose line of links starts with \"Open in Muster\", a `context` with \"Muster v<version>\" and no image, and an `actions` block; the request names `blocks` and `attachments` and sets `unfurl_links` and `unfurl_media` to `false`; no block is `rich_text` or `markdown` (`layout_test.go`, a golden request per status)."
   - "[C-24.FR-5, C-24.AC-5] A firing Root message carries Ack (`primary`), Resolve and the `static_select` \"Snooze…\" whose options are the Route's durations and then the Snooze presets; an acknowledged one Unack, Resolve (`primary`) and the menu; a snoozed one Ack (`primary`), Unsnooze and Resolve; a resolved one no `actions` block; a Reminder \"Still on it\" (`primary`) and Unack; no message has two `primary` buttons or any `danger`; every `value` is a signed action id of at most 150 bytes and every `action_id` is unique in its block (`layout_test.go`)."
   - "[C-24.FR-6, C-24.AC-5] Acknowledge through the API edits the Root message with `chat.update` of its `ts`, naming both `blocks` and `attachments`, Quietly and without Mentions; a new Alert creates a Thread reply with the Root message's `ts` as `thread_ts` and no `reply_broadcast`; a Thread reply and a Storm summary have their text in a `section`, a short `text` and `attachments: []`, and a test message is laid out as a Root message."
-  - "[C-24.FR-7, C-24.AC-6, C-12.FR-7] A label value `@channel <!here> <b>x</b> *y* <https://evil.example|z> &` reaches the fake server as `@​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;`, with no Mention, link or emphasis; `previewTemplate` takes the markup `mrkdwn` and renders a Route's Root message template and line template in it with the same escaping (`safe_test.go`, `templates_test.go`)."
-  - "[C-24.FR-4, C-24.AC-7] An Alert Group with 40 Alerts reaches the fake server with a body `section` of at most 3,000 code points, counted on the mrkdwn as sent, that ends with the line of links, the notices and the footer and cuts the Alert list with \"…and N more\"; an Alert Group whose title is 200 emoji gets a `text` whose title is cut to 60 code points and which stays under 4,000 bytes when every emoji is counted as its shortcode; Mentions that do not fit in 1,000 bytes of `text` stay in the top `section` (`layout_test.go`)."
+  - "[C-24.FR-7, C-24.AC-6, C-12.FR-7] A label value `@channel <!here> <b>x</b> *y* <https://evil.example|z> &` reaches the fake server as `@​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;`, with no Mention, link or emphasis; `previewTemplate` takes the markup `mrkdwn` and renders a Route's Root message template and line template in it with the same escaping (`safe_test.go`, `render_test.go`, `templates_test.go`)."
+  - "[C-24.FR-4, C-24.AC-7] An Alert Group with 40 Alerts reaches the fake server with a body `section` of at most 3,000 code points, counted on the mrkdwn as sent, that ends with the line of links, the notices and the footer and shows the Alert list as the distinct values with the built-in \"+N more\" and \"Full list in Muster\"; an Alert Group whose title is 200 emoji gets a `text` whose title is cut to 60 code points and which stays under 4,000 bytes when every emoji is counted as its shortcode; Mentions that do not fit in 1,000 bytes of `text` stay in the top `section` (`layout_test.go`)."
   - "[C-24.FR-8, C-24.AC-8] Against the fake server: a `429` with `Retry-After: 1` delays the next request through that Connection, to any of its Destinations, by 1 to 2 seconds and is not counted as an attempt; `not_in_channel` makes the Destination Broken at once with the reason named; `invalid_blocks` on a Publication sends the same message as plain `text` within 3,000 bytes and records the delivery event `markup_rejected`; `edit_window_closed` on an edit ends it as Not delivered and leaves the Destination healthy."
   - "[C-24.FR-8, C-24.AC-8] An edit answered `message_not_found` while `conversations.info` shows the bot a member of the channel publishes the Alert Group again once, Quietly, with \"The previous message was deleted at HH:MM\", and leaves the Destination healthy; with the bot no longer a member it makes the Destination Broken; a Thread reply answered `ok` without `message.thread_ts` is deleted with `chat.delete` at once, and the Alert Group is published again once; a second deletion marks the pair \"deleted in the messenger\" (`adapter_test.go`, `live_test.go`)."
   - "[C-24.FR-3, C-24.FR-15, C-24.AC-9] A new Alert Group meets `not_in_channel` because the bot was removed in the fake server, and resolves while the Destination is Broken; after the bot is added back, the next probe — the Destination check of S-098 — ends the Broken state and resolves `MusterDestinationBroken` with no new Alert Group, its `conversations.info` counted in `muster_client_requests_total` under the delivery client class."
@@ -84,48 +85,67 @@ issue: 308
 
 ## Contracts
 
-- **Spec** (`api/openapi.yaml`): the markup enums of `TemplatePreviewRequest` and of the preview's answer gain
-  `mrkdwn`, described as Slack's; `testDestination` and `previewDestination` describe the Slack type — the step
-  `message` alone, and the request as the JSON body of `chat.postMessage`.
+- **Spec** (`api/openapi.yaml`): `TemplatePreviewRequest.format` and `TemplatePreviewResult.format` gain `mrkdwn`,
+  described as Slack's; `testDestination` and `previewDestination` describe the Slack type — the step `message` alone,
+  and the preview's item `message` in the format `json`, the body of `chat.postMessage` as the Bridge's is the
+  envelope, with its request that call and the bot token masked.
 - **Operations**: `testDestination` and `previewDestination` for the type (`destinations:write`, interactive for the
   test); `previewTemplate` with `mrkdwn`.
 - **Adapter** (`internal/slack/adapter.go`): implements `delivery.Adapter` — `Publish` (`chat.postMessage`), `Update`
   (`chat.update`), `Reply` (`chat.postMessage` with `thread_ts`) and `LengthLimit` 3,000 — with the message id the
-  Root message's `ts`; the outcome of each answer by `Classify` of S-097 and these rules: `message_not_found` on an
-  edit reads `conversations.info` in the same client class, then Gone (member, not archived) or Fatal; a reply answered
-  without `message.thread_ts` is deleted with `chat.delete` and returned as Gone; MarkupRejected sends the message again
-  as `text` alone, rendered plain and cut to 3,000 bytes, and returns MarkupRejected with the outcome of that send;
-  `edit_window_closed` and `cant_update_message` are Unknown. The delivery's `message_url` is
+  Root message's `ts` — and `delivery.Checker`, whose `Check` is the Destination check of S-098 in the Call's client
+  class, the Broken probe that `delivery/broken.go` runs; the outcome of each answer by `Classify` of S-097 and these
+  rules: `message_not_found` on an edit reads `conversations.info` in the same client class, then Gone (member, not
+  archived) or Fatal; a reply answered without `message.thread_ts` is deleted with `chat.delete` and returned as Gone;
+  MarkupRejected is returned as it is, and the worker's resend of the same call with `Plain` (C-11.FR-8) makes the
+  adapter send `text` alone — escaped for mrkdwn as the blocks are, cut to 3,000 bytes, with `blocks` and
+  `attachments` empty; `edit_window_closed` and `cant_update_message` are Unknown. The delivery's `message_url` is
   `<workspace url>archives/<channel id>/p<ts without its dot>`, from the `slack_team_url` the check stored, without a
   request; none while the check has not run. Every send and edit goes through the delivery worker or the interactive
   path, as lint 3 checks.
+- **Client** (`internal/slack/client.go`): unexported calls of `chat.postMessage`, `chat.update` and `chat.delete`
+  over `Client.Call`; `Result.Body` also keeps the masked body of an answered `ok: false`, which a test step shows.
 - **Layout** (`internal/slack/layout.go`): the structure of C-24.FR-4 and C-24.FR-5 — `text` and the top `section`
   with the summary line and, for a Loud message, the Mentions; the attachment's colour from `messages.StatusColour`;
   the heading `section`; the body `section` of items 3 to 11 in `mrkdwn`; the `context` with "Muster v<version>" and no
   image; the `actions` block with `block_id`
   `muster_actions`, the `action_id`s `ack`, `unack`, `resolve`, `unsnooze`, `snooze` (the menu) and `still_on_it`, and
-  the labels in the Route's language, the menu's placeholder "Snooze…" («Отложить…»). The title in `text` is cut to 60
-  code points, and Mentions that do not fit in 1,000 bytes of `text` are left out of it.
+  the labels in the Route's language, the menu's placeholder "Snooze…" («Отложить…»), its options the Route's
+  durations as a Text command writes them ("1h", «1ч») and then the Snooze presets by their labels. The title in
+  `text` is cut to 60 code points, and Mentions that do not fit in 1,000 bytes of `text` are left out of it.
 - **Messages** (`internal/messages`): `MarkupMrkdwn` beside the other markups, with its layout of items 3 to 11 and
   `EscapeMrkdwn` — `&`, `<`, `>` as entities, a zero-width space after `@`, `*`, `_`, `~` and `` ` `` in alert data —
   used by the default message, the Route's templates and the Fallback template; the length counted on the escaped
-  string. `delivery/render.go` renders a Slack Destination in `mrkdwn`.
-- **Mentions** (`internal/mentions/mentions.go`): for a Slack Destination, `channel` and `here` render as `<!channel>`
-  and `<!here>`; a chosen User without a Slack link for the Connection renders as their display name, escaped.
-- **Connections** (`internal/connections/slack.go`, `query.sql`): `SlackTarget` — the client, the channel and the
-  bot's name of a Destination for the adapter, cached per Connection version as the other types do.
+  string. A Root message in `mrkdwn` carries `SnoozeSeconds`, the Route's durations, which the menu's options name,
+  as one in CommonMark does; the built-in text `button.snoozeMenu` is the menu's placeholder. `delivery/render.go`
+  renders a Slack Destination in `mrkdwn`.
+- **Mentions** (`internal/slack/layout.go`, `internal/mentions/mentions.go`): the layout renders them, as each adapter
+  renders its own: for a Slack Destination, `channel` and `here` render as `<!channel>` and `<!here>`; a chosen User
+  without a Slack link for the Connection renders as their display name, escaped. `mentions.go` only gains the
+  identity space `slack:<connection id>`, in which S-102 finds the Account links.
+- **Connections** (`internal/connections/slack.go`, `connections.go`, `query.sql`): `SlackTarget` — the client, the
+  channel, the bot's name and the workspace address (`slack_team_url`, for `message_url`) of a Destination for the
+  adapter, the client cached per Connection version as the other types do; `Queries` gains the query and `Service` the
+  cache.
 - **Tests and previews** (`internal/slack/testmsg.go`, `internal/destinations/test.go`, `preview.go`): the test message
-  of C-24.FR-13 through the interactive path, which never presses anything; the preview as the request body.
-- **Fake Slack server** (`internal/fakes/fakeslack/messages.go`): `chat.postMessage`, `chat.update`, `chat.delete`,
-  `chat.postEphemeral` (answered here, used by S-100) and `chat.getPermalink`, keeping each channel's messages and
-  Threads; the rules of F-074 to F-091 that Muster relies on — the block limits with `invalid_blocks`, a `text` over
-  4,000 bytes on an edit with `msg_too_long`, `primary` and `danger` only, `block_mismatch`, a reply to a deleted root
-  without replies posted into the channel without `thread_ts`, a tombstone for a deleted root with replies, and
-  `not_in_channel` for a channel the bot left; `/_fake/messages` lists them, and `/_fake/delete` deletes one as a
-  person would.
-- **Template preview** (`web/src/components/template-preview.tsx`): a `mrkdwn` branch wherever the type check asks
-  for one after the spec change; the option in the Route editor comes with S-103.
-- **Secrets** (lint 5): the probe `slack_connections` gains a Publication and an edit that fail.
+  of C-24.FR-13 through the interactive path, which never presses anything, sent once more as `text` alone after
+  MarkupRejected, as Telegram's is; the preview as the item `message` in the format `json`, the body of
+  `chat.postMessage`, with the bot token masked. `TestSlackDestinationAPI` of S-098, which expects `501` from both
+  operations, expects the step and the item instead.
+- **Fake Slack server** (`internal/fakes/fakeslack/messages.go`, `fakeslack.go`): `chat.postMessage`, `chat.update`,
+  `chat.delete`, `chat.postEphemeral` (answered here, used by S-100) and `chat.getPermalink`, keeping each channel's
+  messages and Threads, with each `ts` from a counter (`1.000001`, `1.000002`, …), never from a clock; the rules of
+  F-074 to F-091 that Muster relies on — the block limits with `invalid_blocks`, a `text` over 4,000 bytes on an edit
+  with `msg_too_long`, `primary` and `danger` only, `block_mismatch`, a reply to a deleted root without replies posted
+  into the channel without `thread_ts`, a tombstone for a deleted root with replies, and `not_in_channel` for a channel
+  the bot left; `GET /_fake/messages?channel=…` lists them, and `POST /_fake/delete` deletes one as a person would.
+  `chat.postEphemeral` is only answered here; S-100 lists the ephemeral messages.
+- **Template preview**: the SPA needs no change — its preview's format is a local union of `markdown` and `html`, the
+  generated enums widen and nothing switches over them exhaustively — and neither do `internal/api/templates.go` and
+  `internal/messages/preview.go`, which pass the markup through; the option in the Route editor comes with S-103.
+- **Secrets** (lint 5): the probe `slack_connections` gains the Slack adapter of its Destination, whose Publication and
+  edit fail, whose edit finds the Root message deleted and reads the channel, whose misplaced reply cannot be deleted,
+  and its test message and preview.
 - **Defaults**: `destination.slack.limiter`, `connection.slack.limiter`, `delivery.broken_probe_interval`,
   `delivery.transient_budget`, `message.alerts_listed`.
 
@@ -144,9 +164,11 @@ issue: 308
 ```sh
 make dev > dev.log 2>&1 &
 # the Admin's session (`jar`, `H`) as in S-011; an Integration "lab" with its fake receiver, NOTIFY, ADV and AG as in
-# S-020 and S-028; the On-call policy in P as in S-025, with its ack timeout and Reminders off; the Connection "sl" (C)
-# and the Destination "alerts" on C0FAKEALERTS (D) as in S-098. Messages are picked by their summary line, so the
-# database need not be fresh.
+# S-020 and S-028; the On-call policy in P as in S-025, with its ack timeout off, a Reminder 600 seconds after an
+# acknowledgement and no automatic Unacknowledge ("ack_timeout":{"enabled":false,"first_interval_seconds":900},
+# "reminders":{"enabled":true,"first_interval_seconds":600,"cap_seconds":14400},"auto_unacknowledge":false); the
+# Connection "sl" (C) and the Destination "alerts" on C0FAKEALERTS (D) as in S-098. Messages are picked by their
+# summary line, so the database need not be fresh.
 API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FS=127.0.0.1:18097/_fake
 R=$(curl -s "${H[@]}" $API/routes -d "{\"name\":\"sl\",\"matchers\":[{\"label\":\"team\",\"op\":\"=\",\"value\":\"sl\"}],\"urgent\":false,
   \"group_key\":[\"alertname\"],\"destination_ids\":[\"$D\"],\"policy\":$P}" | jq -r .id)
@@ -186,19 +208,20 @@ TS=$(MSG DiskFull '.ts' | tr -d '"'); curl -s -X POST $FS/delete -d "{\"channel\
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/unacknowledge > /dev/null; sleep 2
 MSG DiskFull '.attachments[0].blocks[1].text.text | test("The previous message was deleted at [0-9]{2}:[0-9]{2}")'   # true
 curl -s -b jar $API/destinations/$D | jq -r .health.state                      # healthy
-# a Root message deleted before any reply: the reply lands in the channel and is deleted at once
-FIRE s2 CpuHigh j1; G2=$(AG 'pod%3D%22j1%22'); TS=$(MSG CpuHigh '.ts' | tr -d '"')
+# a Root message deleted before any reply: the next Reminder, a reply alone, lands in the channel and is deleted at once
+FIRE s2 CpuHigh j1; G2=$(AG 'pod%3D%22j1%22')
+curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null; sleep 1; TS=$(MSG CpuHigh '.ts' | tr -d '"')
 curl -s -X POST $FS/delete -d "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\"}" > /dev/null
-curl -s -X PUT $FAM/groups/s2/alerts/j2 -d '{"labels":{"team":"sl","pod":"j2"}}' > /dev/null
-NOTIFY s2 '{"reason":"new alerts added"}'; ADV 61; sleep 2
+ADV 600; sleep 2
 curl -s $FS/requests | jq '[.[] | select(.path == "/api/chat.delete")] | length >= 1'   # true
 curl -s -b jar "$API/alert-groups/$G2/timeline" | jq '[.items[] | select(.kind == "delivery" and .delivery_event == "republished")] | length'   # 1
+MSG CpuHigh '.replies | length'                                                 # 1: the Reminder, under the new Root message
 
 # C-24.FR-8, AC-8: 429 for the Connection, markup rejected, an edit window
 FAULT chat.update 429 ratelimited 1
-curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null
+curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null
 sleep 3; curl -s $FS/requests | jq -c '[.[] | select(.path == "/api/chat.update")] | (map(.status) | rindex(429)) as $i | .[$i].at_ms as $t |
-  [.[$i + 1:][] | (.at_ms - $t) / 1000] | length > 0 and all(. >= 1 and . < 2)'   # true
+  (.[$i + 1].at_ms - $t) / 1000 | . >= 1 and . < 2'   # true
 FAULT chat.postMessage 200 invalid_blocks
 FIRE s3 MemHigh k1; G3=$(AG 'pod%3D%22k1%22'); MSG MemHigh '{blocks: (.blocks | length), t: (.text | length > 0)}'   # {"blocks":0,"t":true}
 curl -s -b jar "$API/alert-groups/$G3/timeline" | jq '[.items[] | select(.delivery_event == "markup_rejected")] | length'   # 1
@@ -218,7 +241,7 @@ curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="deli
 MSG NetDown '.ts' | grep -c null                                                # 1: never published
 
 # C-24.FR-13, AC-16: the test message
-curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{}' | jq -c '[.steps[].name, .steps[0].error_class]'   # ["message","none"]
+curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' | jq -c '[.steps[].name, .steps[0].error_class]'   # ["message","none"]
 MSG 'Test message' '.blocks | length > 0'                                       # true
 ```
 
@@ -251,15 +274,27 @@ None.
   label value look as F-074, F-075 and F-082 describe is seen only in a Slack client, and whether the zero-width space
   after `*`, `_`, `~` and `` ` `` keeps mrkdwn from pairing them is a Pending fact (C-24.FR-7). If it does not, the
   escaping changes in this pull request — to a look-alike character, for example — and C-24.FR-7 with it.
-- The probe needs no code here: the Destination check of S-098 is the probe of every type that has one, run in the
-  delivery class by `delivery/broken.go`.
+- The probe needs no code in `delivery/broken.go`: it runs the `Check` of every adapter that implements
+  `delivery.Checker` in the delivery class, and the Slack adapter's `Check` is the Destination check of S-098.
 - `chat.getPermalink` is served by the fake for completeness and not used: it answers `ok` for a tombstone (F-088).
 - `text` is cut so that it never reaches the 4,000 bytes of F-078 even when Slack stores each character as an entity
   or a shortcode, which costs a long title in the notification only; the top `section` keeps the whole title.
 - Muster sends only blocks of the types `section`, `context` and `actions`, so `block_mismatch` cannot happen; the
   fake answers it anyway, as a guard for a later change.
+- The fake does not split a long `text` (F-077), answer with shortcodes (F-079), cut an attachment's text (F-080) or
+  turn a `markdown` block into `rich_text` (F-081): Muster relies on none of them.
+- A Root message deleted before any reply meets a reply first only when the next change is a reply alone, such as a
+  Reminder: a new Alert also edits the Root message, and the worker sends an Alert Group's edit before its replies, so
+  that edit finds the deletion (`message_not_found`, `conversations.info`, published again) and no reply lands in the
+  channel. The Verification and `test/e2e/slack_test.go` therefore delete the Root message of an acknowledged Alert
+  Group and let its Reminder, 600 seconds later on the development clock, find the deletion.
 - The live check posts to the maintainer's `#alerts` and deletes what it posted afterwards (F-087: the bot deletes its
   own messages); a Thread with replies leaves a tombstone, which the operator may delete in the client.
+- In mrkdwn the URLs of template data — the generator URLs, `ExternalURL` and the Alert Group's URL — reach a template
+  with `<`, `>` and `|` percent-encoded and `&` as `&amp;`, so that a Route template's `<{{ .GeneratorURL }}|Source>`
+  stays one link (`safe_test.go`, `render_test.go`). The other markups share the gap and keep their URLs as they are:
+  a `)` in Markdown or a `"` in HTML of a generator URL can still end the link a Route template writes it into. That
+  predates this story and is left to a follow-up story for the URL fields of template data in every markup.
 
 ## Coverage
 

@@ -23,6 +23,8 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/slack"
 )
@@ -796,5 +798,89 @@ func TestSlackDemo(t *testing.T) {
 	}
 	if res, err := e.svc.Check(t.Context(), c.PublicID, nil); err != nil || !res.OK {
 		t.Errorf("demo check = %+v, %v", res, err)
+	}
+}
+
+// TestSlackTarget is where a Slack Destination posts, for the Slack adapter: its channel id and its Connection with the
+// Web API client, kept until the Connection changes, and the workspace address and the bot's name the Connection's last
+// passing check stored — none before one, so that a Publication has no link until then. A Destination that is unknown,
+// of another Connection type or of a deleted Connection has none; a failed read and a token that cannot be opened are
+// errors of their own.
+func TestSlackTarget(t *testing.T) {
+	e, f := newSlackEnv(t)
+	ctx := t.Context()
+	c := e.createSlack(t, slackInput("sl", connections.EventModeSocket))
+	e.store.slTargets[31] = memBRTarget{connection: c.ID, channel: fakeslack.ChannelAlerts}
+	tg, err := e.svc.SlackTarget(ctx, 31)
+	if err != nil || tg.Client == nil || tg.ConnectionID != c.ID || tg.ConnectionPublicID != c.PublicID ||
+		tg.ChannelID != fakeslack.ChannelAlerts || tg.TeamURL != "" || tg.BotName != "" {
+		t.Fatalf("target before a check = %+v, %v", tg, err)
+	}
+	a := &slack.Adapter{Targets: e.svc, Version: "1.2.3"}
+	call := delivery.Call{Class: outbound.ClassDelivery, Destination: delivery.Destination{ID: 31,
+		PublicID: "DS000000000031", Type: delivery.TypeSlack}}
+	m := messages.Message{Kind: messages.KindRoot, Language: "en", Colour: messages.ColourFiring,
+		Heading: &messages.Heading{Number: 1, Title: "DiskFull", URL: "http://localhost:8080/alert-groups/AG00000000000A"},
+		Buttons: []messages.Button{}}
+	if o := a.Publish(ctx, call, m); o.Kind != delivery.OutcomeOK || o.MessageID != "1.000001" || o.MessageURL != "" {
+		t.Fatalf("publish before a check = %+v", o)
+	}
+
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	checked, err := e.svc.SlackTarget(ctx, 31)
+	if err != nil || checked.Client != tg.Client || checked.TeamURL != fakeslack.Apps()[0].TeamURL ||
+		checked.BotName != fakeslack.Apps()[0].BotName {
+		t.Fatalf("target after a check = %+v, %v", checked, err)
+	}
+	o := a.Publish(ctx, call, m)
+	if o.Kind != delivery.OutcomeOK || o.MessageURL != "https://fake-workspace.slack.com/archives/C0FAKEALERTS/p"+
+		strings.ReplaceAll(o.MessageID, ".", "") {
+		t.Fatalf("publish after a check = %+v", o)
+	}
+	if ck := a.Check(ctx, call); ck.Kind != delivery.OutcomeOK {
+		t.Fatalf("check of the destination = %+v", ck)
+	}
+
+	in := slackInput("sl", connections.EventModeSocket)
+	in.BotToken, in.AppToken = keyring.Replace(fakeslack.SecondBotToken), keyring.Replace(fakeslack.SecondAppToken)
+	if err := e.update(t, c.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := e.svc.SlackTarget(ctx, 31)
+	if err != nil || moved.Client == tg.Client {
+		t.Fatalf("the target after a new token = %+v, %v", moved, err)
+	}
+	if o := a.Publish(ctx, call, m); o.Kind != delivery.OutcomeOK ||
+		len(f.Messages(fakeslack.AppB, fakeslack.ChannelAlerts)) != 1 ||
+		len(f.Messages(fakeslack.AppA, fakeslack.ChannelAlerts)) != 2 {
+		t.Fatalf("publish after a new token = %+v", o)
+	}
+
+	mm := e.create(t, "mm")
+	gone := e.createSlack(t, slackInput("gone", connections.EventModeSocket))
+	e.store.slTargets[32] = memBRTarget{connection: mm.ID, channel: fakeslack.ChannelAlerts}
+	e.store.slTargets[33] = memBRTarget{connection: gone.ID, channel: fakeslack.ChannelAlerts}
+	if _, err := e.svc.SlackTarget(ctx, 33); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{32, 33, 99} {
+		if _, err := e.svc.SlackTarget(ctx, id); !errors.Is(err, slack.ErrNoTarget) {
+			t.Errorf("target %d = %v", id, err)
+		}
+	}
+	e.store.fail["GetSlackDestinationTarget"] = errors.New("down")
+	if _, err := e.svc.SlackTarget(ctx, 31); err == nil || errors.Is(err, slack.ErrNoTarget) {
+		t.Errorf("unreadable = %v", err)
+	}
+	delete(e.store.fail, "GetSlackDestinationTarget")
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.SlackTarget(ctx, 31); err == nil || !strings.Contains(err.Error(), "open the bot token") {
+		t.Errorf("a token that cannot be opened = %v", err)
 	}
 }

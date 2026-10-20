@@ -1,0 +1,43 @@
+{
+  "attachments": [],
+  "blocks": [
+    {
+      "type": "section",
+      "block_id": "muster_text",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Alice *​Smith*​\nReminder: Alice Smith, are you still on it?"
+      }
+    },
+    {
+      "type": "actions",
+      "block_id": "muster_actions",
+      "elements": [
+        {
+          "type": "button",
+          "action_id": "still_on_it",
+          "text": {
+            "type": "plain_text",
+            "text": "Still on it"
+          },
+          "value": "AXBBRzAwMDAwMDAwMDBBMWsAABEiM_Sxx6ApoyVrEGAZRj-Zxgk",
+          "style": "primary"
+        },
+        {
+          "type": "button",
+          "action_id": "unack",
+          "text": {
+            "type": "plain_text",
+            "text": "Unack"
+          },
+          "value": "AXBBRzAwMDAwMDAwMDBBMXUAABEiM_44YBATbtJZFC3yqxRcl9E"
+        }
+      ]
+    }
+  ],
+  "channel": "C0FAKEALERTS",
+  "text": "Reminder: Alice Smith, are you still on it? Alice *​Smith*​",
+  "thread_ts": "1.000001",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

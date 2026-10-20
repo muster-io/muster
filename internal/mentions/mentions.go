@@ -301,8 +301,9 @@ func (u User) Display() string {
 	return u.Name
 }
 
-// IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost or Bridge
-// links of its Connection (C-22.FR-15); an outgoing webhook has none, so that a User is named by their display name.
+// IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost, Bridge or
+// Slack links of its Connection (C-22.FR-15, C-24.FR-6); an outgoing webhook has none, so that a User is named by their
+// display name.
 func IdentitySpace(destinationType string, connection *int64) string {
 	switch {
 	case destinationType == TypeTelegram:
@@ -311,6 +312,8 @@ func IdentitySpace(destinationType string, connection *int64) string {
 		return "mattermost:" + strconv.FormatInt(*connection, 10)
 	case destinationType == TypeBridge && connection != nil:
 		return "bridge:" + strconv.FormatInt(*connection, 10)
+	case destinationType == TypeSlack && connection != nil:
+		return "slack:" + strconv.FormatInt(*connection, 10)
 	}
 	return ""
 }

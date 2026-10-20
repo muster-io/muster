@@ -153,3 +153,110 @@ func TestEscapeCommonMark(t *testing.T) {
 		t.Errorf("commonmark line data %+v", line)
 	}
 }
+
+// ac6 is the label value of C-24.AC-6, and ac6Mrkdwn the text it reaches Slack as: entities for `&`, `<` and `>`, and
+// a zero-width space after `@` and each emphasis character.
+const (
+	ac6       = "@channel <!here> <b>x</b> *y* <https://evil.example|z> &"
+	ac6Mrkdwn = "@\u200bchannel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *\u200by*\u200b &lt;https://evil.example|z&gt; &amp;"
+)
+
+// TestEscapeMrkdwn is C-24.FR-7 and C-24.AC-6: alert data reach Slack as literal mrkdwn text — `&`, `<` and `>` as
+// entities, so that nothing becomes a link, a Mention, <!channel> or <!here>, and a zero-width space after `@`, `*`,
+// `_`, `~` and the backquote, so that nothing pairs into emphasis, strikethrough or code; an `@` that Value
+// neutralized gets no second one, and an entity in the input is escaped again, since the escaper runs once.
+func TestEscapeMrkdwn(t *testing.T) {
+	if got := EscapeMrkdwn(Value(ac6)); got != ac6Mrkdwn {
+		t.Errorf("C-24.AC-6 value = %q, want %q", got, ac6Mrkdwn)
+	}
+	for in, want := range map[string]string{
+		"":                       "",
+		"plain text · no markup": "plain text · no markup",
+		"**bold**":               "*\u200b*\u200bbold*\u200b*\u200b",
+		"__italic__":             "_\u200b_\u200bitalic_\u200b_\u200b",
+		"~~struck~~":             "~\u200b~\u200bstruck~\u200b~\u200b",
+		"``code``":               "`\u200b`\u200bcode`\u200b`\u200b",
+		"@here":                  "@\u200bhere",
+		"@\u200bhere":            "@\u200bhere",
+		"a*\u200bb":              "a*\u200bb",
+		"<@U0123ABCD>":           "&lt;@\u200bU0123ABCD&gt;",
+		"<!channel>":             "&lt;!channel&gt;",
+		"&amp; &lt;":             "&amp;amp; &amp;lt;",
+		"|bar|":                  "|bar|",
+		"я_я":                    "я_\u200bя",
+		"end*":                   "end*\u200b",
+	} {
+		if got := EscapeMrkdwn(in); got != want {
+			t.Errorf("EscapeMrkdwn(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if Escaper(MarkupMrkdwn)("*a*") != "*\u200ba*\u200b" {
+		t.Error("the escaper of mrkdwn")
+	}
+}
+
+// hostileURL is a generator URL that url.Parse accepts with a host and that, written raw into a mrkdwn link, would
+// close it and open a second link whose text the alert chooses; hostileURLMrkdwn is how it reaches a template in
+// mrkdwn.
+const (
+	hostileURL       = "https://a.example/x?q=1><https://phish.example|Open_runbook"
+	hostileURLMrkdwn = "https://a.example/x?q=1%3E%3Chttps://phish.example%7COpen_runbook"
+)
+
+// TestSafeDataMrkdwn is C-12.FR-7 and C-24.FR-7 for templates: in mrkdwn the label and annotation values and the
+// title, summary, Route and Owner of the Alert Group reach a template neutralized and escaped for mrkdwn, a label name
+// keeps its spelling, a generator URL is kept only when it is http(s), every URL — the generator URLs, ExternalURL
+// and the Alert Group's — is escaped for a link, so that a Route template's `<{{ .GeneratorURL }}|Source>` stays one
+// link, and the input does not change.
+func TestSafeDataMrkdwn(t *testing.T) {
+	d := templates.Data{
+		GroupLabels:       templates.KV{"alertname": "Disk*Full"},
+		CommonLabels:      templates.KV{"note": ac6, "team_name": "web"},
+		CommonAnnotations: templates.KV{"summary": "a_b ~c~ `d`"},
+		ExternalURL:       "https://muster.example.org/a|b",
+		Alerts: templates.Alerts{
+			{Labels: templates.KV{"pod": "<p1>"}, Annotations: templates.KV{"x": "&"},
+				GeneratorURL: "javascript:alert(1)"},
+			{Labels: templates.KV{"pod": "p2"}, GeneratorURL: "https://prometheus.example.org/graph?g0.expr=up&x=1"},
+			{Labels: templates.KV{"pod": "p3"}, GeneratorURL: hostileURL},
+		},
+		AlertGroup: templates.AlertGroup{Title: "*t*", Summary: "@all", Route: "r_1", Owner: "<!channel>",
+			URL: "https://muster.example.org/alert-groups/AG<1>"},
+	}
+	md := SafeData(d, MarkupMrkdwn)
+	if md.CommonLabels["note"] != ac6Mrkdwn || md.CommonLabels["team_name"] != "web" ||
+		md.GroupLabels["alertname"] != "Disk*\u200bFull" ||
+		md.CommonAnnotations["summary"] != "a_\u200bb ~\u200bc~\u200b `\u200bd`\u200b" ||
+		md.Alerts[0].Labels["pod"] != "&lt;p1&gt;" || md.Alerts[0].Annotations["x"] != "&amp;" ||
+		md.Alerts[0].GeneratorURL != "" ||
+		md.Alerts[1].GeneratorURL != "https://prometheus.example.org/graph?g0.expr=up&amp;x=1" ||
+		md.Alerts[2].GeneratorURL != hostileURLMrkdwn || md.ExternalURL != "https://muster.example.org/a%7Cb" {
+		t.Errorf("mrkdwn data %+v", md)
+	}
+	if g := md.AlertGroup; g.Title != "*\u200bt*\u200b" || g.Summary != "@\u200ball" || g.Route != "r_\u200b1" ||
+		g.Owner != "&lt;!channel&gt;" || g.URL != "https://muster.example.org/alert-groups/AG%3C1%3E" {
+		t.Errorf("mrkdwn alert group %+v", g)
+	}
+	if d.CommonLabels["note"] != ac6 || d.AlertGroup.Owner != "<!channel>" || d.Alerts[2].GeneratorURL != hostileURL ||
+		d.ExternalURL != "https://muster.example.org/a|b" {
+		t.Errorf("the input changed: %+v", d)
+	}
+	line := SafeLine(d.Alerts[0], d.AlertGroup, MarkupMrkdwn)
+	if line.Labels["pod"] != "&lt;p1&gt;" || line.AlertGroup.Owner != "&lt;!channel&gt;" || line.GeneratorURL != "" ||
+		line.AlertGroup.URL != "https://muster.example.org/alert-groups/AG%3C1%3E" {
+		t.Errorf("mrkdwn line data %+v", line)
+	}
+	// A Route template that writes the generator URL into a link makes one link, whatever the URL holds.
+	r := newRenderer(t)
+	src := "<{{ .GeneratorURL }}|Source>"
+	out, err := r.execute("t", src, SafeLine(d.Alerts[2], d.AlertGroup, MarkupMrkdwn))
+	if want := "<" + hostileURLMrkdwn + "|Source>"; err != nil || out != want || strings.Count(out, "<") != 1 ||
+		strings.Count(out, "|") != 1 {
+		t.Errorf("line template = %q, %v; want %q", out, err, want)
+	}
+	src = "{{ range .Alerts }}{{ if .GeneratorURL }}<{{ .GeneratorURL }}|Source> {{ end }}{{ end }}"
+	want := "<https://prometheus.example.org/graph?g0.expr=up&amp;x=1|Source> <" + hostileURLMrkdwn + "|Source> "
+	if out, err = r.execute("t", src, md); err != nil || out != want || strings.Contains(out, "<https://phish") {
+		t.Errorf("root template = %q, %v; want %q", out, err, want)
+	}
+}

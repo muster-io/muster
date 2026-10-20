@@ -629,7 +629,7 @@ export const useCheckDestination = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
+ * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. A Slack Destination posts one test message with `chat.postMessage`, the step `message` alone; a bot cannot press its own button, so the test cannot show that presses reach Muster.
  * @summary Send a test message
  */
 export const testDestination = async (destinationId: string,
@@ -718,7 +718,7 @@ export const useTestDestination = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
  * @summary Preview a message or request
  */
 export const previewDestination = async (destinationId: string,

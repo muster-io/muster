@@ -4,7 +4,9 @@
 package fakeslack_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -156,7 +158,7 @@ func TestErrors(t *testing.T) {
 		{"auth.test", fakeslack.BotToken, "token_revoked"},
 		{"bots.info", fakeslack.BotToken, "token_revoked"},
 		{"apps.connections.open", "xapp-unknown", "invalid_auth"},
-		{"chat.postMessage", fakeslack.SecondBotToken, "unknown_method"},
+		{"chat.scheduleMessage", fakeslack.SecondBotToken, "unknown_method"},
 	} {
 		got := call(t, f, tc.method, tc.token, nil, false)
 		slackError(t, got, tc.code)
@@ -638,5 +640,569 @@ func TestChannelsConfig(t *testing.T) {
 	}
 	if err := f.SetConfig(fakeslack.Config{PageSize: -2}); err == nil {
 		t.Error("SetConfig took a negative page size")
+	}
+}
+
+// botB is the bot token of app b, whose channel alerts the chat tests post to, and botUserB its bot's user.
+const (
+	botB     = fakeslack.SecondBotToken
+	botUserB = "U0MUSTERBOTB"
+	alerts   = fakeslack.ChannelAlerts
+)
+
+// chat calls the chat method with the bearer token and body as JSON, as Muster sends the write methods.
+func chat(t *testing.T, f *fakeslack.Fake, method, token string, body map[string]any) answer {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.URL()+"/api/"+method, bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+token)
+	return do(t, req)
+}
+
+// post posts to the channel alerts of app b with the arguments args, the channel added.
+func post(t *testing.T, f *fakeslack.Fake, args map[string]any) answer {
+	t.Helper()
+	if _, set := args["channel"]; !set {
+		args["channel"] = alerts
+	}
+	return chat(t, f, "chat.postMessage", botB, args)
+}
+
+// ok checks that a is a successful answer and returns its ts.
+func ok(t *testing.T, a answer) string {
+	t.Helper()
+	if a.status != http.StatusOK || a.body["ok"] != true {
+		t.Fatalf("want ok, got %d %s", a.status, a.raw)
+	}
+	ts, _ := a.body["ts"].(string)
+	return ts
+}
+
+func textBlock(id, text string) map[string]any {
+	return map[string]any{"type": "section", "block_id": id, "text": map[string]any{"type": "mrkdwn", "text": text}}
+}
+
+func buttonOf(id, text, value string) map[string]any {
+	return map[string]any{"type": "button", "action_id": id, "text": map[string]any{"type": "plain_text", "text": text},
+		"value": value}
+}
+
+func actionsOf(id string, elements ...any) map[string]any {
+	return map[string]any{"type": "actions", "block_id": id, "elements": elements}
+}
+
+// menu is a static_select with options n, each of text and value.
+func menu(n int, text, value string) map[string]any {
+	options := make([]any, n)
+	for i := range options {
+		options[i] = map[string]any{"text": map[string]any{"type": "plain_text", "text": text}, "value": value}
+	}
+	return map[string]any{"type": "static_select", "action_id": "snooze",
+		"placeholder": map[string]any{"type": "plain_text", "text": "Snooze…"}, "options": options}
+}
+
+// sections are n sections with distinct block ids.
+func sections(n int) []any {
+	out := make([]any, n)
+	for i := range out {
+		out[i] = textBlock(fmt.Sprintf("b%d", i), "x")
+	}
+	return out
+}
+
+// invalid checks that a is invalid_blocks naming pointer.
+func invalid(t *testing.T, a answer, pointer string) {
+	t.Helper()
+	slackError(t, a, "invalid_blocks")
+	errs, _ := a.body["errors"].([]any)
+	for _, e := range errs {
+		if s, _ := e.(string); strings.HasSuffix(s, "[json-pointer:"+pointer+"]") {
+			return
+		}
+	}
+	t.Fatalf("invalid_blocks without %s: %s", pointer, a.raw)
+}
+
+// messagesOf are the messages of the channel alerts of app b, as GET /_fake/messages lists them.
+func messagesOf(t *testing.T, f *fakeslack.Fake, query string) []fakeslack.Message {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/_fake/messages?"+query, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := do(t, req)
+	var out []fakeslack.Message
+	if a.status != http.StatusOK || json.Unmarshal([]byte(a.raw), &out) != nil {
+		t.Fatalf("messages = %d %s", a.status, a.raw)
+	}
+	return out
+}
+
+// TestPostMessage covers F-074, F-089 and F-098 as Muster posts: a message with blocks, an attachment and unfurling
+// off is answered with its channel, its ts and the message by the bot, kept as sent and listed by GET /_fake/messages
+// without replies or edit; a request without text, blocks or attachments is no_text; blocks or attachments that are not
+// a list are refused; a form-encoded post carries its blocks as JSON.
+func TestPostMessage(t *testing.T) {
+	f := start(t)
+	blocks := []any{textBlock("muster_summary", "🔴 #1 DiskFull <!here>")}
+	attachments := []any{map[string]any{"color": "#d32f2f", "fallback": "🔴 #1 DiskFull",
+		"blocks": []any{textBlock("muster_heading", "*<http://x/a|#1 DiskFull>*")}}}
+	a := post(t, f, map[string]any{"text": "🔴 #1 DiskFull", "blocks": blocks, "attachments": attachments,
+		"unfurl_links": false, "unfurl_media": false})
+	ts := ok(t, a)
+	msg, _ := a.body["message"].(map[string]any)
+	if ts != "1.000001" || a.body["channel"] != alerts || msg["user"] != botUserB || msg["bot_id"] != "B0MUSTERDEVB" ||
+		msg["ts"] != ts || msg["text"] != "🔴 #1 DiskFull" || msg["thread_ts"] != nil {
+		t.Fatalf("answer %s", a.raw)
+	}
+	got := messagesOf(t, f, "channel="+alerts+"&app=b")
+	if len(got) != 1 {
+		t.Fatalf("messages %+v", got)
+	}
+	m := got[0]
+	sent, _ := json.Marshal(blocks)
+	if m.App != "b" || m.Channel != alerts || m.TS != ts || m.User != botUserB || string(m.Blocks) != string(sent) ||
+		!strings.Contains(string(m.Attachments), `"color":"#d32f2f"`) || m.UnfurlLinks == nil || *m.UnfurlLinks ||
+		m.UnfurlMedia == nil || *m.UnfurlMedia || m.Subtype != "" || m.Edited != nil || len(m.Replies) != 0 ||
+		!strings.Contains(m.Text, "DiskFull") {
+		t.Errorf("message %+v", m)
+	}
+	slackError(t, post(t, f, map[string]any{}), "no_text")
+	slackError(t, post(t, f, map[string]any{"text": "", "blocks": []any{}, "attachments": []any{}}), "no_text")
+	invalid(t, post(t, f, map[string]any{"text": "x", "blocks": "not a list"}), "/blocks")
+	slackError(t, post(t, f, map[string]any{"text": "x", "attachments": map[string]any{}}), "invalid_attachments")
+	slackError(t, post(t, f, map[string]any{"text": "x", "attachments": []any{"x"}}), "invalid_attachments")
+	form := call(t, f, "chat.postMessage", botB, map[string]string{"channel": alerts, "text": "plain",
+		"blocks": `[{"type":"section","block_id":"s","text":{"type":"mrkdwn","text":"form"}}]`}, false)
+	if ok(t, form) != "1.000002" {
+		t.Fatalf("form post %s", form.raw)
+	}
+	if got := f.Messages(fakeslack.AppB, alerts); len(got) != 2 || !strings.Contains(string(got[1].Blocks), "form") ||
+		got[1].UnfurlLinks != nil {
+		t.Errorf("form message %+v", got)
+	}
+}
+
+// TestTSSequence: every ts comes from one counter — posts, replies and edits alike, across channels and apps — never
+// from a clock.
+func TestTSSequence(t *testing.T) {
+	f := start(t)
+	first := ok(t, post(t, f, map[string]any{"text": "one"}))
+	ok(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": first, "text": "one, edited"}))
+	reply := ok(t, post(t, f, map[string]any{"text": "two", "thread_ts": first}))
+	other := ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": alerts, "text": "a"}))
+	if first != "1.000001" || reply != "1.000003" || other != "1.000004" {
+		t.Fatalf("ts %s %s %s", first, reply, other)
+	}
+	if m := f.Messages(fakeslack.AppB, alerts)[0]; m.Edited == nil || m.Edited.TS != "1.000002" ||
+		m.Edited.User != botUserB {
+		t.Errorf("edited %+v", m.Edited)
+	}
+	if all := f.Messages("", ""); len(all) != 2 || all[0].App != "b" || all[1].App != "a" {
+		t.Errorf("both apps %+v", all)
+	}
+}
+
+// TestBlockLimits covers F-074 and F-076: each limit of Block Kit holds at its bound and is invalid_blocks, with its
+// json-pointer, one past it — in the message's blocks and in an attachment's.
+func TestBlockLimits(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("é", n) }
+	for _, tc := range []struct {
+		name    string
+		at, ok  map[string]any
+		pointer string
+	}{
+		{"section text", map[string]any{"blocks": []any{textBlock("s", long(3001))}},
+			map[string]any{"blocks": []any{textBlock("s", long(3000))}}, "/blocks/0/text/text"},
+		{"empty section", map[string]any{"blocks": []any{textBlock("s", "")}}, nil, "/blocks/0/text/text"},
+		{"section without text", map[string]any{"blocks": []any{map[string]any{"type": "section"}}}, nil, "/blocks/0"},
+		{"blocks", map[string]any{"blocks": sections(51)}, map[string]any{"blocks": sections(50)}, "/blocks"},
+		{"blocks with attachments", map[string]any{"blocks": sections(26), "attachments": []any{map[string]any{
+			"blocks": []any{textBlock("a0", "x"), textBlock("a1", "x"), textBlock("a2", "x"), textBlock("a3", "x"),
+				textBlock("a4", "x"), textBlock("a5", "x"), textBlock("a6", "x"), textBlock("a7", "x"),
+				textBlock("a8", "x"), textBlock("a9", "x"), textBlock("a10", "x"), textBlock("a11", "x"),
+				textBlock("a12", "x"), textBlock("a13", "x"), textBlock("a14", "x"), textBlock("a15", "x"),
+				textBlock("a16", "x"), textBlock("a17", "x"), textBlock("a18", "x"), textBlock("a19", "x"),
+				textBlock("a20", "x"), textBlock("a21", "x"), textBlock("a22", "x"), textBlock("a23", "x"),
+				textBlock("a24", "x")}}}}, nil, "/blocks"},
+		{"type", map[string]any{"blocks": []any{map[string]any{"type": "table"}}},
+			map[string]any{"blocks": []any{map[string]any{"type": "divider"}}}, "/blocks/0/type"},
+		{"block_id", map[string]any{"blocks": []any{textBlock("s", "x"), textBlock("s", "y")}},
+			map[string]any{"blocks": []any{textBlock("s", "x"), textBlock("t", "y")}}, "/blocks/1/block_id"},
+		{"block_id across the attachment", map[string]any{"blocks": []any{textBlock("s", "x")},
+			"attachments": []any{map[string]any{"blocks": []any{textBlock("s", "y")}}}}, nil,
+			"/attachments/0/blocks/0/block_id"},
+		{"header", map[string]any{"blocks": []any{map[string]any{"type": "header",
+			"text": map[string]any{"type": "plain_text", "text": long(151)}}}},
+			map[string]any{"blocks": []any{map[string]any{"type": "header",
+				"text": map[string]any{"type": "plain_text", "text": long(150)}}}}, "/blocks/0/text/text"},
+		{"context", map[string]any{"blocks": []any{map[string]any{"type": "context", "elements": make([]any, 11)}}},
+			map[string]any{"blocks": []any{map[string]any{"type": "context", "elements": make([]any, 10)}}},
+			"/blocks/0/elements"},
+		{"actions", map[string]any{"blocks": []any{actionsOf("a", buttons(26)...)}},
+			map[string]any{"blocks": []any{actionsOf("a", buttons(25)...)}}, "/blocks/0/elements"},
+		{"button text", map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", long(76), "v"))}},
+			map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", long(75), "v"))}},
+			"/blocks/0/elements/0/text/text"},
+		{"button value", map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", "Ack", long(2001)))}},
+			map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", "Ack", long(2000)))}},
+			"/blocks/0/elements/0/value"},
+		{"action_id", map[string]any{"blocks": []any{actionsOf("a", buttonOf(long(256), "Ack", "v"))}},
+			map[string]any{"blocks": []any{actionsOf("a", buttonOf(long(255), "Ack", "v"))}},
+			"/blocks/0/elements/0/action_id"},
+		{"action_id twice", map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", "Ack", "v"),
+			buttonOf("ack", "Ack", "w"))}}, map[string]any{"blocks": []any{actionsOf("a", buttonOf("ack", "Ack", "v")),
+			actionsOf("b", buttonOf("ack", "Ack", "w"))}}, "/blocks/0/elements/1/action_id"},
+		{"element type", map[string]any{"blocks": []any{actionsOf("a", map[string]any{"type": "overflow"})}}, nil,
+			"/blocks/0/elements/0/type"},
+		{"options", map[string]any{"blocks": []any{actionsOf("a", menu(101, "1h", "v"))}},
+			map[string]any{"blocks": []any{actionsOf("a", menu(100, "1h", "v"))}}, "/blocks/0/elements/0/options"},
+		{"option text", map[string]any{"blocks": []any{actionsOf("a", menu(1, long(76), "v"))}},
+			map[string]any{"blocks": []any{actionsOf("a", menu(1, long(75), "v"))}},
+			"/blocks/0/elements/0/options/0/text/text"},
+		{"option value", map[string]any{"blocks": []any{actionsOf("a", menu(1, "1h", long(151)))}},
+			map[string]any{"blocks": []any{actionsOf("a", menu(1, "1h", long(150)))}},
+			"/blocks/0/elements/0/options/0/value"},
+		{"attachment section", map[string]any{"attachments": []any{map[string]any{
+			"blocks": []any{textBlock("s", long(3001))}}}}, map[string]any{"attachments": []any{map[string]any{
+			"blocks": []any{textBlock("s", long(3000))}}}}, "/attachments/0/blocks/0/text/text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := start(t)
+			tc.at["text"] = "x"
+			invalid(t, post(t, f, tc.at), tc.pointer)
+			if tc.ok != nil {
+				tc.ok["text"] = "x"
+				ok(t, post(t, f, tc.ok))
+			}
+		})
+	}
+}
+
+// buttons are n buttons with distinct action ids.
+func buttons(n int) []any {
+	out := make([]any, n)
+	for i := range out {
+		out[i] = buttonOf(fmt.Sprintf("b%d", i), "B", "v")
+	}
+	return out
+}
+
+// TestButtonStyles covers F-074: a button's style is primary or danger, and any other — Mattermost's success, an empty
+// one — is invalid_blocks.
+func TestButtonStyles(t *testing.T) {
+	f := start(t)
+	styled := func(style string) map[string]any {
+		b := buttonOf("ack", "Ack", "v")
+		b["style"] = style
+		return map[string]any{"text": "x", "blocks": []any{actionsOf("a", b)}}
+	}
+	ok(t, post(t, f, styled("primary")))
+	ok(t, post(t, f, styled("danger")))
+	invalid(t, post(t, f, styled("success")), "/blocks/0/elements/0/style")
+	invalid(t, post(t, f, styled("")), "/blocks/0/elements/0/style")
+}
+
+// TestUpdateKeepsAndReplaces covers F-084 and F-085: chat.update replaces the blocks it names and the attachments it
+// names, keeps attachments it does not name, removes them with [], turns a text sent without blocks into one rich_text
+// block, records who edited it, and takes the same edit twice; its answer names the message.
+func TestUpdateKeepsAndReplaces(t *testing.T) {
+	f := start(t)
+	att := []any{map[string]any{"color": "#d32f2f", "fallback": "f", "blocks": []any{textBlock("h", "heading")}}}
+	ts := ok(t, post(t, f, map[string]any{"text": "🔴 #1", "blocks": []any{textBlock("s", "top")}, "attachments": att}))
+	update := func(args map[string]any) answer {
+		args["channel"], args["ts"] = alerts, ts
+		return chat(t, f, "chat.update", botB, args)
+	}
+	a := update(map[string]any{"text": "🟠 #1", "blocks": []any{textBlock("s", "acked")}})
+	if ok(t, a) != ts || a.body["channel"] != alerts || a.body["text"] != "🟠 #1" {
+		t.Fatalf("update %s", a.raw)
+	}
+	m := f.Messages(fakeslack.AppB, alerts)[0]
+	if !strings.Contains(string(m.Blocks), "acked") || !strings.Contains(string(m.Attachments), "heading") ||
+		m.Edited == nil || m.Edited.User != botUserB {
+		t.Fatalf("kept attachments %+v", m)
+	}
+	ok(t, update(map[string]any{"text": "🟠 #1", "blocks": []any{textBlock("s", "acked")}}))
+	ok(t, update(map[string]any{"text": "🟢 #1", "attachments": []any{}}))
+	m = f.Messages(fakeslack.AppB, alerts)[0]
+	if string(m.Attachments) != "[]" || !strings.Contains(string(m.Blocks), `"rich_text"`) || m.Text != "🟢 #1" {
+		t.Errorf("text without blocks %+v", m)
+	}
+	ok(t, update(map[string]any{"blocks": []any{textBlock("s", "sections again")}}))
+	if m = f.Messages(fakeslack.AppB, alerts)[0]; !strings.Contains(string(m.Blocks), "sections again") ||
+		m.Text != "🟢 #1" {
+		t.Errorf("a text-only message becomes sections %+v", m)
+	}
+	invalid(t, update(map[string]any{"blocks": []any{textBlock("s", "")}}), "/blocks/0/text/text")
+	slackError(t, update(map[string]any{"text": "", "blocks": []any{}}), "no_text")
+}
+
+// TestUpdateTooLong covers F-078 and F-079: chat.update takes a text of 4,000 bytes in Slack's stored form and refuses
+// one past it with msg_too_long, counting a bare & as &amp; and a symbol as a shortcode; a post is not checked.
+func TestUpdateTooLong(t *testing.T) {
+	f := start(t)
+	ts := ok(t, post(t, f, map[string]any{"text": strings.Repeat("x", 5000)}))
+	update := func(text string) answer {
+		return chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": ts, "text": text})
+	}
+	for _, text := range []string{strings.Repeat("x", 4000), strings.Repeat("&", 800), strings.Repeat("&amp;", 800),
+		strings.Repeat("🔴", 333) + "xxxx", strings.Repeat("<", 1000)} {
+		ok(t, update(text))
+	}
+	for _, text := range []string{strings.Repeat("x", 4001), strings.Repeat("&", 801), strings.Repeat("🔴", 334),
+		strings.Repeat(">", 1001)} {
+		slackError(t, update(text), "msg_too_long")
+	}
+}
+
+// TestBlockMismatch covers F-086: a message posted only of rich_text blocks cannot be edited into other blocks, but
+// into rich_text again; Muster sends sections only, so it never meets block_mismatch.
+func TestBlockMismatch(t *testing.T) {
+	f := start(t)
+	rich := []any{map[string]any{"type": "rich_text", "elements": []any{}}}
+	ts := ok(t, post(t, f, map[string]any{"text": "x", "blocks": rich}))
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": ts,
+		"blocks": []any{textBlock("s", "section")}}), "block_mismatch")
+	ok(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": ts, "blocks": rich}))
+	plain := ok(t, post(t, f, map[string]any{"text": "plain"}))
+	ok(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": plain,
+		"blocks": []any{textBlock("s", "section")}}))
+}
+
+// TestDeleteAndTombstone covers F-087 and F-090: a root without replies goes, and an edit or a second delete of it is
+// message_not_found; a root with replies stays as a tombstone — "This message was deleted." by USLACKBOT, without
+// blocks or attachments — that keeps its replies, takes new ones under it and cannot be edited or deleted; a deleted
+// reply leaves its Thread.
+func TestDeleteAndTombstone(t *testing.T) {
+	f := start(t)
+	del := func(ts string) answer {
+		return chat(t, f, "chat.delete", botB, map[string]any{"channel": alerts, "ts": ts})
+	}
+	lone := ok(t, post(t, f, map[string]any{"text": "lone"}))
+	if a := del(lone); ok(t, a) != lone || a.body["channel"] != alerts {
+		t.Fatalf("delete %s", a.raw)
+	}
+	slackError(t, del(lone), "message_not_found")
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": lone, "text": "x"}),
+		"message_not_found")
+	if got := f.Messages(fakeslack.AppB, alerts); len(got) != 0 {
+		t.Fatalf("after the delete %+v", got)
+	}
+	root := ok(t, post(t, f, map[string]any{"text": "🔴 #2 DiskFull", "blocks": []any{textBlock("s", "top")},
+		"attachments": []any{map[string]any{"blocks": []any{textBlock("h", "heading")}}}}))
+	first := ok(t, post(t, f, map[string]any{"text": "reply one", "thread_ts": root}))
+	second := ok(t, post(t, f, map[string]any{"text": "reply two", "thread_ts": root}))
+	ok(t, del(second))
+	ok(t, del(root))
+	got := f.Messages(fakeslack.AppB, alerts)
+	if len(got) != 1 || got[0].Subtype != "tombstone" || got[0].Text != "This message was deleted." ||
+		got[0].User != "USLACKBOT" || string(got[0].Blocks) != "[]" || string(got[0].Attachments) != "[]" ||
+		len(got[0].Replies) != 1 || got[0].Replies[0].TS != first {
+		t.Fatalf("tombstone %+v", got)
+	}
+	a := post(t, f, map[string]any{"text": "reply three", "thread_ts": root})
+	msg, _ := a.body["message"].(map[string]any)
+	if ok(t, a) == "" || msg["thread_ts"] != root || msg["parent_user_id"] != "USLACKBOT" {
+		t.Errorf("a reply under the tombstone %s", a.raw)
+	}
+	slackError(t, del(root), "message_not_found")
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": root, "text": "x"}),
+		"message_not_found")
+	if !f.Delete(fakeslack.AppB, alerts, first) || f.Delete(fakeslack.AppB, alerts, first) ||
+		f.Delete(fakeslack.AppB, alerts, root) {
+		t.Error("Delete")
+	}
+}
+
+// TestReplyToDeletedRoot covers F-091: a reply whose thread_ts names a root deleted before any reply is posted into the
+// channel and answered without thread_ts; Muster deletes it.
+func TestReplyToDeletedRoot(t *testing.T) {
+	f := start(t)
+	root := ok(t, post(t, f, map[string]any{"text": "root"}))
+	f.Delete(fakeslack.AppB, alerts, root)
+	a := post(t, f, map[string]any{"text": "reply", "thread_ts": root})
+	msg, _ := a.body["message"].(map[string]any)
+	stray := ok(t, a)
+	if _, has := msg["thread_ts"]; has || stray == "" {
+		t.Fatalf("answer %s", a.raw)
+	}
+	got := f.Messages(fakeslack.AppB, alerts)
+	if len(got) != 1 || got[0].TS != stray || got[0].Text != "reply" {
+		t.Fatalf("channel %+v", got)
+	}
+	ok(t, chat(t, f, "chat.delete", botB, map[string]any{"channel": alerts, "ts": stray}))
+	if got := f.Messages(fakeslack.AppB, alerts); len(got) != 0 {
+		t.Errorf("after the delete %+v", got)
+	}
+}
+
+// TestThreadNormalized covers F-089: a thread_ts naming a reply goes under its root, answered with the root's ts and
+// user; reply_broadcast is kept and answered as thread_broadcast; an unknown thread_ts posts into the channel.
+func TestThreadNormalized(t *testing.T) {
+	f := start(t)
+	root := ok(t, post(t, f, map[string]any{"text": "root"}))
+	reply := ok(t, post(t, f, map[string]any{"text": "one", "thread_ts": root}))
+	a := post(t, f, map[string]any{"text": "two", "thread_ts": reply, "reply_broadcast": true})
+	msg, _ := a.body["message"].(map[string]any)
+	if ok(t, a) == "" || msg["thread_ts"] != root || msg["parent_user_id"] != botUserB ||
+		msg["subtype"] != "thread_broadcast" {
+		t.Fatalf("answer %s", a.raw)
+	}
+	got := f.Messages(fakeslack.AppB, alerts)
+	if len(got) != 1 || len(got[0].Replies) != 2 || got[0].Replies[0].ReplyBroadcast ||
+		!got[0].Replies[1].ReplyBroadcast || got[0].Replies[1].ThreadTS != root {
+		t.Fatalf("thread %+v", got)
+	}
+	ok(t, post(t, f, map[string]any{"text": "lost", "thread_ts": "9.999999"}))
+	if got := f.Messages(fakeslack.AppB, alerts); len(got) != 2 {
+		t.Errorf("an unknown thread_ts %+v", got)
+	}
+}
+
+// TestNotInChannel covers F-098 and C-24.FR-8: a channel the bot left is not_in_channel for a post, an edit and a
+// delete of a message that exists, but message_not_found for one deleted; an archived channel is is_archived; an
+// unknown channel, a #name, a direct chat and a private channel without the bot are channel_not_found; someone else's
+// message cannot be edited or deleted; an app-level token is the wrong kind and a token without chat:write lacks it.
+func TestNotInChannel(t *testing.T) {
+	f := start(t)
+	ts := ok(t, post(t, f, map[string]any{"text": "kept"}))
+	gone := ok(t, post(t, f, map[string]any{"text": "gone"}))
+	f.Delete(fakeslack.AppB, alerts, gone)
+	putConfig(t, f, `{"channels":{"b":{"C0FAKEALERTS":{"name":"alerts","member":false},"C0FAKEARCH":{"name":"old",`+
+		`"member":true,"archived":true},"C0FAKEPRIV":{"name":"ops","private":true}}}}`)
+	slackError(t, post(t, f, map[string]any{"text": "x"}), "not_in_channel")
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": ts, "text": "x"}),
+		"not_in_channel")
+	slackError(t, chat(t, f, "chat.delete", botB, map[string]any{"channel": alerts, "ts": ts}), "not_in_channel")
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": gone, "text": "x"}),
+		"message_not_found")
+	slackError(t, post(t, f, map[string]any{"channel": "C0FAKEARCH", "text": "x"}), "is_archived")
+	for _, ch := range []string{"C0FAKEGONE", "#alerts", "D0FAKEDM", "U0MUSTERUSR1", "C0FAKEPRIV"} {
+		slackError(t, post(t, f, map[string]any{"channel": ch, "text": "x"}), "channel_not_found")
+	}
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": "C0FAKEGONE", "ts": ts, "text": "x"}),
+		"channel_not_found")
+	putConfig(t, f, `{"channels":{"b":null},"app_of":{"xoxp-alice":"b"},"user_tokens":["xoxp-alice"]}`)
+	theirs := ok(t, chat(t, f, "chat.postMessage", "xoxp-alice", map[string]any{"channel": alerts, "text": "mine"}))
+	if m := f.Messages(fakeslack.AppB, alerts); m[len(m)-1].User != fakeslack.UserID {
+		t.Errorf("a person's message %+v", m[len(m)-1])
+	}
+	slackError(t, chat(t, f, "chat.update", botB, map[string]any{"channel": alerts, "ts": theirs, "text": "x"}),
+		"cant_update_message")
+	slackError(t, chat(t, f, "chat.delete", botB, map[string]any{"channel": alerts, "ts": theirs}),
+		"cant_delete_message")
+	slackError(t, chat(t, f, "chat.postMessage", fakeslack.SecondAppToken, map[string]any{"channel": alerts,
+		"text": "x"}), "not_allowed_token_type")
+	putConfig(t, f, `{"scopes":{"b":"channels:read"}}`)
+	a := post(t, f, map[string]any{"text": "x"})
+	slackError(t, a, "missing_scope")
+	if a.body["needed"] != "chat:write" || a.header.Get("X-Accepted-OAuth-Scopes") != "chat:write" {
+		t.Errorf("missing scope %s %v", a.raw, a.header)
+	}
+}
+
+// TestGetPermalink covers F-088: the link to a message, to a reply with its Thread, and to a tombstone; a message that
+// is deleted or unknown, or in a channel without the bot, is message_not_found; an unknown channel channel_not_found.
+func TestGetPermalink(t *testing.T) {
+	f := start(t)
+	link := func(channel, ts string) answer {
+		return chat(t, f, "chat.getPermalink", botB, map[string]any{"channel": channel, "message_ts": ts})
+	}
+	root := ok(t, post(t, f, map[string]any{"text": "root"}))
+	reply := ok(t, post(t, f, map[string]any{"text": "reply", "thread_ts": root}))
+	if a := link(alerts, root); a.body["ok"] != true ||
+		a.body["permalink"] != "https://fake-workspace-b.slack.com/archives/C0FAKEALERTS/p1000001" ||
+		a.header.Get("X-Accepted-OAuth-Scopes") != "" {
+		t.Errorf("root %s", a.raw)
+	}
+	if a := link(alerts, reply); a.body["permalink"] !=
+		"https://fake-workspace-b.slack.com/archives/C0FAKEALERTS/p1000002?thread_ts=1.000001&cid=C0FAKEALERTS" {
+		t.Errorf("reply %s", a.raw)
+	}
+	f.Delete(fakeslack.AppB, alerts, root)
+	if a := link(alerts, root); a.body["ok"] != true {
+		t.Errorf("tombstone %s", a.raw)
+	}
+	slackError(t, link(alerts, "9.999999"), "message_not_found")
+	slackError(t, link("C0FAKEGONE", root), "channel_not_found")
+	slackError(t, chat(t, f, "chat.getPermalink", fakeslack.SecondAppToken, map[string]any{"channel": alerts,
+		"message_ts": root}), "not_allowed_token_type")
+	putConfig(t, f, `{"channels":{"b":{"C0FAKEALERTS":{"name":"alerts","member":false}}}}`)
+	slackError(t, link(alerts, root), "message_not_found")
+}
+
+// TestPostEphemeral covers F-092: an ephemeral message to a user in a channel with the bot is answered with a new
+// message_ts and kept nowhere; without a user it is user_not_in_channel, without the bot not_in_channel; its content is
+// checked as a post's.
+func TestPostEphemeral(t *testing.T) {
+	f := start(t)
+	eph := func(args map[string]any) answer {
+		args["channel"] = alerts
+		return chat(t, f, "chat.postEphemeral", botB, args)
+	}
+	a := eph(map[string]any{"user": fakeslack.UserID, "text": "This is a test message; nothing was changed"})
+	if a.body["ok"] != true || a.body["message_ts"] != "1.000001" {
+		t.Fatalf("ephemeral %s", a.raw)
+	}
+	if got := f.Messages("", ""); len(got) != 0 {
+		t.Errorf("kept %+v", got)
+	}
+	slackError(t, eph(map[string]any{"text": "x"}), "user_not_in_channel")
+	slackError(t, eph(map[string]any{"user": fakeslack.UserID}), "no_text")
+	invalid(t, eph(map[string]any{"user": fakeslack.UserID, "text": "x", "blocks": []any{textBlock("s", "")}}),
+		"/blocks/0/text/text")
+	putConfig(t, f, `{"channels":{"b":{"C0FAKEALERTS":{"name":"alerts","member":false}}}}`)
+	slackError(t, eph(map[string]any{"user": fakeslack.UserID, "text": "x"}), "not_in_channel")
+}
+
+// TestMessagesAndDeleteEndpoints covers the control endpoints: GET /_fake/messages lists a channel's messages of one app
+// or of both, in posting order, with the text as sent; POST /_fake/delete deletes one as a person would, answering 404
+// for none and 400 for a body that is not the request.
+func TestMessagesAndDeleteEndpoints(t *testing.T) {
+	f := start(t)
+	root := ok(t, post(t, f, map[string]any{"text": "🔴 #1 &lt;b&gt; <!here>"}))
+	ok(t, post(t, f, map[string]any{"text": "reply", "thread_ts": root}))
+	ok(t, chat(t, f, "chat.postMessage", fakeslack.BotToken, map[string]any{"channel": alerts, "text": "app a"}))
+	if got := messagesOf(t, f, "channel="+alerts+"&app=b"); len(got) != 1 || got[0].Text != "🔴 #1 &lt;b&gt; <!here>" ||
+		len(got[0].Replies) != 1 || got[0].Replies[0].ThreadTS != root || got[0].Replies[0].User != botUserB {
+		t.Fatalf("app b %+v", got)
+	}
+	if got := messagesOf(t, f, "channel="+alerts); len(got) != 2 || got[1].App != "a" {
+		t.Fatalf("both apps %+v", got)
+	}
+	if got := messagesOf(t, f, "channel=C0FAKEOTHER"); len(got) != 0 {
+		t.Errorf("other %+v", got)
+	}
+	del := func(body string) answer {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.URL()+"/_fake/delete",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return do(t, req)
+	}
+	if a := del(`{"channel":"C0FAKEALERTS","ts":"` + root + `","app":"b"}`); a.status != http.StatusOK ||
+		a.body["ok"] != true {
+		t.Fatalf("delete = %d %s", a.status, a.raw)
+	}
+	if got := messagesOf(t, f, "channel="+alerts+"&app=b"); len(got) != 1 || got[0].Subtype != "tombstone" {
+		t.Errorf("tombstone %+v", got)
+	}
+	if a := del(`{"channel":"C0FAKEALERTS","ts":"` + root + `"}`); a.status != http.StatusNotFound {
+		t.Errorf("again = %d %s", a.status, a.raw)
+	}
+	if a := del(`{"channel":"C0FAKEALERTS","ts":"1.000003"}`); a.status != http.StatusOK {
+		t.Errorf("either app = %d %s", a.status, a.raw)
+	}
+	if a := del(`{"chan":1}`); a.status != http.StatusBadRequest {
+		t.Errorf("bad body = %d %s", a.status, a.raw)
 	}
 }

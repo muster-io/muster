@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	connectionsdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
@@ -33,6 +35,8 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
@@ -42,8 +46,10 @@ import (
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
@@ -962,6 +968,8 @@ func TestLive(t *testing.T) {
 			{"ack_timeout_notice_fallback", l.ackTimeoutNoticeFallback},
 			// S-081.
 			{"edit_window_starts", l.editWindowStarts},
+			// S-099.
+			{"slack_adapter", l.slackAdapter},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -3863,4 +3871,305 @@ func (l *live) editWindowStarts(t *testing.T) {
 	t.Logf("stale start cleared by the Publication; past the window: no call, budget reset; lost republication "+
 		"answer kept its start; %s",
 		strings.Join(lines, "; "))
+}
+
+// liveSlackTargets are the Slack Destinations of the slack_adapter case, by id.
+type liveSlackTargets map[int64]slack.Target
+
+func (ts liveSlackTargets) SlackTarget(_ context.Context, id int64) (slack.Target, error) {
+	t, ok := ts[id]
+	if !ok {
+		return slack.Target{}, slack.ErrNoTarget
+	}
+	return t, nil
+}
+
+// timedSlack is the Slack adapter that notes when, on the business clock, it was asked for each Publication.
+type timedSlack struct {
+	*slack.Adapter
+	clock clock.Clock
+	mu    sync.Mutex
+	at    []time.Time
+}
+
+func (s *timedSlack) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
+	s.mu.Lock()
+	s.at = append(s.at, s.clock.Now())
+	s.mu.Unlock()
+	return s.Adapter.Publish(ctx, c, m)
+}
+
+// clientRequests is the value of muster_client_requests_total for a client class and outcome in a scrape, 0 without
+// one.
+func clientRequests(t *testing.T, class, outcome string) float64 {
+	t.Helper()
+	prefix := `muster_client_requests_total{client="` + class + `",outcome="` + outcome + `"} `
+	for line := range strings.SplitSeq(scrape(t), "\n") {
+		if v, ok := strings.CutPrefix(line, prefix); ok {
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				t.Fatalf("%s: %v", line, err)
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+// slackAdapter is C-24.FR-8, FR-15, AC-8 and AC-9 on PostgreSQL, with the Slack adapter against the fake Slack server
+// (S-099): a Root message deleted after a reply is found by the next edit and published again once, Quietly, with
+// the deletion notice, the Destination healthy; deleted again before any reply, the reply that lands in the channel is
+// deleted at once and the pair is deleted in the messenger; a Root message deleted before any reply is published again
+// once through its misplaced reply, which follows under the new one; an edit of a deleted Root message in a channel
+// the bot left makes the Destination Broken; a Publication that meets not_in_channel makes it Broken, and once the bot
+// is back the probe — the Destination check, conversations.info in the delivery class — ends the Broken state with no
+// Alert Group touched; and a 429 with Retry-After: 1 holds every Destination of the Connection for 1 to 2 seconds.
+func (l *live) slackAdapter(t *testing.T) {
+	ctx := t.Context()
+	f := fakeslack.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conn int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
+		bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_app_token_ciphertext,
+		slack_app_token_key_id, slack_app_token_updated_at, slack_team_url, bot_username, limiter_limit,
+		limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAS1', 'slack', 'sl', 'socket', '\x00',
+		'k1', $2, '\x00', 'k1', $2, 'https://fake-workspace-b.slack.com/', 'muster-dev-bot-b', 1000, 1, $2, $2)
+		RETURNING id`, l.orgID, t0).Scan(&conn); err != nil {
+		t.Fatal(err)
+	}
+	client, err := slack.NewClient(slack.Network{Policy: outbound.StaticPolicy(policy), Log: l.logger,
+		Real: clock.Real{}}, slack.Settings{BotToken: fakeslack.SecondBotToken, AppToken: fakeslack.SecondAppToken,
+		Route: func(logging.Secret) string { return f.URL() + "/api/" },
+		Owner: outbound.Owner{Connection: conn, PublicID: "CNAAAAAAAAAAS1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := liveSlackTargets{}
+	var dests []int64
+	for _, publicID := range []string{"DSAAAAAAAAAAS1", "DSAAAAAAAAAAS2"} {
+		var id int64
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+			slack_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			VALUES ($1, $2, 'slack', $2, $3, 'C0FAKEALERTS', '{}', 1000, 1, 'healthy', $4, $4) RETURNING id`, l.orgID,
+			publicID, conn, t0).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		targets[id] = slack.Target{Client: client, ConnectionID: conn, ConnectionPublicID: "CNAAAAAAAAAAS1",
+			ChannelID: fakeslack.ChannelAlerts, TeamURL: "https://fake-workspace-b.slack.com/",
+			BotName: "muster-dev-bot-b"}
+		dests = append(dests, id)
+	}
+	dest := dests[0]
+	// The query the Slack adapter's Targets read in the runtime: the channel, the Connection with its version, and the
+	// workspace address and bot's name its check stored; none of another Organization.
+	row, err := connectionsdb.New(l.d.Pool).GetSlackDestinationTarget(ctx, connectionsdb.GetSlackDestinationTargetParams{
+		OrgID: l.orgID, DestinationID: dest})
+	if err != nil || row.SlackChannelID.String != fakeslack.ChannelAlerts || row.ID != conn || row.Type != "slack" ||
+		row.Version != 1 || row.SlackTeamUrl.String != "https://fake-workspace-b.slack.com/" ||
+		row.BotUsername.String != "muster-dev-bot-b" || len(row.SlackAppTokenCiphertext) == 0 {
+		t.Fatalf("the slack target = %+v, %v", row, err)
+	}
+	if _, err := connectionsdb.New(l.d.Pool).GetSlackDestinationTarget(ctx,
+		connectionsdb.GetSlackDestinationTargetParams{OrgID: l.orgID + 1, DestinationID: dest}); !errors.Is(err,
+		pgx.ErrNoRows) {
+		t.Fatalf("the slack target of another organization: %v", err)
+	}
+	adapter := &timedSlack{Adapter: &slack.Adapter{Targets: targets, Version: "1.2.3"}, clock: l.business}
+	w := l.worker("slack")
+	w.Adapters[delivery.TypeSlack] = adapter
+	reset := func(ids ...int64) {
+		l.fresh(t, 1000, 1)
+		l.attach(t, ids...)
+		f.ResetRequests()
+	}
+	rounds := func(n int) {
+		for range n {
+			l.round(t, w)
+		}
+	}
+	// roots are the Root messages of the channel whose summary line holds title; a tombstone has none.
+	roots := func(title string) []fakeslack.Message {
+		var out []fakeslack.Message
+		for _, m := range f.Messages(fakeslack.AppB, fakeslack.ChannelAlerts) {
+			if strings.Contains(m.Text, title) {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	paths := func() string {
+		var out []string
+		for _, r := range f.Requests() {
+			out = append(out, strings.TrimPrefix(r.Path, "/api/"))
+		}
+		return strings.Join(out, ",")
+	}
+	member := func(in bool) {
+		cfg := f.Config()
+		cfg.Channels[fakeslack.AppB][fakeslack.ChannelAlerts] = fakeslack.Channel{Name: "alerts", Member: in}
+		if err := f.SetConfig(cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events := func(kind, gid string) int64 {
+		return l.count(t, `SELECT count(*) FROM delivery_events e JOIN alert_groups g ON g.id = e.alert_group_id
+			WHERE e.kind = $1 AND g.public_id = $2`, kind, gid)
+	}
+
+	// A Root message deleted after a reply: the next edit finds it and the Alert Group is published again once.
+	reset(dest)
+	l.fire(t, "sla", "SlackDel/a")
+	ga := l.group(t, "SlackDel")
+	rounds(1)
+	l.fire(t, "sla", "SlackDel/a", "SlackDel/b")
+	rounds(1)
+	first := roots("SlackDel")
+	if len(first) != 1 || len(first[0].Replies) != 1 || first[0].TS != "1.000001" {
+		t.Fatalf("the root and its reply: %+v", first)
+	}
+	if !f.Delete(fakeslack.AppB, fakeslack.ChannelAlerts, first[0].TS) {
+		t.Fatal("the root could not be deleted")
+	}
+	l.business.Advance(42 * time.Minute)
+	deleted := l.business.Now()
+	f.ResetRequests()
+	l.ack(t, ga)
+	rounds(2)
+	note := "The previous message was deleted at " + deleted.UTC().Format("15:04") + "."
+	again := roots("SlackDel")
+	if got := paths(); got != "chat.update,conversations.info,chat.postMessage" || len(again) != 1 ||
+		!strings.Contains(string(again[0].Attachments), note) || strings.Contains(again[0].Text, "<!") ||
+		events("republished", ga) != 1 {
+		t.Fatalf("after the deletion: %s, %+v", got, again)
+	}
+	if health, reason := l.health(t, dest); health != "healthy" || l.state(t, ga, dest) != "delivered" {
+		t.Fatalf("health %s %q, state %s", health, reason, l.state(t, ga, dest))
+	}
+	// Deleted again, before any reply: a Reminder, which leaves the Root message as it is, lands in the channel and
+	// is deleted at once; the pair is marked.
+	reminder := func(title string, seq int64) {
+		l.enqueueEvent(t, title, groups.StatusAcknowledged, groups.Recorded{Seq: seq, Event: groups.EventReminder,
+			Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionOwner}})
+	}
+	f.Delete(fakeslack.AppB, fakeslack.ChannelAlerts, again[0].TS)
+	f.ResetRequests()
+	reminder("SlackDel", 50)
+	rounds(2)
+	if got := paths(); got != "chat.postMessage,chat.delete" || l.state(t, ga, dest) != "deleted_in_messenger" ||
+		events("deleted_in_messenger", ga) != 1 || len(f.Messages(fakeslack.AppB, fakeslack.ChannelAlerts)) != 1 {
+		t.Fatalf("the second deletion: %s, %s, %+v", got, l.state(t, ga, dest),
+			f.Messages(fakeslack.AppB, fakeslack.ChannelAlerts))
+	}
+	l.resolve(t, ga)
+	rounds(2)
+	if got := paths(); got != "chat.postMessage,chat.delete" {
+		t.Fatalf("after deleted_in_messenger: %s", got)
+	}
+
+	// A Root message deleted before any reply: its misplaced reply is deleted, the Alert Group published again once,
+	// and the reply follows under the new Root message.
+	reset(dest)
+	l.fire(t, "slb", "SlackMis/a")
+	gb := l.group(t, "SlackMis")
+	rounds(1)
+	f.Delete(fakeslack.AppB, fakeslack.ChannelAlerts, roots("SlackMis")[0].TS)
+	f.ResetRequests()
+	reminder("SlackMis", 50)
+	rounds(3)
+	mis := roots("SlackMis")
+	if got := paths(); got != "chat.postMessage,chat.delete,chat.postMessage,chat.postMessage" || len(mis) != 1 ||
+		len(mis[0].Replies) != 1 || !strings.Contains(string(mis[0].Attachments), "The previous message was deleted") ||
+		events("republished", gb) != 1 || l.state(t, gb, dest) != "delivered" {
+		t.Fatalf("the misplaced reply: %s, %+v", got, mis)
+	}
+
+	// An edit of a deleted Root message in a channel the bot left: Broken.
+	reset(dest)
+	l.fire(t, "slc", "SlackLeft/a")
+	gc := l.group(t, "SlackLeft")
+	rounds(1)
+	f.Delete(fakeslack.AppB, fakeslack.ChannelAlerts, roots("SlackLeft")[0].TS)
+	member(false)
+	l.ack(t, gc)
+	rounds(1)
+	if health, reason := l.health(t, dest); health != "broken" || !strings.HasPrefix(reason, "not_in_channel") ||
+		paths() != "chat.postMessage,chat.update,conversations.info" {
+		t.Fatalf("bot removed: %s %q, %s", health, reason, paths())
+	}
+	member(true)
+
+	// C-24.AC-9: not_in_channel on a Publication makes the Destination Broken at once; the Alert Group resolves while
+	// it is; once the bot is back, the probe — the Destination check — ends the Broken state.
+	reset(dest)
+	member(false)
+	l.fire(t, "sld", "SlackProbe/a")
+	gd := l.group(t, "SlackProbe")
+	rounds(1)
+	health, reason := l.health(t, dest)
+	if health != "broken" || reason != "not_in_channel" || l.internalAlert(t, "DSAAAAAAAAAAS1") != "firing" {
+		t.Fatalf("not_in_channel: %s %q", health, reason)
+	}
+	l.resolve(t, gd)
+	rounds(1)
+	if l.state(t, gd, dest) != "withheld" {
+		t.Fatalf("state %s", l.state(t, gd, dest))
+	}
+	member(true)
+	f.ResetRequests()
+	before, unchanged := clientRequests(t, "delivery", "ok"), l.groupsUnchanged(t)
+	l.business.Advance(delivery.BrokenProbeInterval)
+	rounds(1)
+	health, _ = l.health(t, dest)
+	probes := clientRequests(t, "delivery", "ok") - before
+	if health != "healthy" || paths() != "conversations.info" || probes < 1 || l.groupsUnchanged(t) != unchanged ||
+		len(roots("SlackProbe")) != 0 {
+		t.Fatalf("the probe: %s, %s, %v requests", health, paths(), probes)
+	}
+	if alert := l.internalAlert(t, "DSAAAAAAAAAAS1"); alert != "resolved" {
+		t.Fatalf("MusterDestinationBroken %q", alert)
+	}
+
+	// C-24.AC-8: a 429 with Retry-After: 1 holds every Destination of the Connection, and is no attempt.
+	reset(dests...)
+	if err := f.SetFault(fakeserver.Fault{Path: "/api/chat.postMessage", Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 1, Body: `{"ok":false,"error":"ratelimited"}`, ContentType: "application/json",
+		Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	adapter.mu.Lock()
+	adapter.at = nil
+	adapter.mu.Unlock()
+	l.fire(t, "sle", "SlackRate/a")
+	start := l.business.Now()
+	for range 40 {
+		l.round(t, w)
+		if len(roots("SlackRate")) == 2 {
+			break
+		}
+		l.business.Advance(250 * time.Millisecond)
+	}
+	adapter.mu.Lock()
+	at := slices.Clone(adapter.at)
+	adapter.mu.Unlock()
+	if len(at) != 3 || !at[0].Equal(start) || len(roots("SlackRate")) != 2 ||
+		l.count(t, `SELECT coalesce(sum(attempts), 0) FROM deliveries`) != 0 {
+		t.Fatalf("publications at %v, messages %d", at, len(roots("SlackRate")))
+	}
+	for _, a := range at[1:] {
+		if gap := a.Sub(start); gap < time.Second || gap >= 2*time.Second {
+			t.Errorf("a Destination of the Connection waited %v", gap)
+		}
+	}
+	t.Logf("slack: edit message_not_found + member → republished once Quietly with %q, healthy; deleted again → "+
+		"misplaced reply deleted, deleted_in_messenger; root deleted before a reply → reply deleted, republished, "+
+		"reply under the new root; bot removed → broken (%s); not_in_channel → broken, probe conversations.info in "+
+		"the delivery class (+%.0f ok) → healthy, MusterDestinationBroken resolved; 429 Retry-After 1 → both "+
+		"Destinations waited %v and %v", note, "not_in_channel", probes, at[1].Sub(start), at[2].Sub(start))
 }

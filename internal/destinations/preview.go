@@ -12,9 +12,10 @@ import (
 
 // Preview renders, without sending anything, what the Destination publicID would receive for the source src
 // (C-16.FR-4): the Root message of a Mattermost (Markdown, with the attachment as the request's body) or a Telegram
-// (HTML) Destination, or the requests of an outgoing webhook — the event body in the events mode and "create",
-// "update", "open thread" and "reply in thread" in the template mode — with every Secret masked. It takes no limiter
-// token and records nothing.
+// (HTML) Destination, the envelope of a Bridge Destination or the body of chat.postMessage of a Slack Destination (as
+// JSON), or the requests of an outgoing webhook — the event body in the events mode and "create", "update", "open
+// thread" and "reply in thread" in the template mode — with every Secret masked. It takes no limiter token and records
+// nothing.
 func (s *Service) Preview(ctx context.Context, publicID string, src Source) ([]delivery.PreviewItem, error) {
 	d, tester, err := s.tester(ctx, publicID)
 	if err != nil {

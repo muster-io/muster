@@ -11,14 +11,16 @@
 // answers the bot and its workspace for a bot token, the person alice for a token configured as a person's, and the
 // app's id alone for an app-level token; bots.info answers the bot of the token's app; apps.connections.open answers a
 // Socket Mode address with a new ticket for an app-level token; conversations.info answers a channel of the token's
-// app and conversations.list its channels page by page (F-098, channels.go). Any other method is unknown_method; any
-// other path 404.
+// app and conversations.list its channels page by page (F-098, channels.go); chat.postMessage, chat.update,
+// chat.delete, chat.postEphemeral and chat.getPermalink keep each channel's messages and Threads by the rules of
+// F-074 to F-092 that Muster relies on (messages.go). Any other method is unknown_method; any other path 404.
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests; faults, such as an error answer, a
 // 429 with Retry-After or a delay) and add GET and PUT /_fake/config: the scopes of each app's bot token, the revoked
 // tokens, the tokens answered as a person's and the app of each token, over the published pairing; the channels of
 // each app, by id, with their name, the bot's membership and whether they are archived or private; and a page size
-// that makes conversations.list answer smaller pages.
+// that makes conversations.list answer smaller pages. GET /_fake/messages lists the messages of a channel, with their
+// Thread replies, and POST /_fake/delete deletes one as a person would (messages.go).
 package fakeslack
 
 import (
@@ -26,6 +28,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"mime"
 	"net/http"
@@ -151,16 +154,22 @@ type Fake struct {
 
 	mu     sync.Mutex
 	config Config
+	// chats are the messages of each channel of each app, the roots in the order they were posted, and seq the
+	// counter every `ts` comes from.
+	chats map[chatKey][]*stored
+	seq   int64
 }
 
 // New returns the fake with DefaultConfig.
 func New() *Fake {
-	f := &Fake{config: DefaultConfig()}
+	f := &Fake{config: DefaultConfig(), chats: map[chatKey][]*stored{}}
 	f.Server = fakeserver.New("Slack", http.HandlerFunc(f.serve))
 	f.HandleControl("GET /_fake/config", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Config())
 	})
 	f.HandleControl("PUT /_fake/config", f.putConfig)
+	f.HandleControl("GET /_fake/messages", f.listMessages)
+	f.HandleControl("POST /_fake/delete", f.deleteByPerson)
 	return f
 }
 
@@ -351,6 +360,11 @@ var acceptedScopes = map[string]string{
 	"apps.connections.open": "connections:write",
 	"conversations.info":    conversationScopes,
 	"conversations.list":    conversationScopes,
+	"chat.postMessage":      chatScope,
+	"chat.update":           chatScope,
+	"chat.delete":           chatScope,
+	"chat.postEphemeral":    chatScope,
+	"chat.getPermalink":     "",
 }
 
 // conversationScopes are the scopes the methods that read conversations accept (F-071).
@@ -369,7 +383,7 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "unknown_method")
 		return
 	}
-	args, code := argsOf(r)
+	args, raw, code := argsOf(r)
 	if code != "" {
 		writeError(w, code)
 		return
@@ -403,6 +417,16 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		conversationsInfo(w, c, cfg, scopes, args["channel"])
 	case "conversations.list":
 		conversationsList(w, c, cfg, scopes, args)
+	case "chat.postMessage":
+		f.postMessage(w, c, cfg, scopes, raw)
+	case "chat.update":
+		f.updateMessage(w, c, cfg, scopes, raw)
+	case "chat.delete":
+		f.deleteMessage(w, c, cfg, scopes, raw)
+	case "chat.postEphemeral":
+		f.postEphemeral(w, c, cfg, scopes, raw)
+	case "chat.getPermalink":
+		f.getPermalink(w, c, cfg, raw)
 	}
 }
 
@@ -453,33 +477,55 @@ func (f *Fake) connectionsOpen(w http.ResponseWriter, c caller) {
 		c.app.AppID})
 }
 
-// argsOf are the arguments of a request: its query and form, or its query and the members of its JSON body that are
-// text; a body that cannot be read is answered with the error code it returns, invalid_json or invalid_form_data.
-func argsOf(r *http.Request) (map[string]string, string) {
-	out := map[string]string{}
+// maxBody is the largest JSON body the fake reads.
+const maxBody = 1 << 20
+
+// argsOf are the arguments of a request: its query and form, or its query and the members of its JSON body, read
+// whole once, each as text where it is one, and raw, each as JSON — a form value as a JSON text, except blocks and
+// attachments, which a form carries as JSON; a body that cannot be read is answered with the error code it returns,
+// invalid_json or invalid_form_data.
+func argsOf(r *http.Request) (map[string]string, map[string]json.RawMessage, string) {
+	out, raw := map[string]string{}, map[string]json.RawMessage{}
 	mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if mt == "application/json" {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			return nil, "invalid_json"
+		data, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+		if err != nil || json.Unmarshal(data, &raw) != nil {
+			return nil, nil, "invalid_json"
 		}
-		for k, v := range body {
-			if s, ok := v.(string); ok {
+		if raw == nil {
+			raw = map[string]json.RawMessage{}
+		}
+		for k, v := range raw {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
 				out[k] = s
 			}
 		}
 		for k, v := range r.URL.Query() {
 			out[k] = v[0]
+			if _, ok := raw[k]; !ok {
+				raw[k] = formRaw(k, v[0])
+			}
 		}
-		return out, ""
+		return out, raw, ""
 	}
 	if r.ParseForm() != nil {
-		return nil, "invalid_form_data"
+		return nil, nil, "invalid_form_data"
 	}
 	for k, v := range r.Form {
 		out[k] = v[0]
+		raw[k] = formRaw(k, v[0])
 	}
-	return out, ""
+	return out, raw, ""
+}
+
+// formRaw is a form value as JSON: blocks and attachments as the JSON they carry, anything else as a JSON text.
+func formRaw(k, v string) json.RawMessage {
+	if (k == "blocks" || k == "attachments") && json.Valid([]byte(v)) {
+		return json.RawMessage(v)
+	}
+	b, _ := json.Marshal(v) // a string always encodes
+	return b
 }
 
 // splitScopes is a list of scopes as x-oauth-scopes names them.
