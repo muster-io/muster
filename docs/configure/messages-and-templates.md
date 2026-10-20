@@ -28,10 +28,11 @@ Choosing **Custom** fills the editor with the source of the built-in template in
 from what people see today and edit it. Choosing **Built-in** again keeps your text until you leave the page.
 
 Each editor has a **Preview** under it. Choose the **Sample** it renders against: a **Built-in example**, the **Recent
-snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost or
-Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of the Route
-(up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not parse, or
-that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and column.
+snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost,
+Slack or Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
+the Route (up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not
+parse, or that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and
+column.
 
 The Outgoing webhook Destinations have templates of their own, written the same way: see
 [template mode](../outgoing-webhooks/templates.md).

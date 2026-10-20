@@ -7,8 +7,8 @@ not signed in. What is open is a short list of endpoints that cannot ask for a s
   and the page where a person sets a password from a setup link;
 - [ingestion](../integrations/alertmanager.md) and the [Heartbeat](../integrations/heartbeat.md), which take an
   Integration token;
-- the callbacks that Mattermost, Telegram and a [Bridge](../messengers/bridge.md) send to Muster, which each carry a
-  secret of their own;
+- the callbacks that Mattermost, Slack, Telegram and a [Bridge](../messengers/bridge.md) send to Muster, which each
+  carry a secret or a signature of their own;
 - the served API specification;
 - the health checks and `/metrics`, on the internal listener, which is not meant to be reachable from outside the
   cluster.
@@ -78,8 +78,8 @@ There are two ways out:
 
 ## Link your messenger accounts
 
-A button in Mattermost or Telegram acts as a Muster User only if the person who presses it has linked their messenger
-account to their User. People do it themselves, from their profile, as [Link your messenger
+A button in Mattermost, Slack or Telegram acts as a Muster User only if the person who presses it has linked their
+messenger account to their User. People do it themselves, from their profile, as [Link your messenger
 accounts](../messengers/account-links.md) describes. Admins cannot do it for them: they see the links of every User and
 can remove them, but they cannot create one for someone else. A press from an unlinked account changes nothing, and the
 person is answered privately with a link to their profile.

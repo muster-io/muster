@@ -36,6 +36,9 @@ What is Fatal depends on the messenger:
 
 - **Mattermost**: `401` or `403`, such as an invalid token or a bot removed from the channel, and `404` for the channel,
   which is not found or archived.
+- **Slack**: a token that Slack refuses (`invalid_auth`, `token_revoked`, `token_expired` and the like), a missing
+  scope, and a channel the bot cannot use: `channel_not_found`, `not_in_channel` for a bot removed from the channel, and
+  `is_archived`. A `429` is not Fatal: Muster holds the whole Connection for the seconds Slack asks.
 - **Telegram**: `401`, and "bot was kicked" or missing rights, such as a bot that lost its admin rights in the channel.
 - **Bridge**: the bridge answers `forbidden`, for example because the bot was removed from the channel; the bridge's own
   text becomes the reason. A bridge that does not answer at all becomes Broken through the Transient budget.
@@ -45,7 +48,9 @@ What is Fatal depends on the messenger:
 Several things look like trouble and do **not** make a Destination Broken:
 
 - A deleted Root message. Muster posts the Alert Group again once, Quietly, with the note "The previous message was
-  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone.
+  deleted at HH:MM"; if that one is deleted too, the pair is marked "deleted in the messenger" and left alone. In Slack
+  this holds while the bot is still in the channel and the channel is not archived; see [Edits and deleted Root
+  messages](../messengers/slack.md#edits-and-deleted-root-messages).
 - A Telegram Thread that lost the automatic copy of its Root message. The delivery state shows "Thread not attached".
 - A delivery that ends as Not delivered, such as a template that failed or a request the receiver rejected with `400`.
 - A Bridge Connection whose bridge cannot be reached. The Connection does not become Broken itself; its Destinations do,
@@ -125,6 +130,10 @@ similar from the outside, so here is the whole picture.
 
 Telegram
 :   None for the bot's own messages. A bot may edit them at any age, so Muster never republishes because of age.
+
+Slack
+:   None known for a bot's own messages. Whether a window that a workspace sets applies to a bot's messages hours or
+    days old has not been verified; an edit Slack refuses ends that delivery as Not delivered.
 
 Mattermost
 :   The server setting `ServiceSettings.PostEditTimeLimit`, which is unlimited (`-1`) by default. Keep the default. If

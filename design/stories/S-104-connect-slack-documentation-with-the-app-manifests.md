@@ -24,10 +24,20 @@ files_touched:
   - docs/llms.txt.tmpl
   - README.md
   - mkdocs.yml
+  - design/prd/l1/C-24-slack.md
+  - design/prd/l1/C-23-request-log.md
+  - docs/configure/messages-and-templates.md
+  - docs/outgoing-webhooks/events.md
+  - docs/operations/runbooks/MusterDeliveryFailing.md
+  - docs/operations/runbooks/MusterDeliveryQueueGrowing.md
+  - docs/operations/runbooks/MusterDeliverySlow.md
+  - docs/messengers/bridge.md
+  - docs/messengers/write-a-bridge.md
+  - docs/install/versions.md
 acceptance:
   - "[C-24.FR-16, C-24.AC-20] The page \"Connect Slack\" (`docs/messengers/slack.md`), in the navigation under Messengers after Telegram, gives the app manifest for Socket Mode — the app and its bot named Muster, the Messages tab on and read-only, the Home tab off, interactivity on, Socket Mode on, token rotation off, the six bot scopes — and the changes for HTTP, whose Interactivity Request URL is the Connection's callback address; and says what each scope is for, that the bot posts under the name in the app's settings (F-073), how to install the app, create the app-level token with `connections:write`, invite the bot with `/invite @Muster` and create the Connection and its Destinations."
   - "[C-24.FR-16] The page explains Socket Mode against HTTP — no address of Muster that Slack reaches against no press lost while the Leader changes — one Slack app per Muster installation and the warning about another program on the app, the proxy (CONNECT to `slack.com`, to the socket's hosts under `slack.com` and to `hooks.slack.com`), Loud and Quiet in Slack (Quiet means without a Mention), Mentions (`@channel`, `@here`, linked users), the limiters and Slack's rate limits, edits, deleted Root messages and the reply that appears in the channel for a moment when a Root message was deleted before any reply, the test message that cannot press its own button, and the Request log; every setting is named by its `area.setting`."
-  - "[C-24.FR-16] The Messengers page names five Destination types and its table has a Slack column with every row filled; Link your messenger accounts has a Slack section (email or name, the code in the Messages tab); Proxies names the hosts Slack needs; Loud and Quiet, Broken Destinations, High availability (Slack's Socket Mode on the Leader) and the Request log page name Slack where they name the other messengers; Statuses and commands has Slack in its table of Transports, with the Snooze durations and presets as one menu; the Quick start offers Slack beside Mattermost and Telegram; Sign-in names Slack's callback and Slack buttons; the Helm page names Slack's presses in HTTP mode among what reaches `ingestURL`; the runbook of `MusterDestinationBroken` names a bot removed from a Slack channel and Slack's `429`; the home page, `llms.txt` and the README list Slack among the messengers."
+  - "[C-24.FR-16] The Messengers page names five Destination types and its list *What each Destination type can do* has a Slack entry in every block; Link your messenger accounts has a Slack section (email or name, the code in the Messages tab); Proxies names the hosts Slack needs; Loud and Quiet, Broken Destinations, High availability (Slack's Socket Mode on the Leader) and the Request log page name Slack where they name the other messengers; Statuses and commands has Slack in its table of Transports, with the Snooze durations and presets as one menu; the Quick start offers Slack beside Mattermost and Telegram; Sign-in names Slack's callback and Slack buttons; the Helm page names Slack's presses in HTTP mode among what reaches `ingestURL`; the runbook of `MusterDestinationBroken` names a bot removed from a Slack channel and Slack's `429`; the home page, `llms.txt` and the README list Slack among the messengers."
   - "[C-24.AC-20] `make docs-check` passes: the site builds strictly, no link or anchor is broken, and `llms.txt` and the full text are current."
 verify: "make docs-check"
 operator_attention: false
@@ -49,7 +59,7 @@ issue: 313
 ## Contracts
 
 - **Pages**: `docs/messengers/slack.md` (new, the outline of C-24.FR-16); `docs/messengers/index.md` (five types, the
-  Slack column: needs a Connection — yes; edits — yes, no window known; buttons — yes, with the Snooze menu; Thread —
+  Slack entry of each block: needs a Connection — yes; edits — yes, no window known; buttons — yes, with the Snooze menu; Thread —
   replies under the Root message; Loud — a new message with Mentions; Quiet — an edit, or a message without a Mention;
   Mentions — nobody, `@channel`, `@here`, users; Account links — a code by direct message; rate limits — Connection 50
   requests/min, Destination 30 requests/min; edit window — none known for a bot's messages; Storms — one Storm summary
@@ -80,7 +90,7 @@ issue: 313
 make docs-check                                                           # passes
 grep -c 'messengers/slack.md' mkdocs.yml                                  # 1
 grep -c 'socket_mode_enabled' docs/messengers/slack.md                    # 2: both manifests
-grep -c '| Slack |\|Slack |' docs/messengers/index.md                     # the table's header names Slack
+grep -c '^    - Slack — ' docs/messengers/index.md                               # 16: every block names Slack
 make docs-serve &   # then open http://localhost:8000/messengers/slack/ and follow every link on it
 ```
 

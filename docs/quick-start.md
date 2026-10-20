@@ -157,11 +157,12 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 - **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
   under **Organization → General**: see [Organization settings](configure/organization.md#general).
-- **Connect a messenger.** Connect [Mattermost](messengers/mattermost.md) or [Telegram](messengers/telegram.md), add a
-  Destination for a channel, and add the Destination to the Default route or to a Route of its own; see
-  [Routes and Group keys](concepts/routes-and-group-keys.md). Mattermost sends button presses to `MUSTER_PUBLIC_URL`
-  here, so the Mattermost server must reach that address: unless it reaches Muster at `http://localhost:8080`, put an
-  HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its `https://` address first.
+- **Connect a messenger.** Connect [Mattermost](messengers/mattermost.md), [Slack](messengers/slack.md) or
+  [Telegram](messengers/telegram.md), add a Destination for a channel, and add the Destination to the Default route or
+  to a Route of its own; see [Routes and Group keys](concepts/routes-and-group-keys.md). Mattermost sends button presses
+  to `MUSTER_PUBLIC_URL` here, so the Mattermost server must reach that address: unless it reaches Muster at
+  `http://localhost:8080`, put an HTTPS reverse proxy in front of port 8080 and set `MUSTER_PUBLIC_URL` to its
+  `https://` address first. Slack in Socket Mode needs no address of Muster that Slack can reach.
 - **Use any other messenger through a Bridge.** A [Bridge](messengers/bridge.md) is a small service that connects
   Muster to a messenger it does not support natively. [Write a bridge](messengers/write-a-bridge.md) with the library
   for Go, [muster-bridge-go](https://github.com/muster-io/muster-bridge-go), or for Python,

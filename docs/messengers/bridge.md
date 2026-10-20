@@ -5,7 +5,7 @@ speaks the Bridge protocol with Muster on one side and talks to your messenger o
 message as an **envelope** — the status, the title, a link, the text and the buttons — and the bridge renders the
 envelope in its messenger. A **Bridge Connection** is one bot of your messenger behind one bridge: one token is one
 bot. Muster posts one **Root message** per Alert Group to a channel of that messenger, edits it as the Alert Group
-changes, and replies in its **Thread** for what happens later, as it does for Mattermost and Telegram.
+changes, and replies in its **Thread** for what happens later, as it does for Mattermost, Slack and Telegram.
 
 To write a bridge, read [Write a bridge](write-a-bridge.md); the protocol itself is the
 [Bridge protocol](../reference/bridge-protocol.md) reference.

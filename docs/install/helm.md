@@ -159,7 +159,8 @@ Muster has two addresses that other systems use, and the chart takes both as val
 `ingestURL`
 :   environment variable: `MUSTER_INGEST_URL`
 
-    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook.
+    Used for machines: Alertmanager, Heartbeats, Mattermost button callbacks, the Telegram webhook, and the button
+    presses of Slack Connections in the HTTP event mode.
 
 `ingestURL` defaults to `publicURL`. Muster never derives either from an Ingress or a route: set them to the addresses
 that people and machines really use, or the links it builds will be wrong.

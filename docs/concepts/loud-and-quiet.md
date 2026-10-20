@@ -4,9 +4,10 @@ Every change to an Alert Group is either **Loud** or **Quiet**. A Loud change sh
 change should only update what they see when they look. Muster fixes the loudness of every change; you decide only whom
 a Loud change **Mentions**.
 
-The rule behind it is simple, and it is the same in Mattermost and Telegram: **an edit never notifies anybody.** Editing
-a message, even to add a Mention, does not ring a phone. So a Loud change is always a **new message**, a new Root message
-or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a Mention.
+The rule behind it is simple, and it is the same in Mattermost, Slack and Telegram: **an edit never notifies anybody.**
+Editing a message, even to add a Mention, does not ring a phone. So a Loud change is always a **new message**, a new
+Root message or a reply in the Thread, and a Quiet change is an edit of the Root message or a new message without a
+Mention.
 
 ## Which changes are Loud
 
@@ -93,6 +94,11 @@ Mattermost
 
     A Quiet change is an edit, or a new post without a Mention.
 
+Slack
+:   A Loud change is a new message, a Root message or a reply in the Thread, with its Mentions.
+
+    A Quiet change is an edit, or a new message without a Mention.
+
 Telegram
 :   A Loud change is a new message, in the channel for a Root message and in the discussion group for a Thread reply.
 
@@ -115,6 +121,10 @@ A few details:
   person a follower. So Quiet means "without a Mention", not "nobody is notified". Mentions are in the text of the
   post and never in the attachment, because a Mention in an attachment notifies with an empty notification. See [Who
   gets notified](../messengers/mattermost.md#who-gets-notified).
+- **Slack.** Slack cannot send a message without a notification: whom a new message notifies depends on each member's
+  settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
+  no Mention, so it drops the Mentions of the message it edits. See [Who gets
+  notified](../messengers/slack.md#who-gets-notified).
 - **Telegram.** `disable_notification` silences the sound but does not remove the push. Only members of the channel's
   discussion group get Thread replies, and the automatic copy of every Root message rings them, even for a Quiet one.
   Tell the people on call to join the group and mute the channel itself. See [Known limitation: Quiet Root messages ring
@@ -143,6 +153,7 @@ or **messenger groups**. What a Destination type offers:
 | Destination | Nobody | Everyone in the chat | Chosen users | Messenger groups |
 |---|---|---|---|---|
 | Mattermost | yes | `@channel`, `@all` or `@here` | yes | Mattermost group names |
+| Slack | yes | `@channel` or `@here` | yes | no |
 | Telegram | yes | no | yes | no |
 | Bridge | yes | no | yes | no |
 | Outgoing webhook | yes | yes, as data | yes, as data | yes, as data |
@@ -157,6 +168,7 @@ people who are Mentioned, and the Owner above all, link their accounts from thei
 accounts](../messengers/account-links.md). Muster renders a Mention in the messenger's own form:
 
 - Mattermost: `@username`;
+- Slack: a Mention of the person's Slack account;
 - Telegram: a link to the person, whose text is the display name;
 - Bridge: a marker that a bridge with `native_mentions` renders as the messenger's mention and any other bridge as the
   person's name.

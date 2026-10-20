@@ -210,7 +210,8 @@ two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until M
 Alert Group offers no Snooze button, and a Route without Snooze durations offers no preset either, because an empty
 `route.snooze_durations` means no Snooze from messengers. Telegram shows the presets on a row of their own under the
 durations, and a bridge with a limit on buttons drops them first; see
-[Bridge](../messengers/bridge.md#what-muster-posts).
+[Bridge](../messengers/bridge.md#what-muster-posts). Slack offers the durations and then the presets as the options of
+one **Snooze…** menu, since its web client folds the buttons beyond five in a row.
 
 The labels are part of the message. After a change of `organization.workday_start` or `organization.week_start`, each
 Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
@@ -239,6 +240,9 @@ API
 
 Mattermost
 :   how: a button on the message · notes: Acknowledge, Unacknowledge, Resolve, Snooze, Unsnooze, Still on it
+
+Slack
+:   how: a button on the message, and the **Snooze…** menu with the durations and then the presets · notes: the same
 
 Telegram
 :   how: an inline button on the message · notes: the same

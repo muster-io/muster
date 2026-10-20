@@ -46,8 +46,8 @@ from 2 s up to 5 min) and marks the Destination Broken only when the Transient b
 5. Compare with all outbound calls of the delivery client class:
    `sum by (outcome) (rate(muster_client_requests_total{job="muster",client="delivery"}[5m]))`. Failures across
    every Destination point at the network, a proxy or DNS rather than one messenger.
-6. Press **Check** on the Destination page, or run `muster doctor`, which prints one line per Mattermost and Telegram
-   Destination (`destination <name>`) with the result of its check.
+6. Press **Check** on the Destination page, or run `muster doctor`, which prints one line per Mattermost, Slack,
+   Telegram and Bridge Destination (`destination <name>`) with the result of its check.
 
 ## Fix
 
