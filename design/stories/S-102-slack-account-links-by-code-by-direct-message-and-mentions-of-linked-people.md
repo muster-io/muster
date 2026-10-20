@@ -12,6 +12,8 @@ files_touched:
   - internal/accountlinks/slack_test.go
   - internal/accountlinks/accountlinks.go
   - internal/accountlinks/accountlinks_test.go
+  - internal/accountlinks/bridge.go
+  - internal/accountlinks/telegram.go
   - internal/accountlinks/query.sql
   - internal/accountlinks/live_test.go
   - internal/slack/links.go
@@ -28,6 +30,7 @@ files_touched:
   - internal/api/accountlinks_test.go
   - internal/api/server.go
   - internal/connections/slack.go
+  - internal/connections/slack_test.go
   - internal/runtime/runtime.go
   - internal/fakes/fakeslack/people.go
   - internal/fakes/fakeslack/fakeslack.go
@@ -36,9 +39,11 @@ files_touched:
   - internal/archlint/secretleak.go
   - design/db/schema.md
   - test/e2e/account_links_test.go
+  - test/e2e/several_connections_test.go
+  - CONTRIBUTING.md
 acceptance:
   - "[C-24.FR-12, C-24.AC-14] `startSlackLink` with a Slack Connection and an email finds the account with `users.lookupByEmail`, whatever the address's letter case, sends it by direct message — `chat.postMessage` to its user id — the code of `account_link.slack_code` with \"You requested a link to Muster. Do not share this code.\", and answers `202` with the request's id, its expiry and `attempts_remaining`; `confirmSlackLink` with the right code links the account, storing its user id, `name` and display name, records `link` in the Audit log with the messenger `slack`, and the bot sends \"Linked to Muster user {name}\" in the direct message."
-  - "[C-24.FR-12, C-24.AC-14] A name is found with `users.list` page by page, compared with `name` and `profile.display_name` regardless of case, leaving out deleted accounts, bots and Slackbot — a name on the second page links the same way; no match is refused with 422 `handle_not_found` at `/handle` and \"No Slack account with this email or name was found.\", two matches with 422 `handle_ambiguous` and \"Several Slack accounts have this name. Enter the email instead.\"; Slack refusing the direct message (`cannot_dm_bot`, `user_not_found`) with 422 `direct_message_refused`."
+  - "[C-24.FR-12, C-24.AC-14] A name is found with `users.list` page by page, compared with `name` and `profile.display_name` regardless of case, leaving out deleted accounts, bots and Slackbot — a name on the second page links the same way; no match is refused with 422 `handle_not_found` at `/handle` and \"No Slack account with this email or name was found.\", two matches with 422 `handle_ambiguous` and \"Several Slack accounts have this name. Enter the email instead.\"; Slack refusing the direct message (`cannot_dm_bot`, `user_not_found`, and `channel_not_found` for the user id) with 422 `direct_message_refused`."
   - "[C-24.FR-12, C-24.AC-14, C-18.FR-4] After five wrong codes the sixth attempt is refused with 422 `link_code_invalid` at `/code` and `attempts_remaining` 0, even with the right code; requests are limited by `account_link.slack_code_requests` per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`); an account linked to another User is refused with `409` `account_linked_elsewhere`; a second link of the same User through the same Connection replaces the first; with an API token, an Admin's included, both operations answer `403` `session_required`."
   - "[C-24.FR-12] `listLinkableConnections` offers Slack Connections that are not deleted, with the messenger `slack`; `listAccountLinks` returns Slack links with their `display_name`; the requests' codes are stored as hashes, the code is masked in the Request log of the direct message and reaches no log line (`secretleak.go` probe `slack_links`)."
   - "[C-24.FR-6, C-24.AC-15, C-12.FR-12] A Destination that mentions Alice for new Alert Groups posts a Loud Root message whose `text` and top `section` carry `<@U0FAKEALICE>`, her Slack link through the Destination's Connection, and whose attachment carries no Mention; a User linked only through another Slack Connection is named by their display name as text; an Alert Group acknowledged by Alice shows \"Acknowledged by Alice Smith\", the display name of her link, in the footer."
@@ -81,11 +86,12 @@ issue: 311
   `target_display_name`, which the link takes on confirmation; `link_rejected` in the Audit log for a wrong code, an
   expired request and an account linked elsewhere; `query.sql` drops the filter of S-097 from
   `listLinkableConnections`.
-- **Slack calls** (`internal/slack/links.go`): `FindUser` — an input with `@` and a dot after it is an email for
-  `users.lookupByEmail`; anything else, a leading `@` dropped, a name for `users.list` with `limit=200` page by page
-  until a match is certain, `429` answered as `503` with `Retry-After`; `SendCode` and `SendLinked` —
-  `chat.postMessage` to the user's id through the interactive path (C-18.FR-11), the code registered as a secret of the
-  request so that the Request log and the logs mask it.
+- **Slack calls** (`internal/slack/links.go`): `FindUser` — an input with an `@` after at least one character and a
+  dot after that `@` is an email for `users.lookupByEmail`; anything else, a leading `@` dropped, a name for
+  `users.list` with `limit=200` page by page until a match is certain, `429` answered as `503` with `Retry-After`;
+  `SendCode` and `SendLinked` — `chat.postMessage` to the user's id through the interactive path (C-18.FR-11), the code
+  registered as a secret of the request so that the Request log and the logs mask it; Slack refusing it with
+  `cannot_dm_bot`, `user_not_found` or `channel_not_found` for the user id is `direct_message_refused`.
 - **Mentions** (`internal/mentions`, `internal/slack/layout.go`): a chosen User with a Slack link for the
   Destination's Connection renders as `<@external_id>`, in `text` and the top `section` only; the footer names a User
   linked for the Connection by the link's `display_name`, else by their Muster display name.
@@ -110,26 +116,28 @@ issue: 311
 ```sh
 make dev > dev.log 2>&1 &
 # as in S-101: the Connection "sl" (C) in socket mode, the Destination "alerts" (D), the Route "sl", FIRE, AG, PRESS;
-# Alice's session in `ajar` (`AH`), as the Admin's in S-011; the link rows of S-100 removed
+# Alice's session in `ajar` (`AH`), as the Admin's in S-011 — a Responder whose Muster display name is "Alice Smith",
+# login alice; the link rows of S-100 removed
 API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake
 psql "$MUSTER_DATABASE_URL" -qc "DELETE FROM account_links WHERE messenger = 'slack'"
 curl -s -b ajar $API/me/account-links/connections | jq -r '[.items[] | select(.messenger == "slack") | .name] | sort | join(",")'   # Dev Slack,sl
 
 # C-24.FR-12, AC-14: by email, in other letter case
 RQ=$(curl -s "${AH[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$C\",\"handle\":\"Alice@Example.ORG\"}" | jq -r .request_id)
-CODE=$(curl -s "$FS/dms?user=U0FAKEALICE" | jq -r '.[-1].text' | grep -oE '[A-Z0-9]{8}')
-curl -s "$FS/dms?user=U0FAKEALICE" | jq -r '.[-1].text' | grep -c 'Do not share this code'   # 1
+CODE=$(curl -s "$FS/dms?app=b&user=U0FAKEALICE" | jq -r '.[-1].text' | grep -oE '[A-Z0-9]{8}')
+curl -s "$FS/dms?app=b&user=U0FAKEALICE" | jq -r '.[-1].text' | grep -c 'Do not share this code'   # 1
 curl -s "${AH[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":\"$RQ\",\"code\":\"$CODE\"}" | jq -c '{messenger, external_id, username, display_name}'
 # {"messenger":"slack","external_id":"U0FAKEALICE","username":"alice","display_name":"Alice Smith"}
-curl -s "$FS/dms?user=U0FAKEALICE" | jq -r '.[-1].text'                          # Linked to Muster user Alice Smith
-curl -s -b jar "$API/audit-log?action=link&limit=1" | jq -c '.items[0] | {action, m: .details.messenger}'   # {"action":"link","m":"slack"}
+curl -s "$FS/dms?app=b&user=U0FAKEALICE" | jq -r '.[-1].text'                    # Linked to Muster user Alice Smith
+curl -s -b jar "$API/audit-log?action=account_link.link&limit=1" | jq -c '.items[0] | {action, m: .details.messenger}'
+# {"action":"account_link.link","m":"slack"}
 # by name: refusals
 curl -s "${AH[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$C\",\"handle\":\"Sam\"}" | jq -c '[.status, .errors[0].code, .errors[0].detail]'
 # [422,"handle_ambiguous","Several Slack accounts have this name. Enter the email instead."]
 curl -s "${AH[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$C\",\"handle\":\"nobody\"}" | jq -c '[.status, .errors[0].code]'   # [422,"handle_not_found"]
 # five wrong codes, then the right one
 RQ=$(curl -s "${AH[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$C\",\"handle\":\"bob\"}" | jq -r .request_id)
-CODE=$(curl -s "$FS/dms?user=U0FAKEBOB" | jq -r '.[-1].text' | grep -oE '[A-Z0-9]{8}')
+CODE=$(curl -s "$FS/dms?app=b&user=U0FAKEBOB" | jq -r '.[-1].text' | grep -oE '[A-Z0-9]{8}')
 for i in 1 2 3 4 5; do curl -s "${AH[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":\"$RQ\",\"code\":\"WRONGCDE\"}" > /dev/null; done
 curl -s "${AH[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":\"$RQ\",\"code\":\"$CODE\"}" | jq -c '[.status, .errors[0].code, .attempts_remaining]'
 # [422,"link_code_invalid",0]
@@ -150,10 +158,11 @@ curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | conta
 Live, on the maintainer's test workspace, with `operator_attention` — the operator reads the code the bot sends:
 
 ```sh
-# the Connection "test workspace" (L) as in S-101; the Admin links their own Slack account by email
-RQ=$(curl -s "${H[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$L\",\"handle\":\"<the operator's Slack email>\"}" | jq -r .request_id)
+# the Connection "test workspace" (L) as in S-101; Alice's session links the operator's Slack account by email, so
+# that a Destination that mentions Alice mentions the operator
+RQ=$(curl -s "${AH[@]}" $API/me/account-links/slack -d "{\"connection_id\":\"$L\",\"handle\":\"<the operator's Slack email>\"}" | jq -r .request_id)
 # the operator opens the bot's Messages tab in Slack, reads the code and types it here
-read -r CODE; curl -s "${H[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":\"$RQ\",\"code\":\"$CODE\"}" | jq -c '{messenger, username}'
+read -r CODE; curl -s "${AH[@]}" $API/me/account-links/slack/confirmation -d "{\"request_id\":\"$RQ\",\"code\":\"$CODE\"}" | jq -c '{messenger, username}'
 # {"messenger":"slack","username":"<the operator's Slack name>"}
 ```
 
