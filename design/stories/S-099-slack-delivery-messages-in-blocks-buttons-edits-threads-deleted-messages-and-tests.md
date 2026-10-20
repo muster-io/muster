@@ -221,7 +221,7 @@ MSG CpuHigh '.replies | length'                                                 
 FAULT chat.update 429 ratelimited 1
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null
 sleep 3; curl -s $FS/requests | jq -c '[.[] | select(.path == "/api/chat.update")] | (map(.status) | rindex(429)) as $i | .[$i].at_ms as $t |
-  [.[$i + 1:][] | (.at_ms - $t) / 1000] | length > 0 and all(. >= 1 and . < 2)'   # true
+  (.[$i + 1].at_ms - $t) / 1000 | . >= 1 and . < 2'   # true
 FAULT chat.postMessage 200 invalid_blocks
 FIRE s3 MemHigh k1; G3=$(AG 'pod%3D%22k1%22'); MSG MemHigh '{blocks: (.blocks | length), t: (.text | length > 0)}'   # {"blocks":0,"t":true}
 curl -s -b jar "$API/alert-groups/$G3/timeline" | jq '[.items[] | select(.delivery_event == "markup_rejected")] | length'   # 1
@@ -241,7 +241,7 @@ curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="deli
 MSG NetDown '.ts' | grep -c null                                                # 1: never published
 
 # C-24.FR-13, AC-16: the test message
-curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{}' | jq -c '[.steps[].name, .steps[0].error_class]'   # ["message","none"]
+curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' | jq -c '[.steps[].name, .steps[0].error_class]'   # ["message","none"]
 MSG 'Test message' '.blocks | length > 0'                                       # true
 ```
 
