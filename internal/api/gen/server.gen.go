@@ -1464,6 +1464,7 @@ func (e MentionSettingEveryone) Valid() bool {
 const (
 	MessengerBridge     Messenger = "bridge"
 	MessengerMattermost Messenger = "mattermost"
+	MessengerSlack      Messenger = "slack"
 	MessengerTelegram   Messenger = "telegram"
 )
 
@@ -1473,6 +1474,8 @@ func (e Messenger) Valid() bool {
 	case MessengerBridge:
 		return true
 	case MessengerMattermost:
+		return true
+	case MessengerSlack:
 		return true
 	case MessengerTelegram:
 		return true
@@ -3041,6 +3044,7 @@ const (
 	TransportBridge     Transport = "bridge"
 	TransportCli        Transport = "cli"
 	TransportMattermost Transport = "mattermost"
+	TransportSlack      Transport = "slack"
 	TransportSystem     Transport = "system"
 	TransportTelegram   Transport = "telegram"
 	TransportUi         Transport = "ui"
@@ -3056,6 +3060,8 @@ func (e Transport) Valid() bool {
 	case TransportCli:
 		return true
 	case TransportMattermost:
+		return true
+	case TransportSlack:
 		return true
 	case TransportSystem:
 		return true
@@ -3517,7 +3523,7 @@ func (e ListRequestLogParamsStatusClass) Valid() bool {
 
 // AccountLink defines model for AccountLink.
 type AccountLink struct {
-	// Connection The Connection the link was made through; Mattermost and Bridge links belong to it.
+	// Connection The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 
@@ -3889,7 +3895,7 @@ type AuditEntry struct {
 	TokenId   nullable.Nullable[NullablePublicId] `json:"token_id,omitempty"`
 	TokenName nullable.Nullable[string]           `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -5401,7 +5407,7 @@ type Note struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -6727,6 +6733,12 @@ type SlackDestinationInputType string
 // SlackEventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
 type SlackEventMode string
 
+// SlackInteractionForm The form Slack posts for an interaction of the app; the signature covers its raw bytes.
+type SlackInteractionForm struct {
+	// Payload The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.
+	Payload string `json:"payload"`
+}
+
 // SnapshotState `pending` until a worker has processed it, `processed`, or `failed` when the body could not be processed. A failed Snapshot is never retried by itself; `muster ingest replay` reprocesses it after a fix.
 type SnapshotState string
 
@@ -7189,7 +7201,7 @@ type TimelineActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -7434,7 +7446,7 @@ type TotpStatus struct {
 	RecoveryCodesRemaining int                          `json:"recovery_codes_remaining"`
 }
 
-// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
 // User defines model for User.
@@ -7545,7 +7557,7 @@ type WebhookActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -8116,6 +8128,15 @@ type BridgeEventParams struct {
 	WebhookSignature string `json:"webhook-signature"`
 }
 
+// SlackInteractionParams defines parameters for SlackInteraction.
+type SlackInteractionParams struct {
+	// XSlackSignature `v0=` and the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Slack signing secret.
+	XSlackSignature string `json:"X-Slack-Signature"`
+
+	// XSlackRequestTimestamp Unix time of the request, in seconds.
+	XSlackRequestTimestamp string `json:"X-Slack-Request-Timestamp"`
+}
+
 // ListConnectionsParams defines parameters for ListConnections.
 type ListConnectionsParams struct {
 	// Cursor Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.
@@ -8499,6 +8520,9 @@ type BridgeEventJSONRequestBody = BridgeEvent
 
 // MattermostActionJSONRequestBody defines body for MattermostAction for application/json ContentType.
 type MattermostActionJSONRequestBody = MattermostActionRequest
+
+// SlackInteractionFormdataRequestBody defines body for SlackInteraction for application/x-www-form-urlencoded ContentType.
+type SlackInteractionFormdataRequestBody = SlackInteractionForm
 
 // TelegramWebhookJSONRequestBody defines body for TelegramWebhook for application/json ContentType.
 type TelegramWebhookJSONRequestBody = TelegramUpdate
@@ -10714,6 +10738,9 @@ type ServerInterface interface {
 	// MattermostAction Receive a Mattermost button press
 	// (POST /callbacks/mattermost/{connection_id})
 	MattermostAction(w http.ResponseWriter, r *http.Request, connectionId ConnectionId)
+	// SlackInteraction Receive a Slack button press (http event mode)
+	// (POST /callbacks/slack/{connection_id})
+	SlackInteraction(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params SlackInteractionParams)
 	// TelegramWebhook Receive a Telegram update (webhook update mode)
 	// (POST /callbacks/telegram/{connection_id})
 	TelegramWebhook(w http.ResponseWriter, r *http.Request, connectionId ConnectionId)
@@ -12513,6 +12540,83 @@ func (siw *ServerInterfaceWrapper) MattermostAction(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.MattermostAction(w, r, connectionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SlackInteraction operation middleware
+func (siw *ServerInterfaceWrapper) SlackInteraction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection_id" -------------
+	var connectionId ConnectionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection_id", r.PathValue("connection_id"), &connectionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SlackInteractionParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "X-Slack-Signature" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Slack-Signature")]; found {
+		var XSlackSignature string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Slack-Signature", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Slack-Signature", valueList[0], &XSlackSignature, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Slack-Signature", Err: err})
+			return
+		}
+
+		params.XSlackSignature = XSlackSignature
+
+	} else {
+		err := fmt.Errorf("Header parameter X-Slack-Signature is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "X-Slack-Signature", Err: err})
+		return
+	}
+
+	// ------------- Required header parameter "X-Slack-Request-Timestamp" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Slack-Request-Timestamp")]; found {
+		var XSlackRequestTimestamp string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Slack-Request-Timestamp", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Slack-Request-Timestamp", valueList[0], &XSlackRequestTimestamp, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Slack-Request-Timestamp", Err: err})
+			return
+		}
+
+		params.XSlackRequestTimestamp = XSlackRequestTimestamp
+
+	} else {
+		err := fmt.Errorf("Header parameter X-Slack-Request-Timestamp is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "X-Slack-Request-Timestamp", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SlackInteraction(w, r, connectionId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16830,6 +16934,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/mattermost/{connection_id}", wrapper.MattermostAction)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/telegram/{connection_id}", wrapper.TelegramWebhook)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/bridge/{connection_id}", wrapper.BridgeEvent)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/callbacks/slack/{connection_id}", wrapper.SlackInteraction)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/routes", wrapper.ListRoutes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/routes", wrapper.CreateRoute)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/routes/{route_id}", wrapper.DeleteRoute)
@@ -19198,6 +19303,72 @@ func (response MattermostAction200JSONResponse) VisitMattermostActionResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SlackInteractionRequestObject struct {
+	ConnectionId ConnectionId `json:"connection_id"`
+	Params       SlackInteractionParams
+	Body         *SlackInteractionFormdataRequestBody
+}
+
+type SlackInteractionResponseObject interface {
+	VisitSlackInteractionResponse(w http.ResponseWriter) error
+}
+
+type SlackInteraction200Response struct {
+}
+
+func (response SlackInteraction200Response) VisitSlackInteractionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type SlackInteraction400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response SlackInteraction400ApplicationProblemPlusJSONResponse) VisitSlackInteractionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SlackInteraction401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SlackInteraction401ApplicationProblemPlusJSONResponse) VisitSlackInteractionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SlackInteraction500ApplicationProblemPlusJSONResponse struct {
+	InternalErrorApplicationProblemPlusJSONResponse
+}
+
+func (response SlackInteraction500ApplicationProblemPlusJSONResponse) VisitSlackInteractionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -33426,6 +33597,9 @@ type StrictServerInterface interface {
 	// MattermostAction Receive a Mattermost button press
 	// (POST /callbacks/mattermost/{connection_id})
 	MattermostAction(ctx context.Context, request MattermostActionRequestObject) (MattermostActionResponseObject, error)
+	// SlackInteraction Receive a Slack button press (http event mode)
+	// (POST /callbacks/slack/{connection_id})
+	SlackInteraction(ctx context.Context, request SlackInteractionRequestObject) (SlackInteractionResponseObject, error)
 	// TelegramWebhook Receive a Telegram update (webhook update mode)
 	// (POST /callbacks/telegram/{connection_id})
 	TelegramWebhook(ctx context.Context, request TelegramWebhookRequestObject) (TelegramWebhookResponseObject, error)
@@ -34462,6 +34636,44 @@ func (sh *strictHandler) MattermostAction(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(MattermostActionResponseObject); ok {
 		if err := validResponse.VisitMattermostActionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SlackInteraction operation middleware
+func (sh *strictHandler) SlackInteraction(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params SlackInteractionParams) {
+	var request SlackInteractionRequestObject
+
+	request.ConnectionId = connectionId
+	request.Params = params
+
+	if err := r.ParseForm(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode formdata: %w", err))
+		return
+	}
+	var body SlackInteractionFormdataRequestBody
+	if err := runtime.BindForm(&body, r.Form, nil, nil); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't bind formdata: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SlackInteraction(ctx, request.(SlackInteractionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SlackInteraction")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SlackInteractionResponseObject); ok {
+		if err := validResponse.VisitSlackInteractionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -56,7 +56,7 @@ export const ListAuditLogResponse = zod.object({
 }),
   "token_id": zod.string().regex(listAuditLogResponseItemsItemTokenIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "action": zod.string().describe('Stable action type such as `integration.update`, `alert_group.acknowledge`, `alert_group.takeover`, `auth.sign_in`, `auth.sign_in_refused`, `token.issue`, `account_link.link_rejected`.'),
   "resource_type": zod.string().nullish(),
   "resource_id": zod.string().nullish(),

@@ -67,8 +67,19 @@ export const getBridgeEventMockHandler = (overrideResponse?: void | ((info: Para
       })
   }, options)
 }
+
+export const getSlackInteractionMockHandler = (overrideResponse?: void | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post('*/callbacks/slack/:connectionId', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 200
+      })
+  }, options)
+}
 export const getMessengerCallbacksMock = () => [
   getMattermostActionMockHandler(),
   getTelegramWebhookMockHandler(),
-  getBridgeEventMockHandler()
+  getBridgeEventMockHandler(),
+  getSlackInteractionMockHandler()
 ]

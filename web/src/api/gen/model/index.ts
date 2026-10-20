@@ -409,6 +409,7 @@ export * from './slackDestinationInput';
 export * from './slackDestinationInputType';
 export * from './slackDestinationType';
 export * from './slackEventMode';
+export * from './slackInteractionForm';
 export * from './snapshotState';
 export * from './snoozePreset';
 export * from './snoozePresetEnd';

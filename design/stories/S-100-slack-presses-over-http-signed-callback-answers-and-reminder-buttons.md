@@ -91,7 +91,7 @@ issue: 309
 - **Spec** (`api/openapi.yaml`): the operation `slackInteraction` (`POST /callbacks/slack/{connection_id}`,
   `x-listener: ingest`, `x-permission: none`, `security: []`), its body `application/x-www-form-urlencoded`
   (`SlackInteractionForm`) with `payload`, the headers `X-Slack-Signature` and `X-Slack-Request-Timestamp`, the answers
-  `200` (empty), `400` and `401`, and the description of C-24.FR-9 — request validation does not answer here, the
+  `200` (empty), `400`, `401` and `500` (a failed read of the Connection), and the description of C-24.FR-9 — request validation does not answer here, the
   handler decides; `Transport` and `Messenger` gain `slack`. Like the other callbacks it is mounted by
   `runtime.Callbacks` on the ingest listener, not by the strict server.
 - **Schema** (migration `0018_slack_presses_and_links`, expand only, `schema.md`): `slack` in the transport CHECKs of

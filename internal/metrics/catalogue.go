@@ -338,7 +338,7 @@ var Commands = newCounter(Definition{
 	Labels: []Label{
 		closed("command", "the Command", CommandNames...),
 		closed("transport", "how the Command reached Muster", "ui", "api", "mattermost", "telegram", "bridge",
-			"system"),
+			"slack", "system"),
 		closed("outcome", "done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a "+
 			"missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group "+
 			"that was not found", "done", "unchanged", "refused", "skipped", "failed"),

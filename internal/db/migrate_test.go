@@ -1227,24 +1227,241 @@ func TestIntegrationSlackDestinations(t *testing.T) {
 	})
 }
 
+// TestIntegrationSlackPressesAndLinks runs 0018 over a database whose partitioned timeline_entries and audit_log have
+// a partition, with a Mattermost and a Slack Connection, a Mattermost link and a Mattermost request: before it the
+// Transport slack and the messenger slack are refused; up adds the transport CHECK with slack to the parents and the
+// partitions and validates it on all of them, dropping the old one, and replaces the messenger CHECKs under their
+// names, validated, so that slack is accepted and an unknown Transport is not, a Slack link's identity space is
+// slack:<connection id>, a Slack link needs a Slack Connection, a Slack request its target account, and the index of
+// the per-target limit exists. Down deletes the Slack links and requests and restores the old CHECKs, the transport
+// ones validated while no row has the Transport slack and NOT VALID once one has, which it keeps, refusing new Slack
+// rows either way; up again works from both states.
+func TestIntegrationSlackPressesAndLinks(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 17)
+		for _, table := range []string{"timeline_entries", "audit_log"} {
+			e.exec(t, fmt.Sprintf(`CREATE TABLE %s_p202610 PARTITION OF %s
+				FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`, table, table))
+		}
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, u.public_id, u.login, u.login, 'responder', 'local', 'active', '2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('SR0000000000A1', 'bob'), ('SR0000000000A2', 'vera')) AS u (public_id, login)`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, slack_event_mode,
+			slack_signing_secret_ciphertext, slack_signing_secret_key_id, bot_token_ciphertext, bot_token_key_id,
+			bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, c.public_id, c.type, c.name, c.server, c.mode, c.secret, c.secret_key, '\x01', 'k1',
+			'2026-10-05', 1, 1, '2026-10-05', '2026-10-05'
+			FROM organizations, (VALUES ('CN0000000000M1', 'mattermost', 'mm', 'http://mm', NULL, NULL, NULL),
+				('CN0000000000S1', 'slack', 'sl', NULL, 'http', '\x04'::bytea, 'k1'))
+				AS c (public_id, type, name, server, mode, secret, secret_key)`)
+		n := 0
+		transport := func(t *testing.T, transport string) error {
+			t.Helper()
+			n++
+			if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id,
+				at, kind, system_event, actor_kind, actor_user_id, transport)
+				SELECT id, $1, 1, '2026-10-05 12:00:00+00', 'system', 'muster_unavailable', 'user', 1, $2
+				FROM organizations`, fmt.Sprintf("TE00000000%04d", n), transport); err != nil {
+				return err
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO audit_log (org_id, public_id, at, actor_kind,
+				actor_user_id, transport, action) SELECT id, $1, '2026-10-05 12:00:00+00', 'user', 1, $2,
+				'alert_group.acknowledged' FROM organizations`, fmt.Sprintf("AE00000000%04d", n), transport)
+			return err
+		}
+		link := func(t *testing.T, publicID, login, messenger, conn, external string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO account_links (org_id, public_id, user_id, messenger,
+				connection_id, external_id, created_at)
+				SELECT u.org_id, $1, u.id, $3, c.id, $5, '2026-10-05' FROM users u, connections c
+				WHERE u.login = $2 AND c.public_id = $4`, publicID, login, messenger, conn, external)
+			return err
+		}
+		request := func(t *testing.T, messenger, conn, target string, hash byte) error {
+			t.Helper()
+			n++
+			var tgt any
+			if target != "" {
+				tgt = target
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO account_link_requests (org_id, public_id, user_id,
+				messenger, connection_id, secret_hash, target_external_id, created_at, expires_at)
+				SELECT u.org_id, $1, u.id, $2, c.id, $3, $4, '2026-10-05', '2026-10-05 00:10'
+				FROM users u, connections c WHERE u.login = 'bob' AND c.public_id = $5`,
+				fmt.Sprintf("AR%012d", n), messenger, bytes.Repeat([]byte{hash}, 32), tgt, conn)
+			return err
+		}
+		refusedBy := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.ConstraintName != constraint {
+				t.Errorf("%s: refused by %v, want %s", name, err, constraint)
+			}
+		}
+		transports := func(t *testing.T) string {
+			t.Helper()
+			return e.constraints(t, []string{"timeline_entries", "timeline_entries_p202610"},
+				"timeline_entries_transport") + " " + e.constraints(t, []string{"audit_log", "audit_log_p202610"},
+				"audit_log_transport")
+		}
+		transportChecks := func(version string, valid bool) string {
+			return fmt.Sprintf("timeline_entries.timeline_entries_transport_%[1]s_check:%[2]v "+
+				"timeline_entries_p202610.timeline_entries_transport_%[1]s_check:%[2]v "+
+				"audit_log.audit_log_transport_%[1]s_check:%[2]v "+
+				"audit_log_p202610.audit_log_transport_%[1]s_check:%[2]v", version, valid)
+		}
+		messengers := func(t *testing.T) string {
+			t.Helper()
+			return strings.TrimSpace(e.constraints(t, []string{"account_links"}, "account_links_messenger") + " " +
+				e.constraints(t, []string{"account_link_requests"}, "account_link_requests_messenger") + " " +
+				e.constraints(t, []string{"account_link_requests"}, "account_link_requests_slack"))
+		}
+		const oldMessengers = "account_links.account_links_messenger_check:true " +
+			"account_link_requests.account_link_requests_messenger_check:true"
+		const newMessengers = oldMessengers + " account_link_requests.account_link_requests_slack_target_check:true"
+		index := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'account_link_requests'
+				AND indexname = 'account_link_requests_slack_target_idx'`)
+		}
+		slackRows := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM account_links WHERE messenger = 'slack'`) +
+				e.count(t, `SELECT count(*) FROM account_link_requests WHERE messenger = 'slack'`)
+		}
+
+		if err := transport(t, "bridge"); err != nil {
+			t.Fatal(err)
+		}
+		if err := link(t, "AK0000000000M1", "bob", "mattermost", "CN0000000000M1", "u-bob"); err != nil {
+			t.Fatal(err)
+		}
+		if err := request(t, "mattermost", "CN0000000000M1", "u-vera", 1); err != nil {
+			t.Fatal(err)
+		}
+		if got := transports(t); got != transportChecks("v2", true) {
+			t.Fatalf("before 0018: %s", got)
+		}
+		if got := messengers(t); got != oldMessengers || index(t) != 0 {
+			t.Fatalf("before 0018: %s, %d indexes", got, index(t))
+		}
+		if err := transport(t, "slack"); err == nil {
+			t.Error("before 0018: the Transport slack was accepted")
+		}
+		refusedBy(t, "before 0018, a Slack link", link(t, "AK0000000000S0", "bob", "slack", "CN0000000000S1",
+			"U0FAKEBOB"), "account_links_messenger_check")
+		refusedBy(t, "before 0018, a Slack request", request(t, "slack", "CN0000000000S1", "U0FAKEBOB", 2),
+			"account_link_requests_messenger_check")
+
+		e.step(t, 1)
+		if got := transports(t); got != transportChecks("v3", true) {
+			t.Errorf("after up: %s", got)
+		}
+		if got := messengers(t); got != newMessengers || index(t) != 1 {
+			t.Errorf("after up: %s, %d indexes", got, index(t))
+		}
+		if err := link(t, "AK0000000000S1", "bob", "slack", "CN0000000000S1", "U0FAKEBOB"); err != nil {
+			t.Fatalf("after up, a Slack link: %v", err)
+		}
+		if e.count(t, `SELECT count(*) FROM account_links al JOIN connections c ON c.id = al.connection_id
+			WHERE al.public_id = 'AK0000000000S1' AND al.identity_space = 'slack:' || c.id::text`) != 1 {
+			t.Error("after up: the Slack link's space is not slack:<connection id>")
+		}
+		refusedBy(t, "after up, a second link of the account", link(t, "AK0000000000S2", "vera", "slack",
+			"CN0000000000S1", "U0FAKEBOB"), "account_links_account_key")
+		if err := link(t, "AK0000000000S3", "vera", "slack", "CN0000000000M1", "U0FAKEVERA"); err == nil {
+			t.Error("after up: a Slack link through a Mattermost Connection was accepted")
+		}
+		if err := request(t, "slack", "CN0000000000S1", "U0FAKEBOB", 3); err != nil {
+			t.Errorf("after up, a Slack request: %v", err)
+		}
+		refusedBy(t, "after up, a Slack request without a target", request(t, "slack", "CN0000000000S1", "", 4),
+			"account_link_requests_slack_target_check")
+		if err := request(t, "slack", "CN0000000000M1", "U0FAKEBOB", 5); err == nil {
+			t.Error("after up: a Slack request through a Mattermost Connection was accepted")
+		}
+		if err := request(t, "mattermost", "CN0000000000M1", "u-bob", 6); err != nil {
+			t.Errorf("after up, a Mattermost request: %v", err)
+		}
+		if err := transport(t, "pigeon"); err == nil {
+			t.Error("after up: an unknown Transport was accepted")
+		}
+
+		e.step(t, -1)
+		if got := transports(t); got != transportChecks("v2", true) {
+			t.Errorf("after down without slack rows: %s", got)
+		}
+		if got := messengers(t); got != oldMessengers || index(t) != 0 {
+			t.Errorf("after down: %s, %d indexes", got, index(t))
+		}
+		if got := slackRows(t); got != 0 {
+			t.Errorf("after down: %d Slack links and requests", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM account_links`) +
+			e.count(t, `SELECT count(*) FROM account_link_requests`); got != 3 {
+			t.Errorf("after down: %d links and requests, want the 3 of Mattermost", got)
+		}
+		refusedBy(t, "after down, a Slack link", link(t, "AK0000000000S4", "vera", "slack", "CN0000000000S1",
+			"U0FAKEVERA"), "account_links_messenger_check")
+
+		e.step(t, 1)
+		if err := transport(t, "slack"); err != nil {
+			t.Fatalf("after up: %v", err)
+		}
+		if err := link(t, "AK0000000000S5", "vera", "slack", "CN0000000000S1", "U0FAKEVERA"); err != nil {
+			t.Fatalf("after up: %v", err)
+		}
+		e.step(t, -1)
+		if got := transports(t); got != transportChecks("v2", false) {
+			t.Errorf("after down with slack rows: %s", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM timeline_entries WHERE transport = 'slack'`) +
+			e.count(t, `SELECT count(*) FROM audit_log WHERE transport = 'slack'`); got != 2 {
+			t.Errorf("after down: %d rows with the Transport slack, want the 2 of history", got)
+		}
+		if got := slackRows(t); got != 0 {
+			t.Errorf("after down: %d Slack links and requests", got)
+		}
+		if err := transport(t, "slack"); err == nil {
+			t.Error("after down: the Transport slack was accepted")
+		}
+		if err := transport(t, "bridge"); err != nil {
+			t.Errorf("after down: %v", err)
+		}
+
+		e.step(t, 1)
+		if got := transports(t); got != transportChecks("v3", true) {
+			t.Errorf("after up again: %s", got)
+		}
+		if got := messengers(t); got != newMessengers || index(t) != 1 {
+			t.Errorf("after up again: %s, %d indexes", got, index(t))
+		}
+		if err := transport(t, "slack"); err != nil {
+			t.Errorf("after up again: %v", err)
+		}
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 18 {
+			t.Errorf("version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (17)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (18)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":17`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":18`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":17`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":18`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1260,10 +1477,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (17)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (18)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":17`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":18`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

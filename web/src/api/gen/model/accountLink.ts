@@ -24,7 +24,7 @@ import type { PublicId } from './publicId';
 export interface AccountLink {
   id: PublicId;
   messenger: Messenger;
-  /** The Connection the link was made through; Mattermost and Bridge links belong to it. */
+  /** The Connection the link was made through; Mattermost, Bridge and Slack links belong to it. */
   connection?: EntityRef;
   external_id: string;
   /**

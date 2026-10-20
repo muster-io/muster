@@ -176,3 +176,33 @@ export const BridgeEventBody = zod.union([zod.object({
 
 export const BridgeEventResponse = zod.void()
 
+/**
+ * Used only when the Slack Connection's event mode is `http`: Slack posts each interaction of the app, one per request, form-encoded with its JSON in `payload`. Muster reads the raw body, up to 1 MiB, before it parses the form, verifies `X-Slack-Signature` — `v0=` followed by the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Connection's Slack signing secret — in constant time, and refuses an `X-Slack-Request-Timestamp` further than `slack.request_tolerance` from its real clock, either way. A missing or wrong signature, a timestamp out of range, an unknown or deleted Connection and a Connection in `socket` mode are all answered `401` with the same body and change nothing, so the endpoint reveals nothing about which Connections exist; a body over 1 MiB, or without a `payload` that is a JSON object, is answered `400`; a failure to read the Connection is answered `500`. Every other request is answered `200` with an empty body at once, before its press is handled, because Slack waits only 3 seconds: a `block_actions` press then runs its Command with the Transport `slack`, and the person who pressed is answered privately, with `chat.postEphemeral` or else the press's `response_url`, only when there is something to read; other kinds of interaction are ignored. Request validation does not answer here: the handler decides every answer.
+ * @summary Receive a Slack button press (http event mode)
+ */
+export const slackInteractionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const SlackInteractionParams = zod.object({
+  "connection_id": zod.string().regex(slackInteractionPathConnectionIdRegExp).describe('Connection `public_id`.')
+})
+
+export const slackInteractionHeaderXSlackSignatureRegExp = new RegExp('^v0=[0-9a-fA-F]{64}$');
+export const slackInteractionHeaderXSlackRequestTimestampRegExp = new RegExp('^[0-9]{1,12}$');
+
+
+export const SlackInteractionHeader = zod.object({
+  "X-Slack-Signature": zod.string().regex(slackInteractionHeaderXSlackSignatureRegExp).describe('`v0=` and the hex HMAC-SHA256 of `v0:<X-Slack-Request-Timestamp>:<raw body>` with the Slack signing secret.'),
+  "X-Slack-Request-Timestamp": zod.string().regex(slackInteractionHeaderXSlackRequestTimestampRegExp).describe('Unix time of the request, in seconds.')
+})
+
+export const slackInteractionBodyPayloadMax = 1048576;
+
+
+
+export const SlackInteractionBody = zod.object({
+  "payload": zod.string().max(slackInteractionBodyPayloadMax).describe('The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.')
+}).describe('The form Slack posts for an interaction of the app; the signature covers its raw bytes.')
+
+export const SlackInteractionResponse = zod.unknown()
+
