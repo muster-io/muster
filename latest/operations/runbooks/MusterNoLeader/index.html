@@ -2774,6 +2774,9 @@ the problem behind the missing Leader — usually the database — may stop deli
 <li><strong>Bridge polling</strong>: Bridge Connections in the <code>poll</code> event delivery mode receive no events — no button presses, Text
   commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
   command that is older than <code>bridge.event_max_age</code> (1 hour) by then is dropped unanswered.</li>
+<li><strong>Slack's Socket Mode</strong>: Slack Connections in the <code>socket</code> event mode hold no Socket Mode connection, so a button
+  press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
+  not count on Slack to send such presses again.</li>
 <li>The <strong>Heartbeat</strong> check and the <strong>Stale</strong> check: no Integration becomes Heartbeat lost, and no alert is resolved as
   Stale.</li>
 <li>Partition maintenance, retention and the pruning of short-lived state, the outgoing heartbeat, the expiry check of
@@ -2781,9 +2784,10 @@ the problem behind the missing Leader — usually the database — may stop deli
   <code>muster_heartbeat_lost</code>, <code>muster_ingest_backlog</code>, <code>muster_storm_active</code>), which go stale or disappear.</li>
 </ul>
 <p>What keeps working: ingestion, delivery to every Destination, timers (the end of a Snooze, Ack timeouts and Reminders),
-the UI, the API, the webhook update mode of Telegram and the <code>push</code> event delivery mode of Bridge Connections. After
-<code>leader.absence_notice</code> (2 minutes) without a Leader, the UI shows the banner "No replica is leading: Telegram and
-Bridge polling, Heartbeat and Stale checks are paused."</p>
+the UI, the API, the webhook update mode of Telegram, the <code>push</code> event delivery mode of Bridge Connections and the
+<code>http</code> event mode of Slack Connections, whose presses any replica receives. After <code>leader.absence_notice</code> (2 minutes)
+without a Leader, the UI shows the banner "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode,
+Heartbeat and Stale checks are paused."</p>
 <h2 id="diagnosis">Diagnosis<a class="headerlink" href="#diagnosis" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>System status</strong> (<code>/admin/system-status</code>). <strong>Replicas</strong> lists every replica that refreshed its record, when
@@ -2814,7 +2818,10 @@ Bridge polling, Heartbeat and Stale checks are paused."</p>
 <li>Raise the database's connection limit if the session connections are refused: each replica holds about three of
   them besides its main pool.</li>
 <li>Once a Leader returns, the paused tasks run again at their next interval: the new Leader polls Telegram and the
-  bridges, and the Heartbeat and Stale checks resume from the signals and Snapshots that ingestion recorded meanwhile.</li>
+  bridges and connects Slack's Socket Mode, and the Heartbeat and Stale checks resume from the signals and Snapshots
+  that ingestion recorded meanwhile.</li>
+<li>A Slack Connection that must not lose a press while no replica leads uses the <code>http</code> event mode, which every replica
+  serves.</li>
 </ul>
 
 

@@ -2878,6 +2878,10 @@ fires on whichever replica is free. A replica that stalls delays nothing beyond 
 <td>polls the events of Bridge Connections in the <code>poll</code> event delivery mode, with one cursor per Connection</td>
 </tr>
 <tr>
+<td>Slack's Socket Mode</td>
+<td>holds one Socket Mode connection per Slack Connection in the <code>socket</code> event mode; presses made during a handover are lost, the <code>http</code> event mode avoids that</td>
+</tr>
+<tr>
 <td>Heartbeat and Stale checks</td>
 <td>find Integrations that are Heartbeat lost and Alerts that went Stale</td>
 </tr>
@@ -2934,8 +2938,10 @@ over. The values are built in; they are not settings.</p>
   B-&gt;&gt;PG: "try the lock: acquired"
   Note over B: "B is the Leader: muster_leader is 1"
   B-&gt;&gt;PG: "writes the alive mark, runs the Leader tasks"</code></pre>
-<p>A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, the periodic checks
-and the outgoing heartbeat pause. Ingestion, delivery and timers do not.</p>
+<p>A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, Slack's Socket
+Mode connections, the periodic checks and the outgoing heartbeat pause. Ingestion, delivery and timers do not. Telegram
+and the bridges keep what arrives meanwhile. A press made in Socket Mode before the new Leader connects is lost and
+its person sees Slack's error: Muster does not count on Slack to send it again.</p>
 <h3 id="when-no-replica-leads">When no replica leads<a class="headerlink" href="#when-no-replica-leads" title="Permanent link">&para;</a></h3>
 <p>The gauge <code>muster_leader</code> is 1 on the Leader and 0 on the others. When the "alive" mark is older than 2 minutes
 (<code>leader.absence_notice</code>), the web UI shows a notice that no replica is leading. The chart rule <code>MusterNoLeader</code> fires
@@ -2947,6 +2953,8 @@ when no replica has led for 2 minutes; see <a href="../runbooks/MusterNoLeader/"
   dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
   <code>telegram.press_max_age</code> (1 hour) before it. Connections in the <code>push</code> mode of a Bridge and the webhook mode of
   Telegram keep working.</li>
+<li>Slack Connections in the <code>socket</code> event mode hold no Socket Mode connection: a press made meanwhile is lost, and the
+  person sees Slack's error. Connections in the <code>http</code> event mode keep working.</li>
 <li>No Integration becomes Heartbeat lost and no Alert goes Stale.</li>
 <li>Partition maintenance, retention and pruning pause; the gauges that only the Leader exports go stale.</li>
 <li>The outgoing heartbeat stops, so a <a href="../outgoing-heartbeat/">dead man's switch</a> alerts you.</li>
