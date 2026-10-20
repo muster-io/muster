@@ -60,8 +60,8 @@ sequenceDiagram
 
 A handover after the loss of a node takes well under a minute. During it, Telegram and Bridge polling, Slack's Socket
 Mode connections, the periodic checks and the outgoing heartbeat pause. Ingestion, delivery and timers do not. Telegram
-and the bridges keep what arrives meanwhile; Slack does not, so a press made in Socket Mode before the new Leader
-connects is lost and its person sees Slack's error.
+and the bridges keep what arrives meanwhile. A press made in Socket Mode before the new Leader connects is lost and
+its person sees Slack's error: Muster does not count on Slack to send it again.
 
 ### When no replica leads
 

@@ -26,8 +26,8 @@ What stops while no replica leads:
   commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
   command that is older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
 - **Slack's Socket Mode**: Slack Connections in the `socket` event mode hold no Socket Mode connection, so a button
-  press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Slack keeps
-  no press for later.
+  press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
+  not count on Slack to send such presses again.
 - The **Heartbeat** check and the **Stale** check: no Integration becomes Heartbeat lost, and no alert is resolved as
   Stale.
 - Partition maintenance, retention and the pruning of short-lived state, the outgoing heartbeat, the expiry check of

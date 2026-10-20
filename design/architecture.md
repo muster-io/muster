@@ -800,7 +800,7 @@ sequenceDiagram
         alt no hello within slack.hello_timeout, link_disabled, too_many_websockets or a failed dial
             LD->>LD: close it, log slack_socket_failed, wait slack.socket_backoff, open the next
         else hello
-            LD->>DB: the time of the hello and the connections it counts beyond the Leader's, for this version
+            LD->>DB: in the background, the hello's time and the connections it counts<br/>beyond the Leader's, for this version
             opt more connections than the Leader holds
                 LD->>LD: log slack_socket_shared, another program takes some of the presses
             end
@@ -809,8 +809,8 @@ sequenceDiagram
     U->>SL: presses Ack on the Root message
     SL->>LD: an interactive envelope with its envelope_id
     LD->>SL: the confirmation with the envelope_id on the same socket, at once
-    LD->>DB: the envelope and its confirmation in the Request log, without a status
     LD->>PR: the payload, in a context of the process that the start of a shutdown does not end
+    LD->>DB: in the background, the envelope and its confirmation in the Request log, without a status
     Note over PR: as in flow c'': bind, Account link, dispatcher with the Transport slack, private answer
     SL->>LD: disconnect with the reason warning or refresh_requested
     LD->>OB: open the next connection first, with its hello
@@ -819,13 +819,19 @@ sequenceDiagram
 
 An envelope of another type is confirmed, recorded and ignored; `hello`, `disconnect` and pings are not recorded. Each
 connection is pinged every 30 s and closed when its pong takes longer than 10 s; a failure and every `disconnect` other
-than a planned refresh back off by `slack.socket_backoff`, which a `hello` resets, and count against nothing: no
-Destination becomes Broken. The waits of the socket are on the real clock, and the time of a `hello` is on the business
-clock. When leadership ends, or the replica stops, every connection is closed at once, and a confirmed press is still
-handled in the process's context, so the shutdown drains it as it drains the callback's; the presses made until the
-next Leader connects are lost, since Slack keeps none for later, and their people see Slack's error. A Connection that
-cannot lose a press uses the `http` event mode, which any replica serves. A Connection switched to `http`, deleted or
-saved closes its connection at once; a saved one opens a new one and counts again at its next `hello`. Slack's
+than a planned refresh back off by `slack.socket_backoff` — never shorter than the `Retry-After` of a rate-limited
+`apps.connections.open`, and reset by a `hello` once its connection has lasted 30 s, or by a planned refresh — and count
+against nothing: no Destination becomes Broken. What Slack's texts repeat of the address's query, the `ticket` above
+all, is masked in what Muster logs. The time of a `hello` and its count are stored by a writer of their own, so that a
+slow database holds up neither the frames nor the `hello`. The waits of the socket are on the real clock, and the time
+of a `hello` is on the business clock. When leadership ends, or the replica stops, every connection is closed at once,
+with a normal closure so that Slack learns that it is gone (cut after a second without an answer), and a confirmed
+press is still handled in the process's context, so the shutdown drains it as it drains the callback's; the presses
+made until the next Leader connects are lost and their people see Slack's error: Muster does not count on Slack to send
+them again. A Connection that cannot lose a press uses the `http` event mode, which any replica serves. A Connection
+switched to `http`, deleted or saved closes its connection at once, in the same way; a saved one opens a new one and
+counts again at its next `hello`. A failed read of the Connections after the first keeps the connections, and is
+logged as `leader_task_failed` and tried again at the next change hint or minute. Slack's
 `num_connections` counts every connection of the app, two of Muster's own during a planned refresh: the count beyond
 the Leader's is shown in the Connection's read, as the warning `another_client_connected` of its check and in
 `muster doctor`, because another program on the same app takes some of the presses at random

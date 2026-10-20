@@ -62,6 +62,7 @@ files_touched:
   - test/e2e/slack_test.go
   - AGENTS.md
   - CONTRIBUTING.md
+  - design/prd/l1/defaults.md
 acceptance:
   - "[C-24.FR-9, C-24.AC-10, C-02.FR-10] The Leader's task `slack_socket_mode` holds one connection for each Slack Connection in `socket` mode that is not deleted, opened after a new `apps.connections.open` each time; a `hello` that has not come within `slack.hello_timeout` closes the connection and opens the next; an `interactive` envelope is confirmed with `{\"envelope_id\": …}` on its socket before its press is handled by the path of S-100, and an envelope of another type is confirmed and ignored; losing leadership or stopping the replica closes every connection at once; a Connection switched to `http` or deleted loses its connection within a second (`socket_test.go`, with a manual clock and the fake server's socket)."
   - "[C-24.FR-9, C-24.AC-10] After `disconnect` with the reason `warning` or `refresh_requested`, the next connection is open, with its `hello`, before the old one closes; `link_disabled`, `too_many_websockets` and a failed dial back off by `slack.socket_backoff`, log `slack_socket_failed` with the reason, count against nothing and make no Destination Broken; with two replicas only the Leader holds a connection, and after it stops the new Leader opens one (`test/e2e/slack_test.go`, `E2E_REPLICAS=2`)."
@@ -113,7 +114,13 @@ issue: 310
   next connection first; `link_disabled` and `too_many_websockets` back off), and every envelope with an
   `envelope_id` confirmed at once — `interactive` handed to `slack.Presses.Go` with the process's context (the drain
   at shutdown waits for it, as for the callback's presses), the others ignored. Failures back off by
-  `slack.socket_backoff`, reset by a `hello`.
+  `slack.socket_backoff`, never shorter than the `Retry-After` of a rate-limited `apps.connections.open`, and reset by
+  a `hello` once its connection has lasted 30 s, or by a planned refresh, so that a connection Slack ends right after
+  its `hello` is not opened again every second. A socket Muster lets go — leadership ended, the replica stops, its
+  Connection changed, left `socket` mode or was deleted — is closed with a normal closure, cut after a second without
+  an answer; a broken one is closed at once. The count of a `hello` is stored by a writer of the Connection's own,
+  within 5 s, so that a slow database holds up neither the frames nor the `hello`. A failed read of the Connections
+  after the first keeps the sockets and is logged as `leader_task_failed`.
 - **Leader task** (`internal/leader/tasks.go`): `slack_socket_mode` starts and stops one socket per Slack Connection
   in `socket` mode, reading the list again on the Connections' change hint and every minute; it stops all sockets when
   leadership ends (ADR-0007).
@@ -140,8 +147,9 @@ issue: 310
   and `error` when the count could not be stored), `slack_socket_shared` (warn: the Connection, the connections counted
   beyond the Leader's — another program is connected to the same Slack app and takes some of its presses) and
   `slack_socket_failed` (warn: the Connection, the reason — `dial`, `hello_timeout`, `link_disabled`,
-  `too_many_websockets`, `closed` — the back-off, and `error`, what failed, masked, empty for `hello_timeout`,
-  `link_disabled` and `too_many_websockets`). The reason `dial` covers a failed `apps.connections.open`, an address it
+  `too_many_websockets`, `closed` — the back-off, absent for a client that could not be built, and `error`, what
+  failed, with the tokens and the address's query masked, absent for `hello_timeout`, `link_disabled` and
+  `too_many_websockets`). The reason `dial` covers a failed `apps.connections.open`, an address it
   answered that is refused, a failed handshake and a client of the Connection that could not be built.
 - **No Leader** (`web/src/locales`, `app-shell.test.tsx`, `deploy/helm/muster/files/rules.yaml`, its rule test and
   `docs/operations/runbooks/MusterNoLeader.md`): the texts of reference.md name Slack's Socket Mode among the paused
