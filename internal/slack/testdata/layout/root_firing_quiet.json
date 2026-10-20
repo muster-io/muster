@@ -1,0 +1,120 @@
+{
+  "attachments": [
+    {
+      "color": "#d32f2f",
+      "fallback": "🔴 #12 DiskFull",
+      "blocks": [
+        {
+          "type": "section",
+          "block_id": "muster_heading",
+          "text": {
+            "type": "mrkdwn",
+            "text": "*<http://localhost:8080/alert-groups/AG0000000000A1|#12 DiskFull>*"
+          }
+        },
+        {
+          "type": "section",
+          "block_id": "muster_body",
+          "text": {
+            "type": "mrkdwn",
+            "text": "a · Started 2026-10-20 11:50 UTC\ncluster: a\nnote: @​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;\nteam: sl\n_Disk almost full_\n• pod: i1\n• ~pod: i2~\n<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>\n🔁 Reopened ×1\nThe previous message was deleted at 11:59."
+          }
+        },
+        {
+          "type": "context",
+          "block_id": "muster_context",
+          "elements": [
+            {
+              "type": "plain_text",
+              "text": "Muster v1.2.3"
+            }
+          ]
+        },
+        {
+          "type": "actions",
+          "block_id": "muster_actions",
+          "elements": [
+            {
+              "type": "button",
+              "action_id": "ack",
+              "text": {
+                "type": "plain_text",
+                "text": "Ack"
+              },
+              "value": "AXJBRzAwMDAwMDAwMDBBMWEAABEiMxjmKk1appoyP0Vd9DyCKvk",
+              "style": "primary"
+            },
+            {
+              "type": "button",
+              "action_id": "resolve",
+              "text": {
+                "type": "plain_text",
+                "text": "Resolve"
+              },
+              "value": "AXJBRzAwMDAwMDAwMDBBMXIAABEiM2u-A6enIR0eehcAUfPGJfg"
+            },
+            {
+              "type": "static_select",
+              "action_id": "snooze",
+              "placeholder": {
+                "type": "plain_text",
+                "text": "Snooze…"
+              },
+              "options": [
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "1h"
+                  },
+                  "value": "AXJBRzAwMDAwMDAwMDBBMXMAABEiMyDDvRULLOMSL9NP-GEupMA"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "4h"
+                  },
+                  "value": "AXJBRzAwMDAwMDAwMDBBMXMBABEiMxpkKL3Kderr6ViEFmE41F0"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "24h"
+                  },
+                  "value": "AXJBRzAwMDAwMDAwMDBBMXMCABEiMzXCeMwsT9COLnGQBHVJhy0"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Until tomorrow 09:00"
+                  },
+                  "value": "AXJBRzAwMDAwMDAwMDBBMXP-ABEiM7AFTepwFKHe1k9iI0M2hmE"
+                },
+                {
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Until Monday 09:00"
+                  },
+                  "value": "AXJBRzAwMDAwMDAwMDBBMXP_ABEiM6s33C4YaAN4A5wDqzYdt8Y"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "type": "section",
+      "block_id": "muster_summary",
+      "text": {
+        "type": "mrkdwn",
+        "text": "🔴 #12 DiskFull"
+      }
+    }
+  ],
+  "channel": "C0FAKEALERTS",
+  "text": "🔴 #12 DiskFull",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

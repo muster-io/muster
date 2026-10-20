@@ -1,0 +1,17 @@
+{
+  "attachments": [],
+  "blocks": [
+    {
+      "type": "section",
+      "block_id": "muster_text",
+      "text": {
+        "type": "mrkdwn",
+        "text": "<!here>\n⛈ Storm on sl: 12 Alert Groups, 0 urgent — open in Muster\n<http://localhost:8080/alert-groups?route=RT0000000000R1|Open in Muster>"
+      }
+    }
+  ],
+  "channel": "C0FAKEALERTS",
+  "text": "⛈ Storm on sl: 12 Alert Groups, 0 urgent — open in Muster <!here>",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

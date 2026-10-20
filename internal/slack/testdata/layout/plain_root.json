@@ -1,0 +1,8 @@
+{
+  "attachments": [],
+  "blocks": [],
+  "channel": "C0FAKEALERTS",
+  "text": "🔴 #12 DiskFull\n<!here>\na · Started 2026-10-20 11:50 UTC\ncluster: a\nnote: @​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;\nteam: sl\n_Disk almost full_\n• pod: i1\n• ~pod: i2~\n<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>\n🔁 Reopened ×1",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

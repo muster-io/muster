@@ -1,0 +1,18 @@
+{
+  "attachments": [],
+  "blocks": [
+    {
+      "type": "section",
+      "block_id": "muster_text",
+      "text": {
+        "type": "mrkdwn",
+        "text": "New alerts (1):\n• pod: i3, note: @​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;"
+      }
+    }
+  ],
+  "channel": "C0FAKEALERTS",
+  "text": "New alerts (1):",
+  "thread_ts": "1.000001",
+  "unfurl_links": false,
+  "unfurl_media": false
+}
