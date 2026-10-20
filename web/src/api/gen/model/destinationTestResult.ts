@@ -22,7 +22,7 @@ import type { PublicId } from './publicId';
 import type { TestStep } from './testStep';
 
 export interface DestinationTestResult {
-  /** The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires. */
+  /** The `message` step for a messenger — alone for Telegram, a Bridge and Slack — followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination's mode requires. */
   steps: TestStep[];
   /** Health after the test; a successful test of a Broken Destination makes it healthy. */
   health: DestinationHealth;

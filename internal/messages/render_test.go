@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -1227,7 +1228,8 @@ func TestPreviewCommonMark(t *testing.T) {
 
 // TestSnoozeSecondsOnlyInCommonMark (C-22.FR-5): a Root message rendered in CommonMark carries a copy of the Route's
 // Snooze durations, for a bridge's commands line and its Snooze buttons, also as the Fallback template and as a test
-// message; in the other markups it has none, so their stored Desired states and hashes do not change.
+// message; in Markdown, HTML and plain text it has none, so their stored Desired states and hashes do not change.
+// mrkdwn carries them too, for Slack's Snooze menu (TestRootSnoozeSecondsMrkdwn).
 func TestSnoozeSecondsOnlyInCommonMark(t *testing.T) {
 	r := newRenderer(t)
 	src := source("firing", 2)
@@ -1254,6 +1256,168 @@ func TestSnoozeSecondsOnlyInCommonMark(t *testing.T) {
 	src.Route.Line = nil
 	if m := r.TestRoot(src, MarkupCommonMark, "DSAAAAAAAAAA11").Message; len(m.SnoozeSeconds) != 3 {
 		t.Errorf("test message %v", m.SnoozeSeconds)
+	}
+}
+
+// TestLayoutMrkdwn is C-24.FR-4 and C-24.FR-7 on the renderer: the default Root message in Slack's mrkdwn — the
+// heading as a link `<url|#N title>`, the summary in `_…_`, the Alerts as bullets with resolved ones struck through in
+// `~…~`, the links as `<url|text>` — with alert data escaped for mrkdwn and `@` neutralized; a Route's line template
+// writes mrkdwn around alert data escaped for it; distinct values, the full list, text lines, links with the characters
+// that break a link's URL, notices and buttons have their lines too.
+func TestLayoutMrkdwn(t *testing.T) {
+	r := newRenderer(t)
+	src := source("acknowledged", 3)
+	src.Owner, src.ReopenCount = "Alice", 2
+	src.CommonLabels["team"] = "web_*ops*"
+	out := r.Root(src, MarkupMrkdwn)
+	want := strings.Join([]string{
+		"🟠 <https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown>",
+		"prod · production · Started 2026-10-04 14:05 UTC",
+		"namespace: shop",
+		"cluster: prod",
+		"owner: @\u200bchannel",
+		"team: web_\u200b*\u200bops*\u200b",
+		"dashboard: https://grafana/d",
+		"_Pods are down_",
+		"• pod: p1",
+		"• ~pod: p2~",
+		"• pod: p3",
+		"<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>",
+		"🔁 Reopened ×2",
+		"Acknowledged by Alice",
+		"[Unack] [Resolve] [Snooze 1 h] [Snooze 4 h] [Snooze 24 h] [Until tomorrow 09:00] [Until Monday 09:00]",
+	}, "\n")
+	if got := Layout(out.Message, MarkupMrkdwn); out.Failure != nil || got != want {
+		t.Errorf("layout\n%s\nwant\n%s", got, want)
+	}
+
+	// A line template writes mrkdwn around escaped alert data; resolved lines are struck through, trimmed.
+	src = source("firing", 3)
+	src.Alerts[0].Labels["pod"] = "<p1>"
+	src.Route.Line = ptr(`{{ .Labels.pod }} *on* {{ .Labels.cluster }} `)
+	out = r.Root(src, MarkupMrkdwn)
+	if l := out.Message.Alerts.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != "&lt;p1&gt; *on* prod " ||
+		l[0].Markup != MarkupMrkdwn {
+		t.Fatalf("line template %+v", out)
+	}
+	mustKeep(t, Layout(out.Message, MarkupMrkdwn), "\n• &lt;p1&gt; *on* prod \n• ~p2 *on* prod~\n• p3 *on* prod \n")
+
+	// The other sections: a padded summary, distinct values above message.alerts_listed and the full list whose URL
+	// holds `&`, `<`, `>`, `|` and a space, text lines, a link text with `>`, a link without a URL and the notices.
+	m := Message{Kind: KindReply, Language: "en", Colour: ColourFiring, Buttons: []Button{}, Summary: "  padded_x  ",
+		Alerts: &AlertList{Distinct: []Distinct{{Label: "pod", Values: []string{"p1", "p_2"}, More: 30}},
+			FullList: &Link{Text: "Full list in Muster", URL: "https://muster.example.org/a b?x=1&y=<2>|z"}},
+		Lines: []string{"New alerts (2):", "<!here> *x*"},
+		Links: []Link{{Text: "Runbook", URL: "https://runbooks.example.org/x"}, {Text: "a>b", URL: "https://x.org"},
+			{Text: "no_url"}},
+		Notices: []string{"⚠ one", "* two"}}
+	want = strings.Join([]string{
+		"_padded_\u200bx_",
+		"pod: p1, p_\u200b2 +30 more",
+		"<https://muster.example.org/a%20b?x=1&amp;y=%3C2%3E%7Cz|Full list in Muster>",
+		"New alerts (2):",
+		"&lt;!here&gt; *\u200bx*\u200b",
+		"<https://runbooks.example.org/x|Runbook> · <https://x.org|a&gt;b> · no_\u200burl",
+		"⚠ one",
+		"*\u200b two",
+	}, "\n")
+	if got := Layout(m, MarkupMrkdwn); got != want {
+		t.Errorf("sections\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestPreviewMrkdwn is C-24.FR-7 and C-24.AC-6 for previewTemplate: the format mrkdwn renders the default Root message,
+// a Root message template and a line template in mrkdwn with alert data escaped as Slack receives them — the label
+// value of C-24.AC-6 included — and answers mrkdwn.
+func TestPreviewMrkdwn(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 3)}
+	f.group.CommonLabels["note"] = ac6
+	f.group.Alerts[0].Labels["pod"] = "*p1*"
+	r := withFake(t, f)
+	ctx := t.Context()
+	res, err := r.Preview(ctx, PreviewRequest{Kind: "root_message", AlertGroupID: "AGK7M3QX9P2RTA",
+		Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || res.Format != MarkupMrkdwn {
+		t.Fatalf("default = %+v, %v", res, err)
+	}
+	mustKeep(t, res.Output, "🔴 <https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown>\n",
+		"\nnote: "+ac6Mrkdwn+"\n", "\n• pod: *\u200bp1*\u200b\n• ~pod: p2~\n• pod: p3\n",
+		"\n<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>\n", "[Ack] [Resolve] [Snooze 1 h]")
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: "*Note:* {{ .CommonLabels.note }}",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || res.Format != MarkupMrkdwn ||
+		!strings.Contains(res.Output, "\n*Note:* "+ac6Mrkdwn+"\n") {
+		t.Errorf("root template = %+v, %v", res, err)
+	}
+	f.group.Alerts[0].Labels["pod"] = ac6
+	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "{{ .Labels.pod }} *{{ .Labels.cluster }}*",
+		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
+	if err != nil || !res.Valid || res.Format != MarkupMrkdwn ||
+		res.Output != "• "+ac6Mrkdwn+" *prod*\n• ~p2 *prod*~\n• p3 *prod*" {
+		t.Errorf("line template = %+v, %v", res, err)
+	}
+}
+
+// TestRootSnoozeSecondsMrkdwn (C-24.FR-5): a Root message rendered in mrkdwn carries a copy of the Route's Snooze
+// durations, which Slack's Snooze menu names as its options in the words of a Text command, also as a test message;
+// Markdown and HTML still carry none. The menu's placeholder is a built-in text in both languages.
+func TestRootSnoozeSecondsMrkdwn(t *testing.T) {
+	r := newRenderer(t)
+	src := source("firing", 2)
+	m := r.Root(src, MarkupMrkdwn).Message
+	src.Route.SnoozeDurations[0] = 60
+	if !slices.Equal(m.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+		t.Errorf("mrkdwn snooze seconds %v", m.SnoozeSeconds)
+	}
+	if raw, _ := json.Marshal(m); !strings.Contains(string(raw), `"snooze_seconds":[3600,14400,86400]`) {
+		t.Errorf("mrkdwn json %s", raw)
+	}
+	if tm := r.TestRoot(src, MarkupMrkdwn, "DSAAAAAAAAAA11").Message; !slices.Equal(tm.SnoozeSeconds,
+		[]int64{60, 14400, 86400}) {
+		t.Errorf("test message %v", tm.SnoozeSeconds)
+	}
+	for _, mk := range []Markup{MarkupMarkdown, MarkupHTML} {
+		if s := r.Root(src, mk).Message.SnoozeSeconds; s != nil {
+			t.Errorf("%s: %v", mk, s)
+		}
+	}
+	if CommandDuration("en", m.SnoozeSeconds[0]) != "1h" || CommandDuration("ru", m.SnoozeSeconds[2]) != "24ч" ||
+		T("en", "button.snoozeMenu", nil) != "Snooze…" || T("ru", "button.snoozeMenu", nil) != "Отложить…" {
+		t.Error("the texts of the snooze menu")
+	}
+}
+
+// TestShortenMrkdwnCountsEntities (C-24.FR-4, C-12.FR-11): the length of a message in mrkdwn is counted on the text as
+// sent — an entity as its characters, a zero-width space as one and a link with its URL — so that shortening keeps a
+// Slack section within its limit, where the same message in Markdown, whose `&` is one character, needs no
+// shortening.
+func TestShortenMrkdwnCountsEntities(t *testing.T) {
+	for _, c := range []struct {
+		m    Message
+		want string
+	}{
+		{Message{Lines: []string{"a & b"}}, "a &amp; b"},
+		{Message{Lines: []string{"*x*"}}, "*\u200bx*\u200b"},
+		{Message{Links: []Link{{Text: "Open", URL: "https://x.org/a"}}}, "<https://x.org/a|Open>"},
+	} {
+		if got := Length(c.m, MarkupMrkdwn); Layout(c.m, MarkupMrkdwn) != c.want ||
+			got != utf8.RuneCountInString(c.want) {
+			t.Errorf("length of %q = %d, want %d", Layout(c.m, MarkupMrkdwn), got, utf8.RuneCountInString(c.want))
+		}
+	}
+	r := newRenderer(t)
+	src := source("firing", 3)
+	src.CommonAnnotations["details"] = strings.Repeat("&", 500)
+	m := r.Root(src, MarkupMrkdwn).Message
+	limit := Length(m, MarkupMrkdwn) - 100
+	short, cut := Shorten(m, limit, MarkupMrkdwn)
+	if out := Layout(short, MarkupMrkdwn); !cut || Length(short, MarkupMrkdwn) > limit || strings.Contains(out, "&amp;") {
+		t.Errorf("shortened %v to %d of %d:\n%s", cut, Length(short, MarkupMrkdwn), limit, out)
+	}
+	mustKeep(t, Layout(short, MarkupMrkdwn), "<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown>",
+		"<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>", "[Ack] [Resolve]")
+	if _, cut := Shorten(m, limit, MarkupMarkdown); cut {
+		t.Error("the message in markdown was shortened")
 	}
 }
 

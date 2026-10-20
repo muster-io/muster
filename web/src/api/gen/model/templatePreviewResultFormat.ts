@@ -29,4 +29,5 @@ export const TemplatePreviewResultFormat = {
   markdown: 'markdown',
   html: 'html',
   commonmark: 'commonmark',
+  mrkdwn: 'mrkdwn',
 } as const;

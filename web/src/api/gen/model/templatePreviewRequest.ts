@@ -27,7 +27,7 @@ export interface TemplatePreviewRequest {
   /** The template to render; empty renders what a Route without a template of the kind shows, and the result returns the source of the built-in template. */
   template: string;
   /**
-     * The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
+     * The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body, `mrkdwn` as in Slack. Ignored for `link_rule` and `webhook_request`, which have no markup.
      * @nullable
      */
   format?: TemplatePreviewRequestFormat;

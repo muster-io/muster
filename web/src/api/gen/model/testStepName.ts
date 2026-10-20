@@ -19,7 +19,7 @@
  */
 
 /**
- * `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook.
+ * `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook. A Slack Destination's `message` is sent with `chat.postMessage`.
  */
 export type TestStepName = typeof TestStepName[keyof typeof TestStepName];
 

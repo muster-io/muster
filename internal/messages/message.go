@@ -25,14 +25,16 @@ import (
 // Markup is the markup an adapter writes, which template output is written in and alert data are escaped for.
 type Markup string
 
-// The markups of C-12.FR-7: Mattermost Markdown, Telegram HTML, CommonMark for bridges, and plain text for outgoing
-// webhooks and the stored text of a Desired state.
+// The markups of C-12.FR-7: Mattermost Markdown, Telegram HTML, CommonMark for bridges, Slack's mrkdwn, and plain text
+// for outgoing webhooks and the stored text of a Desired state.
 const (
 	MarkupMarkdown Markup = "markdown"
 	MarkupHTML     Markup = "html"
 	MarkupPlain    Markup = "plain"
 	// MarkupCommonMark is CommonMark 0.31 with strikethrough, a bridge's envelope body (C-22.FR-4).
 	MarkupCommonMark Markup = "commonmark"
+	// MarkupMrkdwn is Slack's mrkdwn, the text of a Slack message's sections (C-24.FR-4, FR-7).
+	MarkupMrkdwn Markup = "mrkdwn"
 )
 
 // Kind is what a message is.
@@ -63,9 +65,9 @@ const (
 // their Markup, where a trusted Mention token of the `mention` function stands for the adapter to render
 // (C-12.FR-8). Footers are the footer per identity space whose username names the user (C-12.FR-12). Language and
 // TimeZone are those it was rendered in, for the notes delivery adds at call time. SnoozeSeconds are the Route's
-// Snooze durations, which its Snooze buttons name by index, set only in CommonMark: a bridge writes the first in the
-// commands line and drops Snooze buttons from the longest (C-22.FR-5), and the Desired states of the other markups keep
-// their hashes.
+// Snooze durations, which its Snooze buttons name by index, set only in CommonMark and mrkdwn: a bridge writes the
+// first in the commands line and drops Snooze buttons from the longest (C-22.FR-5), Slack's Snooze menu names each as
+// its option (C-24.FR-5), and the Desired states of the other markups keep their hashes.
 type Message struct {
 	Kind              Kind              `json:"kind"`
 	Language          string            `json:"language"`
@@ -191,8 +193,8 @@ func StatusEmoji(colour string) string {
 
 // Layout lays m out as text in a markup, as the preview shows it: one section per line, neutral text escaped for the
 // markup and without Mention tokens, template output as written with its tokens shown as `@` names, and the buttons
-// as a last line of bracketed labels. The adapters of S-061 and S-042 lay messages out for their messengers.
-// CommonMark has a layout of its own, which a bridge's envelope body takes.
+// as a last line of bracketed labels. The adapters lay messages out for their messengers, a Slack message's body
+// section with this layout in mrkdwn. CommonMark has a layout of its own, which a bridge's envelope body takes.
 func Layout(m Message, markup Markup) string {
 	if markup == MarkupCommonMark {
 		return layoutCommonMark(m)
@@ -286,6 +288,10 @@ var markdownURL = strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "
 // commonMarkURL escapes the characters that end or break the destination of a CommonMark link, a space included.
 var commonMarkURL = strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "\\", "%5C", " ", "%20")
 
+// mrkdwnURL escapes the characters that end or break the URL of a mrkdwn link, `<url|text>`: the control characters
+// of mrkdwn, the bar that starts its text and a space; `&` becomes the entity Slack reads back as `&`.
+var mrkdwnURL = strings.NewReplacer("&", "&amp;", "<", "%3C", ">", "%3E", "|", "%7C", " ", "%20")
+
 func link(markup Markup, text, url string) string {
 	esc := Escaper(markup)
 	if url == "" {
@@ -298,6 +304,8 @@ func link(markup Markup, text, url string) string {
 		return `<a href="` + esc(url) + `">` + esc(text) + "</a>"
 	case MarkupCommonMark:
 		return commonMarkLink(esc(text), url)
+	case MarkupMrkdwn:
+		return "<" + mrkdwnURL.Replace(url) + "|" + esc(text) + ">"
 	case MarkupPlain:
 	}
 	return text + " " + url
@@ -311,7 +319,7 @@ func commonMarkLink(text, url string) string {
 	return "[" + text + "](" + commonMarkURL.Replace(url) + ")"
 }
 
-// italic and struck trim s in CommonMark, where a delimiter next to a space opens or closes nothing.
+// italic and struck trim s in CommonMark and mrkdwn, where a delimiter next to a space opens or closes nothing.
 func italic(markup Markup, s string) string {
 	switch markup {
 	case MarkupMarkdown:
@@ -320,6 +328,8 @@ func italic(markup Markup, s string) string {
 		return "<i>" + s + "</i>"
 	case MarkupCommonMark:
 		return around("*", strings.TrimSpace(s))
+	case MarkupMrkdwn:
+		return around("_", strings.TrimSpace(s))
 	case MarkupPlain:
 	}
 	return s
@@ -333,6 +343,8 @@ func struck(markup Markup, s string) string {
 		return "<s>" + s + "</s>"
 	case MarkupCommonMark:
 		return around("~~", strings.TrimSpace(s))
+	case MarkupMrkdwn:
+		return around("~", strings.TrimSpace(s))
 	case MarkupPlain:
 	}
 	return s

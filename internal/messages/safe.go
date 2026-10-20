@@ -13,12 +13,13 @@ import (
 
 // Safe output (C-12.FR-7, ADR-0012): alert data never mention anyone, never carry a link other than http(s), never
 // exceed message.value_cap per value, and reach a template already escaped for the markup it writes. The escapers
-// live here and the adapters apply them to the neutral text of a Message (C-13.FR-8, C-14.FR-13).
+// live here and the adapters apply them to the neutral text of a Message (C-13.FR-8, C-14.FR-13, C-24.FR-7).
 
 // ValueCap is message.value_cap: 4 KB per label or annotation value.
 const ValueCap = 4096
 
-// zeroWidthSpace follows every `@` of alert data, so that no messenger reads a Mention in it.
+// zeroWidthSpace follows every `@` of alert data, so that no messenger reads a Mention in it, and in mrkdwn every
+// character of emphasis, strikethrough and code.
 const zeroWidthSpace = "\u200b"
 
 // ellipsis ends a value cut at ValueCap.
@@ -137,6 +138,37 @@ func escapeLineStart(line string) string {
 	return line
 }
 
+// EscapeMrkdwn escapes s for Slack's mrkdwn (C-24.FR-7): `&`, `<` and `>` become `&amp;`, `&lt;` and `&gt;`, so that
+// nothing in s becomes a link, a Mention, <!channel> or <!here> (F-097); and since mrkdwn has no escape for `*`, `_`,
+// `~` and the backquote, each of them — and `@`, as Neutralize does — is followed by a zero-width space unless one
+// follows it already, so that none pairs into emphasis, strikethrough or code. It is applied once, to neutral text:
+// an entity in s is escaped again and shows as written.
+func EscapeMrkdwn(s string) string {
+	if !strings.ContainsAny(s, "&<>@*_~`") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	for i := range len(s) {
+		switch c := s[i]; c {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '@', '*', '_', '~', '`':
+			b.WriteByte(c)
+			if !strings.HasPrefix(s[i+1:], zeroWidthSpace) {
+				b.WriteString(zeroWidthSpace)
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // Escaper is the escaper of a markup; plain text is left as it is.
 func Escaper(m Markup) func(string) string {
 	switch m {
@@ -146,6 +178,8 @@ func Escaper(m Markup) func(string) string {
 		return EscapeHTML
 	case MarkupCommonMark:
 		return EscapeCommonMark
+	case MarkupMrkdwn:
+		return EscapeMrkdwn
 	case MarkupPlain:
 	}
 	return func(s string) string { return s }

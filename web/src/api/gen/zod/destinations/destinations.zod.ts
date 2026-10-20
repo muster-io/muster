@@ -2657,7 +2657,7 @@ export const CheckDestinationResponse = zod.object({
 })
 
 /**
- * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. This build cannot test a Slack Destination yet and answers `501`.
+ * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`. A Slack Destination posts one test message with `chat.postMessage`, the step `message` alone; a bot cannot press its own button, so the test cannot show that presses reach Muster.
  * @summary Send a test message
  */
 export const testDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2680,7 +2680,7 @@ export const testDestinationResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP
 
 export const TestDestinationResponse = zod.object({
   "steps": zod.array(zod.object({
-  "name": zod.enum(['message', 'press', 'event', 'create']).describe('`message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot\'s own press of the test message\'s first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster\'s callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook.'),
+  "name": zod.enum(['message', 'press', 'event', 'create']).describe('`message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot\'s own press of the test message\'s first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster\'s callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook. A Slack Destination\'s `message` is sent with `chat.postMessage`.'),
   "request": zod.object({
   "method": zod.string(),
   "url": zod.string(),
@@ -2697,7 +2697,7 @@ export const TestDestinationResponse = zod.object({
   "error_class": zod.enum(['none', 'retry_after', 'transient', 'fatal', 'unknown', 'template_error', 'blocked', 'limited']).describe('How a delivery attempt ended. `limited`: no limiter token was free within `delivery.interactive_budget`, so nothing was sent (a test only; the attempt did not reach the remote side).'),
   "error": zod.string().nullish().describe('What failed, in English. Secrets, the Signing secret and tokens are masked. Clients show it as the detail of `error_code`, or of `error_class` without one.'),
   "error_code": zod.union([zod.literal('press_not_reached'),zod.literal('bot_unknown'),zod.literal(null)]).nullish().describe('What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster\'s callback; `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the Connection check, then test again. Null otherwise.')
-})).describe('The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination\'s mode requires.'),
+})).describe('The `message` step for a messenger — alone for Telegram, a Bridge and Slack — followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination\'s mode requires.'),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -2707,7 +2707,7 @@ export const TestDestinationResponse = zod.object({
 })
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). This build cannot preview a Slack Destination yet and answers `501`.
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
  * @summary Preview a message or request
  */
 export const previewDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2731,7 +2731,7 @@ export const PreviewDestinationResponse = zod.object({
   "items": zod.array(zod.object({
   "name": zod.enum(['message', 'event', 'create', 'update', 'open_thread', 'reply_in_thread']),
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('json'),zod.literal('plain'),zod.literal(null)]).nullish(),
-  "text": zod.string().nullish().describe('The rendered Root message text; for a Bridge, the envelope as JSON.'),
+  "text": zod.string().nullish().describe('The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.'),
   "request": zod.object({
   "method": zod.string(),
   "url": zod.string(),
