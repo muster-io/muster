@@ -186,18 +186,19 @@ issue: 309
 ```sh
 make dev > dev.log 2>&1 &
 # as in S-099: the session, FAM, NOTIFY, ADV, AG, FIRE and the Route "sl" with the Destination "alerts" (D) of the
-# Connection "sl" (C); the Responder "alice" and the Viewer "vic", created with `createUser` as in S-011. The fake
-# server's `ts` counter is shared by both apps, so every `ts` below is read, never written as a constant.
+# Connection "sl" (C); the Responders "alice" and "dora" (DORA) and the Viewer "vic", created with `createUser` as in
+# S-011. The fake server's `ts` counter is shared by both apps, so every `ts` below is read, never written as a constant.
 API=localhost:8080/api/v1; FS=127.0.0.1:18097/_fake; ING=localhost:8081/api/v1
 ETAG() { curl -s -b jar $API/connections/$C | jq -r .etag; }
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"slack","name":"sl","event_mode":"http",
-  "slack_signing_secret":"muster-dev-slack-signing-secret-b","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}' > /dev/null
+  "slack_signing_secret":"muster-dev-slack-signing-secret-b","proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":60}}' | jq -c '{event_mode, callback_url}'
+# {"event_mode":"http","callback_url":"http://localhost:8081/api/v1/callbacks/slack/<C>"}
 curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$C\"}}" > /dev/null
 # Account links set up directly (S-102 makes them through the profile)
 LINK() { psql "$MUSTER_DATABASE_URL" -qc "INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id,
   external_id, username, display_name, created_at) SELECT 1, '$4', u.id, 'slack', c.id, '$2', '$3', u.name, now()
   FROM users u, connections c WHERE u.login = '$1' AND c.public_id = '${5:-$C}'"; }
-LINK alice U0FAKEALICE alice AK0000000000S1; LINK vic U0FAKEBOB bob AK0000000000S2
+LINK alice U0FAKEALICE alice AK0000000000S1; LINK vic U0FAKEBOB bob AK0000000000S2; LINK dora U0FAKEDORA dora AK0000000000S4
 PRESS() { curl -s -X POST $FS/press -d "$1" | jq -c '{status}'; }
 FIRE p1 DiskFull q1; G=$(AG 'pod%3D%22q1%22'); TS=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("DiskFull"))][0].ts')
 
@@ -205,34 +206,68 @@ FIRE p1 DiskFull q1; G=$(AG 'pod%3D%22q1%22'); TS=$(curl -s "$FS/messages?channe
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"ack\",\"user\":\"U0FAKEALICE\"}"   # {"status":200}
 sleep 1; curl -s -b jar $API/alert-groups/$G | jq -c '{status, owner: .owner.login}'             # {"status":"acknowledged","owner":"alice"}
 curl -s -b jar "$API/alert-groups/$G/timeline" | jq -r '[.items[] | select(.kind == "status" and .event == "acknowledged")][0].actor.transport'   # slack
+curl -s -b jar "$API/audit-log?action=alert_group.acknowledged&limit=1" | jq -c '.items[0] | {transport, actor: .actor.name}'   # {"transport":"slack","actor":"alice"}
 curl -s localhost:8082/metrics | grep -c 'muster_commands_total{command="acknowledge",transport="slack",outcome="done"}'   # 1
-# refusals: a wrong signature, a stale timestamp, an unknown Connection, a Connection in socket mode
+curl -s $FS/ephemeral | jq length                                                # 0: a press that ran is not answered
+# refusals: a wrong signature, a timestamp 6 minutes old and 6 minutes ahead, an unknown Connection, a Connection in socket mode
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"signature\":\"wrong\"}"   # {"status":401}
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"timestamp_offset_seconds\":-360}"   # {"status":401}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"timestamp_offset_seconds\":360}"   # {"status":401}
 curl -s -X POST $ING/callbacks/slack/CN0000000000ZZ -o /dev/null -w '%{http_code}\n'    # 401
 DS=$(curl -s -b jar $API/connections | jq -r '.items[] | select(.name == "Dev Slack") | .id')   # in socket mode
 curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$DS\"}}" > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\"}"   # {"status":401}
 curl -s -X PUT $FS/config -d "{\"request_url\":{\"b\":\"http://localhost:8081/api/v1/callbacks/slack/$C\"}}" > /dev/null
-grep -c '"event":"slack_press_rejected"' dev.log                                  # 4 or more
+# a body that is signed but has no payload
+B='foo=bar'; T=$(date +%s); SIG=v0=$(printf 'v0:%s:%s' "$T" "$B" | openssl dgst -sha256 -hmac muster-dev-slack-signing-secret-b | sed 's/^.* //')
+curl -s -X POST $ING/callbacks/slack/$C -H "X-Slack-Request-Timestamp: $T" -H "X-Slack-Signature: $SIG" -d "$B" -o /dev/null -w '%{http_code}\n'   # 400
+sleep 1; grep '"event":"slack_press_rejected"' dev.log | jq -r '.reason' | sort | uniq -c
+#   1 bad_signature
+#   1 no_payload
+#   2 stale
+#   1 unknown_connection
+#   1 wrong_mode
 curl -s -b jar $API/alert-groups/$G | jq -r .status                               # acknowledged
 
-# C-24.FR-10, FR-11, AC-12, AC-13: the menu, a Viewer, an unlinked account, a value of another message
+# C-24.FR-10, FR-11, AC-12, AC-13: the menu and the preset tomorrow, a Viewer, an unlinked account, a disabled User, a value of another message
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"snooze\",\"option\":1,\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
-curl -s -b jar $API/alert-groups/$G | jq -r '.status'                              # snoozed
+curl -s -b jar $API/alert-groups/$G | jq -c '{status, snooze_until}'               # {"status":"snoozed","snooze_until":"<4 hours from now>"}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"unsnooze\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G | jq -r .status                               # firing
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"snooze\",\"option\":3,\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G | jq -c '{status, snooze_until}'               # {"status":"snoozed","snooze_until":"<the next 09:00 UTC>"}
+curl -s -b jar "$API/audit-log?action=alert_group.snoozed&limit=1" | jq -c '.items[0] | {transport, actor: .actor.name, preset: .details.preset, time_zone: .details.time_zone}'
+# {"transport":"slack","actor":"alice","preset":"tomorrow","time_zone":"UTC"}
 FIRE p2 CpuHigh q2; T2=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("CpuHigh"))][0].ts')
+curl -s "${H[@]}" -X POST $API/users/$DORA/disable > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEBOB\"}" > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKECAROL\"}" > /dev/null
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEDORA\"}" > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKEALICE\",\"value_of_ts\":\"$T2\"}" > /dev/null; sleep 1
-curl -s $FS/ephemeral | jq -r '.[-3:] | sort_by(.user)[] | "\(.user) \(.thread_ts // "-") \(.text)"'
+curl -s $FS/ephemeral | jq -r '.[-4:] | sort_by(.user)[] | "\(.user) \(.thread_ts // "-") \(.text)"'
 # U0FAKEALICE - This button could not be verified; nothing was changed.
 # U0FAKEBOB - You are not permitted to do this
 # U0FAKECAROL - Your Slack account is not linked to Muster. Link it in your profile: http://localhost:8080/profile
+# U0FAKEDORA - Your Muster account is disabled
 curl -s -b jar $API/alert-groups/$G | jq -r .status                               # snoozed
 curl -s -X POST $FS/faults -d '{"path":"/api/chat.postEphemeral","status":200,"content_type":"application/json","body":"{\"ok\":false,\"error\":\"user_not_in_channel\"}","times":1}' > /dev/null
 PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$TS\",\"action\":\"resolve\",\"user\":\"U0FAKECAROL\"}" > /dev/null; sleep 1
 curl -s $FS/responses | jq -c '.[-1] | {response_type, replace_original}'           # {"response_type":"ephemeral","replace_original":false}
 curl -s $FS/requests | jq '[.[] | select((.body // "") | contains("\"replace_original\":true"))] | length'   # 0
+
+# C-24.FR-5, FR-10: the Reminder's buttons, "Still on it" pressed by the Viewer and by Alice, then Unack
+FIRE p3 MemHigh q3; G3=$(AG 'pod%3D%22q3%22'); T3=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("MemHigh"))][0].ts')
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$T3\",\"action\":\"ack\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+ADV 600; sleep 2
+RT=$(curl -s "$FS/messages?channel=C0FAKEALERTS" | jq -r '[.[] | select(.text | contains("MemHigh"))][0].replies[-1].ts')
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"still_on_it\",\"user\":\"U0FAKEBOB\"}" > /dev/null; sleep 1
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"still_on_it\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s $FS/ephemeral | jq -r --arg t "$T3" '.[-2:][] | "\(.user) \(.thread_ts == $t) \(.text)"'
+# U0FAKEBOB true You are not permitted to do this
+# U0FAKEALICE true Done: Still on it
+curl -s -b jar "$API/alert-groups/$G3/timeline?kind=timers" | jq -c '.items[0] | {event, transport: .actor.transport, name: .actor.name}'   # {"event":"reminder_answered","transport":"slack","name":"alice"}
+PRESS "{\"channel\":\"C0FAKEALERTS\",\"ts\":\"$RT\",\"action\":\"unack\",\"user\":\"U0FAKEALICE\"}" > /dev/null; sleep 1
+curl -s -b jar $API/alert-groups/$G3 | jq -r .status                              # firing
 
 # C-24.FR-13, AC-16: a press on a test message
 curl -s "${H[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' > /dev/null
@@ -244,8 +279,23 @@ curl -s $FS/ephemeral | jq -r '.[-1].text'                                      
 curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=1" | jq -c '.items[0] | {operation, status}'   # {"operation":"interactive","status":200}
 R=$(curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=1" | jq -r '.items[0].id')
 curl -s -b jar "$API/request-log/$R" | jq -c '.request_headers["X-Slack-Signature"]'   # ["[redacted]"]
-curl -s -b jar "$API/request-log?connection=$C&limit=50" | jq -r '.items[].id' | while read -r I; do curl -s -b jar "$API/request-log/$I"; done |
+curl -s -b jar "$API/request-log?connection=$C&direction=inbound&limit=200" | jq -c '{next_cursor, statuses: ([.items[].status] | group_by(.) | map({status: .[0], n: length})), linked: ([.items[] | select(.destination != null or .alert_group != null)] | length)}'
+# {"next_cursor":null,"statuses":[{"status":200,"n":14},{"status":400,"n":1},{"status":401,"n":3}],"linked":0}
+curl -s -b jar "$API/request-log?connection=$C&operation=response_url&limit=1" | jq -c '.items[0] | {status, url, linked: (.destination != null and .alert_group != null)}'
+# {"status":200,"url":"http://127.0.0.1:18097[redacted]","linked":true}
+for O in $C $DS; do curl -s -b jar "$API/request-log?connection=$O&limit=200" | jq -r '.items[].id'; done | while read -r I; do curl -s -b jar "$API/request-log/$I"; echo; done |
   grep -c 'actions%2F\|/actions/\|actions\\/\|muster-dev-slack-signing-secret\|muster-dev-slack-verification-token\|v0=[0-9a-f]\{64\}'   # 0
+# C-24.FR-17: the log events, and no secret in the log
+grep '"event":"slack_press"' dev.log | jq -r '.outcome + " " + (.answer // "-")' | sort | uniq -c
+#   1 disabled ephemeral
+#   6 done -
+#   1 done ephemeral
+#   2 forbidden ephemeral
+#   1 not_linked ephemeral
+#   1 not_linked response_url
+#   1 not_verified ephemeral
+#   1 test ephemeral
+grep -c 'muster-dev-slack-signing-secret\|muster-dev-slack-verification-token\|/actions/\|actions%2F\|v0=[0-9a-f]\{64\}' dev.log   # 0
 ```
 
 Live, on the maintainer's test workspace, with `operator_attention` — Slack must reach the ingest listener: a public
