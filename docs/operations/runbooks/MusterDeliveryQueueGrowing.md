@@ -29,7 +29,9 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
 3. Check whether a Storm feeds the queue: `muster_storm_active` by `route` and the log line `storm_started`.
    `route.storm_threshold` is 20 new Alert Groups per minute.
 4. For Telegram, compare the load with the limiters: `destination.telegram.limiter` allows 10 requests per minute per
-   Destination, sends and edits together, in the channel and its discussion group.
+   Destination, sends and edits together, in the channel and its discussion group. For Slack,
+   `destination.slack.limiter` allows 30 requests per minute per Destination, sends and edits together, and
+   `connection.slack.limiter` 50 requests per minute per Connection.
 5. When no delivery succeeds at all, follow [MusterDeliveryFailing](MusterDeliveryFailing.md) instead.
 
 ## Fix

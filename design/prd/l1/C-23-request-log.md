@@ -62,12 +62,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   and both bodies; the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
   `X-Telegram-Bot-Api-Secret-Token`, `webhook-signature`, `X-Slack-Signature` and of the outgoing webhook's signature
   header are replaced whatever they hold, and so are the `url` of a Socket Mode connection, with its one-time `ticket`,
-  and a Slack press's `response_url`; the signed action ids of buttons (ADR-0011), which authenticate a Mattermost press
-  and are the `value` of a Slack button or menu option, and the tokens and codes of Account links — `/start <token>` in
-  a Telegram update, the `token` of an `account_link` event, the code in a direct message — are replaced too. Masking
-  happens before the record is written: for outbound requests in the outbound package, which knows each request's
-  Secrets, and for inbound requests in one place shared by the callbacks and the Socket Mode connection. The secret lint
-  of ADR-0016 covers both (C-01.FR-6).
+  and a Slack press's `response_url`, and the legacy verification `token` of a Slack payload; the signed action ids of
+  buttons (ADR-0011), which authenticate a Mattermost press and are the `value` of a Slack button or menu option, and
+  the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an `account_link`
+  event, the code in a direct message — are replaced too. Masking happens before the record is written: for outbound
+  requests in the outbound package, which knows each request's Secrets, and for inbound requests in one place shared by
+  the callbacks and the Socket Mode connection. The secret lint of ADR-0016 covers both (C-01.FR-6).
 - **C-23.FR-4** Muster keeps the newest `request_log.max_records` records of each Connection and of each outgoing
   webhook Destination, and as many of the checks before saving of new Connections per Organization, none older than
   `request_log.max_age`; a Leader task deletes the rest and is safe to run twice (ADR-0007), and reads never show a

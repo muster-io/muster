@@ -50,12 +50,18 @@ This alert has two sources with the same name, severity `critical` and this page
 ## Fix
 
 - `cause` `fatal`: fix what the reason names. Typical cases are a revoked bot token (replace it on the Connection),
-  a bot that lost its admin rights in a Telegram channel or its discussion group, a deleted channel or chat, or an
-  outgoing webhook that answers with a permanent error. Then press **Check**: a check that passes ends the Broken
+  a bot that lost its admin rights in a Telegram channel or its discussion group, a bot removed from a Slack channel
+  (invite it again with `/invite`) or a Slack channel that was archived, a deleted channel or chat, or an outgoing
+  webhook that answers with a permanent error. Then press **Check**: a check that passes ends the Broken
   state at once.
 - `cause` `unavailable`: the messenger or the path to it was down long enough to use up the Transient budget. Fix the
   network, the proxy of the Connection or the **Outbound addresses** (`/admin/organization/outbound`); the next probe
   ends the Broken state by itself, or press **Check** to end it now.
+- Slack answers `429`: it limits each method per app and workspace. Muster holds the whole Connection for the seconds
+  of `Retry-After` and does not count that as a failed attempt, so a `429` with `Retry-After` does not make a
+  Destination Broken. A `429` without it counts as a transient failure, and enough of them use up the Transient budget
+  (`cause` `unavailable`): lower the limiters or spread the load. See [Rate
+  limits](../../messengers/slack.md#rate-limits).
 - Telegram is unreachable from your network: see
   [Telegram in restricted networks](../../messengers/telegram-restricted-networks.md).
 - **Send test message** on the Destination page also ends the Broken state when every step succeeds.

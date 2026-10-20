@@ -49,6 +49,10 @@ Mattermost
 :   11.2.2, a test server on the **development stand**, through REST API v4 with a bot account. CI runs the same
     behaviour against a fake Mattermost server. See [Mattermost](../messengers/mattermost.md).
 
+Slack
+:   Slack's cloud Web API and Socket Mode, on a **development stand**: a free workspace with a test app and a test
+    channel. CI runs against a fake. See [Slack](../messengers/slack.md).
+
 Telegram
 :   The cloud Bot API 10.3, on a **development stand**, with a test bot and a test channel. CI runs against a fake. See
     [Telegram](../messengers/telegram.md).

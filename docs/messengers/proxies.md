@@ -8,7 +8,7 @@ straight. `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are **never read**, in any 
 
 | Client | Where |
 |---|---|
-| a Mattermost, Telegram or Bridge Connection | the Connection's proxy section |
+| a Mattermost, Slack, Telegram or Bridge Connection | the Connection's proxy section |
 | an outgoing webhook Destination | the Destination's proxy section |
 | the identity provider (OpenID Connect) | the OIDC settings |
 | the Organization's outgoing heartbeat | its settings |
@@ -68,3 +68,11 @@ Muster cannot see where the proxy finally connects to. The Admin who sets the pr
 Telegram is often reached through a proxy where it is blocked. [Telegram in restricted
 networks](telegram-restricted-networks.md) shows the proxy on the Connection, and the alternatives: a reverse proxy
 under your own domain and a self-hosted Bot API server.
+
+## Slack
+
+A Slack Connection has no address field, since Slack's address is fixed, so a proxy sees only Slack's hosts. It must
+allow `CONNECT` to `slack.com`; in Socket Mode also to the hosts under `slack.com` that the socket uses; and to
+`hooks.slack.com`, where Muster sends the answer to a press when it cannot send it in the channel. When only the proxy
+can resolve outside names and the policy is strict, add `slack.com` and `*.slack.com` to **Allowed**: the domain entry
+covers the socket's hosts and `hooks.slack.com`, but not `slack.com` itself. See [Connect Slack](slack.md#the-proxy).

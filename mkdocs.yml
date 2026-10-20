@@ -94,6 +94,7 @@ nav:
       - messengers/mattermost.md
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
+      - messengers/slack.md
       - messengers/proxies.md
       - messengers/bridge.md
       - messengers/write-a-bridge.md
