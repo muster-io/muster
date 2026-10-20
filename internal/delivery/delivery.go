@@ -399,6 +399,7 @@ type queries interface {
 	rerenderQueries
 	editWindowQueries
 	bridgePressQueries
+	slackPressQueries
 	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
 	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
 		[]dbgen.SetDestinationTemplateErrorRow, error)

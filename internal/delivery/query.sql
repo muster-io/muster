@@ -1519,6 +1519,50 @@ ORDER BY d.id
 LIMIT 1
 FOR NO KEY UPDATE OF d;
 
+-- GetSlackRootBinding reads what a press on the message message_id of the channel channel_id of the Slack Connection
+-- is bound to when it is a Root message (C-24.FR-10): the delivery of an Alert Group to a Slack Destination of the
+-- Connection that is not deleted, whose channel is channel_id and whose Root message is message_id, with the
+-- Destination, the Alert Group, and its Route's language and Snooze durations. A Slack ts is unique within its channel
+-- only, so the channel is part of the lookup, through deliveries_message_idx.
+-- name: GetSlackRootBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       g.id AS alert_group_id, g.public_id AS group_public_id, r.language, r.snooze_durations_seconds
+FROM destinations ds
+JOIN deliveries d ON d.org_id = ds.org_id AND d.destination_id = ds.id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'slack' AND ds.deleted_at IS NULL
+  AND ds.slack_channel_id = @channel_id::text AND d.message_id = @message_id::text
+ORDER BY d.id
+LIMIT 1;
+
+-- GetSlackReminderBinding reads what a press on the message message_id of the channel channel_id of the Slack
+-- Connection is bound to when it is a Reminder (C-24.FR-5, C-17.FR-6): a sent Reminder of an Alert Group to a Slack
+-- Destination of the Connection that is not deleted, whose channel is channel_id, with the columns of
+-- GetSlackRootBinding and the Root message it replies to, found through thread_replies_reminder_message_idx.
+-- name: GetSlackReminderBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       g.id AS alert_group_id, g.public_id AS group_public_id, r.language, r.snooze_durations_seconds,
+       coalesce(d.message_id, '')::text AS root_message_id
+FROM destinations ds
+JOIN thread_replies t ON t.org_id = ds.org_id AND t.destination_id = ds.id
+JOIN deliveries d ON d.org_id = t.org_id AND d.id = t.delivery_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'slack' AND ds.deleted_at IS NULL
+  AND ds.slack_channel_id = @channel_id::text AND t.event = 'reminder' AND t.state = 'sent'
+  AND t.message_id = @message_id::text
+ORDER BY t.id
+LIMIT 1;
+
+-- GetSlackTestDestination reads the Slack Destination public_id of the Connection, not deleted, whose channel is
+-- channel_id: the Destination whose test message a person pressed (C-24.FR-13).
+-- name: GetSlackTestDestination :one
+SELECT ds.id, ds.public_id, ds.name
+FROM destinations ds
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'slack' AND ds.deleted_at IS NULL
+  AND ds.public_id = @public_id::text AND ds.slack_channel_id = @channel_id::text;
+
 -- Telegram comment Threads (C-14.FR-3, schema.md §4.11): the automatic copy of a channel post in the discussion group
 -- meets the answer to sendMessage in telegram_post_copies, keyed by the Connection, the channel and the post, in either
 -- order and on any replica. Both sides take the lock of the post first, so that whichever comes second attaches the
