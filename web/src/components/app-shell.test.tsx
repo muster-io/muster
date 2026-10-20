@@ -413,7 +413,7 @@ describe("banners", () => {
     await expect
       .element(
         screen.getByText(
-          "No replica is leading: Telegram and Bridge polling, Heartbeat and Stale checks are paused.",
+          "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode, Heartbeat and Stale checks are paused.",
         ),
       )
       .toBeVisible();
