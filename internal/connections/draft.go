@@ -221,13 +221,18 @@ func (s *Service) slackDraftRoute(d Draft, row *dbgen.GetConnectionRow, same boo
 	case d.AppToken.Given:
 		out.appToken = d.AppToken.Value
 	case same && out.in.EventMode == EventModeSocket && storedSlackAppToken(*row).Set():
-		base, err := savedBase()
-		if err != nil || base != out.slackBase {
-			return err
+		// Without a typed bot token the stored one is sent, which is routed where it is stored.
+		if d.BotToken.Given {
+			base, err := savedBase()
+			if err != nil || base != out.slackBase {
+				return err
+			}
 		}
-		if out.appToken, err = s.cfg.Keyring.OpenSecret(fieldSlackAppToken, storedSlackAppToken(*row)); err != nil {
+		app, err := s.cfg.Keyring.OpenSecret(fieldSlackAppToken, storedSlackAppToken(*row))
+		if err != nil {
 			return fmt.Errorf("open the app-level token of the connection %s: %w", row.PublicID, err)
 		}
+		out.appToken = app
 	}
 	return nil
 }
