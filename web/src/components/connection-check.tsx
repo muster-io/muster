@@ -15,8 +15,8 @@
 // the form makes an earlier result stale, and the panel hides it. The check runs on the interactive path, so a busy
 // messenger answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and
 // "Requests of this check" opens the requests it made (C-23.FR-6), a check before saving included. A Slack check
-// (C-24.FR-2) has the steps "Token", "Scopes" and, in Socket Mode, "App-level token"; the scopes a bot token lacks are
-// read from the server's English message and named in the reader's language.
+// (C-24.FR-2) has the steps "Token", "Scopes" and, in Socket Mode, "App-level token"; the scopes a bot token lacks come
+// from the step's missing_scopes and are named in the reader's language (D396).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -93,18 +93,14 @@ export type CheckCode =
   | NonNullable<NullableDestinationCheckCode>;
 
 /**
- * The scopes the server's English message of missing_scope names, "The bot token lacks the scopes chat:write,
- * users:read.email."; undefined for any other message.
- */
-function missingScopes(message: string | null | undefined): string | undefined {
-  return /^The bot token lacks the scopes (.+)\.$/.exec(message ?? "")?.[1];
-}
-
-/**
  * What a check found, by its code, in the reader's language; the server's English message is its detail. The scopes a
- * bot token lacks are named from that message, and without it the text names none.
+ * bot token lacks are named from the missing_scopes of the step or item (D396), and without them the text names none.
  */
-export function checkCodeText(t: TFunction, code: CheckCode, message?: string | null): string {
+export function checkCodeText(
+  t: TFunction,
+  code: CheckCode,
+  scopes?: readonly string[] | null,
+): string {
   switch (code) {
     case "token_invalid":
       return t("checks.codes.tokenInvalid");
@@ -166,12 +162,10 @@ export function checkCodeText(t: TFunction, code: CheckCode, message?: string | 
       return t("checks.codes.notBridge");
     case "wrong_token_type":
       return t("checks.codes.wrongTokenType");
-    case "missing_scope": {
-      const scopes = missingScopes(message);
-      return scopes === undefined
-        ? t("checks.codes.missingScopeUnnamed")
-        : t("checks.codes.missingScope", { scopes });
-    }
+    case "missing_scope":
+      return scopes?.length
+        ? t("checks.codes.missingScope", { scopes: scopes.join(", ") })
+        : t("checks.codes.missingScopeUnnamed");
     case "app_mismatch":
       return t("checks.codes.appMismatch");
     case "not_slack":
@@ -184,11 +178,13 @@ export function checkCodeText(t: TFunction, code: CheckCode, message?: string | 
 /**
  * The server's English message as the detail of the text of its code, when it says more than that code's English text,
  * such as a host, a status or a name; null without a code, which shows the message itself. It is compared in English
- * whatever the reader's language, so that no language repeats the code's text in English below its own.
+ * whatever the reader's language, so that no language repeats the code's text in English below its own; the code's
+ * text names the scopes a bot token lacks when they are given, as the server's message does.
  */
 export function checkDetail(
   code: CheckCode | null | undefined,
   message: string | null | undefined,
+  scopes?: readonly string[] | null,
 ): string | null {
   if (
     code === null ||
@@ -199,21 +195,24 @@ export function checkDetail(
   ) {
     return null;
   }
-  return message === checkCodeText(i18n.getFixedT("en"), code, message) ? null : message;
+  return message === checkCodeText(i18n.getFixedT("en"), code, scopes) ? null : message;
 }
 
 /** The detail of a check's code: the server's English message, small and muted below the translated text. */
 export function CheckDetail({
   code,
   message,
+  scopes,
   testId,
 }: {
   code: CheckCode | null | undefined;
   message: string | null | undefined;
+  /** The scopes a bot token lacks, which the code's text names. */
+  scopes?: readonly string[] | null;
   testId: string;
 }) {
   const { t } = useTranslation();
-  const detail = checkDetail(code, message);
+  const detail = checkDetail(code, message, scopes);
   if (detail === null) {
     return null;
   }
@@ -405,7 +404,7 @@ function Step({
           >
             {code === null
               ? (step.message ?? t("connections.check.unknownError"))
-              : checkCodeText(t, code, step.message)}
+              : checkCodeText(t, code, step.missing_scopes)}
           </span>
         )}
         {found && (
@@ -413,11 +412,16 @@ function Step({
             className="wrap-anywhere text-muted-foreground"
             data-testid="connection-check-step-reason"
           >
-            {code === null ? step.message : checkCodeText(t, code, step.message)}
+            {code === null ? step.message : checkCodeText(t, code, step.missing_scopes)}
           </span>
         )}
         {(failed || found) && (
-          <CheckDetail code={code} message={step.message} testId="connection-check-step-detail" />
+          <CheckDetail
+            code={code}
+            message={step.message}
+            scopes={step.missing_scopes}
+            testId="connection-check-step-detail"
+          />
         )}
       </div>
     </li>

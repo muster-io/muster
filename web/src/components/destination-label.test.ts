@@ -8,7 +8,8 @@
 // is two. A Bridge Destination reads its messenger from the info of its Connection, "Bridge" until a check read it,
 // and two Bridge Destinations of one channel through Connections to the same base URL are one chat. The Connections
 // list names a Connection by its messenger and the host it calls (C-22.FR-1), a Slack Connection "Slack" with its
-// bot's name once a check found it (C-24.FR-1).
+// bot's name once a check found it (C-24.FR-1). A Slack Destination posts in "#<channel name>", or "#<channel id>"
+// before a check read the name, and its messenger is "Slack" (C-24.FR-3).
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -21,11 +22,13 @@ import type {
   MattermostDestination,
   RequestTemplate,
   SlackConnection,
+  SlackDestination,
   TelegramConnection,
   TelegramDestination,
   WebhookDestination,
 } from "../api/gen/model";
 import i18n from "../i18n";
+import { destinationTypeName } from "./destination-health";
 import {
   bridgeMessengerName,
   chatKey,
@@ -183,6 +186,24 @@ function mm(
   };
 }
 
+function sl(
+  id: string,
+  name: string,
+  connectionId: string,
+  extra: Partial<SlackDestination> = {},
+): SlackDestination {
+  return {
+    ...READ,
+    id,
+    type: "slack",
+    name,
+    connection_id: connectionId,
+    channel_id: "C0FAKEALERTS",
+    channel_name: "alerts",
+    ...extra,
+  };
+}
+
 function tg(
   id: string,
   name: string,
@@ -231,6 +252,7 @@ const CONNECTIONS = new Map<string, Connection>(
     brConnection("CN000000000BRB", "br-b", "HTTP://127.0.0.1:18094/"),
     brConnection("CN000000000BR2", "br-2", "http://127.0.0.1:18095", "Other chat"),
     brConnection("CN000000000BRU", "br-unread", "http://127.0.0.1:18096", null),
+    slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot"),
   ].map((c) => [c.id, c]),
 );
 
@@ -360,6 +382,36 @@ function byId(id: string): Connection {
   }
   return c;
 }
+
+describe("a Slack Destination", () => {
+  test("posts in #<channel name>, or #<channel id> without the name", () => {
+    expect(destinationPlace(sl("DS7", "slack-alerts", "CN000000000SLA"))).toBe("#alerts");
+    expect(
+      destinationPlace(sl("DS7", "slack-alerts", "CN000000000SLA", { channel_name: null })),
+    ).toBe("#C0FAKEALERTS");
+    expect(
+      destinationPlace(sl("DS7", "slack-alerts", "CN000000000SLA", { channel_name: "" })),
+    ).toBe("#C0FAKEALERTS");
+    expect(
+      destinationPlace(sl("DS7", "slack-alerts", "CN000000000SLA", { channel_name: undefined })),
+    ).toBe("#C0FAKEALERTS");
+  });
+
+  test("is named Slack, in its full label too, in English and Russian", async () => {
+    const d: Destination = sl("DS7", "slack-alerts", "CN000000000SLA");
+    expect(destinationTypeName(i18n.t, "slack")).toBe("Slack");
+    expect(fullLabel(i18n.t, d, CONNECTIONS)).toBe(
+      "slack-alerts · Slack · via Dev Slack · #alerts",
+    );
+    expect(connectionPlace(d, CONNECTIONS)).toBe("Dev Slack · #alerts");
+    expect(fullLabel(i18n.t, d, new Map())).toBe("slack-alerts · Slack · #alerts");
+    await i18n.changeLanguage("ru");
+    expect(destinationTypeName(i18n.t, "slack")).toBe("Slack");
+    expect(fullLabel(i18n.t, d, CONNECTIONS)).toBe(
+      "slack-alerts · Slack · через Dev Slack · #alerts",
+    );
+  });
+});
 
 describe("the Connections list", () => {
   test("names a Bridge by the messenger from its info and the host of its base URL", async () => {

@@ -9,8 +9,9 @@
 // the address answers as. A changed draft hides an earlier result; a value the server would refuse is named before
 // anything is sent; refusals and a busy messenger have their texts. A result that names its run offers "Requests of
 // this check", which lists the requests of that run alone, the check before saving included. A Slack check names its
-// steps and translates its four codes, the scopes a bot token lacks included; "Slack refused the token." stays the
-// detail of the generic text of token_invalid. English and Russian.
+// steps and translates its four codes; the scopes a bot token lacks are named from missing_scopes, never read from the
+// English message, and without them the text names none (D396). "Slack refused the token." stays the detail of the
+// generic text of token_invalid. English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -488,11 +489,18 @@ describe("the check in Russian", () => {
 /** The English message of the step scopes for a bot token without users:read.email, as the server writes it. */
 const MISSING_EMAIL = "The bot token lacks the scopes users:read.email.";
 
-/** A Slack check whose step failed with the code and message; the steps after it are skipped. */
+/** The scopes of the step scopes for a bot token without users:read.email, as the server lists them. */
+const EMAIL_SCOPE = ["users:read.email"];
+
+/**
+ * A Slack check whose step failed with the code, message and the scopes the bot token lacks; the steps after it are
+ * skipped.
+ */
 function slackFailed(
   failing: "token" | "scopes" | "app_token",
   code: NonNullable<ConnectionCheckStep["code"]>,
   message: string,
+  missingScopes?: string[],
 ): ConnectionCheckResult {
   const names = TOKEN_STEPS.slack;
   const at = names.indexOf(failing);
@@ -506,6 +514,7 @@ function slackFailed(
               ok: false,
               code,
               message,
+              ...(missingScopes === undefined ? {} : { missing_scopes: missingScopes }),
               ...(name === "scopes" ? {} : { latency_ms: 4 }),
             })
           : step(name, { ok: false, skipped: true }),
@@ -557,6 +566,7 @@ describe("the check of a Slack Connection", () => {
       "token",
       "wrong_token_type",
       "This is not a bot token.",
+      undefined,
       [
         "Token: failed 4 ms · directThis is not a bot token.",
         "Scopes: Skipped: an earlier step failed",
@@ -567,6 +577,7 @@ describe("the check of a Slack Connection", () => {
       "scopes",
       "missing_scope",
       MISSING_EMAIL,
+      EMAIL_SCOPE,
       [
         "Token: ok · 12 ms · direct",
         "Scopes: failed directThe bot token lacks the scopes users:read.email.",
@@ -577,6 +588,7 @@ describe("the check of a Slack Connection", () => {
       "app_token",
       "app_mismatch",
       "The app-level token belongs to another Slack app than the bot token.",
+      undefined,
       [
         "Token: ok · 12 ms · direct",
         "Scopes: ok · direct",
@@ -585,8 +597,8 @@ describe("the check of a Slack Connection", () => {
     ],
   ] as const)(
     "translates a failed step %s with %s, without repeating its message",
-    async (failing, code, message, texts) => {
-      answer(() => json(200, slackFailed(failing, code, message)));
+    async (failing, code, message, scopes, texts) => {
+      answer(() => json(200, slackFailed(failing, code, message, scopes)));
       await renderCheck({ connectionId: SAVED_ID, type: "slack" });
       await page.getByRole("button", { name: "Check connection" }).click();
       await expect
@@ -611,7 +623,7 @@ describe("the check of a Slack Connection", () => {
 
   test("reads in Russian, the scopes the bot token lacks included", async () => {
     await i18n.changeLanguage("ru");
-    answer(() => json(200, slackFailed("scopes", "missing_scope", MISSING_EMAIL)));
+    answer(() => json(200, slackFailed("scopes", "missing_scope", MISSING_EMAIL, EMAIL_SCOPE)));
     await renderCheck({ connectionId: SAVED_ID, type: "slack" });
     await page.getByRole("button", { name: "Проверить подключение" }).click();
     await expect
@@ -624,22 +636,77 @@ describe("the check of a Slack Connection", () => {
     expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
   });
 
+  test.each([
+    [
+      "en",
+      "Check connection",
+      "The bot token lacks the scopes chat:write, users:read.email.",
+      "Details: Slack wants more scopes.",
+    ],
+    [
+      "ru",
+      "Проверить подключение",
+      "У токена бота нет прав chat:write, users:read.email.",
+      "Подробности: Slack wants more scopes.",
+    ],
+  ] as const)(
+    "names the scopes a check misses from missing_scopes, in English and Russian (%s)",
+    async (language, start, reason, detail) => {
+      await i18n.changeLanguage(language);
+      // The message names no scope: the text takes them from missing_scopes alone.
+      answer(() =>
+        json(
+          200,
+          slackFailed("scopes", "missing_scope", "Slack wants more scopes.", [
+            "chat:write",
+            "users:read.email",
+          ]),
+        ),
+      );
+      await renderCheck({ connectionId: SAVED_ID, type: "slack" });
+      await page.getByRole("button", { name: start }).click();
+      await expect
+        .element(page.getByTestId("connection-check-step-reason"))
+        .toHaveTextContent(reason);
+      await expect
+        .element(page.getByTestId("connection-check-step-detail"))
+        .toHaveTextContent(detail);
+    },
+  );
+
+  test("shows the unnamed text without missing_scopes", async () => {
+    // The English message names a scope, but the text never reads it from there.
+    answer(() => json(200, slackFailed("scopes", "missing_scope", MISSING_EMAIL)));
+    await renderCheck({ connectionId: SAVED_ID, type: "slack" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("The bot token lacks scopes that Muster needs.");
+    await expect
+      .element(page.getByTestId("connection-check-step-detail"))
+      .toHaveTextContent("Details: The bot token lacks the scopes users:read.email.");
+  });
+
   test("translates the four codes of a Slack check in English and Russian", () => {
     const en = i18n.getFixedT("en");
     const ru = i18n.getFixedT("ru");
+    const scopes = ["chat:write", "users:read.email"];
     const twoScopes = "The bot token lacks the scopes chat:write, users:read.email.";
     expect(checkCodeText(en, "wrong_token_type")).toBe("This is not a bot token.");
     expect(checkCodeText(ru, "wrong_token_type")).toBe("Это не токен бота.");
-    expect(checkCodeText(en, "missing_scope", twoScopes)).toBe(twoScopes);
-    expect(checkCodeText(ru, "missing_scope", twoScopes)).toBe(
+    expect(checkCodeText(en, "missing_scope", scopes)).toBe(twoScopes);
+    expect(checkCodeText(ru, "missing_scope", scopes)).toBe(
       "У токена бота нет прав chat:write, users:read.email.",
     );
-    // Without the server's message, such as in a list of codes, the text names no scope.
+    // Without missing_scopes, such as in a list of codes, the text names no scope.
     expect(checkCodeText(en, "missing_scope")).toBe(
       "The bot token lacks scopes that Muster needs.",
     );
     expect(checkCodeText(ru, "missing_scope", null)).toBe(
       "У токена бота нет прав, которые нужны Muster.",
+    );
+    expect(checkCodeText(en, "missing_scope", [])).toBe(
+      "The bot token lacks scopes that Muster needs.",
     );
     expect(checkCodeText(en, "app_mismatch")).toBe(
       "The app-level token belongs to another Slack app than the bot token.",
@@ -650,7 +717,12 @@ describe("the check of a Slack Connection", () => {
     expect(checkCodeText(en, "not_slack")).toBe("The address answered, but not as Slack's API.");
     expect(checkCodeText(ru, "not_slack")).toBe("Адрес ответил, но не как API Slack.");
     // The server's English text of a code is no detail; Slack's refusal under token_invalid is.
-    expect(checkDetail("missing_scope", twoScopes)).toBeNull();
+    expect(checkDetail("missing_scope", twoScopes, scopes)).toBeNull();
+    expect(
+      checkDetail("missing_scope", "The bot token lacks scopes that Muster needs."),
+    ).toBeNull();
+    // The English message alone names no scope: without missing_scopes it is the detail of the unnamed text.
+    expect(checkDetail("missing_scope", twoScopes)).toBe(twoScopes);
     expect(checkDetail("wrong_token_type", "This is not a bot token.")).toBeNull();
     expect(checkDetail("token_invalid", "Slack refused the token.")).toBe(
       "Slack refused the token.",

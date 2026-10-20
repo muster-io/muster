@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The label of a Destination across the SPA (D309): its Connection and its channel — Mattermost "#<channel name>",
-// Telegram the channel title or the channel as entered, a Bridge the channel's name or its id —, or the host of an
-// outgoing webhook's URL. The full label "<name> · <messenger> · via <Connection> · <channel>" names a Destination in
+// Telegram the channel title or the channel as entered, a Bridge the channel's name or its id, Slack "#<channel name>"
+// or "#<channel id>" —, or the host of an outgoing webhook's URL. The full label "<name> · <messenger> · via <Connection> · <channel>" names a Destination in
 // the Route editor, its pickers and the tooltips of the Alert Group page; a Bridge's messenger is the one its
 // Connection's bridge names, "Bridge" until a check read it (C-22.FR-1). The chat a Destination posts in tells the
 // Route editor when two Destinations would post the same Alert Group twice into one chat (D305): one Telegram chat id,
@@ -57,7 +57,7 @@ export function webhookHost(
 
 /**
  * Where a Destination posts: "#<channel name>" (or the channel id), the Telegram channel, a Bridge's channel by its name
- * (or its id), or the webhook's host.
+ * (or its id), a Slack channel as "#<channel name>" (or "#<channel id>"), or the webhook's host.
  */
 export function destinationPlace(d: Destination): string | undefined {
   switch (d.type) {
@@ -67,6 +67,8 @@ export function destinationPlace(d: Destination): string | undefined {
       return d.channel_title || d.channel_id;
     case "bridge":
       return d.channel_name || d.channel_id;
+    case "slack":
+      return `#${d.channel_name || d.channel_id}`;
     default:
       return webhookHost(d);
   }

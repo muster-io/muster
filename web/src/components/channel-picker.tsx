@@ -11,7 +11,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { useListConnectionChannels } from "../api/gen/endpoints/connections/connections";
-import type { MattermostChannel } from "../api/gen/model";
+import type { ConnectionChannelList, MattermostChannel } from "../api/gen/model";
 import { useCan } from "./app-shell";
 import { checkErrorText } from "./connection-check";
 import { Button } from "./ui/button";
@@ -54,6 +54,14 @@ export function teamsOf(channels: readonly MattermostChannel[]): { id: string; n
   return [...teams.entries()]
     .map(([id, name]) => ({ id, name }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The channels of a Mattermost Connection's list; listConnectionChannels answers a Slack Connection with its own list,
+ * which alone has `truncated`, and this picker shows none of it.
+ */
+function mattermostItems(list: ConnectionChannelList | undefined): MattermostChannel[] {
+  return list === undefined || "truncated" in list ? [] : list.items;
 }
 
 export interface ChannelPickerProps {
@@ -131,7 +139,7 @@ export function ChannelPicker({
     );
   }
 
-  const items = channels.data?.items ?? [];
+  const items = mattermostItems(channels.data);
   const teams = teamsOf(items);
   if (teamId !== "" && !teams.some((tm) => tm.id === teamId)) {
     teams.push({ id: teamId, name: storedTeamName || teamId });
