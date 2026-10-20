@@ -38,4 +38,6 @@ export interface ProblemError {
   column?: number;
   /** Set on `destination_check_failed`; the code of the failing check, as in `DestinationCheckItem`, which clients translate, with `detail` as its English text. */
   check_code?: NullableDestinationCheckCode | null;
+  /** Set on `destination_check_failed` with the `check_code` `missing_scope` (Slack), omitted otherwise — the scopes Slack named as needed, as in `DestinationCheckItem`, which clients name in their own words; `detail` names them in English. */
+  missing_scopes?: string[];
 }

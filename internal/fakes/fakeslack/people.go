@@ -205,8 +205,9 @@ func directTarget(channel string) bool {
 // postDirect answers chat.postMessage to the user id of one of the app's people (F-096): the message lands in the
 // bot's direct chat with the person, DMChannel, and the answer names that channel. A bot, the app's own bot user
 // included, is cannot_dm_bot and a deleted account user_not_found, as conversations.open answers them; an id that is
-// not one of the people stays channel_not_found. The model of the direct chat is the fake's own: F-096 verified the
-// delivery to a user id and the errors of conversations.open only.
+// not one of the people stays channel_not_found, and a person of an app in messages_tab_off is messages_tab_disabled.
+// The model of the direct chat is the fake's own: F-096 verified the delivery to a user id and the errors of
+// conversations.open only.
 func (f *Fake) postDirect(w http.ResponseWriter, c caller, scopes string, a chatArgs) {
 	if !chatCaller(w, c, scopes) {
 		return
@@ -222,6 +223,9 @@ func (f *Fake) postDirect(w http.ResponseWriter, c caller, scopes string, a chat
 		return
 	case p.Deleted:
 		writeError(w, "user_not_found")
+		return
+	case f.messagesTabOff(c.app.Key):
+		writeError(w, "messages_tab_disabled")
 		return
 	}
 	con, code, errs := contentOf(a)
@@ -243,6 +247,13 @@ func (f *Fake) postDirect(w http.ResponseWriter, c caller, scopes string, a chat
 	k := chatKey{c.app.Key, channel}
 	f.chats[k] = append(f.chats[k], m)
 	writeOK(w, map[string]any{"channel": channel, "ts": m.ts, "message": answerOf(c, m, nil)})
+}
+
+// messagesTabOff reports whether the Messages tab of the app key is off.
+func (f *Fake) messagesTabOff(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.config.MessagesTabOff, key)
 }
 
 // DirectMessages are the messages the bot of the app sent to the person user by direct message, oldest first; of both

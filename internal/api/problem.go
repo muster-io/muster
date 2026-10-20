@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -173,7 +174,8 @@ func inUseProblem(err error) *Problem {
 }
 
 // checkFailedProblem is the 422 of a save that its Destination check refused: one item per failing check at the field
-// it concerns, with the check's message as its detail and its code as check_code.
+// it concerns, with the check's message as its detail, its code as check_code and, with missing_scope, the scopes the
+// bot token lacks as missing_scopes.
 func checkFailedProblem(c *destinations.CheckFailedError) *Problem {
 	p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
 	for _, it := range c.Items {
@@ -181,6 +183,10 @@ func checkFailedProblem(c *destinations.CheckFailedError) *Problem {
 		item := gen.ProblemError{Pointer: it.Pointer, Code: codeCheckFailed, Detail: &detail}
 		if it.Code != "" {
 			item.CheckCode.Set(gen.NullableDestinationCheckCode(it.Code))
+		}
+		if len(it.MissingScopes) > 0 {
+			scopes := slices.Clone(it.MissingScopes)
+			item.MissingScopes = &scopes
 		}
 		p.Errors = append(p.Errors, item)
 	}

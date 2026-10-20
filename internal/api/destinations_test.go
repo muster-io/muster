@@ -1124,7 +1124,7 @@ func TestBridgeDestinationAPI(t *testing.T) {
 // channel id — a string the spec does not pattern, so that the domain refuses a D… or U… with 422 invalid_format, not
 // request validation with 400 — its Mention settings and limiter, and reads with channel_name; the type filter selects
 // it; a save its check refuses is 422 destination_check_failed with the check_code and the text that names the bot,
-// a missing scope at /connection_id; checkDestination answers its item channel with missing_scopes (D396); its test
+// a missing scope at /connection_id with the scopes in missing_scopes; checkDestination answers its item channel with missing_scopes (D396); its test
 // answers the one step message and its preview the item message in the format json, the body of chat.postMessage with
 // its request (C-24.FR-13).
 func TestSlackDestinationAPI(t *testing.T) {
@@ -1190,10 +1190,16 @@ func TestSlackDestinationAPI(t *testing.T) {
 	} {
 		fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{tc.item}}
 		a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
-		if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
+		errs := problemErrors(t, a)
+		if a.status != http.StatusUnprocessableEntity ||
 			errs[0]["code"] != "destination_check_failed" || errs[0]["pointer"] != tc.item.Pointer ||
 			errs[0]["detail"] != tc.item.Message || errs[0]["check_code"] != tc.checkErr {
 			t.Errorf("refused %s = %d %s", tc.checkErr, a.status, a.body)
+		}
+		scopes, set := errs[0]["missing_scopes"]
+		if list, _ := scopes.([]any); set != (len(tc.item.MissingScopes) > 0) ||
+			(set && (len(list) != 1 || list[0] != "channels:read")) {
+			t.Errorf("refused %s has missing_scopes %v (%t)", tc.checkErr, scopes, set)
 		}
 	}
 	for _, channel := range []string{"D0FAKEDM", "U0MUSTERUSR1", "#alerts"} {

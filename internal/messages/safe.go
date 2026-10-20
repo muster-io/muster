@@ -169,6 +169,17 @@ func EscapeMrkdwn(s string) string {
 	return b.String()
 }
 
+// mrkdwnMentions are the starts of a Mention in mrkdwn — `<!channel>`, `<!here>`, `<!everyone>`, a user group and
+// `<@U…>` — which template text may write literally; as entities they show as written and notify nobody (F-097).
+var mrkdwnMentions = strings.NewReplacer("<!", "&lt;!", "<@", "&lt;@")
+
+// NeutralizeMrkdwnMentions keeps template output in mrkdwn from notifying anyone with a literal Mention, as a literal
+// `@all` in a template's text is escaped (C-12.FR-8): only the Destination's Mention settings notify (C-24.FR-6). Its
+// links stay links, and neutralizing twice changes nothing.
+func NeutralizeMrkdwnMentions(s string) string {
+	return mrkdwnMentions.Replace(s)
+}
+
 // Escaper is the escaper of a markup; plain text is left as it is.
 func Escaper(m Markup) func(string) string {
 	switch m {

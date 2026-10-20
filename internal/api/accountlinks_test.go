@@ -590,8 +590,9 @@ func TestProblemCodesOfBridgeLinks(t *testing.T) {
 // TestSlackAccountLinks is C-24.FR-12 and AC-14 through the API: startSlackLink answers the started request with its
 // expiry and attempts, confirmSlackLink the link with its user id, name and display name; each acts on the signed-in
 // User from the web session, and a missing code is empty. The refusals are 422 handle_not_found, handle_ambiguous and
-// direct_message_refused at /handle and unknown_id at /connection_id, 409 account_linked_elsewhere and without a code
-// for a refusal of Slack, 422 link_code_invalid with the attempts left at /code, 429 link_code_requests_exceeded with
+// direct_message_refused at /handle and unknown_id at /connection_id, 409 account_linked_elsewhere, 409
+// messages_tab_disabled for an app whose Messages tab is off and 409 without a code for any other refusal of Slack,
+// 422 link_code_invalid with the attempts left at /code, 429 link_code_requests_exceeded with
 // Retry-After, 503 with Retry-After without a limiter token or after Slack's 429, and 404 for an unknown request.
 func TestSlackAccountLinks(t *testing.T) {
 	x, f := newAccountLinksAPI(t)
@@ -645,6 +646,11 @@ func TestSlackAccountLinks(t *testing.T) {
 		a.code(t) != codeAccountLinkedElsewhere {
 		t.Errorf("an account linked elsewhere = %d %s", a.status, a.body)
 	}
+	if a := start(t, accountlinks.ErrMessagesTabDisabled); a.status != http.StatusConflict ||
+		a.code(t) != codeMessagesTabDisabled || a.json(t)["type"] != problemBase+typeConflict ||
+		!strings.Contains(a.json(t)["detail"].(string), "Messages tab") {
+		t.Errorf("the Messages tab off = %d %s", a.status, a.body)
+	}
 	if a := start(t, &accountlinks.MessengerError{Call: "users.list", Outcome: "fatal", Status: 200}); a.status !=
 		http.StatusConflict || a.json(t)["code"] != nil {
 		t.Errorf("a refusal of Slack = %d %s", a.status, a.body)
@@ -672,15 +678,17 @@ func TestSlackAccountLinks(t *testing.T) {
 	}
 }
 
-// TestProblemCodesOfSlackLinks: the problem code handle_ambiguous of the Slack links is catalogued in x-problem-codes,
-// beside the codes it shares with the Bridge links.
+// TestProblemCodesOfSlackLinks: the problem codes handle_ambiguous and messages_tab_disabled of the Slack links are
+// catalogued in x-problem-codes, beside the codes they share with the Bridge links.
 func TestProblemCodesOfSlackLinks(t *testing.T) {
 	doc, err := LoadSpec()
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(doc.Components.Schemas["Problem"].Value.Extensions["x-problem-codes"])
-	if !strings.Contains(string(raw), `"code":"`+accountlinks.CodeHandleAmbiguous+`"`) {
-		t.Errorf("%s is not catalogued", accountlinks.CodeHandleAmbiguous)
+	for _, code := range []string{accountlinks.CodeHandleAmbiguous, codeMessagesTabDisabled} {
+		if !strings.Contains(string(raw), `"code":"`+code+`"`) {
+			t.Errorf("%s is not catalogued", code)
+		}
 	}
 }

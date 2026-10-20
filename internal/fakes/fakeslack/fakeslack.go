@@ -30,8 +30,9 @@
 // tokens, the tokens answered as a person's and the app of each token, over the published pairing; the channels of
 // each app, by id, with their name, the bot's membership and whether they are archived or private; a page size that
 // makes conversations.list answer smaller pages; the request_url of each app, the Interactivity Request URL its
-// presses go to; and the extra_connections of each app, the connections of other programs that the hello of its
-// sockets counts. GET /_fake/messages lists the messages of a channel, with their Thread replies, and POST
+// presses go to; the extra_connections of each app, the connections of other programs that the hello of its
+// sockets counts; and messages_tab_off, the apps whose Messages tab is off, whose bot's direct messages to a person
+// answer messages_tab_disabled. GET /_fake/messages lists the messages of a channel, with their Thread replies, and POST
 // /_fake/delete deletes one as a person would (messages.go); GET /_fake/dms?user=U…[&app=a|b] lists the direct
 // messages the bot sent to a person (people.go). POST /_fake/press presses a button of a message as one of
 // the people and sends the app's request_url the payload signed with the app's Slack signing secret and with its
@@ -142,7 +143,8 @@ func PublishedBotToken(token string) bool {
 // channel id. PageSize, when positive, is the most channels a page of conversations.list holds. RequestURL is the
 // Interactivity Request URL of each app, by app key, where /_fake/press sends its presses. ExtraConnections are the
 // connections of other programs to each app, by app key, which the hello of its sockets counts beside the fake's own
-// (F-102).
+// (F-102). MessagesTabOff are the keys of the apps whose Messages tab is off: chat.postMessage to a person's user id
+// answers messages_tab_disabled, as Slack's reference lists it for chat.postMessage (not seen on the stand).
 type Config struct {
 	Scopes           map[string]string             `json:"scopes"`
 	Revoked          []string                      `json:"revoked"`
@@ -152,6 +154,7 @@ type Config struct {
 	PageSize         int                           `json:"page_size"`
 	RequestURL       map[string]string             `json:"request_url"`
 	ExtraConnections map[string]int                `json:"extra_connections"`
+	MessagesTabOff   []string                      `json:"messages_tab_off"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
@@ -168,6 +171,7 @@ type configPatch struct {
 	PageSize         *int                           `json:"page_size"`
 	RequestURL       map[string]*string             `json:"request_url"`
 	ExtraConnections map[string]*int                `json:"extra_connections"`
+	MessagesTabOff   *[]string                      `json:"messages_tab_off"`
 }
 
 // DefaultConfig is the configuration of a new fake: both apps with DefaultScopes and the default channels, nothing
@@ -177,7 +181,7 @@ func DefaultConfig() Config {
 	return Config{Scopes: map[string]string{AppA: DefaultScopes, AppB: DefaultScopes}, Revoked: []string{},
 		UserTokens: []string{}, AppOf: map[string]string{},
 		Channels:   map[string]map[string]Channel{AppA: defaultChannels(), AppB: defaultChannels()},
-		RequestURL: map[string]string{}, ExtraConnections: map[string]int{}}
+		RequestURL: map[string]string{}, ExtraConnections: map[string]int{}, MessagesTabOff: []string{}}
 }
 
 // Fake is the fake Slack Web API server.
@@ -297,6 +301,11 @@ func check(c Config) error {
 			return fmt.Errorf("extra_connections: %d of the app %q is negative", n, key)
 		}
 	}
+	for _, key := range c.MessagesTabOff {
+		if _, ok := appByKey(key); !ok {
+			return fmt.Errorf("messages_tab_off: the app %q is not a or b", key)
+		}
+	}
 	return nil
 }
 
@@ -304,7 +313,8 @@ func check(c Config) error {
 func clone(c Config) Config {
 	out := Config{Scopes: maps.Clone(c.Scopes), Revoked: slices.Clone(c.Revoked),
 		UserTokens: slices.Clone(c.UserTokens), AppOf: maps.Clone(c.AppOf), Channels: cloneChannels(c.Channels),
-		PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL), ExtraConnections: maps.Clone(c.ExtraConnections)}
+		PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL), ExtraConnections: maps.Clone(c.ExtraConnections),
+		MessagesTabOff: slices.Clone(c.MessagesTabOff)}
 	if out.Scopes == nil {
 		out.Scopes = map[string]string{}
 	}
@@ -322,6 +332,9 @@ func clone(c Config) Config {
 	}
 	if out.ExtraConnections == nil {
 		out.ExtraConnections = map[string]int{}
+	}
+	if out.MessagesTabOff == nil {
+		out.MessagesTabOff = []string{}
 	}
 	return out
 }
@@ -382,6 +395,9 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		c.ExtraConnections[key] = *n
+	}
+	if p.MessagesTabOff != nil {
+		c.MessagesTabOff = *p.MessagesTabOff
 	}
 	c = clone(c)
 	err := check(c)

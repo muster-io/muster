@@ -195,6 +195,26 @@ func TestEscapeMrkdwn(t *testing.T) {
 	}
 }
 
+// TestNeutralizeMrkdwnMentions is C-12.FR-8 and C-24.FR-6 for template text in mrkdwn: a literal <!here>, <!channel>,
+// <!everyone>, a user group and <@U…> show as written and notify nobody, links stay links, other text is kept, and
+// neutralizing twice changes nothing.
+func TestNeutralizeMrkdwnMentions(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                                 "",
+		"*bold* _x_ ~y~":                   "*bold* _x_ ~y~",
+		"<!here> <!channel> <!everyone>":   "&lt;!here> &lt;!channel> &lt;!everyone>",
+		"<!subteam^S0123|@sre>":            "&lt;!subteam^S0123|@sre>",
+		"<@U0123ABCD> <@\u200bU0123ABCD>":  "&lt;@U0123ABCD> &lt;@\u200bU0123ABCD>",
+		"<https://e.org|runbook> <#C0123>": "<https://e.org|runbook> <#C0123>",
+		"&lt;!here>":                       "&lt;!here>",
+	} {
+		got := NeutralizeMrkdwnMentions(in)
+		if got != want || NeutralizeMrkdwnMentions(got) != got {
+			t.Errorf("NeutralizeMrkdwnMentions(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // hostileURL is a generator URL that url.Parse accepts with a host and that, written raw into a mrkdwn link, would
 // close it and open a second link whose text the alert chooses; hostileURLMrkdwn is how it reaches a template in
 // mrkdwn.

@@ -412,6 +412,23 @@ func TestSlackStartRefusals(t *testing.T) {
 	}
 }
 
+// TestSlackStartMessagesTabOff is C-24.FR-12: a direct message Slack refuses because the app's Messages tab is off is
+// ErrMessagesTabDisabled, not a field error, and voids the request, which still counts toward the limits.
+func TestSlackStartMessagesTabOff(t *testing.T) {
+	e := newEnv(t)
+	e.sl.sendErr = ErrMessagesTabDisabled
+	for i := range SlackCodeRequestsPerTarget {
+		_, err := e.s.StartSlack(t.Context(), alice, slPID, "dana")
+		if !errors.Is(err, ErrMessagesTabDisabled) || errors.As(err, new(*FieldError)) || len(e.store.reqs) != i+1 ||
+			e.store.reqs[i].voided == nil || len(e.sl.sent) != i+1 {
+			t.Fatalf("request %d with the tab off = %v, %+v", i, err, e.store.reqs)
+		}
+	}
+	if _, err := e.s.StartSlack(t.Context(), alice, slPID, "dana"); !errors.As(err, new(*RateLimitedError)) {
+		t.Errorf("the requests refused with the tab off did not count: %v", err)
+	}
+}
+
 // TestCodeAttempts is account_link.bridge_code and account_link.slack_code: a code takes five attempts through a
 // Bridge and through Slack, and the code of a messenger without attempts is an error before anything is read or
 // written — even the right code links nothing, takes no attempt and records nothing.

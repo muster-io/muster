@@ -192,9 +192,10 @@ func StatusEmoji(colour string) string {
 }
 
 // Layout lays m out as text in a markup, as the preview shows it: one section per line, neutral text escaped for the
-// markup and without Mention tokens, template output as written with its tokens shown as `@` names, and the buttons
-// as a last line of bracketed labels. The adapters lay messages out for their messengers, a Slack message's body
-// section with this layout in mrkdwn. CommonMark has a layout of its own, which a bridge's envelope body takes.
+// markup and without Mention tokens, template output as written with its tokens shown as `@` names — in mrkdwn with its
+// literal Mentions neutralized, as a Slack message carries it — and the buttons as a last line of bracketed labels.
+// The adapters lay messages out for their messengers, a Slack message's body section with this layout in mrkdwn.
+// CommonMark has a layout of its own, which a bridge's envelope body takes.
 func Layout(m Message, markup Markup) string {
 	if markup == MarkupCommonMark {
 		return layoutCommonMark(m)
@@ -202,6 +203,13 @@ func Layout(m Message, markup Markup) string {
 	escape := Escaper(markup)
 	// Only template output may carry a Mention token; neutral text never shows one.
 	esc := func(s string) string { return escape(templates.StripTokens(s)) }
+	tmpl := func(s string) string {
+		s = templates.ReplaceTokens(s, tokenText)
+		if markup == MarkupMrkdwn {
+			return NeutralizeMrkdwnMentions(s)
+		}
+		return s
+	}
 	var out []string
 	add := func(s string) {
 		if s != "" {
@@ -222,11 +230,11 @@ func Layout(m Message, markup Markup) string {
 		add(italic(markup, esc(m.Summary)))
 	}
 	if m.Body != nil {
-		add(templates.ReplaceTokens(strings.TrimRight(m.Body.Text, "\n"), tokenText))
+		add(tmpl(strings.TrimRight(m.Body.Text, "\n")))
 	}
 	if a := m.Alerts; a != nil {
 		for _, l := range a.Lines {
-			text := templates.ReplaceTokens(l.Text, tokenText)
+			text := tmpl(l.Text)
 			if l.Markup == "" {
 				text = esc(l.Text)
 			}

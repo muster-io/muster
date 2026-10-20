@@ -882,6 +882,8 @@ API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
   whether a zero-width space after `*`, `_`, `~` or `` ` `` keeps mrkdwn from pairing them into emphasis (C-24.FR-7);
   what `apps.connections.open` answers with Socket Mode off, and `link_disabled` (F-101); how long `num_connections`
   keeps counting a socket that went away without a close, such as a crashed Leader's (F-102); Socket Mode through a
-  SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot token; and the mobile clients — the colour bar,
-  buttons beyond five in a row and `static_select` (F-075, F-082). To check on the test stand with a person, by the
-  Slack stories.
+  SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot token; what `chat.postMessage` to a user id answers
+  with the app's Messages tab off — `messages_tab_disabled`, as Slack's reference for `chat.postMessage` lists it, which
+  `startSlackLink` answers as `409` `messages_tab_disabled` and the fake Slack server answers with `messages_tab_off`
+  (F-096 tried the tab on and read-only only); and the mobile clients — the colour bar, buttons beyond five in a row
+  and `static_select` (F-075, F-082). To check on the test stand with a person, by the Slack stories.

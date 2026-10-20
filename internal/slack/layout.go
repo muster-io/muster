@@ -464,18 +464,10 @@ func laidOut(m messages.Message, l look) messages.Message {
 }
 
 // templateText is template output as a Slack message carries it: its trusted Mention tokens as text, and its literal
-// Mentions neutralized.
+// Mentions neutralized as the preview neutralizes them (messages.NeutralizeMrkdwnMentions).
 func templateText(s string) string {
-	return neutralizeTemplate(templates.ReplaceTokens(s, tokenText))
+	return messages.NeutralizeMrkdwnMentions(templates.ReplaceTokens(s, tokenText))
 }
-
-// literalMentions are the starts of a Mention in mrkdwn — `<!channel>`, `<!here>`, a user group and `<@U…>` — which
-// template text may write literally; as entities they show as written and notify nobody (F-097).
-var literalMentions = strings.NewReplacer("<!", "&lt;!", "<@", "&lt;@")
-
-// neutralizeTemplate keeps a Route template from notifying anyone with a literal Mention, as a literal `@all` in a
-// template's text is escaped (C-12.FR-8); its links stay links.
-func neutralizeTemplate(s string) string { return literalMentions.Replace(s) }
 
 // tokenText is a trusted Mention token as text that notifies nobody: `@`, a zero-width space and its word or group.
 // A Loud message mentions everyone in the chat for the channel and here tokens in its Mentions instead.

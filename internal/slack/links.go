@@ -35,6 +35,10 @@ var slackUserID = regexp.MustCompile(`^[UW][A-Z0-9]{2,20}$`)
 // bot, an unknown or deleted account (F-096), and a user id Slack does not know as a channel.
 var refusedDirect = []string{"cannot_dm_bot", "user_not_found", "channel_not_found"}
 
+// messagesTabDisabled is the error of chat.postMessage to a user id while the Messages tab of the Slack app is off,
+// which refuses every person until an admin of the app turns it on (C-24.FR-12).
+const messagesTabDisabled = "messages_tab_disabled"
+
 // LinkConnections find the Slack Connection of an Account link, declared by their consumer; *connections.Service
 // implements them.
 type LinkConnections interface {
@@ -210,12 +214,16 @@ func (b *linkBot) SendLinked(ctx context.Context, userID, text string) error {
 
 // direct posts text, escaped for mrkdwn, to the account userID with chat.postMessage, whose channel is the user id
 // (F-096): the bot's direct chat with the person, without unfurling. An error of refusedDirect is
-// accountlinks.ErrDirectMessageRefused, which leaves the Connection as it is.
+// accountlinks.ErrDirectMessageRefused and messagesTabDisabled accountlinks.ErrMessagesTabDisabled; both leave the
+// Connection as it is.
 func (b *linkBot) direct(ctx context.Context, call, userID, text string) error {
 	r := b.conn.Client.Call(ctx, b.class, "chat.postMessage", Args{"channel": userID,
 		"text": answerText.Replace(text), "unfurl_links": false, "unfurl_media": false})
 	if slices.Contains(refusedDirect, r.ErrorCode) {
 		return accountlinks.ErrDirectMessageRefused
+	}
+	if r.ErrorCode == messagesTabDisabled {
+		return accountlinks.ErrMessagesTabDisabled
 	}
 	return b.failed(call, r)
 }

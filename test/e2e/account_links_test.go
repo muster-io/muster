@@ -1143,7 +1143,8 @@ func slackProblem(t *testing.T, a answer) string {
 // inserted by hand: the Slack Connections to link through (C-24.FR-12); a code for an email in other letter case,
 // sent by direct message to the account's user id, and the link it makes with the account's id, name and display name,
 // confirmed by the bot (C-24.AC-14); a name found on the second page of users.list, five wrong codes and the right one
-// refused after them; no account, a name two accounts share and the direct messages Slack refuses; the limits of
+// refused after them; no account, a name two accounts share, the direct messages Slack refuses and the app's Messages
+// tab off; the limits of
 // account_link.slack_code_requests; an account linked to another User (C-18.FR-5); a second link through one
 // Connection replacing the first (C-18.FR-4); tokens refused where only the web session may act; the codes masked in
 // the Request log (C-23.FR-3); Alice mentioned as <@U0FAKEALICE> and Dora by her name, and the footer naming Alice by
@@ -1261,6 +1262,19 @@ func TestSlackAccountLinks(t *testing.T) {
 	}
 	if dms := e.slackDMs(fakeslack.AppB, fakeslack.UserCarol); len(dms) != 0 {
 		t.Errorf("a refused direct message reached carol: %+v", dms)
+	}
+
+	// C-24.FR-12: with the Messages tab of the Slack app off, Slack refuses every direct message, which is 409
+	// messages_tab_disabled; eve and dora's account have no request yet, so no limit is near.
+	eve := e.person("Eve E.", "eve", "responder")
+	s.fake(http.MethodPut, s.fs+"/config", `{"messages_tab_off":["b"]}`)
+	a := e.requestSlackCode(eve, s.conn, "dora@example.org")
+	s.fake(http.MethodPut, s.fs+"/config", `{"messages_tab_off":[]}`)
+	if a.status != http.StatusConflict || codeOf(t, a) != "messages_tab_disabled" {
+		t.Errorf("the Messages tab off = %d %s", a.status, a.body)
+	}
+	if dms := e.slackDMs(fakeslack.AppB, fakeslack.UserDora); len(dms) != 0 {
+		t.Errorf("a direct message reached dora with the Messages tab off: %+v", dms)
 	}
 
 	// C-18.FR-5: an account linked to another User; it is checked after the limits, so it comes before bob's third
