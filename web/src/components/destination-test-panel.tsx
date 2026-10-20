@@ -11,8 +11,8 @@
 // The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
 // and when a step failed the Destination stays Broken, which the result explains, the button press included. The hint
 // above the button says what the test of each type sends; a Bridge sends one test message through the bridge, and Slack
-// one to its channel. A result
-// names its check run, and "Requests of this check" opens the requests it made (C-23.FR-6).
+// one to its channel. A result names its check run, and "Requests of this check" opens the requests it made
+// (C-23.FR-6).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";

@@ -104,9 +104,9 @@ issue: 307
   `listConnectionChannels` answers for a Slack Connection `SlackChannelList` (`items` of `id`, `name`, `is_private`, and
   `truncated`), its `200` the named `ConnectionChannelList`, a `oneOf` of `MattermostChannelList` and
   `SlackChannelList`, and takes `q`; `MattermostChannelList` takes no other member (`additionalProperties: false`), so
-  that an empty Slack list matches one branch of the `oneOf` only; its `team_id`, which a Slack Connection ignores, and its `503`, which Slack's `429`
-  on a page also gives, say so; `destination_check_failed` puts `missing_scope` at `/connection_id`, as
-  `token_invalid`; `MentionSetting.everyone` and `groups` describe what Slack takes.
+  that an empty Slack list matches one branch of the `oneOf` only; its `team_id`, which a Slack Connection ignores, and
+  its `503`, which Slack's `429` on a page also gives, say so; `destination_check_failed` puts `missing_scope` at
+  `/connection_id`, as `token_invalid`; `MentionSetting.everyone` and `groups` describe what Slack takes.
 - **D396: structured scopes instead of parsing the message**: `ConnectionCheckStep` and `DestinationCheckItem` gain an
   optional array `missing_scopes`, set only with the code `missing_scope` — for the step `scopes` the scopes of
   C-24.FR-1 the bot token lacks, in their order, for the item `channel` those Slack's `needed` names — which clients
@@ -273,16 +273,18 @@ None.
     both branches of the `oneOf`, which the API tests' response validation refuses.
   - D396 replaces the proposed text "The bot token lacks a scope this check needs: {scope}." with the field
     `missing_scopes` and the existing text of `missing_scope`, so that the SPA never parses an English message.
+  - `chatKey` gains a Slack branch (its Connection's workspace and the channel id), so that two Slack Destinations of
+    one channel get the duplicate-chat warning of S-070 now that the API can create them (review).
   - `files_touched` adds `internal/slack/check.go` and `check_test.go` (D396), `internal/connections/connections.go`
     (the field of D396 on a step, and the messenger a `MessengerError` names), `internal/connections/live_test.go`
     (the Slack queries on PostgreSQL 14 and 17), `internal/doctor/doctor.go` (the route of `muster dev doctor`),
     `internal/api/problem.go` (a refused channel list names Slack, not Mattermost), `connection-check.test.tsx` and
     `destination-label.test.ts` (evidence for the SPA's statements), `AGENTS.md` and `CONTRIBUTING.md` (the fake Slack
     server's `/_fake/config` gains channels and a page size) and S-103's story file (its Verification names the bot as
-    the fake does). It drops `internal/destinations/test.go`, since `501` already comes from `ErrNoTester`, and
-    `internal/connections/connections_test.go`, since the doctor's Slack stubs live in `doctor_test.go` and the tests
-    of the channel list in `slack_test.go`. `internal/destinations/delete.go` stays: it holds `WriterConfig`, which
-    gains the Slack checker.
+    the fake does, and its Contracts say how the SPA shows `missing_scopes`). It drops `internal/destinations/test.go`,
+    since `501` already comes from `ErrNoTester`, and `internal/connections/connections_test.go`, since the doctor's
+    Slack stubs live in `doctor_test.go` and the tests of the channel list in `slack_test.go`.
+    `internal/destinations/delete.go` stays: it holds `WriterConfig`, which gains the Slack checker.
 - With 51 files the story is at the edge of the size signal; the SPA's narrowing cannot be split off, because the spec
   change breaks the TypeScript type check until it lands, and three of the files are documents whose only change is
   the fake Slack server's configuration or the bot's name.

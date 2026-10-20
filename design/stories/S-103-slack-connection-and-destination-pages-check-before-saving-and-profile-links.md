@@ -84,7 +84,9 @@ issue: 312
   "more channels than shown" note when `truncated`, the id field, Mention settings without `all` and groups, the
   limiter); `link-slack-dialog.tsx`; the narrowing branches of S-097 and S-098 replaced by the real forms; the check
   panels show the new steps and codes; the test panel's note; the preview panel's Slack message drawn element by
-  element from the request body, never as markup.
+  element from the request body, never as markup. `destination-check.tsx` passes an item's `missing_scopes` to
+  `checkCodeText` and `CheckDetail` (D396), with a component test; a refused save names the scopes only in the problem's
+  English `detail` unless this story adds `missing_scopes` to the problem's error items.
 - **Texts**: every string through i18next in `en.json` and `ru.json`, the texts of reference.md among them.
 - **End-to-end** (`web/e2e/`): `slack-connection.spec.ts` (create in both modes, check, the shared warning by the fake's
   `extra_connections`, the check before saving), `slack-destination.spec.ts` (picker, refusal, save, Check, test with

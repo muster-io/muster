@@ -9,7 +9,8 @@
 // and two Bridge Destinations of one channel through Connections to the same base URL are one chat. The Connections
 // list names a Connection by its messenger and the host it calls (C-22.FR-1), a Slack Connection "Slack" with its
 // bot's name once a check found it (C-24.FR-1). A Slack Destination posts in "#<channel name>", or "#<channel id>"
-// before a check read the name, and its messenger is "Slack" (C-24.FR-3).
+// before a check read the name, and its messenger is "Slack" (C-24.FR-3); two Slack Destinations of one channel
+// through Connections to the same workspace are one chat.
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -253,6 +254,9 @@ const CONNECTIONS = new Map<string, Connection>(
     brConnection("CN000000000BR2", "br-2", "http://127.0.0.1:18095", "Other chat"),
     brConnection("CN000000000BRU", "br-unread", "http://127.0.0.1:18096", null),
     slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot"),
+    slackConnection("CN000000000SLB", "slack-b", "muster-dev-slack-bot-b"),
+    { ...slackConnection("CN000000000SL2", "slack-2", "other-bot"), team_id: "T0000000002" },
+    slackConnection("CN000000000SLU", "slack-unchecked", null),
   ].map((c) => [c.id, c]),
 );
 
@@ -531,6 +535,57 @@ describe("the chat of a Destination", () => {
         new Map(),
       ),
     ).toEqual([["one", "two"]]);
+  });
+
+  test("keys a Slack chat by its Connection's workspace and the channel id", () => {
+    expect(chatKey(sl("DS7", "a", "CN000000000SLA"), CONNECTIONS)).toBe(
+      "sl:T0000000001:C0FAKEALERTS",
+    );
+    // Two Connections to one workspace: one chat.
+    expect(chatKey(sl("DS7", "a", "CN000000000SLB"), CONNECTIONS)).toBe(
+      "sl:T0000000001:C0FAKEALERTS",
+    );
+    // Another channel, or the same channel id in another workspace: another chat; the channel id keeps its case.
+    expect(
+      chatKey(sl("DS7", "a", "CN000000000SLA", { channel_id: "C0FAKEOTHER" }), CONNECTIONS),
+    ).toBe("sl:T0000000001:C0FAKEOTHER");
+    expect(chatKey(sl("DS7", "a", "CN000000000SL2"), CONNECTIONS)).toBe(
+      "sl:T0000000002:C0FAKEALERTS",
+    );
+    // Without the workspace — no check found it yet, or the Connection is unknown — keyed by the Connection.
+    expect(chatKey(sl("DS7", "a", "CN000000000SLU"), CONNECTIONS)).toBe(
+      "sl:connection:CN000000000SLU:C0FAKEALERTS",
+    );
+    expect(chatKey(sl("DS7", "a", "CN000000000SLA"), new Map())).toBe(
+      "sl:connection:CN000000000SLA:C0FAKEALERTS",
+    );
+  });
+
+  test("warns about two Slack Destinations of one channel through Connections to the same workspace", () => {
+    expect(
+      duplicateChatGroups(
+        [
+          sl("DS1", "sl-alerts", "CN000000000SLA"),
+          sl("DS2", "sl-b-alerts", "CN000000000SLB"),
+          sl("DS3", "sl-other-channel", "CN000000000SLA", { channel_id: "C0FAKEOTHER" }),
+          sl("DS4", "sl-other-workspace", "CN000000000SL2"),
+          sl("DS5", "sl-unchecked", "CN000000000SLU"),
+          sl("DS6", "sl-unchecked-again", "CN000000000SLU"),
+          mm("DS7", "mm-alerts", "CN000000000MMA", { channel_id: "C0FAKEALERTS" }),
+        ],
+        CONNECTIONS,
+      ),
+    ).toEqual([
+      ["sl-alerts", "sl-b-alerts"],
+      ["sl-unchecked", "sl-unchecked-again"],
+    ]);
+    // Connections the reader cannot see: only the same Connection is known to be the same workspace.
+    expect(
+      duplicateChatGroups(
+        [sl("DS1", "one", "CN000000000SLA"), sl("DS2", "two", "CN000000000SLB")],
+        new Map(),
+      ),
+    ).toEqual([]);
   });
 
   test("warns about two Destinations of one Connection in one chat, and not about other channels", () => {

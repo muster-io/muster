@@ -3,12 +3,13 @@
 
 // The label of a Destination across the SPA (D309): its Connection and its channel — Mattermost "#<channel name>",
 // Telegram the channel title or the channel as entered, a Bridge the channel's name or its id, Slack "#<channel name>"
-// or "#<channel id>" —, or the host of an outgoing webhook's URL. The full label "<name> · <messenger> · via <Connection> · <channel>" names a Destination in
-// the Route editor, its pickers and the tooltips of the Alert Group page; a Bridge's messenger is the one its
-// Connection's bridge names, "Bridge" until a check read it (C-22.FR-1). The chat a Destination posts in tells the
-// Route editor when two Destinations would post the same Alert Group twice into one chat (D305): one Telegram chat id,
-// one Mattermost server and channel, or one bridge base URL and channel. The Connections list names a Connection by its
-// messenger and the host it calls, or its Telegram bot; a Slack Connection by its bot's name once a check found it.
+// or "#<channel id>" —, or the host of an outgoing webhook's URL. The full label
+// "<name> · <messenger> · via <Connection> · <channel>" names a Destination in the Route editor, its pickers and the
+// tooltips of the Alert Group page; a Bridge's messenger is the one its Connection's bridge names, "Bridge" until a
+// check read it (C-22.FR-1). The chat a Destination posts in tells the Route editor when two Destinations would post
+// the same Alert Group twice into one chat (D305): one Telegram chat id, one Mattermost server and channel, one bridge
+// base URL and channel, or one Slack workspace and channel. The Connections list names a Connection by its messenger
+// and the host it calls, or its Telegram bot; a Slack Connection by its bot's name once a check found it.
 
 import type { TFunction } from "i18next";
 import { useMemo } from "react";
@@ -134,7 +135,8 @@ export function normalizedServer(serverUrl: string): string {
 /**
  * The chat a Destination posts in: Telegram its numeric chat id once a check found it, else the channel as entered,
  * lower-cased; Mattermost its Connection's server and the channel id; a Bridge its Connection's base URL and the
- * channel id, which is opaque and keeps its case. An outgoing webhook has none.
+ * channel id, which is opaque and keeps its case; Slack its Connection's workspace and the channel id, which keeps its
+ * case. An outgoing webhook has none.
  */
 export function chatKey(
   d: Destination,
@@ -160,6 +162,15 @@ export function chatKey(
           ? normalizedServer(connection.base_url)
           : `connection:${d.connection_id}`;
       return `br:${base}:${d.channel_id}`;
+    }
+    case "slack": {
+      const connection = connections.get(d.connection_id);
+      // Without the workspace, only Destinations of that one Connection are known to share it.
+      const workspace =
+        connection?.type === "slack" && connection.team_id != null
+          ? connection.team_id
+          : `connection:${d.connection_id}`;
+      return `sl:${workspace}:${d.channel_id}`;
     }
     default:
       return undefined;
