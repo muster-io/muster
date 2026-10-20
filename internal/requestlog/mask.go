@@ -37,8 +37,10 @@ var (
 	hooksRe = regexp.MustCompile(`(?i)https?(?::|%3A)` + slash + slash + `hooks\.slack\.com(?:` + slash +
 		`[A-Za-z0-9_.~-]+)*`)
 	// actionsRe is the path of a press's response_url on any host, /actions/<team>/<n>/<token>, as the fake Slack
-	// server of `muster dev` serves it, in any of the forms of slash.
-	actionsRe = regexp.MustCompile(`(?i)` + slash + `actions` + slash + `[A-Z0-9]+` + slash + `[0-9]+` + slash +
+	// server of `muster dev` serves it, in any of the forms of slash. The path is matched in its case and only with a
+	// Slack team id, T or E and capitals or digits, so that other links with an /actions/ path, such as those of
+	// GitHub Actions in an annotation, are kept.
+	actionsRe = regexp.MustCompile(slash + `actions` + slash + `[TE][A-Z0-9]+` + slash + `[0-9]+` + slash +
 		`[A-Za-z0-9]+`)
 	// responseURLRes and slackTokenRes find the value of the member response_url, whatever its address, and of the
 	// member token of a Slack payload: in JSON, and in JSON that a form carries percent-encoded.
@@ -91,7 +93,7 @@ func maskSlack(s string) string {
 	if containsFold(s, "hooks.slack.com") {
 		s = hooksRe.ReplaceAllLiteralString(s, redacted)
 	}
-	if containsFold(s, "actions") {
+	if strings.Contains(s, "actions") {
 		s = actionsRe.ReplaceAllLiteralString(s, redacted)
 	}
 	return s
