@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/accountlinks/dbgen"
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -408,6 +409,48 @@ func TestSlackStartRefusals(t *testing.T) {
 	e.s.cfg.Random = bytes.NewReader(nil)
 	if _, err := e.s.StartSlack(t.Context(), alice, slPID, "dana"); err == nil {
 		t.Error("a code without randomness")
+	}
+}
+
+// TestCodeAttempts is account_link.bridge_code and account_link.slack_code: a code takes five attempts through a
+// Bridge and through Slack, and the code of a messenger without attempts is an error before anything is read or
+// written — even the right code links nothing, takes no attempt and records nothing.
+func TestCodeAttempts(t *testing.T) {
+	if len(codeAttempts) != 2 || codeAttempts[MessengerBridge] != 5 || codeAttempts[MessengerSlack] != 5 {
+		t.Errorf("code attempts %v", codeAttempts)
+	}
+	e := newEnv(t)
+	e.startSL(t, alice, "bob")
+	code := e.sl.code(t)
+	req, audits, locks := e.store.reqs[0], len(e.store.audit), len(e.store.locks)
+	for _, m := range []string{MessengerMattermost, MessengerTelegram, ""} {
+		a := account{messenger: m, conn: connRef{id: slID, publicID: slPID}, space: SpaceSlack(slID),
+			external: req.target.String}
+		out, err := e.s.checkCode(t.Context(), alice, req.id, a, code)
+		if err == nil || !strings.Contains(err.Error(), "no code attempts") || out != (codeOutcome{}) {
+			t.Errorf("a %q code = %+v, %v", m, out, err)
+		}
+	}
+	if got := e.store.reqs[0]; len(e.store.links) != 0 || got.attempts != 0 || got.consumed != nil ||
+		got.voided != nil || len(e.store.audit) != audits || len(e.store.locks) != locks {
+		t.Errorf("a code without attempts changed %+v, links %+v", got, e.store.links)
+	}
+}
+
+// TestSlackLookupLimited is C-24.FR-12 and F-099: a lookup Slack limits, its *delivery.LimitedError, is returned as
+// it is, for the API to answer 503 with its Retry-After; it stores no request, so it counts toward no limit of
+// account_link.slack_code_requests, and sends nothing.
+func TestSlackLookupLimited(t *testing.T) {
+	e := newEnv(t)
+	e.sl.findErr = &delivery.LimitedError{RetryAfter: 30 * time.Second}
+	var le *delivery.LimitedError
+	if _, err := e.s.StartSlack(t.Context(), alice, slPID, "dana"); !errors.As(err, &le) ||
+		le.RetryAfter != 30*time.Second || len(e.store.reqs) != 0 || len(e.sl.sent) != 0 {
+		t.Errorf("a lookup Slack limits = %v, %+v", err, e.store.reqs)
+	}
+	e.sl.findErr = nil
+	if st := e.startSL(t, alice, "dana"); st.AttemptsRemaining != SlackMaxAttempts || len(e.store.reqs) != 1 {
+		t.Errorf("the request after it %+v", st)
 	}
 }
 

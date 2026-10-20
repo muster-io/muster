@@ -556,17 +556,21 @@ type codeOutcome struct {
 }
 
 // codeAttempts are the attempts a code takes, by the messenger of its request: account_link.bridge_code's and
-// account_link.slack_code's.
+// account_link.slack_code's. A messenger missing from it has no limit to apply, and checkCode refuses its code.
 var codeAttempts = map[string]int{MessengerBridge: BridgeMaxAttempts, MessengerSlack: SlackMaxAttempts}
 
 // checkCode is the transaction of ConfirmBridge and ConfirmSlack: it checks code against the request requestID of the
-// requesting User, with the attempts of the messenger of a, and links the account a when it is right. It locks the
-// User before the request, as StartBridgeCode and StartSlack lock the User before they void the User's pending
-// requests, so that a confirmation and a new request of one User do not deadlock.
+// requesting User, with the attempts of the messenger of a, and links the account a when it is right. A messenger
+// without attempts in codeAttempts is an error, before anything is read or written. It locks the User before the
+// request, as StartBridgeCode and StartSlack lock the User before they void the User's pending requests, so that a
+// confirmation and a new request of one User do not deadlock.
 func (s *Service) checkCode(ctx context.Context, r Requester, requestID int64, a account, code string) (codeOutcome,
 	error) {
 	var out codeOutcome
-	limit := codeAttempts[a.messenger]
+	limit, ok := codeAttempts[a.messenger]
+	if !ok {
+		return out, fmt.Errorf("no code attempts for the messenger %q", a.messenger)
+	}
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		out = codeOutcome{}
 		u, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID})

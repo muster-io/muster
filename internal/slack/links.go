@@ -52,9 +52,10 @@ type LinkBots struct {
 }
 
 // Session takes one limiter token of the Connection publicID on the interactive path and runs f with its bot; a 429
-// with Retry-After that a call of f gets holds the Connection, since Slack limits each method per app and workspace
-// (F-099). A Connection that is unknown, deleted or not a Slack one is accountlinks.ErrNoConnection; no token within
-// the budget is a *delivery.LimitedError and runs nothing.
+// with Retry-After that a direct message of f gets holds the Connection, as for any chat.postMessage, while one of a
+// lookup holds nothing, since Slack limits each method per app and workspace (F-099). A Connection that is unknown,
+// deleted or not a Slack one is accountlinks.ErrNoConnection; no token within the budget is a *delivery.LimitedError
+// and runs nothing.
 func (l LinkBots) Session(ctx context.Context, publicID string,
 	f func(ctx context.Context, b accountlinks.SlackBot) error) error {
 	conn, err := l.Conns.SlackLinkConnection(ctx, publicID)
@@ -137,14 +138,14 @@ func (b *linkBot) byEmail(ctx context.Context, email string) (accountlinks.Slack
 	if r.ErrorCode == "users_not_found" {
 		return accountlinks.SlackAccount{}, accountlinks.ErrMessengerUserNotFound
 	}
-	if err := b.failed(method, r); err != nil {
+	if err := b.lookupFailed(method, r); err != nil {
 		return accountlinks.SlackAccount{}, err
 	}
 	var out struct {
 		User *member `json:"user"`
 	}
 	if r.Decode(&out) != nil || out.User == nil {
-		return accountlinks.SlackAccount{}, b.failed(method, notExpected(r, method))
+		return accountlinks.SlackAccount{}, b.lookupFailed(method, notExpected(r, method))
 	}
 	if !out.User.linkable() {
 		return accountlinks.SlackAccount{}, accountlinks.ErrMessengerUserNotFound
@@ -166,14 +167,14 @@ func (b *linkBot) byName(ctx context.Context, name string) (accountlinks.SlackAc
 			args["cursor"] = cursor
 		}
 		r := b.conn.Client.Call(ctx, b.class, method, args)
-		if err := b.failed(method, r); err != nil {
+		if err := b.lookupFailed(method, r); err != nil {
 			return accountlinks.SlackAccount{}, err
 		}
 		var page struct {
 			Members []member `json:"members"`
 		}
 		if r.Decode(&page) != nil {
-			return accountlinks.SlackAccount{}, b.failed(method, notExpected(r, method))
+			return accountlinks.SlackAccount{}, b.lookupFailed(method, notExpected(r, method))
 		}
 		for _, m := range page.Members {
 			if !m.linkable() || (!strings.EqualFold(m.Name, name) && !strings.EqualFold(m.Profile.DisplayName, name)) ||
@@ -217,6 +218,16 @@ func (b *linkBot) direct(ctx context.Context, call, userID, text string) error {
 		return accountlinks.ErrDirectMessageRefused
 	}
 	return b.failed(call, r)
+}
+
+// lookupFailed is failed for a lookup of the account, except that a RetryAfter is only a *delivery.LimitedError, which
+// the Session's outcome does not take: Slack limits users.list and users.lookupByEmail on their own (F-099), so their
+// 429 must not hold the alert deliveries of the Connection, while the person still learns when to try again.
+func (b *linkBot) lookupFailed(method string, r Result) error {
+	if o := r.Outcome(); o.Kind == delivery.OutcomeRetryAfter {
+		return &delivery.LimitedError{RetryAfter: o.RetryAfter}
+	}
+	return b.failed(method, r)
 }
 
 // failed is the error of a call that did not succeed: a RetryAfter is a *delivery.LimitedError and holds the

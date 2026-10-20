@@ -10,16 +10,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
-	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/outbound"
@@ -43,8 +46,67 @@ func (c *linkConns) SlackLinkConnection(_ context.Context, publicID string) (Con
 	return c.conn, nil
 }
 
+// holdsDB is the database of the link tests' interactive path: every take of tokens is granted at once, as
+// deliverytest.Unlimited grants it, and every hold of a limiter bucket is recorded as its subject, "connection 7".
+type holdsDB struct {
+	mu    sync.Mutex
+	holds []string
+}
+
+func (d *holdsDB) Begin(context.Context) (pgx.Tx, error) { return holdsTx{d: d}, nil }
+
+func (d *holdsDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.HasPrefix(sql, "-- name: HoldBucket ") {
+		d.mu.Lock()
+		d.holds = append(d.holds, fmt.Sprint(args[2], " ", args[3]))
+		d.mu.Unlock()
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func (d *holdsDB) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, pgx.ErrNoRows }
+
+func (d *holdsDB) QueryRow(context.Context, string, ...any) pgx.Row { return grantRow{} }
+
+// held are the holds of a limiter bucket so far.
+func (d *holdsDB) held() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.holds)
+}
+
+// holdsTx is a transaction of holdsDB; only what the limiter calls is implemented.
+type holdsTx struct {
+	pgx.Tx
+	d *holdsDB
+}
+
+func (t holdsTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return t.d.Exec(ctx, sql, args...)
+}
+
+func (t holdsTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return t.d.QueryRow(ctx, sql, args...)
+}
+
+func (holdsTx) Commit(context.Context) error { return nil }
+
+func (holdsTx) Rollback(context.Context) error { return nil }
+
+// grantRow is the answer of a take of tokens: taken, due now.
+type grantRow struct{}
+
+func (grantRow) Scan(dest ...any) error {
+	for _, d := range dest {
+		if v, ok := d.(*bool); ok {
+			*v = true
+		}
+	}
+	return nil
+}
+
 // linkPath is the interactive path of the link tests: it records the subject and the outcome of each call and makes
-// it as deliverytest.Unlimited does; err fails every call before it is made.
+// it over holdsDB; err fails every call before it is made.
 type linkPath struct {
 	path *delivery.Interactive
 
@@ -76,11 +138,12 @@ func (p *linkPath) last() delivery.Outcome {
 	return p.outcomes[len(p.outcomes)-1]
 }
 
-// linkEnv is LinkBots over the fake's app b, whose requests the Request log keeps.
+// linkEnv is LinkBots over the fake's app b, whose requests the Request log keeps, with the limiter holds of its path.
 type linkEnv struct {
 	f     *fakeslack.Fake
 	rec   *records
 	conns *linkConns
+	db    *holdsDB
 	path  *linkPath
 	bots  LinkBots
 }
@@ -100,8 +163,10 @@ func newLinkEnvAt(t *testing.T, f *fakeslack.Fake, route Route) *linkEnv {
 	c := newClient(t, n, Settings{BotToken: fakeslack.SecondBotToken, AppToken: fakeslack.SecondAppToken,
 		Owner: outbound.Owner{Connection: 7, PublicID: linkConnID}, Route: route})
 	clk := clock.NewManual(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC))
+	d := &holdsDB{}
 	e := &linkEnv{f: f, rec: rec, conns: &linkConns{conn: Conn{ID: 7, PublicID: linkConnID, Mode: EventModeSocket,
-		Client: c}}, path: &linkPath{path: deliverytest.Unlimited(1, clock.Clocks{Business: clk, Real: clk})}}
+		Client: c}}, db: d, path: &linkPath{path: &delivery.Interactive{OrgID: 1, Store: delivery.NewStore(d, d),
+		Clocks: clock.Clocks{Business: clk, Real: clk}}}}
 	e.bots = LinkBots{Conns: e.conns, Path: e.path}
 	return e
 }
@@ -156,9 +221,9 @@ func TestEmailHandle(t *testing.T) {
 
 // TestFindUserByEmail is C-24.FR-12, AC-14 and F-095: an email in any letter case finds its account with
 // users.lookupByEmail, form-encoded, in the interactive class of the Connection's limiter: its user id, name and
-// display name, the real name when the profile has no display name; an unknown address, a deleted account and an id
-// of another shape are no account; a token without users:read.email and an answer without a user are refusals that
-// name the call and no text of Slack's.
+// display name, the real name when the profile has no display name; an unknown address, a deleted account, a bot,
+// Slackbot and an id of another shape are no account, and nothing is sent to them; a token without users:read.email
+// and an answer without a user are refusals that name the call and no text of Slack's.
 func TestFindUserByEmail(t *testing.T) {
 	e := newLinkEnv(t)
 	for _, c := range []struct {
@@ -200,6 +265,19 @@ func TestFindUserByEmail(t *testing.T) {
 	if _, err := e.find(t, "x@example.org"); !errors.Is(err, accountlinks.ErrMessengerUserNotFound) {
 		t.Errorf("an id of another shape = %v", err)
 	}
+	for name, user := range map[string]string{"a bot": `{"id":"U0BOT","name":"b","is_bot":true}`,
+		"Slackbot": `{"id":"USLACKBOT","name":"slackbot"}`} {
+		if err := e.f.SetFault(fakeserver.Fault{Path: "/api/users.lookupByEmail", Status: http.StatusOK,
+			Body: `{"ok":true,"user":` + user + `}`, Times: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.find(t, "x@example.org"); !errors.Is(err, accountlinks.ErrMessengerUserNotFound) {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+	if reqs := e.requests("chat.postMessage"); len(reqs) != 0 {
+		t.Errorf("sent to an account that is none: %+v", reqs)
+	}
 	if err := e.f.SetFault(fakeserver.Fault{Path: "/api/users.lookupByEmail", Status: http.StatusOK,
 		Body: `{"ok":true}`, Times: 1}); err != nil {
 		t.Fatal(err)
@@ -226,8 +304,8 @@ func TestFindUserByEmail(t *testing.T) {
 // and display name regardless of case over the pages of users.list, 200 asked for a page, the second and third with
 // the cursor the page before named; Slackbot, bots, the app's bot user and deleted accounts are no match; a name two
 // accounts share is ambiguous once the second is found; a cursor that names itself ends the pages; a 429 with
-// Retry-After is a *delivery.LimitedError that holds the Connection, and any other failure a refusal without Slack's
-// text.
+// Retry-After is a *delivery.LimitedError that holds nothing (TestLookupRetryAfter), and any other failure a refusal
+// without Slack's text.
 func TestFindUserByName(t *testing.T) {
 	e := newLinkEnv(t)
 	b := fakeslack.Apps()[1]
@@ -283,9 +361,8 @@ func TestFindUserByName(t *testing.T) {
 	if _, err := e.find(t, "bob"); !errors.As(err, &le) || le.RetryAfter != 30*time.Second {
 		t.Errorf("a 429 = %v", err)
 	}
-	if o := e.path.last(); o.Kind != delivery.OutcomeRetryAfter || o.Scope != delivery.ScopeConnection ||
-		o.RetryAfter != 30*time.Second || o.Error != "" {
-		t.Errorf("the outcome of a 429 %+v", o)
+	if o := e.path.last(); o.Kind != delivery.OutcomeOK || len(e.db.held()) != 0 {
+		t.Errorf("a 429 of users.list held %v with the outcome %+v", e.db.held(), o)
 	}
 	if err := e.f.SetFault(fakeserver.Fault{Path: "/api/users.list", Status: http.StatusBadGateway,
 		Body: "bad gateway", Times: 1}); err != nil {
@@ -325,6 +402,46 @@ func TestFindUserPages(t *testing.T) {
 	var me *accountlinks.MessengerError
 	if _, err := e.find(t, "bob"); !errors.As(err, &me) || me.Call != "users.list" || pages != maxUserPages {
 		t.Errorf("an endless cursor = %v after %d pages", err, pages)
+	}
+}
+
+// TestLookupRetryAfter is C-24.FR-12 and F-099: a 429 with Retry-After of users.lookupByEmail or users.list is a
+// *delivery.LimitedError with Slack's delay, which the API answers 503 with Retry-After (TestSlackAccountLinks), and
+// holds no limiter bucket, since Slack limits each method on its own: the Connection's alert deliveries go on, and so
+// does the next lookup; a 429 of the direct message holds the Connection, as any chat.postMessage does.
+func TestLookupRetryAfter(t *testing.T) {
+	e := newLinkEnv(t)
+	for _, c := range []struct{ method, handle string }{
+		{"users.lookupByEmail", "alice@example.org"}, {"users.list", "bob"},
+	} {
+		if err := e.f.SetFault(fakeserver.Fault{Path: "/api/" + c.method, Status: http.StatusTooManyRequests,
+			RetryAfterSeconds: 30, Body: `{"ok":false,"error":"ratelimited"}`, Times: 1}); err != nil {
+			t.Fatal(err)
+		}
+		var le *delivery.LimitedError
+		if _, err := e.find(t, c.handle); !errors.As(err, &le) || le.RetryAfter != 30*time.Second {
+			t.Errorf("a 429 of %s = %v", c.method, err)
+		}
+		if o := e.path.last(); o.Kind != delivery.OutcomeOK || len(e.db.held()) != 0 {
+			t.Errorf("a 429 of %s held %v with the outcome %+v", c.method, e.db.held(), o)
+		}
+		if _, err := e.find(t, c.handle); err != nil {
+			t.Errorf("the lookup after a 429 of %s = %v", c.method, err)
+		}
+	}
+	if err := e.f.SetFault(fakeserver.Fault{Path: "/api/chat.postMessage", Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 10, Body: `{"ok":false,"error":"ratelimited"}`, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var le *delivery.LimitedError
+	if err := e.run(t, func(ctx context.Context, b accountlinks.SlackBot) error {
+		return b.SendCode(ctx, fakeslack.UserAlice, "ABCD2345", "code ABCD2345")
+	}); !errors.As(err, &le) || le.RetryAfter != 10*time.Second {
+		t.Errorf("a 429 of the direct message = %v", err)
+	}
+	if o := e.path.last(); o.Kind != delivery.OutcomeRetryAfter || o.Scope != delivery.ScopeConnection ||
+		o.RetryAfter != 10*time.Second || o.Error != "" || !slices.Equal(e.db.held(), []string{"connection 7"}) {
+		t.Errorf("a 429 of the direct message held %v with the outcome %+v", e.db.held(), o)
 	}
 }
 
