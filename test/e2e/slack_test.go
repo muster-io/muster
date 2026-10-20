@@ -8,15 +8,21 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/url"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	buttonids "github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
+	"github.com/muster-io/muster/internal/slack"
 )
 
 // slk drives a Slack Connection "sl" of the fake Slack server's second app and its Destination "alerts" on the channel
@@ -667,4 +673,576 @@ func optionValues(el slackElement) []string {
 		out[i] = o.Value
 	}
 	return out
+}
+
+// The answers of C-18 and C-24.FR-13 that the presses below meet, as the fake shows them.
+const (
+	slackForbidden   = "You are not permitted to do this"
+	slackNotVerified = "This button could not be verified; nothing was changed."
+	slackTest        = "This is a test message; nothing was changed"
+	slackDisabledRU  = "Ваша учётная запись Muster отключена"
+	slackStillOnIt   = "Done: Still on it"
+)
+
+// slackNotLinked is the answer to an account without an Account link.
+var slackNotLinked = "Your Slack account is not linked to Muster. Link it in your profile: " + devmode.PublicURL + "/profile"
+
+// httpMode switches the Connection to the http event mode with the Slack signing secret of the fake's second app, and
+// points the app's request_url at its callback.
+func (s *slk) httpMode() {
+	s.t.Helper()
+	etag := s.api.do(http.MethodGet, "/api/v1/connections/"+s.conn, "").header.Get("ETag")
+	conn := s.api.json(http.MethodPut, "/api/v1/connections/"+s.conn, `{"type":"slack","name":"sl","event_mode":"http",
+		"slack_signing_secret":"`+fakeslack.SecondSigningSecret+`","proxy":{"enabled":false},
+		"limiter":{"limit":50,"per_seconds":1}}`, http.StatusOK, "If-Match", etag)
+	if conn["event_mode"] != "http" || conn["callback_url"] != devmode.IngestURL+slack.CallbackPath+s.conn {
+		s.t.Fatalf("the connection in http mode %v", conn)
+	}
+	s.requestURL(s.conn)
+}
+
+// requestURL points the request_url of the fake's second app at the callback of the Connection conn.
+func (s *slk) requestURL(conn string) {
+	s.t.Helper()
+	s.fake(http.MethodPut, s.fs+"/config", `{"request_url":{"b":"`+s.r.Ingest+slack.CallbackPath+conn+`"}}`)
+}
+
+// press presses action on the message ts of the channel alerts of the fake's second app as user, with the extra
+// fields of /_fake/press, and returns Muster's answer.
+func (s *slk) press(ts, action, user string, extra map[string]any) fakeslack.PressResult {
+	s.t.Helper()
+	body := map[string]any{"channel": fakeslack.ChannelAlerts, "ts": ts, "action": action, "user": user}
+	maps.Copy(body, extra)
+	b, _ := json.Marshal(body)
+	a := call(s.t, http.MethodPost, s.fs+"/press", string(b))
+	if a.status != http.StatusOK {
+		s.t.Fatalf("press %s = %d %s", b, a.status, a.body)
+	}
+	var res fakeslack.PressResult
+	decode(s.t, a, &res)
+	return res
+}
+
+// pressed presses as press does and fails unless Muster confirmed the press at once.
+func (s *slk) pressed(ts, action, user string, extra map[string]any) {
+	s.t.Helper()
+	if res := s.press(ts, action, user, extra); res.Status != http.StatusOK || res.Body != "" {
+		s.t.Fatalf("press %s on %s by %s = %+v", action, ts, user, res)
+	}
+}
+
+func (s *slk) ephemerals() []fakeslack.Ephemeral {
+	s.t.Helper()
+	var out []fakeslack.Ephemeral
+	decode(s.t, call(s.t, http.MethodGet, s.fs+"/ephemeral", ""), &out)
+	return out
+}
+
+func (s *slk) responses() []fakeslack.Response {
+	s.t.Helper()
+	var out []fakeslack.Response
+	decode(s.t, call(s.t, http.MethodGet, s.fs+"/responses", ""), &out)
+	return out
+}
+
+// answered waits until the fake showed n ephemeral messages after the first before, and returns them, by user and
+// then text.
+func (s *slk) answered(before, n int) []fakeslack.Ephemeral {
+	s.t.Helper()
+	var got []fakeslack.Ephemeral
+	eventually(s.t, fmt.Sprintf("%d ephemeral answers", n), func() bool {
+		got = s.ephemerals()
+		return len(got) >= before+n
+	})
+	got = got[before:]
+	slices.SortFunc(got, func(a, b fakeslack.Ephemeral) int {
+		return strings.Compare(a.User+a.Text, b.User+b.Text)
+	})
+	return got
+}
+
+// pressLines waits until n slack_press lines have the Alert Group group — empty for a press bound to none — and the
+// outcome, and returns them.
+func (s *slk) pressLines(group, outcome string, n int) []map[string]any {
+	s.t.Helper()
+	var got []map[string]any
+	eventually(s.t, fmt.Sprintf("%d slack_press lines %s", n, outcome), func() bool {
+		got = nil
+		for _, l := range logLines(s.r, "slack_press") {
+			if g, _ := l["group"].(string); g == group && l["outcome"] == outcome {
+				got = append(got, l)
+			}
+		}
+		return len(got) >= n
+	})
+	return got
+}
+
+// pressLine waits for the first slack_press line of the Alert Group group with the outcome.
+func (s *slk) pressLine(group, outcome string) map[string]any {
+	s.t.Helper()
+	return s.pressLines(group, outcome, 1)[0]
+}
+
+// rejected are the reasons of the slack_press_rejected lines of the Connection conn, "" for an unknown one.
+func (s *slk) rejected(conn string) []string {
+	var out []string
+	for _, l := range logLines(s.r, "slack_press_rejected") {
+		if l["connection"] == conn {
+			out = append(out, fmt.Sprint(l["reason"]))
+		}
+	}
+	return out
+}
+
+// audit is the newest Audit log entry of action.
+func (s *slk) audit(action string) map[string]any {
+	s.t.Helper()
+	items := s.api.json(http.MethodGet, "/api/v1/audit-log?limit=1&action="+action, "", http.StatusOK)["items"].([]any)
+	if len(items) == 0 {
+		s.t.Fatalf("no %s entry", action)
+	}
+	return items[0].(map[string]any)
+}
+
+// replyActions are the action ids and values of the actions block of a Thread reply.
+func replyActions(r fakeslack.Reply) map[string]string {
+	var blocks []slackBlock
+	_ = json.Unmarshal(r.Blocks, &blocks)
+	out := map[string]string{}
+	for _, b := range blocks {
+		for _, el := range b.Elements {
+			if b.Type == "actions" {
+				out[el.ActionID] = el.Value
+			}
+		}
+	}
+	return out
+}
+
+// buttonValues are the signed action ids of every button and option of the channel's messages and their replies.
+func (s *slk) buttonValues() []string {
+	s.t.Helper()
+	var out []string
+	for _, m := range s.messages() {
+		for _, el := range m.actions() {
+			out = append(out, el.Value)
+			out = append(out, optionValues(el)...)
+		}
+		for _, r := range m.Replies {
+			out = append(out, slices.Collect(maps.Values(replyActions(r)))...)
+		}
+	}
+	return slices.DeleteFunc(out, func(v string) bool { return v == "" })
+}
+
+// actionIDs are the action ids of the Root message ts.
+func (s *slk) actionIDs(ts string) []string {
+	var out []string
+	for _, el := range s.message(ts).actions() {
+		out = append(out, el.ActionID)
+	}
+	return out
+}
+
+// waitActions waits until the Root message ts offers the action, after its edit.
+func (s *slk) waitActions(ts, action string) {
+	s.t.Helper()
+	eventually(s.t, "the action "+action+" on "+ts, func() bool { return slices.Contains(s.actionIDs(ts), action) })
+}
+
+// presetEnd is the end of the Snooze preset tomorrow from now in loc, the working day starting at 09:00 (C-10.FR-17).
+func presetEnd(now time.Time, loc *time.Location) time.Time {
+	y, m, d := now.In(loc).Date()
+	for day := d; ; day++ {
+		if end := time.Date(y, m, day, 9, 0, 0, 0, loc); end.After(now) {
+			return end
+		}
+	}
+}
+
+// slackLeak finds what no record of the Request log may hold: a response_url's path in any form, a Slack signature,
+// the fake's Slack signing secret and verification token of either app.
+var slackLeak = regexp.MustCompile(`actions%2F|/actions/|actions\\/|v0=[0-9a-f]{64}|muster-dev-slack-signing-secret|` +
+	`muster-dev-slack-verification-token`)
+
+// TestSlackPresses is the Verification of S-100 against `muster dev` and the fake Slack server, with E2E_REPLICAS=2 on
+// two replicas: the Connection "sl" in http mode, presses of the fake's people sent to its callback signed with the
+// app's Slack signing secret. A press of Ack by an account linked to a Responder runs as that User with the Transport
+// slack and is not answered (C-24.FR-9, FR-10, AC-11, AC-12); a wrong signature, a timestamp 6 minutes old or ahead, an
+// unknown and a deleted Connection and one in socket mode are refused alike, a body without a payload is 400
+// (C-24.AC-11); the Snooze menu's 4h and tomorrow (C-24.AC-12); a Viewer, an account without a link, a disabled User in
+// Russian, another message's value and a tampered value are answered privately (C-24.FR-11, AC-12, AC-13, C-18.FR-8);
+// a refused chat.postEphemeral falls back to the response_url (C-24.AC-13); the Reminder's buttons (C-24.FR-5, FR-10);
+// a test message (C-24.AC-16); and the Request log, masked (C-24.FR-14, AC-17).
+func TestSlackPresses(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	s := newSlack(t, h, r)
+	t.Cleanup(func() {
+		restore(t, http.MethodDelete, h.Fakes.Slack+"/_fake/faults", "")
+		restore(t, http.MethodPut, h.Fakes.Slack+"/_fake/config", `{"request_url":{"b":null}}`)
+	})
+	s.httpMode()
+	ids := map[string]string{}
+	for _, u := range []struct{ login, role, external, link string }{
+		{"alice", "responder", fakeslack.UserAlice, "AK0000000000S1"},
+		{"vic", "viewer", fakeslack.UserBob, "AK0000000000S2"},
+		{"dora", "responder", fakeslack.UserDora, "AK0000000000S4"},
+	} {
+		ids[u.login] = s.api.json(http.MethodPost, "/api/v1/users", `{"name":"`+u.login+`","login":"`+u.login+
+			`","role":"`+u.role+`"}`, http.StatusCreated)["id"].(string)
+		h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
+			username, display_name, created_at) SELECT 1, '`+u.link+`', u.id, 'slack', c.id, '`+u.external+`', '`+
+			u.login+`', u.name, now() FROM users u, connections c WHERE u.login = '`+u.login+`' AND c.public_id = '`+
+			s.conn+`'`)
+	}
+	h.exec(t, `UPDATE users SET time_zone = 'Asia/Tokyo' WHERE login = 'alice'`)
+	h.exec(t, `UPDATE users SET language = 'ru' WHERE login = 'dora'`)
+	var g, g2 string
+	var root, root2 slackMessage
+
+	t.Run("http_press", func(t *testing.T) {
+		s := s.on(t)
+		s.fire("p1", "DiskFull", "q1", `{"team":"sl","cluster":"a","pod":"q1"}`)
+		g = s.groupOf("a")
+		root = s.root(s.number(g), "DiskFull")
+		before := len(s.ephemerals())
+		s.pressed(root.TS, "ack", fakeslack.UserAlice, nil)
+		eventually(t, "the acknowledgement by alice", func() bool { return s.alertGroup(g)["status"] == "acknowledged" })
+		if owner, _ := s.alertGroup(g)["owner"].(map[string]any); owner["login"] != "alice" {
+			t.Errorf("owner %v", owner)
+		}
+		var acked []timelineEntry
+		for _, x := range s.timeline(g, "") {
+			if x.Kind == "status" && x.Event == "acknowledged" {
+				acked = append(acked, x)
+			}
+		}
+		if len(acked) != 1 || acked[0].Actor.Transport != "slack" || acked[0].Actor.Name != "alice" {
+			t.Errorf("acknowledged %+v", acked)
+		}
+		if a := s.audit("alert_group.acknowledged"); a["transport"] != "slack" ||
+			a["actor"].(map[string]any)["name"] != "alice" {
+			t.Errorf("audit %v", a)
+		}
+		if got := r.Metric(t, `muster_commands_total{command="acknowledge",transport="slack",outcome="done"}`); got !=
+			"1" {
+			t.Errorf("muster_commands_total = %q", got)
+		}
+		if l := s.pressLine(g, "done"); l["connection"] != s.conn || l["command"] != "acknowledge" ||
+			l["answer"] != nil || l["error"] != nil {
+			t.Errorf("slack_press %v", l)
+		}
+		if got := s.ephemerals(); len(got) != before {
+			t.Errorf("a successful press was answered: %+v", got[before:])
+		}
+		s.waitActions(root.TS, "unack")
+	})
+
+	t.Run("refused_requests", func(t *testing.T) {
+		s := s.on(t)
+		entries := len(s.timeline(g, ""))
+		var bodies []string
+		refuse := func(extra map[string]any) {
+			t.Helper()
+			res := s.press(root.TS, "resolve", fakeslack.UserAlice, extra)
+			if res.Status != http.StatusUnauthorized {
+				t.Errorf("%v = %+v", extra, res)
+			}
+			bodies = append(bodies, res.Body)
+		}
+		refuse(map[string]any{"signature": "wrong"})
+		refuse(map[string]any{"timestamp_offset_seconds": -360})
+		refuse(map[string]any{"timestamp_offset_seconds": 360})
+		s.requestURL("CN0000000000ZZ")
+		refuse(nil)
+		gone := s.api.json(http.MethodPost, "/api/v1/connections", `{"type":"slack","name":"gone","event_mode":"http",
+			"bot_token":"`+fakeslack.SecondBotToken+`","slack_signing_secret":"`+fakeslack.SecondSigningSecret+`",
+			"proxy":{"enabled":false},"limiter":{"limit":50,"per_seconds":1}}`, http.StatusCreated)["id"].(string)
+		s.api.json(http.MethodDelete, "/api/v1/connections/"+gone, "", http.StatusNoContent)
+		s.requestURL(gone)
+		refuse(nil)
+		dev := s.connectionNamed(devmode.SlackConnectionName)
+		s.requestURL(dev)
+		refuse(nil)
+		s.requestURL(s.conn)
+		for _, b := range bodies[1:] {
+			if b != bodies[0] || !strings.Contains(b, `"status":401`) {
+				t.Errorf("refusals answered %q and %q", bodies[0], b)
+			}
+		}
+		body := "foo=bar"
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		if a := call(t, http.MethodPost, r.Ingest+slack.CallbackPath+s.conn, body, "Content-Type",
+			"application/x-www-form-urlencoded", slack.HeaderTimestamp, ts, slack.HeaderSignature,
+			fakeslack.Sign(fakeslack.SecondSigningSecret, ts, []byte(body))); a.status != http.StatusBadRequest {
+			t.Errorf("no payload = %d %s", a.status, a.body)
+		}
+		eventually(t, "the refusals in the log", func() bool {
+			return len(s.rejected(s.conn)) >= 4 && len(s.rejected("")) >= 2 && len(s.rejected(dev)) >= 1
+		})
+		mine := s.rejected(s.conn)
+		slices.Sort(mine)
+		if !slices.Equal(mine, []string{"bad_signature", "no_payload", "stale", "stale"}) ||
+			!slices.Equal(s.rejected(""), []string{"unknown_connection", "unknown_connection"}) ||
+			!slices.Equal(s.rejected(dev), []string{"wrong_mode"}) {
+			t.Errorf("slack_press_rejected %v, %v, %v", mine, s.rejected(""), s.rejected(dev))
+		}
+		if st := s.alertGroup(g)["status"]; st != "acknowledged" || len(s.timeline(g, "")) != entries {
+			t.Errorf("a refused press changed %s: %v", g, st)
+		}
+	})
+
+	t.Run("menu_and_presets", func(t *testing.T) {
+		s := s.on(t)
+		before := readClock(t, r).Now
+		s.pressed(root.TS, "snooze", fakeslack.UserAlice, map[string]any{"option": 1})
+		eventually(t, "the snooze for 4h", func() bool { return s.alertGroup(g)["status"] == "snoozed" })
+		after := readClock(t, r).Now
+		until, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(s.alertGroup(g)["snooze_until"]))
+		if until.Before(before.Add(4*time.Hour-time.Second)) || until.After(after.Add(4*time.Hour+time.Second)) {
+			t.Errorf("snoozed until %v, want 4 hours after %v", until, before)
+		}
+		if a := s.audit("alert_group.snoozed"); a["transport"] != "slack" {
+			t.Errorf("audit %v", a)
+		}
+		s.waitActions(root.TS, "unsnooze")
+		s.pressed(root.TS, "unsnooze", fakeslack.UserAlice, nil)
+		eventually(t, "the unsnooze", func() bool { return s.alertGroup(g)["status"] != "snoozed" })
+		s.waitActions(root.TS, "snooze")
+		tokyo, err := time.LoadLocation("Asia/Tokyo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		before = readClock(t, r).Now
+		s.pressed(root.TS, "snooze", fakeslack.UserAlice, map[string]any{"option": 3})
+		eventually(t, "the snooze until tomorrow", func() bool { return s.alertGroup(g)["status"] == "snoozed" })
+		after = readClock(t, r).Now
+		until, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(s.alertGroup(g)["snooze_until"]))
+		if want := presetEnd(before, tokyo); !until.Equal(want) && !until.Equal(presetEnd(after, tokyo)) {
+			t.Errorf("snoozed until %v, want %v", until, want)
+		}
+		a := s.audit("alert_group.snoozed")
+		if d, _ := a["details"].(map[string]any); a["transport"] != "slack" || d["preset"] != "tomorrow" ||
+			d["time_zone"] != "Asia/Tokyo" {
+			t.Errorf("audit %v", a)
+		}
+		s.command(g, "unsnooze")
+	})
+
+	t.Run("answers", func(t *testing.T) {
+		s := s.on(t)
+		s.fire("p2", "CpuHigh", "q2", `{"team":"sl","cluster":"b","pod":"q2"}`)
+		g2 = s.groupOf("b")
+		root2 = s.root(s.number(g2), "CpuHigh")
+		s.api.json(http.MethodPost, "/api/v1/users/"+ids["dora"]+"/disable", "", http.StatusOK)
+		entries, entries2 := len(s.timeline(g, "")), len(s.timeline(g2, ""))
+		var resolve string
+		for _, el := range root2.actions() {
+			if el.ActionID == "resolve" {
+				resolve = el.Value
+			}
+		}
+		tampered := resolve[:len(resolve)-4] + "AAAA"
+		if tampered == resolve {
+			tampered = resolve[:len(resolve)-4] + "BBBB"
+		}
+		before := len(s.ephemerals())
+		s.pressed(root2.TS, "resolve", fakeslack.UserBob, nil)
+		s.pressed(root2.TS, "resolve", fakeslack.UserCarol, nil)
+		s.pressed(root2.TS, "resolve", fakeslack.UserDora, nil)
+		s.pressed(root2.TS, "resolve", fakeslack.UserAlice, map[string]any{"value_of_ts": root.TS})
+		s.pressed(root2.TS, "resolve", fakeslack.UserAlice, map[string]any{"value": tampered})
+		got := s.answered(before, 5)
+		want := []string{fakeslack.UserAlice + " " + slackNotVerified, fakeslack.UserAlice + " " + slackNotVerified,
+			fakeslack.UserBob + " " + slackForbidden, fakeslack.UserCarol + " " + slackNotLinked,
+			fakeslack.UserDora + " " + slackDisabledRU}
+		for i, e := range got {
+			if e.User+" "+e.Text != want[i] || e.Channel != fakeslack.ChannelAlerts || e.ThreadTS != nil || e.App != "b" {
+				t.Errorf("answer %d %+v, want %s", i, e, want[i])
+			}
+		}
+		for _, o := range []string{"forbidden", "not_linked", "disabled"} {
+			if l := s.pressLine(g2, o); l["answer"] != "ephemeral" || l["command"] != "resolve" {
+				t.Errorf("slack_press %v", l)
+			}
+		}
+		for _, l := range s.pressLines("", "not_verified", 2) {
+			if l["answer"] != "ephemeral" || l["connection"] != s.conn {
+				t.Errorf("slack_press %v", l)
+			}
+		}
+		if st := s.alertGroup(g2)["status"]; st != "firing" || s.alertGroup(g)["status"] != "acknowledged" ||
+			len(s.timeline(g2, "")) != entries2 || len(s.timeline(g, "")) != entries {
+			t.Errorf("a refused press changed %s: %v", g2, st)
+		}
+	})
+
+	t.Run("response_url_fallback", func(t *testing.T) {
+		s := s.on(t)
+		s.fault("chat.postEphemeral", http.StatusOK, "user_not_in_channel", 0)
+		before, answers := len(s.responses()), len(s.ephemerals())
+		s.pressed(root2.TS, "resolve", fakeslack.UserCarol, nil)
+		var got []fakeslack.Response
+		eventually(t, "the answer to the response_url", func() bool {
+			got = s.responses()
+			return len(got) > before
+		})
+		last := got[len(got)-1]
+		if last.ResponseType == nil || *last.ResponseType != "ephemeral" || last.ReplaceOriginal == nil ||
+			*last.ReplaceOriginal || last.Text != slackNotLinked || last.User != fakeslack.UserCarol ||
+			last.Channel != fakeslack.ChannelAlerts {
+			t.Errorf("response_url answer %+v", last)
+		}
+		if l := s.pressLines(g2, "not_linked", 2)[1]; l["answer"] != "response_url" ||
+			!strings.Contains(fmt.Sprint(l["error"]), "user_not_in_channel") {
+			t.Errorf("slack_press %v", l)
+		}
+		if n := len(s.ephemerals()); n != answers {
+			t.Errorf("%d ephemeral answers, want %d", n, answers)
+		}
+		for _, req := range fakeRequests(t, h.Fakes.Slack) {
+			if strings.Contains(req.Body, `"replace_original":true`) || strings.Contains(req.Body, "delete_original") {
+				t.Errorf("a request replaces the message: %s %s", req.Path, req.Body)
+			}
+		}
+	})
+
+	t.Run("reminder_buttons", func(t *testing.T) {
+		s := s.on(t)
+		s.fire("p3", "MemHigh", "q3", `{"team":"sl","cluster":"c","pod":"q3"}`)
+		g3 := s.groupOf("c")
+		root3 := s.root(s.number(g3), "MemHigh")
+		s.pressed(root3.TS, "ack", fakeslack.UserAlice, nil)
+		eventually(t, "the acknowledgement of #3", func() bool { return s.alertGroup(g3)["status"] == "acknowledged" })
+		s.settled()
+		advance(t, r, 600)
+		var reminder fakeslack.Reply
+		eventually(t, "the reminder", func() bool {
+			for _, rp := range s.message(root3.TS).Replies {
+				if a := replyActions(rp); a["still_on_it"] != "" && a["unack"] != "" {
+					reminder = rp
+					return true
+				}
+			}
+			return false
+		})
+		before := len(s.ephemerals())
+		s.pressed(reminder.TS, "still_on_it", fakeslack.UserBob, nil)
+		if got := s.answered(before, 1); got[0].Text != slackForbidden || got[0].ThreadTS == nil ||
+			*got[0].ThreadTS != root3.TS || got[0].User != fakeslack.UserBob {
+			t.Errorf("vic's answer %+v", got[0])
+		}
+		s.pressed(reminder.TS, "still_on_it", fakeslack.UserAlice, nil)
+		if got := s.answered(before+1, 1); got[0].Text != slackStillOnIt || got[0].ThreadTS == nil ||
+			*got[0].ThreadTS != root3.TS || got[0].User != fakeslack.UserAlice {
+			t.Errorf("alice's answer %+v", got[0])
+		}
+		if x := s.timeline(g3, "&kind=timers"); len(x) == 0 || x[0].Event != "reminder_answered" ||
+			x[0].Actor.Transport != "slack" || x[0].Actor.Name != "alice" {
+			t.Errorf("the answer of the Reminder %+v", x)
+		}
+		s.pressed(reminder.TS, "unack", fakeslack.UserAlice, nil)
+		eventually(t, "the unacknowledgement", func() bool { return s.alertGroup(g3)["status"] == "firing" })
+		var unack map[string]any
+		eventually(t, "slack_press of the unack", func() bool {
+			for _, l := range logLines(s.r, "slack_press") {
+				if l["group"] == g3 && l["command"] == "unacknowledge" {
+					unack = l
+				}
+			}
+			return unack != nil
+		})
+		if unack["outcome"] != "done" || unack["answer"] != nil {
+			t.Errorf("slack_press %v", unack)
+		}
+	})
+
+	t.Run("test_message", func(t *testing.T) {
+		s := s.on(t)
+		s.settled()
+		entries := len(s.timeline(g, ""))
+		s.api.json(http.MethodPost, "/api/v1/destinations/"+s.dest+"/tests", `{"source":`+example+`}`, http.StatusOK)
+		var test slackMessage
+		eventually(t, "the test message", func() bool {
+			for _, m := range s.messages() {
+				if strings.Contains(m.Text, "Test message") {
+					test = m
+				}
+			}
+			return test.TS != ""
+		})
+		before := len(s.ephemerals())
+		s.pressed(test.TS, "ack", fakeslack.UserAlice, nil)
+		if got := s.answered(before, 1); got[0].Text != slackTest || got[0].ThreadTS != nil {
+			t.Errorf("the answer %+v", got[0])
+		}
+		if l := s.pressLine("", "test"); l["command"] != "acknowledge" || l["answer"] != "ephemeral" {
+			t.Errorf("slack_press %v", l)
+		}
+		if got := len(s.timeline(g, "")); got != entries {
+			t.Errorf("the press changed a timeline: %d entries, want %d", got, entries)
+		}
+	})
+
+	t.Run("request_log", func(t *testing.T) {
+		s := s.on(t)
+		records := s.requestLog("connection=" + s.conn)
+		inbound := ofOperation(records, "interactive")
+		statuses := map[float64]int{}
+		for _, rec := range inbound {
+			statuses[rec["status"].(float64)]++
+			full, _ := s.requestRecord(rec["id"].(string))
+			headers, _ := full["request_headers"].(map[string]any)
+			sig, _ := headers["X-Slack-Signature"].([]any)
+			form, err := url.ParseQuery(full["request_body"].(string))
+			var p map[string]any
+			if rec["direction"] != "inbound" || rec["connection_id"] != s.conn || rec["destination"] != nil ||
+				rec["alert_group"] != nil || len(sig) != 1 || sig[0] != "[redacted]" {
+				t.Errorf("inbound record %v, X-Slack-Signature %v", rec, sig)
+			}
+			if rec["status"] != 400.0 && (err != nil || json.Unmarshal([]byte(form.Get("payload")), &p) != nil ||
+				p["token"] != "[redacted]" || p["response_url"] != "[redacted]" || p["type"] != "block_actions") {
+				t.Errorf("inbound body %v", full["request_body"])
+			}
+		}
+		if statuses[200] < 10 || statuses[401] != 3 || statuses[400] != 1 {
+			t.Errorf("inbound statuses %v", statuses)
+		}
+		linked := func(op, group string) []map[string]any {
+			var out []map[string]any
+			for _, rec := range ofOperation(records, op) {
+				d, _ := rec["destination"].(map[string]any)
+				ag, _ := rec["alert_group"].(map[string]any)
+				if d != nil && d["id"] == s.dest && ag != nil && ag["id"] == group {
+					out = append(out, rec)
+				}
+			}
+			return out
+		}
+		if got := linked("chat.postEphemeral", g2); len(got) < 5 {
+			t.Errorf("%d chat.postEphemeral records of %s", len(got), g2)
+		}
+		answers := linked("response_url", g2)
+		if len(answers) != 1 || answers[0]["status"] != 200.0 || strings.Contains(fmt.Sprint(answers[0]["url"]),
+			"/actions/") || !strings.HasSuffix(fmt.Sprint(answers[0]["url"]), "[redacted]") {
+			t.Errorf("response_url records %v", answers)
+		}
+		values := s.buttonValues()
+		if len(values) == 0 {
+			t.Fatal("no button values")
+		}
+		for _, rec := range records {
+			_, text := s.requestRecord(rec["id"].(string))
+			if m := slackLeak.FindString(text); m != "" {
+				t.Errorf("record %s %s holds %q", rec["id"], rec["operation"], m)
+			}
+			for _, v := range values {
+				if strings.Contains(text, v) {
+					t.Errorf("record %s %s holds a signed action id", rec["id"], rec["operation"])
+				}
+			}
+		}
+	})
 }
