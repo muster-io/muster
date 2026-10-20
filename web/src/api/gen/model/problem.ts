@@ -48,7 +48,7 @@ export interface Problem {
   /** Set on `rate-limited`; equals the `Retry-After` header. */
   retry_after_seconds?: number;
   /**
-     * Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+     * Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
      * @minimum 0
      */
   attempts_remaining?: number;

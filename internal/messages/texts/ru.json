@@ -4,6 +4,7 @@
   "accountLink.invalid": "Эта ссылка недействительна или устарела. Начните заново в своём профиле Muster.",
   "accountLink.linkedBridge": "Учётная запись связана с пользователем Muster {name} ({login})",
   "accountLink.linkedMattermost": "Учётная запись связана с пользователем Muster {name}",
+  "accountLink.linkedSlack": "Учётная запись связана с пользователем Muster {name}",
   "accountLink.linkedTelegram": "Учётная запись связана с пользователем Muster {name} ({login})",
   "alerts.fullList": "Полный список в Muster",
   "alerts.more": "и ещё {count}",

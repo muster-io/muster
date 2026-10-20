@@ -271,6 +271,24 @@ func (s *Service) SlackPressConnection(ctx context.Context, publicID string) (sl
 	return conn, secret, nil
 }
 
+// SlackLinkConnection is the Slack Connection publicID with its client, kept until the Connection changes, for the
+// calls of an Account link (slack.LinkConnections) in either event mode; one that is unknown, deleted or not a Slack
+// Connection is slack.ErrNoConnection.
+func (s *Service) SlackLinkConnection(ctx context.Context, publicID string) (slack.Conn, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) || err == nil && row.Type != TypeSlack {
+		return slack.Conn{}, slack.ErrNoConnection
+	}
+	if err != nil {
+		return slack.Conn{}, err
+	}
+	c, err := s.cachedSlackClient(row.ID, row.Version, func() (*slack.Client, error) { return s.slackClient(row) })
+	if err != nil {
+		return slack.Conn{}, err
+	}
+	return slack.Conn{ID: row.ID, PublicID: row.PublicID, Mode: row.SlackEventMode.String, Client: c}, nil
+}
+
 // SocketConnections lists the Slack Connections in socket mode that are not deleted, for the Leader's sockets
 // (slack.SocketSource): each with its client, kept until the Connection changes, whose requests — apps.connections.open
 // among them — go to the Request log of the Connection, and its version. A Connection whose client cannot be built has

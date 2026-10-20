@@ -65,9 +65,9 @@ const (
 var (
 	// ErrCodeNotOffered is a code request through a Bridge Connection whose info offers no code.
 	ErrCodeNotOffered = errors.New("the bridge offers no link code")
-	// ErrDirectMessageRefused is a direct message the bridge refused as forbidden: the account cannot receive one from
-	// the bot.
-	ErrDirectMessageRefused = errors.New("the bridge refused the direct message")
+	// ErrDirectMessageRefused is a direct message the bridge refused as forbidden, or Slack refused for the account:
+	// the account cannot receive one from the bot.
+	ErrDirectMessageRefused = errors.New("the messenger refused the direct message")
 )
 
 // lookupNames name the kinds of handle in the detail of handle_not_found.
@@ -543,22 +543,34 @@ func (s *Service) ConfirmBridge(ctx context.Context, r Requester, requestPublicI
 	return Link{}, invalid(out.left)
 }
 
-// codeOutcome is how the check of a Bridge code ended: the link, or the reason it was rejected with the attempts the
-// request has left.
+// codeOutcome is how the check of a Bridge or a Slack code ended: the link, with the name and the language of its User,
+// or the reason it was rejected with the attempts the request has left.
 type codeOutcome struct {
 	link   Link
 	old    *view
 	user   string
+	name   string
+	lang   string
 	reason string
 	left   int
 }
 
-// checkCode is the transaction of ConfirmBridge: it checks code against the request requestID of the requesting User
-// and links the account a when it is right. It locks the User before the request, as StartBridgeCode locks the User
-// before it voids the User's pending requests, so that a confirmation and a new request of one User do not deadlock.
+// codeAttempts are the attempts a code takes, by the messenger of its request: account_link.bridge_code's and
+// account_link.slack_code's. A messenger missing from it has no limit to apply, and checkCode refuses its code.
+var codeAttempts = map[string]int{MessengerBridge: BridgeMaxAttempts, MessengerSlack: SlackMaxAttempts}
+
+// checkCode is the transaction of ConfirmBridge and ConfirmSlack: it checks code against the request requestID of the
+// requesting User, with the attempts of the messenger of a, and links the account a when it is right. A messenger
+// without attempts in codeAttempts is an error, before anything is read or written. It locks the User before the
+// request, as StartBridgeCode and StartSlack lock the User before they void the User's pending requests, so that a
+// confirmation and a new request of one User do not deadlock.
 func (s *Service) checkCode(ctx context.Context, r Requester, requestID int64, a account, code string) (codeOutcome,
 	error) {
 	var out codeOutcome
+	limit, ok := codeAttempts[a.messenger]
+	if !ok {
+		return out, fmt.Errorf("no code attempts for the messenger %q", a.messenger)
+	}
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		out = codeOutcome{}
 		u, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: r.UserID})
@@ -579,12 +591,12 @@ func (s *Service) checkCode(ctx context.Context, r Requester, requestID int64, a
 			out.reason = ReasonTokenExpired
 		case subtle.ConstantTimeCompare(hash(normalizeCode(code)), row.SecretHash) != 1:
 			out.reason = ReasonWrongCode
-			attempts, err := q.RecordWrongCode(ctx, dbgen.RecordWrongCodeParams{MaxAttempts: BridgeMaxAttempts,
-				Now: now, OrgID: s.cfg.OrgID, ID: row.ID})
+			attempts, err := q.RecordWrongCode(ctx, dbgen.RecordWrongCodeParams{MaxAttempts: int64(limit), Now: now,
+				OrgID: s.cfg.OrgID, ID: row.ID})
 			if err != nil {
 				return fmt.Errorf("count the wrong code: %w", err)
 			}
-			out.left = max(BridgeMaxAttempts-int(attempts), 0)
+			out.left = max(limit-int(attempts), 0)
 		}
 		if out.reason != "" {
 			return s.reject(ctx, q, r.Actor, r.Transport, r.Address, a, out.reason, u.PublicID)
@@ -601,7 +613,7 @@ func (s *Service) checkCode(ctx context.Context, r Requester, requestID int64, a
 			ID: row.ID}); err != nil {
 			return fmt.Errorf("consume the link request: %w", err)
 		}
-		out.user = u.PublicID
+		out.user, out.name, out.lang = u.PublicID, u.Name, language(u.Language)
 		return nil
 	})
 	return out, err

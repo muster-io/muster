@@ -1052,6 +1052,280 @@ func TestLiveBridgeLinks(t *testing.T) {
 	})
 }
 
+// liveSlackBot is the Slack bot of TestLiveSlackLinks: it finds anyone by email or name — U0 and the name in
+// capitals, the name with " Brown" as the display name, none for dana — and keeps the direct messages.
+type liveSlackBot struct {
+	mu   sync.Mutex
+	sent []string
+}
+
+func (b *liveSlackBot) Session(ctx context.Context, _ string, f func(context.Context, accountlinks.SlackBot) error) error {
+	return f(ctx, b)
+}
+
+func (b *liveSlackBot) FindUser(_ context.Context, handle string) (accountlinks.SlackAccount, error) {
+	local, _, _ := strings.Cut(strings.ToLower(handle), "@")
+	a := accountlinks.SlackAccount{ID: "U0" + strings.ToUpper(local), Name: local}
+	if local != "dana" {
+		a.DisplayName = strings.ToUpper(local[:1]) + local[1:] + " Brown"
+	}
+	return a, nil
+}
+
+func (b *liveSlackBot) SendCode(_ context.Context, _ string, _ logging.Secret, text string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sent = append(b.sent, text)
+	return nil
+}
+
+func (b *liveSlackBot) SendLinked(_ context.Context, _, text string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sent = append(b.sent, text)
+	return nil
+}
+
+// code is the code of the last direct message with one.
+func (b *liveSlackBot) code() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := len(b.sent) - 1; i >= 0; i-- {
+		if c := codeRe.FindString(b.sent[i]); c != "" {
+			return c
+		}
+	}
+	return ""
+}
+
+// TestLiveSlackLinks runs the queries of Slack links on PostgreSQL (C-24.FR-12, C-24.FR-6): the Slack Connections that
+// are not deleted among those to link through; a request stored with its target's user id, name and display name and
+// no method; a link in the identity space of its Connection with them; a second link of the User through the
+// Connection replacing the first; an account linked to another User refused; a link through another Slack Connection
+// in a space of its own; five wrong codes voiding a request; both limits of account_link.slack_code_requests under
+// concurrency; the footer naming the User by the display name of their link for the Connection, without one by none;
+// and the pruning of Slack requests.
+func TestLiveSlackLinks(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+		d, err := db.Open(ctx, conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		if err := d.Migrate(ctx, logger); err != nil {
+			t.Fatal(err)
+		}
+		if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+			t.Fatal(err)
+		}
+		org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Pool.Exec(ctx, `CREATE TABLE audit_log_p202610 PARTITION OF audit_log
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		conns := map[string]int64{}
+		for _, c := range []struct {
+			id, name string
+			deleted  bool
+		}{{"CNAAAAAAAAAAS1", "sl", false}, {"CNAAAAAAAAAAS2", "Dev Slack", false}, {"CNAAAAAAAAAAS3", "gone", true}} {
+			var id int64
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
+				bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_app_token_ciphertext,
+				slack_app_token_key_id, slack_app_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+				updated_at, deleted_at) VALUES ($1, $2, 'slack', $3, 'socket', '\x00', 'k1', $4, '\x00', 'k1', $4, 10, 1,
+				$4, $4, CASE WHEN $5 THEN $4::timestamptz END) RETURNING id`, org.ID, c.id, c.name, t0,
+				c.deleted).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			conns[c.id] = id
+		}
+		users := map[string]int64{}
+		pid := func(login string) string { return "SRAAAAAAAAAAS" + strings.ToUpper(login[:1]) }
+		for _, login := range []string{"alice", "bob", "carol", "dave", "erin", "frank", "gina", "hank"} {
+			var id int64
+			if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+				created_at, updated_at) VALUES ($1, $2, $3, $3, 'responder', 'local', 'active', $4, $4) RETURNING id`,
+				org.ID, pid(login), login, t0).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			users[login] = id
+		}
+		business := clock.NewManual(t0)
+		bot := &liveSlackBot{}
+		svc := accountlinks.New(accountlinks.Config{OrgID: org.ID, Store: accountlinks.NewStore(d.Pool),
+			Audit: audit.NewWriter(logger, business), Business: business, Log: logger, Slack: bot})
+		as := func(login string) accountlinks.Requester {
+			return accountlinks.Requester{UserID: users[login], UserPublicID: pid(login),
+				Actor: audit.User(users[login], pid(login)), Transport: audit.TransportUI,
+				Address: netip.MustParseAddr("192.0.2.1")}
+		}
+		count := func(q string, args ...any) int {
+			var n int
+			if err := d.Pool.QueryRow(ctx, q, args...).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		s1, s2 := accountlinks.SpaceSlack(conns["CNAAAAAAAAAAS1"]), accountlinks.SpaceSlack(conns["CNAAAAAAAAAAS2"])
+		// The Slack Connections that are not deleted, by name, without link methods.
+		cs, err := svc.Connections(ctx)
+		if err != nil || len(cs) != 2 || cs[0].Name != "Dev Slack" || cs[1].Name != "sl" ||
+			cs[0].Messenger != accountlinks.MessengerSlack || cs[0].LinkMethods != nil || cs[0].HandleKind != "" {
+			t.Fatalf("Connections = %+v, %v", cs, err)
+		}
+		// By email: the request keeps the target, the link takes it.
+		started, err := svc.StartSlack(ctx, as("alice"), "CNAAAAAAAAAAS1", "Alice@Example.org")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count(`SELECT count(*) FROM account_link_requests WHERE public_id = $1 AND messenger = 'slack' AND
+			method IS NULL AND target_external_id = 'U0ALICE' AND target_username = 'alice' AND
+			target_display_name = 'Alice Brown' AND length(secret_hash) = 32`, started.RequestPublicID) != 1 {
+			t.Error("the stored request")
+		}
+		first, err := svc.ConfirmSlack(ctx, as("alice"), started.RequestPublicID, bot.code())
+		if err != nil || first.ExternalID != "U0ALICE" || *first.Username != "alice" || *first.DisplayName != "Alice Brown" {
+			t.Fatalf("ConfirmSlack = %+v, %v", first, err)
+		}
+		if count(`SELECT count(*) FROM account_links WHERE messenger = 'slack' AND identity_space = $1 AND
+			external_id = 'U0ALICE' AND display_name = 'Alice Brown'`, s1) != 1 ||
+			count(`SELECT count(*) FROM audit_log WHERE action = 'account_link.link' AND
+			details->>'messenger' = 'slack' AND details->>'display_name' = 'Alice Brown' AND transport = 'ui'`) != 1 ||
+			bot.sent[len(bot.sent)-1] != "Linked to Muster user alice" {
+			t.Errorf("the link through sl, sent %q", bot.sent)
+		}
+		// A second link of alice through sl replaces the first; dana's account has no display name.
+		started, err = svc.StartSlack(ctx, as("alice"), "CNAAAAAAAAAAS1", "dana")
+		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := svc.ConfirmSlack(ctx, as("alice"), started.RequestPublicID, bot.code())
+		if err != nil || l.ExternalID != "U0DANA" || l.DisplayName != nil || count(`SELECT count(*) FROM account_links
+			WHERE user_id = $1 AND identity_space = $2`, users["alice"], s1) != 1 || count(`SELECT count(*) FROM
+			audit_log WHERE action = 'account_link.unlink' AND details->>'reason' = 'replaced' AND
+			details->>'messenger' = 'slack'`) != 1 {
+			t.Fatalf("the replacing link = %+v, %v", l, err)
+		}
+		// Bob cannot link dana's account; alice links through Dev Slack, a space of its own.
+		if _, err := svc.StartSlack(ctx, as("bob"), "CNAAAAAAAAAAS1", "dana@example.org"); !errors.Is(err,
+			accountlinks.ErrLinkedElsewhere) || count(`SELECT count(*) FROM audit_log WHERE
+			action = 'account_link.link_rejected' AND details->>'reason' = 'conflict' AND
+			details->>'messenger' = 'slack'`) != 1 {
+			t.Errorf("a conflict = %v", err)
+		}
+		started, err = svc.StartSlack(ctx, as("alice"), "CNAAAAAAAAAAS2", "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.ConfirmSlack(ctx, as("alice"), started.RequestPublicID, bot.code()); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			space, external string
+			linked          bool
+		}{{s1, "U0DANA", true}, {s2, "U0ALICE", true}, {s1, "U0ALICE", false}, {s2, "U0DANA", false}} {
+			u, err := svc.Lookup(ctx, c.space, c.external)
+			if c.linked != (err == nil && u.ID == users["alice"]) {
+				t.Errorf("Lookup(%s, %s) = %+v, %v", c.space, c.external, u, err)
+			}
+		}
+		mine, err := svc.List(ctx, users["alice"])
+		if err != nil || len(mine) != 2 || mine[0].Messenger != accountlinks.MessengerSlack {
+			t.Errorf("List = %+v, %v", mine, err)
+		}
+		// Five wrong codes void a request; the right one is refused then.
+		started, err = svc.StartSlack(ctx, as("bob"), "CNAAAAAAAAAAS2", "bob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := bot.code()
+		for range accountlinks.SlackMaxAttempts {
+			if _, err := svc.ConfirmSlack(ctx, as("bob"), started.RequestPublicID, "22222222"); err == nil {
+				t.Fatal("a wrong code linked")
+			}
+		}
+		var fe *accountlinks.FieldError
+		if _, err := svc.ConfirmSlack(ctx, as("bob"), started.RequestPublicID, code); !errors.As(err, &fe) ||
+			*fe.AttemptsRemaining != 0 || count(`SELECT count(*) FROM account_link_requests WHERE public_id = $1 AND
+			attempts = 5 AND voided_at IS NOT NULL`, started.RequestPublicID) != 1 {
+			t.Errorf("the right code after five wrong ones = %v", err)
+		}
+		// The footer of an Alert Group alice acknowledged: by the display name of her link through Dev Slack, and
+		// through sl, whose link has none, by none, which leaves her Muster display name.
+		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+		var group int64
+		if err := d.Pool.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+			group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+			integration_ids, status, severity_level, urgent, owner_user_id, acknowledged_at, created_at,
+			last_changed_at)
+			SELECT $1, 'AGAAAAAAAAAAS1', 1, r.id, '{alertname}', '{}', sha256('footer'::bytea), 'Latency', '{}', '{}',
+				'{}', 'acknowledged', 'critical', false, $2, $3, $3, $3
+			FROM routes r WHERE r.org_id = $1 AND r.is_default RETURNING id`, org.ID, users["alice"], t0).Scan(
+			&group); err != nil {
+			t.Fatal(err)
+		}
+		names, err := mentions.New(org.ID, d.Pool).FooterNames(ctx, nil, group)
+		if err != nil || len(names) != 1 || names[s2] != "Alice Brown" {
+			t.Errorf("footer names = %v, %v", names, err)
+		}
+		// Ten code requests of one User at once store five; five Users' requests for one account store three.
+		race := func(n int, start func(i int) error) (stored, limited int) {
+			t.Helper()
+			errs := make([]error, n)
+			var wg sync.WaitGroup
+			for i := range n {
+				wg.Go(func() { errs[i] = start(i) })
+			}
+			wg.Wait()
+			for _, err := range errs {
+				var rl *accountlinks.RateLimitedError
+				switch {
+				case err == nil:
+					stored++
+				case errors.As(err, &rl):
+					limited++
+				default:
+					t.Fatalf("a concurrent request = %v", err)
+				}
+			}
+			return stored, limited
+		}
+		if stored, limited := race(10, func(i int) error {
+			_, err := svc.StartSlack(ctx, as("carol"), "CNAAAAAAAAAAS1", "t"+strconv.Itoa(i)+"@example.org")
+			return err
+		}); stored != 5 || limited != 5 {
+			t.Errorf("one User's concurrent requests: %d stored, %d limited", stored, limited)
+		}
+		if stored, limited := race(5, func(i int) error {
+			login := []string{"dave", "erin", "frank", "gina", "hank"}[i]
+			_, err := svc.StartSlack(ctx, as(login), "CNAAAAAAAAAAS1", "zed")
+			return err
+		}); stored != 3 || limited != 2 {
+			t.Errorf("concurrent requests for one account: %d stored, %d limited", stored, limited)
+		}
+		// Slack requests are pruned as any other.
+		slackReqs := count(`SELECT count(*) FROM account_link_requests WHERE messenger = 'slack'`)
+		pruned, err := accountlinks.NewPruner(d.Pool).Requests(ctx, org.ID, t0.Add(48*time.Hour), 1000)
+		if err != nil || slackReqs != 12 || pruned != 12 || count(`SELECT count(*) FROM account_link_requests`) != 0 {
+			t.Errorf("pruned %d of %d Slack requests, %v", pruned, slackReqs, err)
+		}
+		for _, m := range bot.sent {
+			if c := codeRe.FindString(m); c != "" && strings.Contains(log.String(), c) {
+				t.Error("a code in the log")
+			}
+		}
+	})
+}
+
 // The lock order of a token link against the deletion of its User: the deletion (users.Admin.Delete) locks the User
 // (LockUser) and then, through RemoveUserLinks, voids the User's pending link requests, while a token link reads its
 // request by the token's hash and locks the User before the request. Each test runs a real deletion transaction, held

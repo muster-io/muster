@@ -16,8 +16,8 @@ import (
 const (
 	// codeAccountLinkedElsewhere refuses linking a messenger account linked to another User (C-18.FR-5).
 	codeAccountLinkedElsewhere = "account_linked_elsewhere"
-	// codeLinkCodeRequestsExceeded refuses a Mattermost or Bridge link code beyond
-	// account_link.mattermost_code_requests or account_link.bridge_code_requests.
+	// codeLinkCodeRequestsExceeded refuses a Mattermost, Bridge or Slack link code beyond
+	// account_link.mattermost_code_requests, account_link.bridge_code_requests or account_link.slack_code_requests.
 	codeLinkCodeRequestsExceeded = "link_code_requests_exceeded"
 	// codeCodeNotOffered refuses a Bridge link code through a Connection whose info offers none (C-22.FR-15).
 	codeCodeNotOffered = "code_not_offered"
@@ -41,6 +41,10 @@ type AccountLinks interface {
 	StartBridgeCode(ctx context.Context, r accountlinks.Requester, connectionPublicID, handle string) (
 		accountlinks.BridgeCodeStarted, error)
 	ConfirmBridge(ctx context.Context, r accountlinks.Requester, requestPublicID, code string) (accountlinks.Link,
+		error)
+	StartSlack(ctx context.Context, r accountlinks.Requester, connectionPublicID, handle string) (
+		accountlinks.SlackStarted, error)
+	ConfirmSlack(ctx context.Context, r accountlinks.Requester, requestPublicID, code string) (accountlinks.Link,
 		error)
 }
 
@@ -103,9 +107,10 @@ func (s *Server) ListMyAccountLinks(ctx context.Context, _ gen.ListMyAccountLink
 	return gen.ListMyAccountLinks200JSONResponse(accountLinkListOf(links)), nil
 }
 
-// ListLinkableConnections is listLinkableConnections: the Connections that are not deleted with only their id, name
-// and messenger, for any signed-in User (C-18.FR-10); a Bridge Connection also has its link methods and the kind of
-// handle a code needs, null when it offers none (C-22.FR-15), and no other Connection has either member.
+// ListLinkableConnections is listLinkableConnections: the Connections that are not deleted, Slack ones included, with
+// only their id, name and messenger, for any signed-in User (C-18.FR-10, C-24.FR-12); a Bridge Connection also has its
+// link methods and the kind of handle a code needs, null when it offers none (C-22.FR-15), and no other Connection has
+// either member.
 func (s *Server) ListLinkableConnections(ctx context.Context, _ gen.ListLinkableConnectionsRequestObject) (
 	gen.ListLinkableConnectionsResponseObject, error) {
 	conns, err := s.accountLinks.Connections(ctx)
@@ -267,6 +272,47 @@ func (s *Server) ConfirmBridgeLink(ctx context.Context, req gen.ConfirmBridgeLin
 		return nil, linkProblem(err)
 	}
 	return gen.ConfirmBridgeLink201JSONResponse(accountLinkOf(l)), nil
+}
+
+// StartSlackLink is startSlackLink: the bot of a Slack Connection sends a code by direct message to the account the
+// caller names by email or name (C-24.FR-12).
+func (s *Server) StartSlackLink(ctx context.Context, req gen.StartSlackLinkRequestObject) (
+	gen.StartSlackLinkResponseObject, error) {
+	r, err := linkRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	started, err := s.accountLinks.StartSlack(ctx, r, req.Body.ConnectionId, req.Body.Handle)
+	if err != nil {
+		return nil, linkProblem(err)
+	}
+	return gen.StartSlackLink202JSONResponse(gen.SlackLinkStarted{RequestId: started.RequestPublicID,
+		ExpiresAt: started.ExpiresAt.UTC(), AttemptsRemaining: started.AttemptsRemaining}), nil
+}
+
+// ConfirmSlackLink is confirmSlackLink: the code from the bot's direct message links the caller's account of the
+// Slack Connection (C-24.FR-12, AC-14).
+func (s *Server) ConfirmSlackLink(ctx context.Context, req gen.ConfirmSlackLinkRequestObject) (
+	gen.ConfirmSlackLinkResponseObject, error) {
+	r, err := linkRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	code := ""
+	if req.Body.Code != nil {
+		code = *req.Body.Code
+	}
+	l, err := s.accountLinks.ConfirmSlack(ctx, r, req.Body.RequestId, code)
+	if err != nil {
+		return nil, linkProblem(err)
+	}
+	return gen.ConfirmSlackLink201JSONResponse(accountLinkOf(l)), nil
 }
 
 // ListUserAccountLinks is listUserAccountLinks: the links of a User, for users:read (C-18.FR-6).

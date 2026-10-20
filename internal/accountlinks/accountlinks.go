@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package accountlinks holds the Account links of C-18 and C-22.FR-15: which messenger account, in which identity
-// space, acts as which User. A Telegram account lives in the one identity space telegram, a Mattermost or a Bridge
-// account in the space of its Connection. Every link starts in the User's web session and the secret travels from there
-// to the messenger account (ADR-0013): a Telegram deep link whose token the bot receives with `/start`, a token the
-// person sends to a bridge's bot, or a code that a Mattermost or a bridge's bot sends as a direct message and the User
-// types into the profile. The package links, replaces and unlinks, records the Audit log, sends the account-links hint
-// to the link's User, and looks links up for the button presses of the messengers. It never calls a messenger itself:
-// the bots of the messenger packages do, on the interactive path.
+// Package accountlinks holds the Account links of C-18, C-22.FR-15 and C-24.FR-12: which messenger account, in which
+// identity space, acts as which User. A Telegram account lives in the one identity space telegram, a Mattermost, a
+// Bridge or a Slack account in the space of its Connection. Every link starts in the User's web session and the secret
+// travels from there to the messenger account (ADR-0013): a Telegram deep link whose token the bot receives with
+// `/start`, a token the person sends to a bridge's bot, or a code that a Mattermost, a bridge's or a Slack bot sends as
+// a direct message and the User types into the profile. The package links, replaces and unlinks, records the Audit
+// log, sends the account-links hint to the link's User, and looks links up for the button presses of the messengers.
+// It never calls a messenger itself: the bots of the messenger packages do, on the interactive path.
 package accountlinks
 
 import (
@@ -68,6 +68,7 @@ const (
 	MessengerTelegram   = "telegram"
 	MessengerMattermost = "mattermost"
 	MessengerBridge     = "bridge"
+	MessengerSlack      = "slack"
 )
 
 // HintType is the live-update hint of a User whose Account link appeared, changed or disappeared; it names the link.
@@ -137,8 +138,8 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
-// RateLimitedError refuses a code request beyond account_link.mattermost_code_requests or
-// account_link.bridge_code_requests until RetryAfter passed.
+// RateLimitedError refuses a code request beyond account_link.mattermost_code_requests,
+// account_link.bridge_code_requests or account_link.slack_code_requests until RetryAfter passed.
 type RateLimitedError struct {
 	RetryAfter time.Duration
 }
@@ -209,6 +210,11 @@ type Queries interface {
 		dbgen.CountUserBridgeCodeRequestsRow, error)
 	CountTargetBridgeCodeRequests(ctx context.Context, arg dbgen.CountTargetBridgeCodeRequestsParams) (
 		dbgen.CountTargetBridgeCodeRequestsRow, error)
+	VoidPendingSlackRequests(ctx context.Context, arg dbgen.VoidPendingSlackRequestsParams) (int64, error)
+	CountUserSlackCodeRequests(ctx context.Context, arg dbgen.CountUserSlackCodeRequestsParams) (
+		dbgen.CountUserSlackCodeRequestsRow, error)
+	CountTargetSlackCodeRequests(ctx context.Context, arg dbgen.CountTargetSlackCodeRequestsParams) (
+		dbgen.CountTargetSlackCodeRequestsRow, error)
 	VoidLinkRequest(ctx context.Context, arg dbgen.VoidLinkRequestParams) error
 	LockCodeTarget(ctx context.Context, arg dbgen.LockCodeTargetParams) error
 	CountUserCodeRequests(ctx context.Context, arg dbgen.CountUserCodeRequestsParams) (
@@ -278,10 +284,11 @@ type Config struct {
 	// Business is the business clock: link times, expiries and the request limits.
 	Business clock.Clock
 	Log      *logging.Logger
-	// Telegram, Mattermost and Bridge are the bots that call the messengers on the interactive path.
+	// Telegram, Mattermost, Bridge and Slack are the bots that call the messengers on the interactive path.
 	Telegram   TelegramBots
 	Mattermost MattermostBots
 	Bridge     BridgeBots
+	Slack      SlackBots
 	// Random is where tokens and codes come from; nil is crypto/rand.
 	Random io.Reader
 }
@@ -310,7 +317,7 @@ type Requester struct {
 }
 
 // Link is an Account link as the profile lists it (C-18.FR-10). DisplayName is the account's name as a bridge
-// reported it, nil for a Telegram or a Mattermost link.
+// reported it, or a Slack account's display name; nil for a Telegram or a Mattermost link.
 type Link struct {
 	PublicID           string
 	Messenger          string
@@ -485,7 +492,7 @@ func (s *Service) removeUserLinks(ctx context.Context, q Queries, userID int64, 
 	}, nil
 }
 
-// account is a messenger account to link through a Connection; displayName is a Bridge account's name.
+// account is a messenger account to link through a Connection; displayName is a Bridge or a Slack account's name.
 type account struct {
 	messenger   string
 	conn        connRef
@@ -659,7 +666,7 @@ func (s *Service) hint(userPublicID, linkPublicID string) db.Hint {
 
 func (s *Service) now() time.Time { return s.cfg.Business.Now().UTC() }
 
-// view is what the Audit log diff of a link shows; a Bridge link shows its display name too.
+// view is what the Audit log diff of a link shows; a Bridge or a Slack link shows its display name too.
 type view struct {
 	Messenger   string  `json:"messenger,omitempty"`
 	Connection  string  `json:"connection,omitempty"`

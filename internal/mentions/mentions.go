@@ -7,10 +7,11 @@
 // Mention of all and no messenger groups (C-24.FR-6), and the
 // resolution of a Loud message's symbolic Mentions into targets: the Destination's setting for a kind, the Owner the
 // lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
-// Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16) —
-// otherwise by the Muster display name, which mentions nobody; the footer of a message names users the same way, a
-// Bridge link by its display name. Storing the settings is the Destination's, and rendering a target in a messenger's
-// syntax is its adapter's.
+// Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16), and
+// in Slack by the link's user id as <@id>, which its adapter renders (C-24.FR-6) — otherwise by the Muster display
+// name, which mentions nobody; the footer of a message names users the same way, a Bridge or a Slack link by its
+// display name. Storing the settings is the Destination's, and rendering a target in a messenger's syntax is its
+// adapter's.
 package mentions
 
 import (
@@ -282,7 +283,8 @@ type Target struct {
 
 // User is a User as a Mention names them: public_id, display name, login, and the username, the messenger's user id
 // and the display name of their Account link in the Destination's identity space, empty without one; Telegram mentions
-// a user by that id (C-12.FR-8), a Bridge by that id and the link's display name (C-22.FR-16).
+// a user by that id (C-12.FR-8), a Bridge by that id and the link's display name (C-22.FR-16), and Slack by that id
+// (C-24.FR-6).
 type User struct {
 	PublicID    string `json:"id"`
 	Name        string `json:"name"`
@@ -481,8 +483,9 @@ func (s *Service) owners(ctx context.Context, q Queries, org int64, r Request) (
 
 // FooterNames are the names, by identity space, of the user the footer of the Alert Group groupID names — its Owner,
 // who snoozed it or who resolved it — read through db, or the main pool for a nil one (C-12.FR-12): the username of a
-// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16), each on one line, a
-// link whose name is blank left out.
+// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16), and the display name
+// of a Slack link (C-24.FR-6), each on one line; a link whose name is blank is left out, so that the footer names the
+// User by their Muster display name.
 func (s *Service) FooterNames(ctx context.Context, db DBTX, groupID int64) (map[string]string, error) {
 	rows, err := s.q(db).ListFooterUsernames(ctx, dbgen.ListFooterUsernamesParams{OrgID: s.orgID, ID: groupID})
 	if err != nil {
@@ -491,8 +494,11 @@ func (s *Service) FooterNames(ctx context.Context, db DBTX, groupID int64) (map[
 	var out map[string]string
 	for _, r := range rows {
 		name := oneLine(r.Username)
-		if r.Messenger == TypeBridge {
+		switch r.Messenger {
+		case TypeBridge:
 			name = cmp.Or(oneLine(r.DisplayName), name)
+		case TypeSlack:
+			name = oneLine(r.DisplayName)
 		}
 		if name == "" {
 			continue

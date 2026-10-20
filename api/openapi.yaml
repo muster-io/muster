@@ -5510,8 +5510,8 @@ paths:
       description: The profile's own short list of the Connections that are not deleted, for picking one when linking a
         messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name
         and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it —
-        `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links
-        through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+        `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403`
+        (`service_account_not_allowed`).
       x-permission: authenticated
       x-listener: app
       security:
@@ -5830,6 +5830,110 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /me/account-links/slack:
+    post:
+      operationId: startSlackLink
+      tags:
+      - Account links
+      summary: Start linking a Slack account with a code
+      description: 'Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@`
+        after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores
+        the letter case. Anything else is a name, a leading `@` dropped, compared with each account''s `name` and
+        `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot
+        are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to
+        the account''s user id — with "You requested a link to Muster. Do not share this code.". Code requests are
+        limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`,
+        `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409`
+        `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack
+        refuses a call. Runs on the interactive path: when no limiter token is free within
+        `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation
+        starts a link for another User, whatever the caller''s Role. A `connection_id` that names no Slack Connection —
+        missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422`
+        `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an
+        account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id)
+        `422` `direct_message_refused` at `/handle`.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackLinkRequest'
+      responses:
+        '202':
+          description: The code was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackLinkStarted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
+  /me/account-links/slack/confirmation:
+    post:
+      operationId: confirmSlackLink
+      tags:
+      - Account links
+      summary: Confirm a Slack link with the code
+      description: 'At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a
+        request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at
+        `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none;
+        a request of another User, or one that is not a Slack request, is `404`. The link stores the account''s user id
+        as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as
+        `display_name`, which Mentions and the footer use; a second link of the User through the same Connection
+        replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that
+        fails is only logged. Runs on the interactive path: when no limiter token is free within
+        `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation
+        starts a link for another User, whatever the caller''s Role.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackLinkConfirm'
+      responses:
+        '201':
+          description: The link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
   /users/{user_id}/account-links:
     get:
       operationId: listUserAccountLinks
@@ -7925,9 +8029,9 @@ components:
         attempts_remaining:
           type: integer
           minimum: 0
-          description: Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the
-            attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or
-            after the last wrong code).
+          description: Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and
+            `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used
+            (void, used or expired, or after the last wrong code).
       x-problem-types:
       - type: validation-failed
         status:
@@ -8055,18 +8159,24 @@ components:
             for `token` and for the codes `token_invalid` and `missing_scope`, `/channel_id` for the others (see
             `DestinationCheckItem`) — with the check's message as `detail` and its code as `check_code`.
         - code: link_code_invalid
-          description: The Mattermost or Bridge link code is wrong, or its request is void, used or expired; never says
-            which. The pointer is `/code` (`confirmMattermostLink`, `confirmBridgeLink`), and `attempts_remaining` says
-            how many codes the request still takes.
+          description: The Mattermost, Bridge or Slack link code is wrong, or its request is void, used or expired; never
+            says which. The pointer is `/code` (`confirmMattermostLink`, `confirmBridgeLink`, `confirmSlackLink`), and
+            `attempts_remaining` says how many codes the request still takes.
         - code: messenger_user_not_found
           description: The Mattermost server has no user with this username; the pointer is `/username`
             (`startMattermostLink`).
         - code: handle_not_found
-          description: The bridge found no account with this handle, of the kind its `user_lookup` declares; the pointer
-            is `/handle` (`startBridgeCodeLink`).
+          description: The bridge found no account with this handle, of the kind its `user_lookup` declares
+            (`startBridgeCodeLink`); or no Slack account has this email or name, or it is deleted, a bot or Slackbot
+            (`startSlackLink`). The pointer is `/handle`.
+        - code: handle_ambiguous
+          description: Several Slack accounts have this name; the pointer is `/handle` (`startSlackLink`). The email
+            finds one.
         - code: direct_message_refused
           description: The bridge refused the direct message with the code as `forbidden`, since its bot cannot write to
-            the account. The pointer is `/handle` (`startBridgeCodeLink`); the token sent to the bot still links it.
+            the account, and the token sent to the bot still links it (`startBridgeCodeLink`); or Slack refused the
+            direct message to the account with `cannot_dm_bot`, `user_not_found`, or `channel_not_found` for its user
+            id (`startSlackLink`). The pointer is `/handle`.
         - code: webhook_call_failed
           description: Saving a Telegram Connection that enters the webhook update mode, or changes its base URL or bot
             token in it, called `setWebhook`, or one that leaves it called `deleteWebhook`, and the call failed; nothing
@@ -8173,10 +8283,10 @@ components:
         in: code
         codes:
         - code: link_code_requests_exceeded
-          description: Too many Mattermost or Bridge link codes were requested within an hour, by the User or for the
-            target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
-            `account_link.bridge_code_requests`, `startBridgeCodeLink`); `retry_after_seconds` says when the next one is
-            allowed.
+          description: Too many Mattermost, Bridge or Slack link codes were requested within an hour, by the User or for
+            the target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
+            `account_link.bridge_code_requests`, `startBridgeCodeLink`; `account_link.slack_code_requests`,
+            `startSlackLink`); `retry_after_seconds` says when the next one is allowed.
       - type: gone
         in: code
         codes:
@@ -14151,11 +14261,12 @@ components:
           type:
           - string
           - 'null'
-          description: The account's username; for a Bridge link, the handle the bridge reported.
+          description: The account's username; for a Bridge link, the handle the bridge reported; for a Slack link, the
+            account's `name`.
         display_name:
           type: string
-          description: Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers
-            show.
+          description: Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's
+            `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
         last_used_at:
           type:
           - string
@@ -14176,7 +14287,8 @@ components:
     LinkableConnection:
       type: object
       description: A Connection an account can be linked through, as the profile sees it; no other Connection field is
-        shown. A Bridge Connection also says how an account can be linked through it.
+        shown. A Bridge Connection also says how an account can be linked through it; a Slack Connection has neither
+        `link_methods` nor `handle_kind`, since its accounts link by a code sent by direct message.
       required:
       - id
       - name
@@ -14323,6 +14435,45 @@ components:
         attempts_remaining:
           type: integer
     BridgeLinkConfirm:
+      type: object
+      required:
+      - request_id
+      - code
+      properties:
+        request_id:
+          $ref: '#/components/schemas/PublicId'
+        code:
+          type: string
+          writeOnly: true
+          description: The code the bot sent as a direct message.
+    SlackLinkRequest:
+      type: object
+      required:
+      - connection_id
+      - handle
+      properties:
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+        handle:
+          type: string
+          minLength: 1
+          maxLength: 320
+          description: The Slack email or name of the account to link; a leading `@` of a name is optional.
+    SlackLinkStarted:
+      type: object
+      required:
+      - request_id
+      - expires_at
+      - attempts_remaining
+      properties:
+        request_id:
+          $ref: '#/components/schemas/PublicId'
+        expires_at:
+          type: string
+          format: date-time
+        attempts_remaining:
+          type: integer
+    SlackLinkConfirm:
       type: object
       required:
       - request_id

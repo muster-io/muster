@@ -26,9 +26,9 @@ type GetDestinationMentionsParams struct {
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Mentions (C-12.FR-8, FR-12, C-22.FR-16): the Mention settings of a Destination, the Owners a lifecycle event
-// recorded, the Users a Mention names with the username, the messenger's user id and the display name of their Account
-// link in an identity space, and the names of the user a footer names.
+// Mentions (C-12.FR-8, FR-12, C-22.FR-16, C-24.FR-6): the Mention settings of a Destination, the Owners a lifecycle
+// event recorded, the Users a Mention names with the username, the messenger's user id and the display name of their
+// Account link in an identity space, and the names of the user a footer names.
 // GetDestinationMentions reads the Mention settings of a Destination.
 func (q *Queries) GetDestinationMentions(ctx context.Context, arg GetDestinationMentionsParams) ([]byte, error) {
 	row := q.db.QueryRow(ctx, getDestinationMentions, arg.OrgID, arg.ID)
@@ -89,7 +89,7 @@ type ListFooterUsernamesRow struct {
 
 // ListFooterUsernames lists the Account links, by identity space, of the user the footer of an Alert Group names: its
 // Owner while acknowledged, who snoozed it while snoozed, who resolved it while resolved, with the messenger, the
-// username and the display name of each, empty without one; FooterNames picks the name (C-22.FR-16).
+// username and the display name of each, empty without one; FooterNames picks the name (C-22.FR-16, C-24.FR-6).
 func (q *Queries) ListFooterUsernames(ctx context.Context, arg ListFooterUsernamesParams) ([]ListFooterUsernamesRow, error) {
 	rows, err := q.db.Query(ctx, listFooterUsernames, arg.OrgID, arg.ID)
 	if err != nil {

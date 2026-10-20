@@ -366,8 +366,9 @@ func TestResolve(t *testing.T) {
 }
 
 // TestNames (C-12.FR-12): a user is shown by the username of their Account link, else by the display name; the
-// footer's names come by identity space, a Bridge link's display name before its username, each on one line, and a
-// blank one left out (C-22.FR-16); identity spaces follow the Destination type and Connection.
+// footer's names come by identity space, a Bridge link's display name before its username, a Slack link's display name
+// alone, each on one line, and a blank one left out, so that the footer names the User by their Muster display name
+// (C-22.FR-16, C-24.FR-6); identity spaces follow the Destination type and Connection.
 func TestNames(t *testing.T) {
 	if (User{Name: "Alice", Username: "alice"}).Display() != "alice" || (User{Name: "Alice"}).Display() != "Alice" {
 		t.Error("display names")
@@ -391,10 +392,13 @@ func TestNames(t *testing.T) {
 		{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\n"},
 		{IdentitySpace: "mattermost:3", Messenger: TypeMattermost, Username: "alice.mm", DisplayName: "Alice Smith"},
 		{IdentitySpace: "mattermost:8", Messenger: TypeMattermost},
+		{IdentitySpace: "slack:9", Messenger: TypeSlack, Username: "alice", DisplayName: " Alice\n Smith "},
+		{IdentitySpace: "slack:10", Messenger: TypeSlack, Username: "alice"},
 		{IdentitySpace: "telegram", Messenger: TypeTelegram, Username: "alice_tg"}}
 	got, err := s.FooterNames(t.Context(), nil, 5)
 	if want := map[string]string{"bridge:4": "Alice Smith", "bridge:5": "Alice Smith", "bridge:6": "alice@example.org",
-		"mattermost:3": "alice.mm", "telegram": "alice_tg"}; err != nil || !maps.Equal(got, want) {
+		"mattermost:3": "alice.mm", "slack:9": "Alice Smith", "telegram": "alice_tg"}; err != nil ||
+		!maps.Equal(got, want) {
 		t.Errorf("footer names %q %v, want %q", got, err, want)
 	}
 	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\t"}}
@@ -499,9 +503,12 @@ func TestValidateSlack(t *testing.T) {
 
 // TestResolveSlack covers C-24.FR-6: a Slack Destination's Mentions resolve into channel and here and its Users, and
 // leave out all and groups that settings stored before the rule would carry; its identity space is the Slack links of
-// its Connection, in which a User without a link has no username and is named by their display name.
+// its Connection, in which a User with a link has its user id, which the adapter mentions as <@id>, and a User without
+// one, or linked through another Slack Connection only, has no username and is named by their display name.
 func TestResolveSlack(t *testing.T) {
 	f := newFake()
+	f.users[1].links = map[string]string{"slack:4": "bob"}
+	f.users[1].externals = map[string]string{"slack:4": "U0FAKEBOB"}
 	s := newService(f)
 	set := nobody()
 	set[KindNewAlertGroup] = Setting{Everyone: EveryoneHere, Groups: []string{"oncall"}, UserIDs: []string{alice}}
@@ -520,5 +527,21 @@ func TestResolveSlack(t *testing.T) {
 	}
 	if IdentitySpace(TypeSlack, &conn) != "slack:3" || IdentitySpace(TypeSlack, nil) != "" {
 		t.Errorf("identity space %q", IdentitySpace(TypeSlack, &conn))
+	}
+	f.users[0].links["slack:3"] = "alice"
+	f.users[0].externals["slack:3"] = "U0FAKEALICE"
+	f.users[0].displays = map[string]string{"slack:3": "Alice S."}
+	set[KindNewAlertGroup] = Setting{Everyone: EveryoneNone, UserIDs: []string{alice, bob}}
+	f.settings[60] = settingsJSON(t, set)
+	r.Mentions = []string{KindNewAlertGroup}
+	got, err = s.Resolve(t.Context(), nil, orgID, r)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("linked = %s, %v", describe(got), err)
+	}
+	if a := got[0].User; a.ExternalID != "U0FAKEALICE" || a.Username != "alice" || a.DisplayName != "Alice S." {
+		t.Errorf("a User with a Slack link %+v", a)
+	}
+	if b := got[1].User; b.ExternalID != "" || b.Username != "" || b.Display() != "Bob Jones" {
+		t.Errorf("a User linked through another Slack Connection %+v", b)
 	}
 }

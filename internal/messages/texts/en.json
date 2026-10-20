@@ -4,6 +4,7 @@
   "accountLink.invalid": "This link is invalid or expired. Start again from your Muster profile.",
   "accountLink.linkedBridge": "Linked to Muster user {name} ({login})",
   "accountLink.linkedMattermost": "Linked to Muster user {name}",
+  "accountLink.linkedSlack": "Linked to Muster user {name}",
   "accountLink.linkedTelegram": "Linked to Muster user {name} ({login})",
   "alerts.fullList": "Full list in Muster",
   "alerts.more": "+{count} more",

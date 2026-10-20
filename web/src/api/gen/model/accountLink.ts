@@ -28,11 +28,11 @@ export interface AccountLink {
   connection?: EntityRef;
   external_id: string;
   /**
-     * The account's username; for a Bridge link, the handle the bridge reported.
+     * The account's username; for a Bridge link, the handle the bridge reported; for a Slack link, the account's `name`.
      * @nullable
      */
   username?: string | null;
-  /** Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show. */
+  /** Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's `profile.display_name`, else `profile.real_name`, which Mentions and footers show. */
   display_name?: string;
   /** @nullable */
   last_used_at?: string | null;

@@ -36,7 +36,8 @@ var (
 )
 
 // The fixtures: Users, a Telegram and a Mattermost Connection, a deleted one and a second Telegram one; a Bridge
-// Connection whose info offers a code by email, a second one whose info Muster has not read, and a deleted one.
+// Connection whose info offers a code by email, a second one whose info Muster has not read, and a deleted one; two
+// Slack Connections and a deleted one.
 const (
 	aliceID, bobID, carolID, daveID     = 1, 2, 3, 4
 	alicePID, bobPID, carolPID, davePID = "SRAAAAAAAAAAA1", "SRAAAAAAAAAAA2", "SRAAAAAAAAAAA3", "SRAAAAAAAAAAA4"
@@ -44,6 +45,8 @@ const (
 	tgPID, mmPID, gonePID, tg2PID       = "CNAAAAAAAAAAA1", "CNAAAAAAAAAAA2", "CNAAAAAAAAAAA3", "CNAAAAAAAAAAA4"
 	brID, br2ID, brGoneID               = 15, 16, 17
 	brPID, br2PID, brGonePID            = "CNAAAAAAAAAAA5", "CNAAAAAAAAAAA6", "CNAAAAAAAAAAA7"
+	slID, sl2ID, slGoneID               = 18, 19, 20
+	slPID, sl2PID, slGonePID            = "CNAAAAAAAAAAA8", "CNAAAAAAAAAAA9", "CNAAAAAAAAAA20"
 	linkTemplate                        = "https://chat.example.org/bots/muster?start={token}"
 )
 
@@ -86,6 +89,8 @@ func (l fLink) space() string {
 		return SpaceTelegram
 	case MessengerBridge:
 		return SpaceBridge(l.connID)
+	case MessengerSlack:
+		return SpaceSlack(l.connID)
 	}
 	return SpaceMattermost(l.connID)
 }
@@ -119,7 +124,8 @@ type fakeStore struct {
 	// counted are the request counts and the locks of code targets, in order, each marked whether it ran in a
 	// transaction.
 	counted []string
-	// locks are the rows LockLinkUser, LockLinkRequest and VoidPendingMattermostRequests locked, in order.
+	// locks are the rows LockLinkUser, LockLinkRequest, VoidPendingMattermostRequests and VoidPendingSlackRequests
+	// locked, in order.
 	locks      []string
 	fail       map[string]error
 	next       int64
@@ -143,6 +149,9 @@ func newStore() *fakeStore {
 		{brID, brPID, MessengerBridge, "Dev Bridge", "", "", false},
 		{br2ID, br2PID, MessengerBridge, "br", "", "", false},
 		{brGoneID, brGonePID, MessengerBridge, "gone bridge", "", "", true},
+		{slID, slPID, MessengerSlack, "sl", "", "", false},
+		{sl2ID, sl2PID, MessengerSlack, "Dev Slack", "", "", false},
+		{slGoneID, slGonePID, MessengerSlack, "gone slack", "", "", true},
 	}
 	s.infos = map[int64]fInfo{brID: {lookup: LookupEmail, botCanStart: true, template: linkTemplate}}
 	return s
@@ -521,7 +530,7 @@ func (s *fakeStore) count(messenger string, match func(fReq) bool, since time.Ti
 	var n int64
 	oldest := since
 	for _, r := range s.reqs {
-		code := messenger == MessengerMattermost || r.method.String == MethodCode
+		code := messenger == MessengerMattermost || messenger == MessengerSlack || r.method.String == MethodCode
 		if r.messenger == messenger && code && r.created.After(since) && match(r) {
 			if n == 0 || r.created.Before(oldest) {
 				oldest = r.created
@@ -674,15 +683,16 @@ type env struct {
 	tg    *fakeTG
 	mm    *fakeMM
 	br    *fakeBR
+	sl    *fakeSL
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := &env{store: newStore(), clock: clock.NewManual(t0), log: &bytes.Buffer{}, tg: &fakeTG{username: "fallback_bot"},
-		mm: newFakeMM(), br: newFakeBR()}
+		mm: newFakeMM(), br: newFakeBR(), sl: newFakeSL()}
 	logger := logging.New(e.log, logging.LevelInfo)
 	e.s = New(Config{OrgID: org, Store: e.store, Audit: audit.NewWriter(logger, e.clock), Business: e.clock,
-		Log: logger, Telegram: e.tg, Mattermost: e.mm, Bridge: e.br, Random: &counter{}})
+		Log: logger, Telegram: e.tg, Mattermost: e.mm, Bridge: e.br, Slack: e.sl, Random: &counter{}})
 	return e
 }
 
@@ -763,10 +773,11 @@ func TestLookup(t *testing.T) {
 	}
 }
 
-// TestLists is C-18.FR-6, FR-10 and C-22.FR-15: a User's links with their Connection, username, display name and last
-// use; an Admin's list of another User, unknown and deleted Users included; the Connections to link through, by
-// messenger and name, each Bridge Connection with the link methods and the kind of handle its stored info offers —
-// only the token, and no kind, while Muster has not read its info.
+// TestLists is C-18.FR-6, FR-10, C-22.FR-15 and C-24.FR-12: a User's links with their Connection, username, display
+// name and last use, a Slack link's display name included; an Admin's list of another User, unknown and deleted Users
+// included; the Connections to link through, by messenger and name, Slack ones that are not deleted among them without
+// link methods, each Bridge Connection with the link methods and the kind of handle its stored info offers — only the
+// token, and no kind, while Muster has not read its info.
 func TestLists(t *testing.T) {
 	e := newEnv(t)
 	used := t0.Add(time.Minute)
@@ -775,15 +786,19 @@ func TestLists(t *testing.T) {
 	e.addLink(bobID, MessengerTelegram, tgID, "7002", nil)
 	b := e.addLink(bobID, MessengerBridge, brID, "u-bob", nil)
 	e.store.links[2].displayName = ptr("Bob Brown")
+	s := e.addLink(bobID, MessengerSlack, slID, "U0BOB", ptr("bob"))
+	e.store.links[3].displayName = ptr("Bob Jones")
 	links, err := e.s.List(t.Context(), bobID)
-	if err != nil || len(links) != 3 || links[0].PublicID != l.publicID || links[0].ConnectionName != "mm" ||
+	if err != nil || len(links) != 4 || links[3].PublicID != s.publicID || links[3].Messenger != MessengerSlack ||
+		*links[3].Username != "bob" || *links[3].DisplayName != "Bob Jones" || links[3].ConnectionName != "sl" ||
+		links[0].PublicID != l.publicID || links[0].ConnectionName != "mm" ||
 		links[0].ConnectionPublicID != mmPID || *links[0].Username != "bob" || !links[0].LastUsedAt.Equal(used) ||
 		links[0].DisplayName != nil || links[1].Username != nil || links[1].LastUsedAt != nil ||
 		links[1].Messenger != MessengerTelegram || links[2].PublicID != b.publicID || links[2].Username != nil ||
 		links[2].DisplayName == nil || *links[2].DisplayName != "Bob Brown" || links[2].Messenger != MessengerBridge {
 		t.Fatalf("List = %+v, %v", links, err)
 	}
-	if got, err := e.s.ListOfUser(t.Context(), strings.ToLower(bobPID)); err != nil || len(got) != 3 {
+	if got, err := e.s.ListOfUser(t.Context(), strings.ToLower(bobPID)); err != nil || len(got) != 4 {
 		t.Errorf("ListOfUser = %+v, %v", got, err)
 	}
 	if got, err := e.s.ListOfUser(t.Context(), davePID); err != nil || len(got) != 0 {
@@ -800,6 +815,8 @@ func TestLists(t *testing.T) {
 		{PublicID: brPID, Name: "Dev Bridge", Messenger: MessengerBridge, LinkMethods: []string{MethodToken, MethodCode},
 			HandleKind: LookupEmail},
 		{PublicID: mmPID, Name: "mm", Messenger: MessengerMattermost},
+		{PublicID: sl2PID, Name: "Dev Slack", Messenger: MessengerSlack},
+		{PublicID: slPID, Name: "sl", Messenger: MessengerSlack},
 		{PublicID: tgPID, Name: "Dev Telegram", Messenger: MessengerTelegram},
 		{PublicID: tg2PID, Name: "Second", Messenger: MessengerTelegram},
 	}; err != nil || !reflect.DeepEqual(conns, want) {

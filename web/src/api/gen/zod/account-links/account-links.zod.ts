@@ -37,15 +37,15 @@ export const ListMyAccountLinksResponse = zod.object({
   "name": zod.string()
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
-  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))
 })
 
 /**
- * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+ * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List the Connections an account can be linked through
  */
 export const listLinkableConnectionsResponseItemsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -58,7 +58,7 @@ export const ListLinkableConnectionsResponse = zod.object({
   "messenger": zod.enum(['telegram', 'mattermost', 'bridge', 'slack']),
   "link_methods": zod.array(zod.enum(['token', 'code'])).optional().describe('Set on Bridge Connections only, from the Connection\'s last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.'),
   "handle_kind": zod.union([zod.literal('email'),zod.literal('login'),zod.literal('username'),zod.literal('user_id'),zod.literal(null)]).nullish().describe('Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection\'s last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.')
-}).describe('A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.'))
+}).describe('A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it; a Slack Connection has neither `link_methods` nor `handle_kind`, since its accounts link by a code sent by direct message.'))
 })
 
 /**
@@ -135,8 +135,8 @@ export const ConfirmMattermostLinkResponse = zod.object({
   "name": zod.string()
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
-  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -208,8 +208,61 @@ export const ConfirmBridgeLinkResponse = zod.object({
   "name": zod.string()
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
-  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
+  "created_at": zod.iso.datetime({"offset":true})
+})
+
+/**
+ * Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+ * @summary Start linking a Slack account with a code
+ */
+export const startSlackLinkBodyConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const startSlackLinkBodyHandleMax = 320;
+
+
+
+export const StartSlackLinkBody = zod.object({
+  "connection_id": zod.string().regex(startSlackLinkBodyConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "handle": zod.string().min(1).max(startSlackLinkBodyHandleMax).describe('The Slack email or name of the account to link; a leading `@` of a name is optional.')
+})
+
+export const startSlackLinkResponseRequestIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const StartSlackLinkResponse = zod.object({
+  "request_id": zod.string().regex(startSlackLinkResponseRequestIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "expires_at": zod.iso.datetime({"offset":true}),
+  "attempts_remaining": zod.int()
+})
+
+/**
+ * At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+ * @summary Confirm a Slack link with the code
+ */
+export const confirmSlackLinkBodyRequestIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ConfirmSlackLinkBody = zod.object({
+  "request_id": zod.string().regex(confirmSlackLinkBodyRequestIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "code": zod.string().describe('The code the bot sent as a direct message.')
+})
+
+export const confirmSlackLinkResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const confirmSlackLinkResponseConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ConfirmSlackLinkResponse = zod.object({
+  "id": zod.string().regex(confirmSlackLinkResponseIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "messenger": zod.enum(['telegram', 'mattermost', 'bridge', 'slack']),
+  "connection": zod.object({
+  "id": zod.string().regex(confirmSlackLinkResponseConnectionIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string()
+}).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
+  "external_id": zod.string(),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -237,8 +290,8 @@ export const ListUserAccountLinksResponse = zod.object({
   "name": zod.string()
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
-  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported.'),
-  "display_name": zod.string().optional().describe('Set on Bridge links only; the account\'s name as the bridge reported it, which Mentions and footers show.'),
+  "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))

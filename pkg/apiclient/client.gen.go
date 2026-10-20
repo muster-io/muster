@@ -3532,7 +3532,7 @@ type AccountLink struct {
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 
-	// DisplayName Set on Bridge links only; the account's name as the bridge reported it, which Mentions and footers show.
+	// DisplayName Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
 	DisplayName *string `json:"display_name,omitempty"`
 	ExternalId  string  `json:"external_id"`
 
@@ -3541,7 +3541,7 @@ type AccountLink struct {
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Messenger  Messenger                    `json:"messenger"`
 
-	// Username The account's username; for a Bridge link, the handle the bridge reported.
+	// Username The account's username; for a Bridge link, the handle the bridge reported; for a Slack link, the account's `name`.
 	Username nullable.Nullable[string] `json:"username,omitempty"`
 }
 
@@ -5031,7 +5031,7 @@ type LinkRuleScope struct {
 // LinkRuleScopeType defines model for LinkRuleScope.Type.
 type LinkRuleScopeType string
 
-// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it.
+// LinkableConnection A Connection an account can be linked through, as the profile sees it; no other Connection field is shown. A Bridge Connection also says how an account can be linked through it; a Slack Connection has neither `link_methods` nor `handle_kind`, since its accounts link by a code sent by direct message.
 type LinkableConnection struct {
 	// HandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
 	HandleKind nullable.Nullable[LinkHandleKind] `json:"handle_kind,omitempty"`
@@ -5871,7 +5871,7 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
-	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink` and `confirmBridgeLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
 	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
@@ -6749,6 +6749,33 @@ type SlackEventMode string
 type SlackInteractionForm struct {
 	// Payload The interaction as JSON, a `block_actions` payload for a button press or a menu option (F-093), whose action `value` or `selected_option.value` carries the signed action id.
 	Payload string `json:"payload"`
+}
+
+// SlackLinkConfirm defines model for SlackLinkConfirm.
+type SlackLinkConfirm struct {
+	// Code The code the bot sent as a direct message.
+	Code *string `json:"code,omitempty"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
+}
+
+// SlackLinkRequest defines model for SlackLinkRequest.
+type SlackLinkRequest struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Handle The Slack email or name of the account to link; a leading `@` of a name is optional.
+	Handle string `json:"handle"`
+}
+
+// SlackLinkStarted defines model for SlackLinkStarted.
+type SlackLinkStarted struct {
+	AttemptsRemaining int       `json:"attempts_remaining"`
+	ExpiresAt         time.Time `json:"expires_at"`
+
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	RequestId PublicId `json:"request_id"`
 }
 
 // SlackSocketStatus What a `hello` of the Leader's Socket Mode connection of a Slack Connection counted.
@@ -8616,6 +8643,12 @@ type StartMattermostLinkJSONRequestBody = MattermostLinkRequest
 
 // ConfirmMattermostLinkJSONRequestBody defines body for ConfirmMattermostLink for application/json ContentType.
 type ConfirmMattermostLinkJSONRequestBody = MattermostLinkConfirm
+
+// StartSlackLinkJSONRequestBody defines body for StartSlackLink for application/json ContentType.
+type StartSlackLinkJSONRequestBody = SlackLinkRequest
+
+// ConfirmSlackLinkJSONRequestBody defines body for ConfirmSlackLink for application/json ContentType.
+type ConfirmSlackLinkJSONRequestBody = SlackLinkConfirm
 
 // StartTelegramLinkJSONRequestBody defines body for StartTelegramLink for application/json ContentType.
 type StartTelegramLinkJSONRequestBody = TelegramLinkRequest
@@ -11610,7 +11643,7 @@ type ClientInterface interface {
 
 	// ListLinkableConnections List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 	ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -11650,6 +11683,42 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /me/account-links/mattermost/confirmation (the `ConfirmMattermostLink` operationId).
 	ConfirmMattermostLink(ctx context.Context, body ConfirmMattermostLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartSlackLinkWithBody Start linking a Slack account with a code
+	//
+	// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+	StartSlackLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartSlackLink Start linking a Slack account with a code
+	//
+	// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+	StartSlackLink(ctx context.Context, body StartSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmSlackLinkWithBody Confirm a Slack link with the code
+	//
+	// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+	ConfirmSlackLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ConfirmSlackLink Confirm a Slack link with the code
+	//
+	// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+	ConfirmSlackLink(ctx context.Context, body ConfirmSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// StartTelegramLinkWithBody Start linking a Telegram account
 	//
@@ -14328,7 +14397,7 @@ func (c *Client) ConfirmBridgeLink(ctx context.Context, body ConfirmBridgeLinkJS
 
 // ListLinkableConnections List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Corresponds with GET /me/account-links/connections (the `ListLinkableConnections` operationId).
 func (c *Client) ListLinkableConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -14409,6 +14478,82 @@ func (c *Client) ConfirmMattermostLinkWithBody(ctx context.Context, contentType 
 // Corresponds with POST /me/account-links/mattermost/confirmation (the `ConfirmMattermostLink` operationId).
 func (c *Client) ConfirmMattermostLink(ctx context.Context, body ConfirmMattermostLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewConfirmMattermostLinkRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartSlackLinkWithBody Start linking a Slack account with a code
+//
+// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+func (c *Client) StartSlackLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSlackLinkRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartSlackLink Start linking a Slack account with a code
+//
+// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+func (c *Client) StartSlackLink(ctx context.Context, body StartSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartSlackLinkRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ConfirmSlackLinkWithBody Confirm a Slack link with the code
+//
+// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+func (c *Client) ConfirmSlackLinkWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSlackLinkRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ConfirmSlackLink Confirm a Slack link with the code
+//
+// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+func (c *Client) ConfirmSlackLink(ctx context.Context, body ConfirmSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewConfirmSlackLinkRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -20599,6 +20744,86 @@ func NewConfirmMattermostLinkRequestWithBody(server string, contentType string, 
 	return req, nil
 }
 
+// NewStartSlackLinkRequest calls the generic StartSlackLink builder with application/json body
+func NewStartSlackLinkRequest(server string, body StartSlackLinkJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartSlackLinkRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewStartSlackLinkRequestWithBody constructs an http.Request for the StartSlackLink method, with any body, and a specified content type
+func NewStartSlackLinkRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/account-links/slack")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewConfirmSlackLinkRequest calls the generic ConfirmSlackLink builder with application/json body
+func NewConfirmSlackLinkRequest(server string, body ConfirmSlackLinkJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewConfirmSlackLinkRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewConfirmSlackLinkRequestWithBody constructs an http.Request for the ConfirmSlackLink method, with any body, and a specified content type
+func NewConfirmSlackLinkRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/account-links/slack/confirmation")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewStartTelegramLinkRequest calls the generic StartTelegramLink builder with application/json body
 func NewStartTelegramLinkRequest(server string, body StartTelegramLinkJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -24804,7 +25029,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 	//
-	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+	// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -24846,6 +25071,42 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /me/account-links/mattermost/confirmation (the `ConfirmMattermostLink` operationId).
 	ConfirmMattermostLinkWithResponse(ctx context.Context, body ConfirmMattermostLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmMattermostLinkResponse, error)
+
+	// StartSlackLinkWithBodyWithResponse Start linking a Slack account with a code
+	//
+	// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+	StartSlackLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSlackLinkResponse, error)
+
+	// StartSlackLinkWithResponse Start linking a Slack account with a code
+	//
+	// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+	StartSlackLinkWithResponse(ctx context.Context, body StartSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSlackLinkResponse, error)
+
+	// ConfirmSlackLinkWithBodyWithResponse Confirm a Slack link with the code
+	//
+	// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+	ConfirmSlackLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSlackLinkResponse, error)
+
+	// ConfirmSlackLinkWithResponse Confirm a Slack link with the code
+	//
+	// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+	ConfirmSlackLinkWithResponse(ctx context.Context, body ConfirmSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSlackLinkResponse, error)
 
 	// StartTelegramLinkWithBodyWithResponse Start linking a Telegram account
 	//
@@ -32563,6 +32824,221 @@ func (r ConfirmMattermostLinkResponse) ContentType() string {
 	return ""
 }
 
+// StartSlackLinkResponse429Headers the declared response headers of an HTTP 429 response for StartSlackLink
+type StartSlackLinkResponse429Headers struct {
+	RetryAfter *int
+}
+
+// StartSlackLinkResponse503Headers the declared response headers of an HTTP 503 response for StartSlackLink
+type StartSlackLinkResponse503Headers struct {
+	RetryAfter *int
+}
+
+type StartSlackLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *SlackLinkStarted
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *StartSlackLinkResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *StartSlackLinkResponse503Headers
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r StartSlackLinkResponse) GetJSON202() *SlackLinkStarted {
+	return r.JSON202
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r StartSlackLinkResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r StartSlackLinkResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartSlackLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartSlackLinkResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartSlackLinkResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ConfirmSlackLinkResponse429Headers the declared response headers of an HTTP 429 response for ConfirmSlackLink
+type ConfirmSlackLinkResponse429Headers struct {
+	RetryAfter *int
+}
+
+// ConfirmSlackLinkResponse503Headers the declared response headers of an HTTP 503 response for ConfirmSlackLink
+type ConfirmSlackLinkResponse503Headers struct {
+	RetryAfter *int
+}
+
+type ConfirmSlackLinkResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *AccountLink
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ConfirmSlackLinkResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *ConfirmSlackLinkResponse503Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r ConfirmSlackLinkResponse) GetJSON201() *AccountLink {
+	return r.JSON201
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r ConfirmSlackLinkResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ConfirmSlackLinkResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ConfirmSlackLinkResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ConfirmSlackLinkResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ConfirmSlackLinkResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // StartTelegramLinkResponse429Headers the declared response headers of an HTTP 429 response for StartTelegramLink
 type StartTelegramLinkResponse429Headers struct {
 	RetryAfter *int
@@ -40216,7 +40692,7 @@ func (c *ClientWithResponses) ConfirmBridgeLinkWithResponse(ctx context.Context,
 
 // ListLinkableConnectionsWithResponse List the Connections an account can be linked through
 //
-// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Slack Connections are not listed until links through them exist. Service account tokens get `403` (`service_account_not_allowed`).
+// The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection, and for a Bridge Connection how an account can be linked through it — `link_methods` and `handle_kind`, from the Connection's last `info`. Service account tokens get `403` (`service_account_not_allowed`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -40287,6 +40763,66 @@ func (c *ClientWithResponses) ConfirmMattermostLinkWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseConfirmMattermostLinkResponse(rsp)
+}
+
+// StartSlackLinkWithBodyWithResponse Start linking a Slack account with a code
+//
+// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+func (c *ClientWithResponses) StartSlackLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartSlackLinkResponse, error) {
+	rsp, err := c.StartSlackLinkWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSlackLinkResponse(rsp)
+}
+
+// StartSlackLinkWithResponse Start linking a Slack account with a code
+//
+// Looks up the account of the Slack Connection that the caller names in `handle`. An email — an `@` after at least one character with a dot after that `@` — is looked up with `users.lookupByEmail`, which ignores the letter case. Anything else is a name, a leading `@` dropped, compared with each account's `name` and `profile.display_name` regardless of case over the pages of `users.list`; deleted accounts, bots and Slackbot are left out. The bot then sends a code (`account_link.slack_code`) by direct message — `chat.postMessage` to the account's user id — with "You requested a link to Muster. Do not share this code.". Code requests are limited per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`, `account_link.slack_code_requests`); a request whose direct message failed still counts. Refused with `409` `account_linked_elsewhere` when the account is linked to another User, and with `409` without a code when Slack refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Slack Connection — missing, deleted or of another type — answers `422` `unknown_id` at `/connection_id`; no account answers `422` `handle_not_found` at `/handle`, several accounts with the name `422` `handle_ambiguous` at `/handle`, and an account the bot cannot write to (`cannot_dm_bot`, `user_not_found`, or `channel_not_found` for the user id) `422` `direct_message_refused` at `/handle`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/slack (the `StartSlackLink` operationId).
+func (c *ClientWithResponses) StartSlackLinkWithResponse(ctx context.Context, body StartSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*StartSlackLinkResponse, error) {
+	rsp, err := c.StartSlackLink(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartSlackLinkResponse(rsp)
+}
+
+// ConfirmSlackLinkWithBodyWithResponse Confirm a Slack link with the code
+//
+// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+func (c *ClientWithResponses) ConfirmSlackLinkWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConfirmSlackLinkResponse, error) {
+	rsp, err := c.ConfirmSlackLinkWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSlackLinkResponse(rsp)
+}
+
+// ConfirmSlackLinkWithResponse Confirm a Slack link with the code
+//
+// At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/account-links/slack/confirmation (the `ConfirmSlackLink` operationId).
+func (c *ClientWithResponses) ConfirmSlackLinkWithResponse(ctx context.Context, body ConfirmSlackLinkJSONRequestBody, reqEditors ...RequestEditorFn) (*ConfirmSlackLinkResponse, error) {
+	rsp, err := c.ConfirmSlackLink(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseConfirmSlackLinkResponse(rsp)
 }
 
 // StartTelegramLinkWithBodyWithResponse Start linking a Telegram account
@@ -47943,6 +48479,209 @@ func ParseConfirmMattermostLinkResponse(rsp *http.Response) (*ConfirmMattermostL
 		response.Headers429 = &headers
 	case rsp.StatusCode == 503:
 		var headers ConfirmMattermostLinkResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseStartSlackLinkResponse parses an HTTP response from a StartSlackLinkWithResponse call
+func ParseStartSlackLinkResponse(rsp *http.Response) (*StartSlackLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartSlackLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest SlackLinkStarted
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers StartSlackLinkResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers StartSlackLinkResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseConfirmSlackLinkResponse parses an HTTP response from a ConfirmSlackLinkWithResponse call
+func ParseConfirmSlackLinkResponse(rsp *http.Response) (*ConfirmSlackLinkResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ConfirmSlackLinkResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest AccountLink
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers ConfirmSlackLinkResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers ConfirmSlackLinkResponse503Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
