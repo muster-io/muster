@@ -48,6 +48,8 @@ import {
   ConnectionForm,
   type ConnectionValues,
   PUSH_SECRET_FORMAT,
+  SLACK_APP_TOKEN_FORMAT,
+  SLACK_BOT_TOKEN_FORMAT,
   TOKEN_FOR_NEW_SERVER,
   addressChanged,
   connectionDraft,
@@ -481,6 +483,31 @@ describe("the checks before a save", () => {
     };
     expect(addressChanged(stored, SLACK)).toBe(false);
     expect(addressChanged(proxied, SLACK)).toBe(false);
+    // The check of the edit names no problem: it sends no token and makes the dry probe.
+    expect(draftErrors(proxied, SLACK)).toEqual({});
+    expect(connectionErrors(proxied, SLACK)).toEqual({});
+  });
+
+  test("needs the secret of a Slack Connection's event mode, sent now or stored", () => {
+    const fresh = connectionValues(undefined, "slack");
+    expect(draftAddress(connectionDraft(fresh, undefined))).toBe("https://slack.com/api/");
+    expect(connectionErrors({ ...fresh, name: "ui" }, undefined)).toEqual({
+      "/bot_token": "required",
+      "/app_token": "required",
+    });
+    expect(connectionErrors({ ...fresh, name: "ui", event_mode: "http" }, undefined)).toEqual({
+      "/bot_token": "required",
+      "/slack_signing_secret": "required",
+    });
+    // The saved Connection stores its app-level token, not its Slack signing secret.
+    const stored = connectionValues(SLACK);
+    expect(connectionErrors(stored, SLACK)).toEqual({});
+    expect(connectionErrors({ ...stored, event_mode: "http" }, SLACK)).toEqual({
+      "/slack_signing_secret": "required",
+    });
+    expect(
+      connectionErrors({ ...stored, bot_token: { mode: "replace", value: "xapp-1" } }, SLACK),
+    ).toEqual({ "/bot_token": SLACK_BOT_TOKEN_FORMAT });
   });
 
   test("needs whole limiter numbers of at least 1", () => {
@@ -549,6 +576,28 @@ describe("the checks before a save", () => {
     );
     expect(connectionErrorText(i18n.t, PUSH_SECRET_FORMAT)).toBe(
       "Enter the push secret as whsec_ followed by base64.",
+    );
+  });
+
+  test("puts the server's refusals of a Slack Connection's tokens on their fields", () => {
+    expect(
+      serverErrors(
+        refusal(422, {
+          errors: [
+            { pointer: "/bot_token", code: "invalid_format" },
+            { pointer: "/app_token", code: "invalid_format" },
+            { pointer: "/slack_signing_secret", code: "required" },
+          ],
+        }),
+        false,
+      ),
+    ).toEqual({
+      "/bot_token": SLACK_BOT_TOKEN_FORMAT,
+      "/app_token": SLACK_APP_TOKEN_FORMAT,
+      "/slack_signing_secret": "required",
+    });
+    expect(connectionErrorText(i18n.t, SLACK_APP_TOKEN_FORMAT)).toBe(
+      "Enter the app-level token of the Slack app, which starts with xapp-.",
     );
   });
 });

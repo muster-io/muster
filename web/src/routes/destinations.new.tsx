@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1, C-22.FR-3): the choice of the type — Mattermost, Telegram,
-// Bridge or outgoing webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing
+// "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1, C-22.FR-3, C-24.FR-3): the choice of the type — Mattermost,
+// Telegram, Slack, Bridge or outgoing webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing
 // webhook first shows its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the
 // query cache, and the page of the Destination opens when the dialog closes.
 
@@ -26,6 +26,7 @@ import { DestinationForm } from "../components/destination-form";
 import { destinationTypeName } from "../components/destination-health";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { SigningSecretDialog } from "../components/signing-secret-dialog";
+import { SLACK_KIND } from "../components/slack-destination-fields";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
 import { buttonVariants } from "../components/ui/button";
 import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
@@ -35,7 +36,7 @@ export const Route = createFileRoute("/destinations/new")({
   component: NewDestinationPage,
 });
 
-const TYPES: readonly DestinationType[] = ["mattermost", "telegram", "bridge", "webhook"];
+const TYPES: readonly DestinationType[] = ["mattermost", "telegram", "slack", "bridge", "webhook"];
 
 function NewDestination() {
   const { t } = useTranslation();
@@ -107,6 +108,14 @@ function NewDestination() {
       {type === "telegram" && (
         <DestinationForm
           kind={TELEGRAM_KIND}
+          submitLabel={t("common.save")}
+          save={save}
+          onCancel={cancel}
+        />
+      )}
+      {type === "slack" && (
+        <DestinationForm
+          kind={SLACK_KIND}
           submitLabel={t("common.save")}
           save={save}
           onCancel={cancel}

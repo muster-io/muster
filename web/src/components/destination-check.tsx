@@ -4,7 +4,9 @@
 // "Check" of a Destination (C-13.FR-10, C-13.AC-8; C-14.FR-14; C-22.FR-3): the Destination check through the
 // interactive path, each check with "ok" or what failed, translated by its code with the server's English message below
 // as its detail — for Telegram "Channel exists", "Discussion group", "Bot rights in the channel" and "Bot rights in the
-// discussion group", for a Bridge "Channel" — and "Check passed" or "Check failed". A passing check ends the Broken
+// discussion group", for a Bridge and Slack "Channel" — and "Check passed" or "Check failed". The scopes a Slack bot
+// token lacks come from the item's missing_scopes and are named in the reader's language (D396); a Slack channel without
+// the bot says to invite it, naming the bot of the Connection (C-24.FR-3). A passing check ends the Broken
 // state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
 // answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and "Requests
 // of this check" opens the requests it made (C-23.FR-6).
@@ -25,7 +27,8 @@ import type {
   DestinationCheckItemName,
   DestinationCheckResult,
 } from "../api/gen/model";
-import { CheckDetail, checkCodeText, checkErrorText } from "./connection-check";
+import i18n from "../i18n";
+import { type CheckCode, checkCodeText, checkErrorText } from "./connection-check";
 import { unreachable } from "./destination-test-panel";
 import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
@@ -53,9 +56,60 @@ export function checkItemName(t: TFunction, name: DestinationCheckItemName): str
   }
 }
 
-function Item({ item }: { item: DestinationCheckItem }) {
+/** What a Destination check's code needs besides itself: the scopes Slack named, and the bot of a Slack Destination. */
+export interface DestinationCheckContext {
+  /** The scopes a Slack bot token lacks (missing_scopes), which the text of missing_scope names. */
+  scopes?: readonly string[] | null;
+  /**
+   * The bot of a Slack Destination's Connection, which "Invite the bot to the channel: /invite @{bot}" names; null
+   * while no check found it, undefined for another type.
+   */
+  slackBot?: string | null;
+}
+
+/**
+ * What a Destination check found, by its code, in the reader's language: a Slack channel without the bot says to invite
+ * the bot (C-24.FR-3, reference.md), any other code as the check of a Connection names it.
+ */
+export function destinationCheckText(
+  t: TFunction,
+  code: CheckCode,
+  context: DestinationCheckContext = {},
+): string {
+  if (code === "bot_not_in_channel" && context.slackBot !== undefined) {
+    return context.slackBot
+      ? t("destinations.slack.inviteBot", { bot: context.slackBot })
+      : t("destinations.slack.inviteBotUnnamed");
+  }
+  return checkCodeText(t, code, context.scopes);
+}
+
+/**
+ * The server's English message as the detail of the text of its code, when it says more than that code's English
+ * text; null without a code, which shows the message itself.
+ */
+export function destinationCheckDetail(
+  code: CheckCode | null | undefined,
+  message: string | null | undefined,
+  context: DestinationCheckContext = {},
+): string | null {
+  if (
+    code === null ||
+    code === undefined ||
+    message === null ||
+    message === undefined ||
+    message === ""
+  ) {
+    return null;
+  }
+  return message === destinationCheckText(i18n.getFixedT("en"), code, context) ? null : message;
+}
+
+function Item({ item, slackBot }: { item: DestinationCheckItem; slackBot?: string | null }) {
   const { t } = useTranslation();
   const code = item.code ?? null;
+  const context: DestinationCheckContext = { scopes: item.missing_scopes, slackBot };
+  const detail = item.ok ? null : destinationCheckDetail(code, item.message, context);
   return (
     <li className="flex min-w-0 items-start gap-2 text-sm" data-testid="destination-check-item">
       {item.ok ? (
@@ -76,19 +130,30 @@ function Item({ item }: { item: DestinationCheckItem }) {
               <span className="sr-only">{t("destinations.check.itemFailed")} </span>
               {code === null
                 ? (item.message ?? t("destinations.check.noDetails"))
-                : checkCodeText(t, code)}
+                : destinationCheckText(t, code, context)}
             </span>
           )}
         </span>
-        {!item.ok && (
-          <CheckDetail code={code} message={item.message} testId="destination-check-item-detail" />
+        {detail !== null && (
+          <span
+            className="text-xs wrap-anywhere text-muted-foreground"
+            data-testid="destination-check-item-detail"
+          >
+            {t("checks.detail", { detail })}
+          </span>
         )}
       </span>
     </li>
   );
 }
 
-function Result({ result }: { result: DestinationCheckResult }) {
+function Result({
+  result,
+  slackBot,
+}: {
+  result: DestinationCheckResult;
+  slackBot?: string | null;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="destination-check-result">
@@ -104,7 +169,7 @@ function Result({ result }: { result: DestinationCheckResult }) {
       {result.checks.length > 0 && (
         <ul className="flex flex-col gap-1.5" aria-label={t("destinations.check.itemsLabel")}>
           {result.checks.map((item, index) => (
-            <Item key={`${item.name}-${index}`} item={item} />
+            <Item key={`${item.name}-${index}`} item={item} slackBot={slackBot} />
           ))}
         </ul>
       )}
@@ -116,9 +181,11 @@ export interface DestinationCheckProps {
   destination: Destination;
   /** The form has unsaved changes; the check uses the saved Destination. */
   dirty: boolean;
+  /** The bot of a Slack Destination's Connection, null before a check found it; undefined for another type. */
+  slackBot?: string | null;
 }
 
-export function DestinationCheck({ destination, dirty }: DestinationCheckProps) {
+export function DestinationCheck({ destination, dirty, slackBot }: DestinationCheckProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const check = useCheckDestination({
@@ -164,7 +231,7 @@ export function DestinationCheck({ destination, dirty }: DestinationCheckProps) 
               {checkErrorText(t, check.error)}
             </div>
           )}
-          {check.isSuccess && <Result result={check.data} />}
+          {check.isSuccess && <Result result={check.data} slackBot={slackBot} />}
         </div>
         {check.isSuccess && (
           <div>

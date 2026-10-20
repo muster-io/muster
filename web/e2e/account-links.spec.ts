@@ -13,15 +13,21 @@
 // acknowledges through the fake shows "Bob via Bridge" in its Timeline. The token, the handle and the code entry fit
 // 360 pixels, in English and in Russian. The fake's configuration is put back and "Dev Bridge" checked again at the
 // end, before the rest of the cleaning, each step of which runs whatever the others do.
+// Through Slack (Verification step 5 of its story): the Admin links alice of the fake Slack server's second app
+// through the spec's own Connection "ui" by her email and the code the bot sent her, the list shows "Slack · ui · Alice
+// Smith", and Unlink removes it; a name nobody has is refused; bob, linked through the API, is shown and removed on the
+// Admin's user page; the dialog fits 360 pixels, the code entry included.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
 import {
   type Api,
   adminApi,
+  FSL,
   checkConnection,
   connectionNamed,
   createBridgeConnection,
+  createSlackConnection,
   deleteRoute,
   expectNoHorizontalScroll,
   fakeIntegration,
@@ -29,6 +35,7 @@ import {
   fbr,
   notify,
   removeBridgeConnection,
+  removeSlackConnection,
   resetFakeBridge,
   shot,
   signIn,
@@ -651,3 +658,115 @@ async function russianBridgeDialogs(bob: Page): Promise<void> {
   await bob.keyboard.press("Escape");
   await expect(code).toBeHidden();
 }
+
+/** A direct message of the bot of the fake Slack server's second app. */
+interface SlackDm {
+  text: string;
+}
+
+async function slackDms(person: string): Promise<SlackDm[]> {
+  const res = await fetch(`${FSL}/dms?user=${person}&app=b`);
+  expect(res.ok).toBe(true);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the fake's own list of direct messages
+  return (await res.json()) as SlackDm[];
+}
+
+/** The code of the first direct message the Slack bot sent the person after the before ones. */
+async function newSlackCode(person: string, before: number): Promise<string> {
+  let code = "";
+  await expect
+    .poll(async () => {
+      const list = await slackDms(person);
+      code = list.length > before ? (CODE.exec(list.at(-1)?.text ?? "")?.[1] ?? "") : "";
+      return code;
+    })
+    .not.toBe("");
+  return code;
+}
+
+test("links a Slack account by email and code, and unlinks it", async ({ page }) => {
+  test.setTimeout(120_000);
+  const admin = await adminApi();
+  let adminId = "";
+  try {
+    await removeSlackConnection(admin, "ui");
+    const slackId = await createSlackConnection(admin, "ui");
+    const csp = watchCsp(page);
+    await signInAdmin(page);
+    await page.goto("/profile");
+    await expect(page.getByRole("heading", { name: "Messenger accounts" })).toBeVisible();
+
+    // 5. "Link Slack" → "ui": the email, "Send code", the code from the direct message to alice.
+    await page.getByRole("button", { name: "Link Slack" }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Connection").selectOption({ label: "ui" });
+    // A name nobody has is refused with its text.
+    await dialog.getByLabel("Your Slack email or name").fill("nobody");
+    await dialog.getByRole("button", { name: "Send code" }).click();
+    await expect(dialog.getByTestId("link-slack-error")).toHaveText(
+      "No Slack account with this email or name was found.",
+    );
+    const before = (await slackDms("U0FAKEALICE")).length;
+    await dialog.getByLabel("Your Slack email or name").fill("alice@example.org");
+    await dialog.getByRole("button", { name: "Send code" }).click();
+    await expect(dialog.getByText("5 attempts left")).toBeVisible();
+    await shot(page, "account-links-slack-code");
+    await dialog
+      .getByLabel("Enter the code the bot sent you in Slack")
+      .fill(await newSlackCode("U0FAKEALICE", before));
+    await dialog.getByRole("button", { name: "Link", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    const linked = rows(page).filter({ hasText: "Slack · ui · Alice Smith" });
+    await expect(linked).toHaveCount(1);
+    await shot(page, "account-links-slack-list");
+
+    // Unlink removes it.
+    await page.getByRole("button", { name: "Unlink Alice Smith", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Unlink", exact: true }).click();
+    await expect(linked).toHaveCount(0);
+
+    // The Admin's user page shows a Slack link and removes it.
+    const bobBefore = (await slackDms("U0FAKEBOB")).length;
+    const started = await admin.call<{ request_id: string }>(
+      "POST",
+      "/api/v1/me/account-links/slack",
+      { connection_id: slackId, handle: "bob@example.org" },
+    );
+    await admin.call("POST", "/api/v1/me/account-links/slack/confirmation", {
+      request_id: started.request_id,
+      code: await newSlackCode("U0FAKEBOB", bobBefore),
+    });
+    const me = await admin.call<{ user: { id: string } }>("GET", "/api/v1/sessions/current");
+    adminId = me.user.id;
+    await page.goto(`/admin/users/${adminId}`);
+    const bob = rows(page).filter({ hasText: "Slack · ui · Bob Jones" });
+    await expect(bob).toHaveCount(1);
+    await page.getByRole("button", { name: "Remove Bob Jones", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(bob).toHaveCount(0);
+
+    // At 360 pixels the dialog fits, before and after "Send code".
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto("/profile");
+    await page.getByRole("button", { name: "Link Slack" }).click();
+    const phone = page.getByRole("dialog");
+    await expect(phone.getByLabel("Your Slack email or name")).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    await phone.getByLabel("Your Slack email or name").fill("nobody");
+    await phone.getByRole("button", { name: "Send code" }).click();
+    await expect(phone.getByTestId("link-slack-error")).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    // The code entry after a code was sent fits too.
+    await phone.getByLabel("Your Slack email or name").fill("alice@example.org");
+    await phone.getByRole("button", { name: "Send code" }).click();
+    await expect(phone.getByLabel("Enter the code the bot sent you in Slack")).toBeVisible();
+    await expect(phone.getByText("5 attempts left")).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    await shot(page, "account-links-slack-phone");
+    await page.keyboard.press("Escape");
+    expect(csp).toEqual([]);
+  } finally {
+    await removeSlackConnection(admin, "ui");
+    await admin.dispose();
+  }
+});

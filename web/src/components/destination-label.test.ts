@@ -8,7 +8,7 @@
 // is two. A Bridge Destination reads its messenger from the info of its Connection, "Bridge" until a check read it,
 // and two Bridge Destinations of one channel through Connections to the same base URL are one chat. The Connections
 // list names a Connection by its messenger and the host it calls (C-22.FR-1), a Slack Connection "Slack" with its
-// bot's name once a check found it (C-24.FR-1). A Slack Destination posts in "#<channel name>", or "#<channel id>"
+// bot's name and its workspace once a check found them (C-24.FR-1). A Slack Destination posts in "#<channel name>", or "#<channel id>"
 // before a check read the name, and its messenger is "Slack" (C-24.FR-3); two Slack Destinations of one channel
 // through Connections to the same workspace are one chat.
 
@@ -445,11 +445,12 @@ describe("the Connections list", () => {
     expect(bridgeMessengerName(i18n.t, undefined)).toBe("Мост");
   });
 
-  test("names a Slack Connection Slack, with its bot once a check found it and no address", async () => {
+  test("names a Slack Connection Slack, with its bot and workspace once a check found them and no address", async () => {
     const checked = slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot");
     const unchecked = slackConnection("CN000000000SLU", "slack-unchecked", null);
     expect(connectionMessengerName(i18n.t, checked)).toBe("Slack");
-    expect(connectionAccount(checked)).toBe("muster-dev-slack-bot");
+    expect(connectionAccount(checked)).toBe("muster-dev-slack-bot · Fake workspace");
+    expect(connectionAccount({ ...checked, team_name: null })).toBe("muster-dev-slack-bot");
     expect(connectionAccount(unchecked)).toBeUndefined();
     expect(connectionAccount({ ...unchecked, bot_name: "" })).toBeUndefined();
     await i18n.changeLanguage("ru");

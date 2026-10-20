@@ -28,6 +28,7 @@ import type {
   DestinationTestResult,
   Permission,
   Session,
+  SlackDestination,
   TestStep,
   WebhookDestination,
 } from "../api/gen/model";
@@ -588,6 +589,57 @@ describe("DestinationTestPanel", () => {
         "Отправляет через мост одно тестовое сообщение с пометкой 🧪 по сохранённым настройкам. Группы алертов не меняются; если человек нажмёт кнопку тестового сообщения, ничего не изменится, а Muster ответит, что это тестовое сообщение. Тест, успешный на каждом шаге, снимает состояние «сломано».",
       );
     expect(document.body.textContent).not.toContain("по-английски");
+  });
+
+  test("says beside a Slack Destination's one step that Slack does not let a bot press its own button", async () => {
+    const slack: SlackDestination = {
+      id: ID,
+      type: "slack",
+      name: "slack-alerts",
+      connection_id: "CN0000000000SL",
+      channel_id: "C0FAKEALERTS",
+      channel_name: "alerts",
+      mentions: defaultMentions(),
+      limiter: { limit: 30, per_seconds: 60 },
+      health: { state: "healthy" },
+      routes: [],
+      created_at: "2026-10-20T09:30:00Z",
+      etag: '"1"',
+    };
+    const result: DestinationTestResult = {
+      steps: [step("message", "none", { response_status: 200 })],
+      health: { state: "healthy" },
+      request_log_run: RUN,
+    };
+    fakeApi(() => Promise.resolve(json(200, result)));
+    const panel = () => (
+      <DestinationTestPanel
+        destination={slack}
+        source={EXAMPLE}
+        dirty={false}
+        onSourceGone={() => undefined}
+      />
+    );
+    const screen = await render(providers(panel()).ui);
+    await expect.element(page.getByTestId("test-note")).not.toBeInTheDocument();
+    await page.getByRole("button", { name: "Send test message" }).click();
+    await expect.element(page.getByTestId("test-summary")).toHaveTextContent("Test passed");
+    expect(titles()).toEqual(["Message: Sent"]);
+    await expect
+      .element(page.getByTestId("test-note"))
+      .toHaveTextContent(
+        "Slack does not let a bot press its own button, so this test does not check presses. Press a button on the test message: once the press reaches Muster, it answers that nothing was changed.",
+      );
+    await screen.unmount();
+
+    await i18n.changeLanguage("ru");
+    await render(providers(panel()).ui);
+    await page.getByRole("button", { name: "Отправить тестовое сообщение" }).click();
+    await expect
+      .element(page.getByTestId("test-note"))
+      .toHaveTextContent(
+        "Slack не даёт боту нажимать собственные кнопки, поэтому этот тест не проверяет нажатия. Нажмите кнопку тестового сообщения: когда нажатие дойдёт до Muster, он ответит, что ничего не изменилось.",
+      );
   });
 
   test("offers only the example without alert-groups:read", async () => {

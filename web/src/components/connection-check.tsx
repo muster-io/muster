@@ -15,8 +15,11 @@
 // the form makes an earlier result stale, and the panel hides it. The check runs on the interactive path, so a busy
 // messenger answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and
 // "Requests of this check" opens the requests it made (C-23.FR-6), a check before saving included. A Slack check
-// (C-24.FR-2) has the steps "Token", "Scopes" and, in Socket Mode, "App-level token"; the scopes a bot token lacks come
-// from the step's missing_scopes and are named in the reader's language (D396).
+// (C-24.FR-2) has the steps "Token", "Scopes" and, in Socket Mode, "App-level token", which name the bot and the
+// workspace, and the app; a refused or wrong token is named as the token of its step, the bot's or the app-level one;
+// the scopes a bot token lacks come from the step's missing_scopes and are named in the reader's language (D396). A
+// draft whose bot token is typed but whose app-level token goes nowhere — none typed, and the stored one is sent only
+// with the stored bot token through the saved proxy — skips "App-level token", and the step says to type it.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -38,6 +41,7 @@ import type {
   ConnectionDraft,
   NullableConnectionCheckCode,
   NullableDestinationCheckCode,
+  SlackCheckInfo,
   TelegramUpdateMode,
 } from "../api/gen/model";
 import i18n from "../i18n";
@@ -95,15 +99,19 @@ export type CheckCode =
 /**
  * What a check found, by its code, in the reader's language; the server's English message is its detail. The scopes a
  * bot token lacks are named from the missing_scopes of the step or item (D396), and without them the text names none.
+ * The step app_token of a Slack check names its refused or wrong token as the app-level token, not the bot's.
  */
 export function checkCodeText(
   t: TFunction,
   code: CheckCode,
   scopes?: readonly string[] | null,
+  step?: ConnectionCheckStepName,
 ): string {
   switch (code) {
     case "token_invalid":
-      return t("checks.codes.tokenInvalid");
+      return step === "app_token"
+        ? t("checks.codes.appTokenInvalid")
+        : t("checks.codes.tokenInvalid");
     case "not_bot_api":
       return t("checks.codes.notBotApi");
     case "wrong_path_prefix":
@@ -161,7 +169,9 @@ export function checkCodeText(
     case "not_bridge":
       return t("checks.codes.notBridge");
     case "wrong_token_type":
-      return t("checks.codes.wrongTokenType");
+      return step === "app_token"
+        ? t("checks.codes.notAppToken")
+        : t("checks.codes.wrongTokenType");
     case "missing_scope":
       return scopes?.length
         ? t("checks.codes.missingScope", { scopes: scopes.join(", ") })
@@ -185,6 +195,7 @@ export function checkDetail(
   code: CheckCode | null | undefined,
   message: string | null | undefined,
   scopes?: readonly string[] | null,
+  step?: ConnectionCheckStepName,
 ): string | null {
   if (
     code === null ||
@@ -195,7 +206,7 @@ export function checkDetail(
   ) {
     return null;
   }
-  return message === checkCodeText(i18n.getFixedT("en"), code, scopes) ? null : message;
+  return message === checkCodeText(i18n.getFixedT("en"), code, scopes, step) ? null : message;
 }
 
 /** The detail of a check's code: the server's English message, small and muted below the translated text. */
@@ -203,16 +214,19 @@ export function CheckDetail({
   code,
   message,
   scopes,
+  step,
   testId,
 }: {
   code: CheckCode | null | undefined;
   message: string | null | undefined;
   /** The scopes a bot token lacks, which the code's text names. */
   scopes?: readonly string[] | null;
+  /** The step of a Connection check, whose token the code's text names. */
+  step?: ConnectionCheckStepName;
   testId: string;
 }) {
   const { t } = useTranslation();
-  const detail = checkDetail(code, message, scopes);
+  const detail = checkDetail(code, message, scopes, step);
   if (detail === null) {
     return null;
   }
@@ -290,18 +304,26 @@ export function connectionCheckErrorText(
 
 /**
  * Why a step was skipped: only the dry probe ran, for want of a token — a new Connection's draft has none typed, and an
- * edited one has a changed address or proxy that the stored token never goes to —, or an earlier step failed.
+ * edited one has a changed address or proxy that the stored token never goes to —, a Slack draft's app-level token goes
+ * nowhere — none is typed and none is stored (appToken), or the stored one goes only with the stored bot token through
+ * the saved proxy, which the draft changed (appTokenRetype) —, or an earlier step failed.
  */
-type SkipReason = "noToken" | "retype" | "earlier";
+type SkipReason = "noToken" | "retype" | "appToken" | "appTokenRetype" | "earlier";
 
 /** Whether the check was made from the create form or from the page of a saved Connection. */
 type CheckMode = "new" | "edit";
 
 /**
  * The reason of each skipped step, read from the result: a step skipped right after a dry probe that passed was skipped
- * for want of a token, any other after a step that failed.
+ * for want of a token, the step app_token after steps that all passed for want of an app-level token — to be typed when
+ * none is stored, typed too when the stored one does not go with the draft —, any other after a step that failed. Only
+ * a draft skips app_token after passing steps: a check of a saved Connection always has it.
  */
-function skipReasons(result: ConnectionCheckResult, mode: CheckMode): (SkipReason | undefined)[] {
+function skipReasons(
+  result: ConnectionCheckResult,
+  mode: CheckMode,
+  appTokenStored: boolean,
+): (SkipReason | undefined)[] {
   let last: ConnectionCheckStep | undefined;
   return result.steps.map((step) => {
     if (step.skipped !== true) {
@@ -310,6 +332,9 @@ function skipReasons(result: ConnectionCheckResult, mode: CheckMode): (SkipReaso
     }
     if (last?.name === "dry_probe" && last.ok) {
       return mode === "new" ? "noToken" : "retype";
+    }
+    if (step.name === "app_token" && last !== undefined && last.ok) {
+      return appTokenStored ? "appTokenRetype" : "appToken";
     }
     return "earlier";
   });
@@ -321,6 +346,10 @@ function skipText(t: TFunction, reason: SkipReason): string {
       return t("connections.check.skippedNoToken");
     case "retype":
       return t("connections.check.skippedRetype");
+    case "appToken":
+      return t("connections.check.skippedAppToken");
+    case "appTokenRetype":
+      return t("connections.check.skippedAppTokenRetype");
     case "earlier":
       return t("connections.check.skippedEarlier");
     default:
@@ -349,11 +378,14 @@ function Step({
   skipReason,
   bot,
   pendingUpdates,
+  slack,
 }: {
   step: ConnectionCheckStep;
   skipReason?: SkipReason;
   bot?: string;
   pendingUpdates?: number;
+  /** What a Slack check found: the bot and the workspace by the step token, the app by the step app_token. */
+  slack?: SlackCheckInfo | null;
 }) {
   const { t } = useTranslation();
   const skipped = step.skipped === true;
@@ -376,6 +408,17 @@ function Step({
   }
   if (step.ok && !skipped && step.name === "get_webhook_info" && pendingUpdates !== undefined) {
     details.push(t("connections.check.pendingUpdates", { count: pendingUpdates }));
+  }
+  if (step.ok && !skipped && slack !== undefined && slack !== null) {
+    if (step.name === "token") {
+      if (bot !== undefined) {
+        details.push(t("connections.check.bot", { bot }));
+      }
+      details.push(t("connections.slack.workspace", { name: slack.team_name }));
+    }
+    if (step.name === "app_token" && slack.app_id !== null) {
+      details.push(t("connections.slack.app", { id: slack.app_id }));
+    }
   }
   const failed = !step.ok && !skipped;
   const code = step.code ?? null;
@@ -410,7 +453,7 @@ function Step({
           >
             {code === null
               ? (step.message ?? t("connections.check.unknownError"))
-              : checkCodeText(t, code, step.missing_scopes)}
+              : checkCodeText(t, code, step.missing_scopes, step.name)}
           </span>
         )}
         {found && (
@@ -418,7 +461,7 @@ function Step({
             className="wrap-anywhere text-muted-foreground"
             data-testid="connection-check-step-reason"
           >
-            {code === null ? step.message : checkCodeText(t, code, step.missing_scopes)}
+            {code === null ? step.message : checkCodeText(t, code, step.missing_scopes, step.name)}
           </span>
         )}
         {(failed || found) && (
@@ -426,6 +469,7 @@ function Step({
             code={code}
             message={step.message}
             scopes={step.missing_scopes}
+            step={step.name}
             testId="connection-check-step-detail"
           />
         )}
@@ -439,17 +483,19 @@ function Result({
   type,
   mode,
   updateMode,
+  appTokenStored,
 }: {
   result: ConnectionCheckResult;
   type: Connection["type"];
   mode: CheckMode;
   updateMode?: TelegramUpdateMode;
+  appTokenStored: boolean;
 }) {
   const { t } = useTranslation();
   const name = result.bot_name ?? "";
   // Telegram names bots by their @username; Mattermost by its username alone.
   const bot = name === "" ? undefined : type === "telegram" ? `@${name}` : name;
-  const reasons = skipReasons(result, mode);
+  const reasons = skipReasons(result, mode, appTokenStored);
   let summary: string;
   if (!result.ok) {
     summary = t("connections.check.failedSummary");
@@ -481,6 +527,7 @@ function Result({
             skipReason={reasons[index]}
             bot={bot}
             pendingUpdates={result.pending_updates ?? undefined}
+            slack={result.slack}
           />
         ))}
       </ul>
@@ -528,6 +575,8 @@ export interface ConnectionCheckProps {
   invalid?: string;
   /** The update mode of a Telegram Connection, as the form holds it. */
   updateMode?: TelegramUpdateMode;
+  /** Whether the saved Slack Connection of an edit stores an app-level token (app_token_status.set). */
+  appTokenStored?: boolean;
 }
 
 /** What a check was made of: the draft as it was sent, or the saved Connection. */
@@ -541,6 +590,7 @@ export function ConnectionCheck({
   draft,
   invalid,
   updateMode,
+  appTokenStored = false,
 }: ConnectionCheckProps) {
   const { t } = useTranslation();
   const mode: CheckMode = connectionId === undefined ? "new" : "edit";
@@ -629,7 +679,13 @@ export function ConnectionCheck({
             </div>
           )}
           {shown && check.isSuccess && (
-            <Result result={check.data} type={type} mode={mode} updateMode={updateMode} />
+            <Result
+              result={check.data}
+              type={type}
+              mode={mode}
+              updateMode={updateMode}
+              appTokenStored={appTokenStored}
+            />
           )}
         </div>
         {shown && check.isSuccess && (

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create connection" (C-13.FR-1, FR-14, C-14.FR-1, C-22.FR-1): the choice of the messenger — Mattermost, Telegram or a
-// Bridge — then its form and "Check connection", which checks the form's values before anything is saved and saves
-// nothing; the new Connection's page opens after it is created, with its own check and, for Mattermost and a Bridge in
-// push mode, its callback address.
+// "Create connection" (C-13.FR-1, FR-14, C-14.FR-1, C-22.FR-1, C-24.FR-1, FR-2): the choice of the messenger —
+// Mattermost, Telegram, Slack or a Bridge — then its form and "Check connection", which checks the form's values before
+// anything is saved and saves nothing; the new Connection's page opens after it is created, with its own check and, for
+// Mattermost, a Bridge in push mode and Slack in HTTP mode, its callback address.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -39,6 +39,7 @@ function NewConnection() {
   const kinds: readonly { kind: ConnectionType; name: string }[] = [
     { kind: "mattermost", name: "Mattermost" },
     { kind: "telegram", name: "Telegram" },
+    { kind: "slack", name: t("connections.types.slack") },
     { kind: "bridge", name: t("connections.types.bridge") },
   ];
   const queryClient = useQueryClient();

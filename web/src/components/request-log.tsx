@@ -4,7 +4,8 @@
 // The Request log (C-23.FR-6): the records of a Connection, of a Destination, of an Alert Group's deliveries to one
 // Destination or of one check run, newest first and page by page with "Load more" — when each was made in the user's
 // time zone, a named arrow for its direction before the operation in a monospace font with the kind of check below it,
-// and the status or, without an answer, what failed, with the latency below it — filtered by direction, status class
+// and the status or, without an answer, what failed — an envelope of Slack's Socket Mode, which has no status, as
+// confirmed — with the latency below it — filtered by direction, status class
 // and operation. Three columns fit 360 px (NFR-15), the date and the time of day on two lines there. The pages keep the
 // filters in the URL, so that a link to a filtered list can be shared; the dialogs of the Alert Group page and the
 // check panels keep them while they are open. A record opens in a dialog of its own.
@@ -39,6 +40,7 @@ import {
   RequestRecordDialog,
   checkKindText,
   errorClassText,
+  isEnvelope,
   useRecordTime,
 } from "./request-record";
 import { StatusTabs } from "./status-tabs";
@@ -58,10 +60,16 @@ export type RequestLogScope = Pick<
 const DIRECTIONS = Object.values(RequestDirection);
 const STATUS_CLASSES = Object.values(ListRequestLogStatusClass);
 
-/** The status of a record, or without an answer what failed: its error code, else its error class. */
-function statusText(t: TFunction, record: RequestRecordSummary): string {
+/**
+ * The status of a record, or without an answer what failed: its error code, else its error class; an envelope of
+ * Slack's Socket Mode has no status, and Muster confirmed it.
+ */
+export function statusText(t: TFunction, record: RequestRecordSummary): string {
   if (record.status !== null) {
     return String(record.status);
+  }
+  if (isEnvelope(record) && record.error_code === null && record.error_class === null) {
+    return t("requestLog.envelopeConfirmed");
   }
   if (record.error_code !== null) {
     return checkCodeText(t, record.error_code);

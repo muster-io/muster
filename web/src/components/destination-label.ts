@@ -9,7 +9,8 @@
 // check read it (C-22.FR-1). The chat a Destination posts in tells the Route editor when two Destinations would post
 // the same Alert Group twice into one chat (D305): one Telegram chat id, one Mattermost server and channel, one bridge
 // base URL and channel, or one Slack workspace and channel. The Connections list names a Connection by its messenger
-// and the host it calls, or its Telegram bot; a Slack Connection by its bot's name once a check found it.
+// and the host it calls, or its Telegram bot; a Slack Connection by its bot's name and its workspace once a check found
+// them.
 
 import type { TFunction } from "i18next";
 import { useMemo } from "react";
@@ -223,8 +224,8 @@ function hostOf(url: string): string | undefined {
 
 /**
  * What a Connection calls, in the Connections list: the host of a Mattermost server URL or of a Bridge's base URL, the
- * @username of a Telegram bot or the name of a Slack bot once a check found it. Slack's address is fixed, so it has
- * none.
+ * @username of a Telegram bot, or the name of a Slack bot and its workspace once a check found them. Slack's address is
+ * fixed, so it has none.
  */
 export function connectionAccount(c: Connection): string | undefined {
   switch (c.type) {
@@ -235,7 +236,7 @@ export function connectionAccount(c: Connection): string | undefined {
     case "bridge":
       return hostOf(c.base_url);
     case "slack":
-      return c.bot_name || undefined;
+      return [c.bot_name, c.team_name].filter(Boolean).join(" · ") || undefined;
     default:
       // A type this SPA does not know calls nothing it could name.
       return undefined;
