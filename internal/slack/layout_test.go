@@ -317,6 +317,24 @@ func slackRules(t *testing.T, name string, o outgoing) {
 // file and the rules of Slack: a Root message per status, Loud and Quiet, an edit and a final edit, a Reminder, Thread
 // replies, a Storm summary, a test message, and the plain text after Slack rejected the markup.
 func TestLayoutGolden(t *testing.T) {
+	for _, c := range layoutCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			slackRules(t, c.name, c.o)
+			golden(t, c.name, c.o)
+		})
+	}
+}
+
+// layoutCase is a request of a golden file: an edit names the `ts` 1.000001 and a Thread reply its `thread_ts`.
+type layoutCase struct {
+	name string
+	o    outgoing
+}
+
+// layoutCases are the requests of the golden files: the Root message in each status, Loud and Quiet, its edits and
+// final edit, a Reminder, Thread replies, a Storm summary, a test message and messages as text alone.
+func layoutCases(t *testing.T) []layoutCase {
+	t.Helper()
 	e := newLayoutEnv(t)
 	l := testLook()
 	loud := []string{"<!here>"}
@@ -326,10 +344,7 @@ func TestLayoutGolden(t *testing.T) {
 	acked := e.root(t, layoutSource(messages.ColourAcknowledged))
 	test := e.r.TestRoot(layoutSource(messages.ColourFiring), messages.MarkupMrkdwn, "DS0000000000D1").Message
 	storm := e.r.Storm("RT0000000000R1", "sl", "en", 12, 0)
-	cases := []struct {
-		name string
-		o    outgoing
-	}{
+	return []layoutCase{
 		{"root_firing_loud", layout(firing, l, loud)},
 		{"root_firing_quiet", layout(messages.DeletedNote(firing, layoutNow.Add(-time.Minute)), l, nil)},
 		{"root_acknowledged_edit", edit(layout(acked, l, nil))},
@@ -344,12 +359,6 @@ func TestLayoutGolden(t *testing.T) {
 		{"test_message", testRequest(test, l)},
 		{"plain_root", layout(firing, plainLook(), loud)},
 		{"plain_reply", reply(layout(newAlertsReply(), plainLook(), loud))},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			slackRules(t, c.name, c.o)
-			golden(t, c.name, c.o)
-		})
 	}
 }
 

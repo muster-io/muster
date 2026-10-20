@@ -118,7 +118,7 @@ func (r MessageRenderer) Reply(ctx context.Context, db messages.DBTX, rv ReplyVi
 }
 
 // markupOf is the markup a Destination type writes: Markdown in Mattermost, HTML in Telegram, CommonMark in a
-// bridge's envelope body (C-22.FR-4), plain text for an outgoing webhook.
+// bridge's envelope body (C-22.FR-4), Slack's mrkdwn (C-24.FR-7), plain text for an outgoing webhook.
 func markupOf(destinationType string) messages.Markup {
 	switch destinationType {
 	case TypeMattermost:
@@ -127,6 +127,8 @@ func markupOf(destinationType string) messages.Markup {
 		return messages.MarkupHTML
 	case TypeBridge:
 		return messages.MarkupCommonMark
+	case TypeSlack:
+		return messages.MarkupMrkdwn
 	}
 	return messages.MarkupPlain
 }

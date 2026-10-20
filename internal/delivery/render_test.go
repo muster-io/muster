@@ -235,3 +235,34 @@ func TestBridgeMarkup(t *testing.T) {
 		t.Errorf("reply markups %v, calls to the bridge %+v", replies, calls)
 	}
 }
+
+// TestSlackMarkup is C-24.FR-7 on delivery: the Root messages of a Slack Destination are rendered in mrkdwn, beside
+// the markups of the Route's other Destinations, and so are its Thread replies.
+func TestSlackMarkup(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].typ = delivery.TypeSlack
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	var roots [][]messages.Markup
+	var replies []messages.Markup
+	r := replyMarkups{stubRenderer: stubRenderer{markups: &roots}, replies: &replies}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Renderer: r})
+	e.w.Renderer = r
+	e.w.Adapters[delivery.TypeSlack] = e.rec
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	if len(roots) != 1 || !slices.Equal(roots[0], []messages.Markup{messages.MarkupMrkdwn, messages.MarkupPlain}) {
+		t.Fatalf("root markups %v", roots)
+	}
+	if calls := e.callsTo(destMM); len(calls) != 1 || calls[0].Method != deliverytest.MethodPublish {
+		t.Fatalf("calls to slack %+v", calls)
+	}
+	e.rec.Reset()
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 2,
+		Event: groups.EventAckTimeout, Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionAckTimeout}})
+	e.round(t)
+	calls := e.callsTo(destMM)
+	if !slices.Equal(replies, []messages.Markup{messages.MarkupMrkdwn}) || len(calls) != 1 ||
+		calls[0].Method != deliverytest.MethodReply {
+		t.Errorf("reply markups %v, calls to slack %+v", replies, calls)
+	}
+}

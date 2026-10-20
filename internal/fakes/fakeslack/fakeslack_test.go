@@ -156,7 +156,7 @@ func TestErrors(t *testing.T) {
 		{"auth.test", fakeslack.BotToken, "token_revoked"},
 		{"bots.info", fakeslack.BotToken, "token_revoked"},
 		{"apps.connections.open", "xapp-unknown", "invalid_auth"},
-		{"chat.postMessage", fakeslack.SecondBotToken, "unknown_method"},
+		{"chat.scheduleMessage", fakeslack.SecondBotToken, "unknown_method"},
 	} {
 		got := call(t, f, tc.method, tc.token, nil, false)
 		slackError(t, got, tc.code)

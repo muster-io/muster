@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
@@ -51,6 +53,14 @@ const (
 	botTokenPrefix = "xoxb-"
 	appTokenPrefix = "xapp-"
 )
+
+var _ slack.Targets = (*Service)(nil)
+
+// cachedSlack is the Slack client of a version of a Connection.
+type cachedSlack struct {
+	version int64
+	client  *slack.Client
+}
 
 // SlackIdentity is what a check of a Slack Connection found: the workspace and the bot's user id from the step token,
 // and the app's id from the step app_token, empty without it.
@@ -189,6 +199,54 @@ func (s *Service) slackClient(row dbgen.GetConnectionRow) (*slack.Client, error)
 	return slack.NewClient(slack.Network(s.cfg.Network), slack.Settings{BotToken: token, AppToken: app,
 		SigningSecret: signing, Proxy: p.Outbound(password),
 		Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}, Route: s.cfg.SlackRoute})
+}
+
+// cachedSlackClient is the Slack client of the Connection id at version for delivery, built again when the version
+// changed.
+func (s *Service) cachedSlackClient(id, version int64, build func() (*slack.Client, error)) (*slack.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cc, ok := s.slackClients[id]; ok && cc.version == version {
+		return cc.client, nil
+	}
+	c, err := build()
+	if err != nil {
+		return nil, err
+	}
+	s.slackClients[id] = cachedSlack{version: version, client: c}
+	return c, nil
+}
+
+// SlackTarget is where the Slack Destination destinationID posts, for the Slack delivery (slack.Targets): its channel
+// id and its Connection with the Web API client, kept until the Connection changes, and the workspace address and the
+// bot's name the Connection's last passing check stored, read every time. A deleted Destination still has one, for
+// its final edit. A Destination that is unknown or not a Slack one, or whose Connection is deleted or not a Slack
+// Connection, is slack.ErrNoTarget.
+func (s *Service) SlackTarget(ctx context.Context, destinationID int64) (slack.Target, error) {
+	r, err := s.cfg.Store.GetSlackDestinationTarget(ctx, dbgen.GetSlackDestinationTargetParams{OrgID: s.cfg.OrgID,
+		DestinationID: destinationID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return slack.Target{}, slack.ErrNoTarget
+	}
+	if err != nil {
+		return slack.Target{}, fmt.Errorf("read the connection of the destination %d: %w", destinationID, err)
+	}
+	if r.Type != TypeSlack {
+		return slack.Target{}, slack.ErrNoTarget
+	}
+	row := dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: r.Type, Name: r.Name,
+		BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		SlackAppTokenCiphertext: r.SlackAppTokenCiphertext, SlackAppTokenKeyID: r.SlackAppTokenKeyID,
+		SlackAppTokenUpdatedAt: r.SlackAppTokenUpdatedAt, SlackSigningSecretCiphertext: r.SlackSigningSecretCiphertext,
+		SlackSigningSecretKeyID: r.SlackSigningSecretKeyID, SlackSigningSecretUpdatedAt: r.SlackSigningSecretUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}
+	c, err := s.cachedSlackClient(r.ID, r.Version, func() (*slack.Client, error) { return s.slackClient(row) })
+	if err != nil {
+		return slack.Target{}, err
+	}
+	return slack.Target{Client: c, ConnectionID: r.ID, ConnectionPublicID: r.PublicID,
+		ChannelID: r.SlackChannelID.String, TeamURL: r.SlackTeamUrl.String, BotName: r.BotUsername.String}, nil
 }
 
 // checkSlack runs the check of the Slack Connection row (C-24.FR-2) on the interactive path, limited by the Connection,

@@ -273,6 +273,8 @@ type Queries interface {
 		dbgen.GetTelegramDestinationTargetRow, error)
 	GetBridgeDestinationTarget(ctx context.Context, arg dbgen.GetBridgeDestinationTargetParams) (
 		dbgen.GetBridgeDestinationTargetRow, error)
+	GetSlackDestinationTarget(ctx context.Context, arg dbgen.GetSlackDestinationTargetParams) (
+		dbgen.GetSlackDestinationTargetRow, error)
 	bridgeEventQueries
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
@@ -355,6 +357,7 @@ type Service struct {
 	clients       map[int64]cachedClient
 	tgClients     map[int64]cachedTelegram
 	bridgeClients map[int64]cachedBridge
+	slackClients  map[int64]cachedSlack
 }
 
 // cachedClient is the client of a version of a Connection.
@@ -366,7 +369,7 @@ type cachedClient struct {
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
 	s := &Service{cfg: cfg, clients: map[int64]cachedClient{}, tgClients: map[int64]cachedTelegram{},
-		bridgeClients: map[int64]cachedBridge{}}
+		bridgeClients: map[int64]cachedBridge{}, slackClients: map[int64]cachedSlack{}}
 	s.info = bridge.NewInfoCache(s, cfg.Clocks.Business, bridge.DefaultInfoMaxAge, cfg.Log)
 	return s
 }

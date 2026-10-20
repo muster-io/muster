@@ -14,8 +14,8 @@ import (
 // Class is the class of a failed call (C-24.FR-8), decided by Slack's `error` and, without one, by the status.
 type Class string
 
-// The classes of a failed call. A Gone-candidate is a `chat.update` that answered message_not_found: delivery reads
-// the channel before it takes the Root message for deleted (S-099).
+// The classes of a failed call. A Gone-candidate is a `chat.update` that answered message_not_found: the adapter reads
+// the channel before it takes the Root message for deleted (adapter.go).
 const (
 	ClassRetryAfter     Class = "retry_after"
 	ClassTransient      Class = "transient"

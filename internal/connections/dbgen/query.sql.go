@@ -347,6 +347,80 @@ func (q *Queries) GetOutage(ctx context.Context) (GetOutageRow, error) {
 	return i, err
 }
 
+const getSlackDestinationTarget = `-- name: GetSlackDestinationTarget :one
+SELECT d.slack_channel_id, c.id, c.public_id, c.type, c.name, c.bot_token_ciphertext, c.bot_token_key_id,
+       c.bot_token_updated_at, c.slack_app_token_ciphertext, c.slack_app_token_key_id, c.slack_app_token_updated_at,
+       c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at, c.proxy,
+       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version,
+       c.slack_team_url, c.bot_username
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = $1 AND d.id = $2 AND d.type = 'slack' AND c.org_id = $1
+  AND c.deleted_at IS NULL
+`
+
+type GetSlackDestinationTargetParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type GetSlackDestinationTargetRow struct {
+	SlackChannelID               pgtype.Text
+	ID                           int64
+	PublicID                     string
+	Type                         string
+	Name                         string
+	BotTokenCiphertext           []byte
+	BotTokenKeyID                pgtype.Text
+	BotTokenUpdatedAt            time.Time
+	SlackAppTokenCiphertext      []byte
+	SlackAppTokenKeyID           pgtype.Text
+	SlackAppTokenUpdatedAt       pgtype.Timestamptz
+	SlackSigningSecretCiphertext []byte
+	SlackSigningSecretKeyID      pgtype.Text
+	SlackSigningSecretUpdatedAt  pgtype.Timestamptz
+	Proxy                        []byte
+	ProxyPasswordCiphertext      []byte
+	ProxyPasswordKeyID           pgtype.Text
+	ProxyPasswordUpdatedAt       pgtype.Timestamptz
+	Version                      int64
+	SlackTeamUrl                 pgtype.Text
+	BotUsername                  pgtype.Text
+}
+
+// GetSlackDestinationTarget reads where a Slack Destination posts — its channel id — with the Connection it posts
+// through, that Connection's secrets as stored, its version, which its client is cached for, and the workspace address
+// and the bot's name that its last passing check stored. A deleted Destination is read too, since its final edit still
+// runs; its Connection must not be deleted.
+func (q *Queries) GetSlackDestinationTarget(ctx context.Context, arg GetSlackDestinationTargetParams) (GetSlackDestinationTargetRow, error) {
+	row := q.db.QueryRow(ctx, getSlackDestinationTarget, arg.OrgID, arg.DestinationID)
+	var i GetSlackDestinationTargetRow
+	err := row.Scan(
+		&i.SlackChannelID,
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.Name,
+		&i.BotTokenCiphertext,
+		&i.BotTokenKeyID,
+		&i.BotTokenUpdatedAt,
+		&i.SlackAppTokenCiphertext,
+		&i.SlackAppTokenKeyID,
+		&i.SlackAppTokenUpdatedAt,
+		&i.SlackSigningSecretCiphertext,
+		&i.SlackSigningSecretKeyID,
+		&i.SlackSigningSecretUpdatedAt,
+		&i.Proxy,
+		&i.ProxyPasswordCiphertext,
+		&i.ProxyPasswordKeyID,
+		&i.ProxyPasswordUpdatedAt,
+		&i.Version,
+		&i.SlackTeamUrl,
+		&i.BotUsername,
+	)
+	return i, err
+}
+
 const getTelegramDestinationTarget = `-- name: GetTelegramDestinationTarget :one
 SELECT d.telegram_channel_id, d.telegram_channel_chat_id, d.telegram_discussion_chat_id, c.id, c.public_id, c.type,
        c.name, c.telegram_bot_api_base_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at,

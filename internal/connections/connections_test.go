@@ -74,11 +74,12 @@ type memStore struct {
 	tx        int
 	committed int
 	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them, tgTargets the Telegram ones,
-	// as GetTelegramDestinationTarget reads them, and brTargets the Bridge ones, as GetBridgeDestinationTarget reads
-	// them and muster doctor lists them.
+	// as GetTelegramDestinationTarget reads them, brTargets the Bridge ones, as GetBridgeDestinationTarget reads
+	// them and muster doctor lists them, and slTargets the Slack ones, as GetSlackDestinationTarget reads them.
 	targets   map[int64]memTarget
 	tgTargets map[int64]memTGTarget
 	brTargets map[int64]memBRTarget
+	slTargets map[int64]memBRTarget
 	// outage is what GetOutage reads.
 	outage dbgen.GetOutageRow
 	// seen are the recorded Bridge event ids, by Connection and event id, with when they were seen, and locks the
@@ -100,7 +101,7 @@ type memTGTarget struct {
 	channelID, groupID int64
 }
 
-// memBRTarget is a Bridge Destination: its Connection and its channel id.
+// memBRTarget is a Bridge or a Slack Destination: its Connection and its channel id.
 type memBRTarget struct {
 	connection int64
 	channel    string
@@ -115,7 +116,7 @@ type memTarget struct {
 func newMemStore() *memStore {
 	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{},
 		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}, brTargets: map[int64]memBRTarget{},
-		seen: map[memEvent]time.Time{}}
+		slTargets: map[int64]memBRTarget{}, seen: map[memEvent]time.Time{}}
 }
 
 // txHandle stands for the transaction that the Abandon hook writes through.
@@ -485,6 +486,28 @@ func (s *memStore) GetBridgeDestinationTarget(_ context.Context, a dbgen.GetBrid
 		BridgePushSecretUpdatedAt: c.BridgePushSecretUpdatedAt, Proxy: c.Proxy,
 		ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
+}
+
+func (s *memStore) GetSlackDestinationTarget(_ context.Context, a dbgen.GetSlackDestinationTargetParams) (
+	dbgen.GetSlackDestinationTargetRow, error) {
+	if err := s.fail["GetSlackDestinationTarget"]; err != nil {
+		return dbgen.GetSlackDestinationTargetRow{}, err
+	}
+	d, ok := s.slTargets[a.DestinationID]
+	r := s.rows[d.connection]
+	if !ok || r == nil || r.deleted || a.OrgID != 1 {
+		return dbgen.GetSlackDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	c := r.row
+	return dbgen.GetSlackDestinationTargetRow{SlackChannelID: pgtype.Text{String: d.channel, Valid: true}, ID: c.ID,
+		PublicID: c.PublicID, Type: c.Type, Name: c.Name, BotTokenCiphertext: c.BotTokenCiphertext,
+		BotTokenKeyID: c.BotTokenKeyID, BotTokenUpdatedAt: c.BotTokenUpdatedAt,
+		SlackAppTokenCiphertext: c.SlackAppTokenCiphertext, SlackAppTokenKeyID: c.SlackAppTokenKeyID,
+		SlackAppTokenUpdatedAt: c.SlackAppTokenUpdatedAt, SlackSigningSecretCiphertext: c.SlackSigningSecretCiphertext,
+		SlackSigningSecretKeyID: c.SlackSigningSecretKeyID, SlackSigningSecretUpdatedAt: c.SlackSigningSecretUpdatedAt,
+		Proxy: c.Proxy, ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version, SlackTeamUrl: c.SlackTeamUrl,
+		BotUsername: c.BotUsername}, nil
 }
 
 func (s *memStore) ListBridgePollingConnections(_ context.Context, org int64) (

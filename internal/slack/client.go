@@ -5,8 +5,9 @@
 // Connection's bot token or app-level token as a bearer token, through internal/outbound with the Connection's proxy in
 // the caller's client class (ADR-0015), JSON for the write methods and form-encoded for the others, with both tokens and
 // the Slack signing secret registered for redaction; the classification of every answer by Slack's `error`
-// (classify.go); the Connection check (check.go); and the Destination check of a channel and the channel list
-// (channels.go). Later stories add delivery, presses, Socket Mode and Account links.
+// (classify.go); the Connection check (check.go); the Destination check of a channel and the channel list
+// (channels.go); and delivery (adapter.go), whose messages are laid out in blocks (layout.go) and sent with the
+// unexported chat calls of this file. Later stories add presses, Socket Mode and Account links.
 package slack
 
 import (
@@ -228,7 +229,7 @@ type Args map[string]any
 // masked, empty without an `ok: false` answer, and Needed the scopes its `needed` names, masked. Warning is the
 // `warning` of the answer and NextCursor its `response_metadata.next_cursor`; Scopes are the token's scopes that the
 // answer's x-oauth-scopes names, kept on a failure too, and AcceptedScopes those of x-accepted-oauth-scopes. Body is
-// the answer of a call that succeeded, with the secrets replaced.
+// the answer of a call that succeeded, or of an `ok: false` answer, which a test step shows, with the secrets replaced.
 // Network is what failed when the call got no answer (outbound.Network*), Detail its masked text, and Blocked whether
 // the outbound address policy refused the address.
 type Result struct {
@@ -255,7 +256,7 @@ func (r Result) Decode(out any) error { return json.Unmarshal(r.Body, out) }
 
 // Outcome is the Result for delivery (C-24.FR-8): RetryAfter holds the whole Connection, since Slack limits each method
 // per app and workspace (F-099); Transient, Fatal and MarkupRejected are themselves; a Gone-candidate is unknown until
-// delivery reads the channel, and Unknown is unknown.
+// the adapter reads the channel, and Unknown is unknown.
 func (r Result) Outcome() delivery.Outcome {
 	o := delivery.Outcome{Error: r.Error, Status: r.Status}
 	switch r.Classification.Class {
@@ -435,6 +436,40 @@ func formOf(args Args) (url.Values, error) {
 	return form, nil
 }
 
+// posted is what chat.postMessage and chat.update answer of the message: its `ts`, and its `thread_ts` when it went
+// into a Thread (F-089); a reply to a deleted root without replies is answered without one (F-091).
+type posted struct {
+	TS      string `json:"ts"`
+	Message struct {
+		TS       string `json:"ts"`
+		ThreadTS string `json:"thread_ts"`
+	} `json:"message"`
+}
+
+// postMessage calls chat.postMessage with the bot token in class for the message o: a Root message, or a Thread reply
+// when o names its `thread_ts`. Its answer is decoded from the masked body of a call that succeeded.
+func (c *Client) postMessage(ctx context.Context, class outbound.Class, o outgoing) (posted, Result) {
+	var p posted
+	r := c.Call(ctx, class, "chat.postMessage", o.args())
+	if !r.OK() {
+		return posted{}, r
+	}
+	if r.Decode(&p) != nil {
+		return posted{}, notExpected(r, "chat.postMessage")
+	}
+	return p, r
+}
+
+// updateMessage calls chat.update with the bot token in class: the message o.TS becomes o (F-084, F-085).
+func (c *Client) updateMessage(ctx context.Context, class outbound.Class, o outgoing) Result {
+	return c.Call(ctx, class, "chat.update", o.args())
+}
+
+// deleteMessage calls chat.delete with the bot token in class for the message ts of channel (F-087).
+func (c *Client) deleteMessage(ctx context.Context, class outbound.Class, channel, ts string) Result {
+	return c.Call(ctx, class, "chat.delete", Args{"channel": channel, "ts": ts})
+}
+
 // answer is the envelope of every answer of the Web API: ok, and for an error its `error`, with `needed` and
 // `provided` for missing_scope (F-070); a `warning`, and the cursor of the next page.
 type answer struct {
@@ -562,6 +597,7 @@ func (c *Client) resultOf(method string, res outbound.Result, err error) Result 
 	case res.Outcome == outbound.OutcomeRedirect:
 		r.Classification = Classification{Class: ClassUnknown}
 	case decoded && !*env.OK:
+		r.Body = c.maskBody(res.Body)
 		code := c.redact(env.Error)
 		r.ErrorCode, r.Needed = cut(code), c.scopes(env.Needed)
 		r.Classification = Classify(Answer{Status: res.Status, RetryAfter: res.RetryAfter,

@@ -31,6 +31,7 @@ files_touched:
   - internal/delivery/render_test.go
   - internal/delivery/live_test.go
   - internal/connections/connections.go
+  - internal/connections/connections_test.go
   - internal/connections/slack.go
   - internal/connections/slack_test.go
   - internal/connections/query.sql
