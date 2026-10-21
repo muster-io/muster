@@ -70,6 +70,35 @@ Timeline
 The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
 
+## In the web UI
+
+1. Open **Alert Groups**. The list shows the Alert Groups of the chosen **Time range**, the last 7 days by default,
+   newest first: the status, the number, the title, the Route, the Integrations, the Owner, when each started and how
+   long it has lasted. The tabs above it — **Open**, **Firing**, **Acknowledged**, **Snoozed**, **Resolved** and
+   **All** — choose the statuses and count each one; **Search** finds an Alert Group by its number, such as `#412`, or
+   by text.
+
+    ![The Alert Groups list on the tab All: Alert Groups in each status, with the filters beside it](../assets/screenshots/concepts/alert-groups/01-list.png){ .screenshot }
+
+2. Narrow the list with the filters beside it: the **Routes**, the **Integrations**, the **Severity**, **Urgent**, the
+   **Owner**, label Matchers and more. They combine, and they live in the address, so a filtered list can be shared;
+   **Clear filters** removes them. On a phone they open from **Filters**.
+
+    ![The list filtered by the Route payments: two Alert Groups](../assets/screenshots/concepts/alert-groups/02-filters.png){ .screenshot }
+
+3. Select the number or the title of an Alert Group to open its page: the status, the Owner, the command buttons, the
+   [Alerts](#what-an-alert-group-has), the labels, the deliveries to its Destinations and the previous Alert Groups
+   with the same Route and Group key values.
+
+    ![The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts](../assets/screenshots/concepts/alert-groups/03-alert-group.png){ .screenshot }
+
+4. Further down, the [Timeline](#the-timeline) lists what happened to it, with the actor and the Transport of each
+   change, and the box to add a Note.
+
+    ![The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI](../assets/screenshots/concepts/alert-groups/04-timeline.png){ .screenshot }
+
+The [commands](statuses-and-commands.md#commands-in-the-web-ui) act on the Alert Group from its page.
+
 ## Live updates
 
 The list and the Alert Group page change as soon as something happens, without a reload. A mark in the header of every
@@ -179,6 +208,21 @@ an Alert Group's status. A new Group key or new Matchers apply only to Alerts th
 A Route that still has open Alert Groups cannot be deleted. Muster refuses and offers to move them to the Default
 route. A moved Alert Group keeps its Group key values, takes no new Alerts, and never reopens; it stays open until its
 Alerts resolve or a person resolves it.
+
+## Statistics
+
+**Statistics** counts the Alert Groups that started in a period and how fast people took and closed them: for each
+Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
+and of the time to resolve. Days are split in your time zone.
+
+1. Open **Statistics**. Choose the **Period** — **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom** — and
+   show it **By route** or **By integration**; add Routes or Integrations to narrow it.
+
+    ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](../assets/screenshots/concepts/alert-groups/05-statistics.png){ .screenshot }
+
+2. Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.
+
+    ![The Alert Groups per day of start of the Route payments](../assets/screenshots/concepts/alert-groups/06-statistics-days.png){ .screenshot }
 
 ## How long Alert Groups are kept
 

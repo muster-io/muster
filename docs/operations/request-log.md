@@ -143,6 +143,8 @@ Permissions; a Personal access token may hold fewer.
   failed — and the latency; **Load more** shows older records. Filters by direction, status class (`2xx`, `3xx`,
   `4xx`, `5xx` or **No answer**) and operation are kept in the address, such as
   `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+
+    ![The tab Request log of the Mattermost Connection: the requests of its check, with the operation, the status and the latency](../assets/screenshots/operations/request-log/01-connection-request-log.png){ .screenshot }
 - **The Alert Group page → Delivery → Requests** on each Destination's row: what was sent to that Destination for this
   Alert Group and what came back.
 - **Requests of this check** under the result of the Connection check, of the check before saving and of the
@@ -151,6 +153,8 @@ Permissions; a Personal access token may hold fewer.
   side on a wide screen and one under the other on a narrow one; a JSON body is indented. **Copy URL**, **Copy
   headers** and **Copy body** copy each, the body as it is stored rather than indented. A record links to its
   Destination, its Alert Group and the other requests of its check.
+
+    ![A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body](../assets/screenshots/operations/request-log/02-record.png){ .screenshot }
 
 The API reads the same records: `listRequestLog` and `getRequestRecord` in the [API reference](../reference/api.md),
 with the check run in the results of the Connection check, the check before saving, the Destination check and the

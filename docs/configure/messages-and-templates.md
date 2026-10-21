@@ -37,6 +37,22 @@ column.
 The Outgoing webhook Destinations have templates of their own, written the same way: see
 [template mode](../outgoing-webhooks/templates.md).
 
+## Edit a Route's message
+
+1. Open **Routes** and the Route, and scroll to **Message**. Choose the **Language** of its built-in texts. Each
+   template shows **Built-in** or **Custom**, with its **Preview** under it.
+
+    ![The Message section of a Route: the language English and the Root message built in, with its preview](../assets/screenshots/configure/messages-and-templates/01-message.png){ .screenshot }
+
+2. Choose **Custom** for the template you change, such as **Alert line**, and edit the source in the editor; it starts
+   from the built-in template. The **Preview** renders it as you type, against the **Sample** you choose, in the markup
+   of **Mattermost**, **Telegram** or **Slack**. A Route without recent Stored Snapshots renders against the built-in
+   example. [The template language](#the-template-language) lists what a template reads.
+
+    ![The Alert line made Custom with the template pod: summary, and its preview of the built-in example](../assets/screenshots/configure/messages-and-templates/02-alert-line.png){ .screenshot }
+
+3. Select **Save**. A template with an error is not saved, and the editor marks the error at its line and column.
+
 ## The template language
 
 Templates are Go templates, the language of Alertmanager's own templates, and run in a sandbox:
@@ -114,12 +130,25 @@ in a template is escaped and mentions nobody.
 Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
 in the message and as the **Links** block on the Alert Group page.
 
-A **Lookup table** is a table of values: a key and one value per named column. Open **Organization → Lookup tables →
-Create table**, name it, add the columns and the rows. Limits: 50 columns and 10,000 rows, names and column names up to
-200 characters, a description up to 2,000, a key or value up to 4,096 (`lookup_table.size_max`).
+### Add a Lookup table
 
-A **Link rule** turns an Alert Group, or each value of a label, into a link. Open **Organization → Link rules → Create
-rule** and fill in:
+A **Lookup table** is a table of values: a key and one value per named column. Limits: 50 columns and 10,000 rows,
+names and column names up to 200 characters, a description up to 2,000, a key or value up to 4,096
+(`lookup_table.size_max`).
+
+1. Open **Organization → Lookup tables** and select **Create table**.
+2. Enter the **Name** that Link rules read the table by, and a **Description** if you like. Under **Rows**, name the
+   first column, add more with **Add column**, and add each row with **Add row**: its **Key** and a value per column.
+
+    ![The form of a new Lookup table: the name dashboards, the column url and the rows prod-eu and prod](../assets/screenshots/configure/messages-and-templates/03-new-lookup-table.png){ .screenshot }
+
+3. Select **Create**. The list of Lookup tables shows the table with its number of rows.
+
+    ![The Lookup tables: dashboards with 2 rows](../assets/screenshots/configure/messages-and-templates/04-lookup-tables.png){ .screenshot }
+
+### Add a Link rule
+
+A **Link rule** turns an Alert Group, or each value of a label, into a link. Its fields:
 
 **Name**
 :   Shown as the text of the link.
@@ -138,6 +167,16 @@ rule** and fill in:
     "column"` reads one cell and gives an empty text when the table, the key or the column does not exist. A template
     that writes nothing, or something that is not an `http` or `https` URL, gives no link.
 
+1. Open **Organization → Link rules** and select **Create rule**.
+2. Fill in the fields above. The **Preview** under the URL template shows the link that the rule makes for the
+   **Sample** you choose, a built-in example or a recent Alert Group.
+
+    ![The form of a new Link rule: the name Dashboard, the Matcher cluster =~ .+, the scope Alert Group, the URL template with lookup and its preview link](../assets/screenshots/configure/messages-and-templates/05-new-link-rule.png){ .screenshot }
+
+3. Select **Create**. The list of Link rules shows the rule beside the built-in **Explore**.
+
+    ![The Link rules: Dashboard and the built-in Explore](../assets/screenshots/configure/messages-and-templates/06-link-rules.png){ .screenshot }
+
 All the Link rules of one message together read at most 100 rows with `lookup` in one render
 (`template.lookups_per_render`); the 101st is a template error, and a Link rule that fails is left out of the message
 and counted.
@@ -146,8 +185,11 @@ Example: a dashboard per cluster.
 
 1. Create the Lookup table `dashboards` with the column `url` and one row for each cluster: the key `prod-eu`, the
    value `https://grafana.example.org/d/abc123/prod-eu`.
-2. Create the Link rule `Dashboard`, scope **Alert Group**, with the URL template
-   `{{ lookup "dashboards" .Labels.cluster "url" }}`.
+2. Create the Link rule `Dashboard` with the Matcher `cluster=~".+"`, scope **Alert Group**, and the URL template
+   `{{ lookup "dashboards" .Labels.cluster "url" }}`. The Matcher keeps the rule to Alert Groups whose Alerts share a
+   `cluster`. A label the Alert Group lacks is no value at all, not an empty key, and `lookup` fails on it: without
+   the Matcher, saving fails with a template error when a recent Alert Group that the rule is checked against has no
+   common `cluster` label.
 3. The preview of the rule shows the link for a sample. Alert Groups with `cluster="prod-eu"` now carry **Dashboard**.
 
 A rule with the scope **Each value of label** and the label `pod` can build one log link per pod:

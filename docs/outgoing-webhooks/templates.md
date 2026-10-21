@@ -15,7 +15,31 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the cha
 
 ## Create the Destination
 
-Create a Destination of type `webhook` with the mode `template` (or `both`, with the `events` request too):
+In the web UI:
+
+1. Open **Destinations**, select **Create destination**, choose **Outgoing webhook** and the **Mode** **Template** (or
+   **Both**, with the **Events request** too). Under **Requests**, **Create** and **Update** are required; **Open
+   thread** and **Reply in thread** are optional.
+
+    ![The form of a new outgoing webhook in the mode Template, with its requests](../assets/screenshots/outgoing-webhooks/templates/01-template-mode.png){ .screenshot }
+
+2. In **Create**, choose the **Method**, enter the **URL**, the headers with **Add header** and the **Body**, and add
+   the [extraction rules](#extraction-rules-and-response) with **Add rule**: a name and a JSONPath into the answer.
+
+    ![The request Create: POST to the chat's messages, the body template and the extraction rule id at $.data.id](../assets/screenshots/outgoing-webhooks/templates/02-create-request.png){ .screenshot }
+
+3. In **Update**, enter the request that edits the message; it reads the extracted values as `{{ .Response.<name> }}`.
+
+    ![The request Update: PUT to the message by its id, read as .Response.id, with the same body](../assets/screenshots/outgoing-webhooks/templates/03-update-request.png){ .screenshot }
+
+4. Give the Destination a **Name** and select **Save**. Muster shows the Signing secret once, as in the
+   [events mode](events.md#create-the-destination), and then the saved Destination. In the screenshots, the chat's API
+   is at `https://hooks.example.org/chat/ops`.
+
+    ![The saved Destination team chat in the mode Template](../assets/screenshots/outgoing-webhooks/templates/04-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `template` (or `both`, with the `events` request
+too):
 
 ```json
 {

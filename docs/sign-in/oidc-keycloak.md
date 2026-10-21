@@ -99,6 +99,23 @@ The settings behind the three rows above Proxy are `oidc.unmatched_role` (none: 
 (on) and
 `oidc.skip_totp_with_idp_mfa` (off).
 
+In the web UI:
+
+1. Open **Access → OIDC**. Under **Identity provider**, turn on **Allow sign-in through OIDC** and fill in the **Issuer
+   URL**, the **Provider name** (the display name), the **Client ID**, the **Client secret** — **Set a value**, or
+   **Replace** once one is set —, **Client secret expires on** and the **Scopes**.
+
+    ![The OIDC settings: the issuer https://sso.example.org/realms/muster, the provider name Keycloak, the client muster and the scopes profile email](../assets/screenshots/sign-in/oidc-keycloak/01-identity-provider.png){ .screenshot }
+
+2. Under **Roles**, enter the **Groups claim** and map each group with **Add IdP group**: the group's name and its
+   Role. Choose the **Role for users without a matching group**, and whether to **Sync the Role at every sign-in** and
+   to **Skip TOTP when the identity provider confirmed multi-factor authentication**. Set the proxy below if Muster
+   needs one, and select **Save**.
+
+    ![The Roles of the OIDC settings: the groups claim groups, muster-admins mapped to Admin and oncall to Responder](../assets/screenshots/sign-in/oidc-keycloak/02-roles.png){ .screenshot }
+
+The screenshots show the form filled in, before **Save**.
+
 Then press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.

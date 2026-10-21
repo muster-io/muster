@@ -12,9 +12,29 @@ Enrolment gives the person **10 recovery codes** (`auth.totp_recovery_codes`), e
 save them somewhere safe. In the profile a person can generate new recovery codes, which replace the unused ones, and
 remove TOTP. Removing it needs the current password (a local user) or a current code or recovery code.
 
+1. Open your **Profile** and, under **Two-factor authentication (TOTP)**, select **Set up TOTP**.
+2. Scan the QR code with your authenticator app, or enter the **Secret** by hand. Enter the code the app shows in
+   **Code from the app** and select **Confirm**.
+
+    ![Set up TOTP: the QR code and the secret, covered here, and the field Code from the app](../assets/screenshots/sign-in/totp/01-set-up.png){ .screenshot }
+
+3. Muster shows the recovery codes once: **Copy codes**, keep them somewhere safe, and select **Continue**.
+
+    ![Save these recovery codes: the ten codes, covered here, with Copy codes and Continue](../assets/screenshots/sign-in/totp/02-recovery-codes.png){ .screenshot }
+
+4. The profile says since when TOTP is on and how many recovery codes are left, with **Regenerate recovery codes** and
+   **Remove TOTP**.
+
+    ![TOTP on: since when, 10 recovery codes left, and the buttons to regenerate the codes and to remove TOTP](../assets/screenshots/sign-in/totp/03-totp-on.png){ .screenshot }
+
 A User has one enrolment. From then on, every sign-in asks for a code after the password, or after the redirect from the
-identity provider. A recovery code is accepted in place of a code, and is then used up. Until the code is given, the
-session can only read itself, sign out and give the code.
+identity provider: **Two-factor authentication** asks for the **Code**, and **Use a recovery code instead** takes a
+recovery code.
+
+![The sign-in step Two-factor authentication: the field Code, Continue, Use a recovery code instead and Sign out](../assets/screenshots/sign-in/totp/04-code-prompt.png){ .screenshot }
+
+A recovery code is accepted in place of a code, and is then used up. Until the code is given, the session can only read
+itself, sign out and give the code.
 
 A wrong password or code counts as a failure, and failures slow the next attempts down per account and per source
 address: after 3 in a row, each attempt waits twice as long as the one before, from 1 second up to 60 seconds.
@@ -29,6 +49,12 @@ values:
 | nobody (the default) | no one; everyone may enrol if they want |
 | local users | every account that has a password |
 | everyone | every account, local or from OpenID Connect |
+
+1. Open **Organization → Security**.
+2. Under **Two-factor authentication**, choose **TOTP required**: **Nobody**, **Local users** or **Everyone**. Select
+   **Save**.
+
+    ![Organization → Security with TOTP required set to Local users, saved](../assets/screenshots/sign-in/totp/05-policy.png){ .screenshot }
 
 A person who falls under the policy and has no TOTP yet must enrol right after sign-in, before they can do anything
 else. An account that signs in through OpenID Connect, whether created by it or linked to it, does not count as a local

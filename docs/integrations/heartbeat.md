@@ -27,6 +27,31 @@ keep it a few times the interval at which Alertmanager signals. The Heartbeat th
 nothing is raised and nothing goes Stale until it arrives, however long that takes. The first signal makes it
 **live**.
 
+1. Open **Integrations** and the Integration. Next to its name, the Heartbeat badge says **Not configured**, and a
+   banner warns that Muster will not notice when Alertmanager goes quiet. The list of **Integrations** shows the same
+   badge in its column **Heartbeat**.
+
+    ![An Integration without a Heartbeat: the badge Not configured and the banner No Heartbeat](../assets/screenshots/integrations/heartbeat/01-not-configured.png){ .screenshot }
+
+2. Select **Edit**. Under **Heartbeat**, turn on **Watch for Heartbeat signals**, keep or change the **Timeout** in
+   minutes, and note the [Heartbeat URL](#the-heartbeat-url). Select **Save**. A new Integration can have the
+   Heartbeat on from the start: the same switch is in its form.
+
+    ![The Heartbeat settings of an Integration: Watch for Heartbeat signals on, the timeout of 5 minutes and the Heartbeat URL](../assets/screenshots/integrations/heartbeat/02-turn-on.png){ .screenshot }
+
+3. The badge says **Waiting** until the first signal arrives.
+
+    ![The Integration waiting for its first Heartbeat signal: the badge Waiting and its banner](../assets/screenshots/integrations/heartbeat/03-waiting.png){ .screenshot }
+
+4. Select **Create token** and **Create**. With the Heartbeat on, the dialog also shows the **Heartbeat
+   configuration**: add it to Prometheus and Alertmanager as [The snippet](#the-snippet) explains, and reload them.
+
+    ![The dialog Token created with the Heartbeat configuration under the Alertmanager configuration](../assets/screenshots/integrations/heartbeat/04-token-and-snippet.png){ .screenshot }
+
+5. The first signal makes the badge **Live**, and the banner goes.
+
+    ![The Integration with a live Heartbeat: the badge Live and no banner](../assets/screenshots/integrations/heartbeat/05-live.png){ .screenshot }
+
 While the Heartbeat is off, Muster answers a signal with `204` and records nothing, so turning it on later always
 starts from waiting. Turning it off resolves an open `MusterHeartbeatLost`.
 
@@ -114,6 +139,11 @@ No signal within the timeout makes the Integration **Heartbeat lost**:
   signal returns, does not count towards an alert's time to go Stale, so a broken path never resolves alerts that may
   still fire.
 - The chart's rule `MusterHeartbeatLost` on `muster_heartbeat_lost` is the backup when Muster itself cannot deliver.
+
+On the Integration page, the badge says **Lost** and the banner names the time of the last signal; the list of
+**Integrations** and **Organization → System status** show the loss too.
+
+![An Integration whose Heartbeat is lost: the badge Lost and the banner No contact with Alertmanager since the last signal](../assets/screenshots/integrations/heartbeat/06-lost.png){ .screenshot }
 
 The next signal makes the Heartbeat live again and resolves `MusterHeartbeatLost`. Deleting the Integration resolves it
 too.

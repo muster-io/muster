@@ -22,9 +22,20 @@ Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connec
 
 ## Create a token and paste the snippet
 
-In **Integrations**, create the Integration, then **Create token**. Muster shows the token and a ready Alertmanager
-snippet **once**; copy it before you close the dialog. Only a hash of the token is kept, so a lost token cannot be shown
-again: create a new one.
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name** after the Alertmanager cluster,
+   such as `prod-eu`, and add its [Static labels](#static-labels) with **Add label**, such as `cluster=prod-eu`. Keep
+   the **Duplicate window** of 45 seconds. Select **Create**.
+
+    ![The form of a new Integration: the name prod-eu, the Static label cluster=prod-eu and the duplicate window of 45 seconds](../assets/screenshots/integrations/alertmanager/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `alertmanager`, and
+   select **Create**. Muster shows the token and a ready Alertmanager snippet, the **Alertmanager configuration**,
+   **once**; copy it with **Copy** before you select **Done**. Only a hash of the token is kept, so a lost token cannot
+   be shown again: create a new one.
+
+    ![The dialog Token created: the token, the Alertmanager configuration with the receiver and the route, and the warning that the token is shown once](../assets/screenshots/integrations/alertmanager/02-token-and-snippet.png){ .screenshot }
+
+3. Paste the snippet into the Alertmanager configuration, as the rest of this section explains, and reload Alertmanager.
 
 The snippet has two parts. The Alertmanager receiver goes into `receivers`:
 
@@ -99,7 +110,15 @@ severity=warning` prints the receivers an alert reaches; it should list Muster a
   [Repeat intervals](#repeat-intervals) for why.
 
 Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and
-the Stored Snapshots as received.
+the Stored Snapshots as received. In the screenshots, the addresses start with `http://localhost:8081`, the ingest
+address of a development installation; yours start with your `MUSTER_INGEST_URL`.
+
+![The Integration prod-eu after its first Snapshot: the last Snapshot, one Snapshot received, the token last used and the Alertmanager route Muster saw](../assets/screenshots/integrations/alertmanager/03-first-snapshot.png){ .screenshot }
+
+Further down, **Stored Snapshots** lists each Snapshot as received, newest first, with its group key and its state;
+select one to see its body.
+
+![The Stored Snapshots of the Integration: one Snapshot, Processed](../assets/screenshots/integrations/alertmanager/04-stored-snapshots.png){ .screenshot }
 
 ## Repeat intervals
 
@@ -144,6 +163,12 @@ Alertmanager; the [runbook](../operations/runbooks/MusterSnapshotTruncated.md) h
 Static labels belong to the Integration, not to Alertmanager. Add them in the Integration's settings, such as
 `cluster=prod-eu`; Muster adds them to every Alert of the Integration before it routes the Alert, so a Route and a Group
 key can use them as if the rules had set them.
+
+1. Open the Integration and select **Edit**, or set them in the form of a new Integration.
+2. Under **Static labels**, select **Add label** and enter the label's name and value, one label per row; **Remove
+   label** takes a row away. Select **Save**.
+
+    ![The field Static labels of an Integration with the label cluster=prod-eu](../assets/screenshots/integrations/alertmanager/05-static-labels.png){ .screenshot }
 
 - Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
   default Group key of a Route includes `cluster`, so Alert Groups of different clusters stay apart.
