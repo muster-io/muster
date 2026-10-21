@@ -55,6 +55,50 @@ about every OIDC user who has an offline token and a live session or a usable Pe
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](closed-networks.md).
 
+## Add a User
+
+An Admin adds a local user; a person who signs in through OpenID Connect gets their User at their first sign-in.
+
+1. Open **Access → Users** and select **Create user**. Enter the **Name**, the **Login** and, if you like, the
+   **Email (optional)**, and choose the [Role](#roles). Select **Create**.
+
+    ![The dialog Create user: the name Dana Lee, the login dana, an email and the Role Responder](../assets/screenshots/sign-in/index/01-create-user.png){ .screenshot }
+
+2. Muster shows the **Password setup link** once. Copy it with **Copy** and hand it to the person yourself: Muster sends
+   no email. The link works once, until the time the dialog names. In the screenshot it starts with
+   `http://localhost:8080`, the address of a development installation; yours starts with your `MUSTER_PUBLIC_URL`.
+
+    ![The dialog Password setup link: the link with Copy, until when it works, and that it is shown once](../assets/screenshots/sign-in/index/02-setup-link.png){ .screenshot }
+
+3. The **Users** list shows the new User with the Role, the source, the sign-in method, the last sign-in, TOTP and the
+   status. If the link is lost or expires, open the User and select **New password setup link**.
+
+    ![The Users list: admin and Dana Lee, a local Responder who has not signed in yet](../assets/screenshots/sign-in/index/03-users.png){ .screenshot }
+
+4. The person opens the link, sets a password, and signs in on **Sign in to Muster** with the login and the password.
+   With OpenID Connect on, the page also offers **Sign in with {name}**.
+
+    ![The sign-in page with the login dana and a password, and Sign in with the identity provider below](../assets/screenshots/sign-in/index/04-sign-in.png){ .screenshot }
+
+## Your profile
+
+Every signed-in person opens their own profile from the user menu, their name at the top right: **Profile**.
+
+1. Under **Details**, change your **Name** and select **Save**. Under **Language and time zone**, choose the
+   **Language** and the **Time zone** of the web UI; they apply at once. The time zone also sets when the Snooze
+   presets you press in messengers end.
+
+    ![The profile of Dana Lee: Details with the name, Language and time zone, Sign-in method and Password](../assets/screenshots/sign-in/index/05-profile.png){ .screenshot }
+
+2. Under **Password**, enter the **Current password** and the new one twice, and select **Change password**; your other
+   sessions are signed out. **Sessions** lists where you are signed in, and **Sign out everywhere** ends them all, this
+   one too.
+
+    ![The profile further down: Password, Two-factor authentication (TOTP) off, and Sessions with one active session](../assets/screenshots/sign-in/index/06-password-and-sessions.png){ .screenshot }
+
+The profile also holds [TOTP](totp.md#enrol), the [messenger accounts](../messengers/account-links.md) and the
+[Personal access tokens](../configure/api-tokens.md#create-a-personal-access-token).
+
 ## Sign-in needs HTTPS or localhost
 
 The session cookie is `Secure`, so browsers keep it only on a page served over HTTPS or from the browser's own machine:

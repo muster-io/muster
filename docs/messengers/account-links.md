@@ -21,10 +21,14 @@ remove a link of its own User.
 
 ## Link Telegram
 
-1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram** — or
-   **Relink Telegram** once you have a Telegram link, which the new link replaces.
-2. Muster shows a link `https://t.me/<bot>?start=<token>`. Open it on the device where you use Telegram, within 10
-   minutes (`account_link.telegram_token_ttl`); the link works once.
+1. In your profile, open **Messenger accounts** and select **Link Telegram** — or **Relink Telegram** once you have a
+   Telegram link, which the new link replaces.
+2. Choose the Telegram **Connection**, when there are several, and select **Get link**. Muster shows a link `https://t.me/<bot>?start=<token>` as **Open Telegram** and as a QR code
+   to scan with your phone. Open it on the device where you use Telegram, within 10 minutes
+   (`account_link.telegram_token_ttl`); the link works once.
+
+    ![The dialog Link Telegram: Open Telegram, the QR code, covered here, and the time the link expires](../assets/screenshots/messengers/account-links/01-link-telegram.png){ .screenshot }
+
 3. Telegram opens a chat with the bot. Press **Start**.
 4. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link at once.
 
@@ -35,12 +39,18 @@ linked to someone else; nothing changed.
 
 ## Link Mattermost
 
-1. In your profile, open **Messenger accounts**, choose the Mattermost Connection, enter your Mattermost username —
-   with or without the `@` — and select **Send code**.
+1. In your profile, open **Messenger accounts** and select **Link Mattermost**. Choose the **Connection**, enter
+   **Your Mattermost username** — with or without the `@` — and select **Send code**.
+
+    ![The dialog Link Mattermost: the Connection chat.example.org and the username alice](../assets/screenshots/messengers/account-links/02-link-mattermost.png){ .screenshot }
+
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are the same. The bot confirms
-   "Linked to Muster user {your name}".
+3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are
+   the same. Select **Link**. The bot confirms "Linked to Muster user {your name}".
+
+    ![The code entry of Link Mattermost: Enter the code the bot sent you in Mattermost, 5 attempts left](../assets/screenshots/messengers/account-links/03-mattermost-code.png){ .screenshot }
+
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
 A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
@@ -51,14 +61,17 @@ The bot must be allowed to open direct messages with you; see [Direct messages](
 
 ## Link Slack
 
-1. In your profile, open **Messenger accounts**, choose the Slack Connection, enter your Slack email or name and select
-   **Send code**. An email finds your account for sure; a name is compared with the name and the display name of each
-   account, regardless of case.
+1. In your profile, open **Messenger accounts** and select **Link Slack**. Choose the **Connection**, enter **Your
+   Slack email or name** and select **Send code**. An email finds your account for sure; a name is compared with the
+   name and the display name of each account, regardless of case.
+
+    ![The dialog Link Slack: the Connection Example workspace and the email alice@example.org](../assets/screenshots/messengers/account-links/04-link-slack.png){ .screenshot }
+
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. It shows in the **Messages** tab of the bot's app, which is read-only, so you can read the code and
    cannot write to the bot. If you did not ask for it, ignore it.
 3. Type the code into your profile within 10 minutes (`account_link.slack_code`); capital and small letters are the
-   same. The bot confirms "Linked to Muster user {your name}".
+   same, and select **Link**. The bot confirms "Linked to Muster user {your name}".
 
 If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
 Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
@@ -88,10 +101,14 @@ which notifies nobody.
 
 ### By a token sent to the bot
 
-1. In your profile, open **Messenger accounts**, choose the Bridge Connection and select **Link**.
-2. Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
-   as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token to the bot of that Connection in a direct message, or open the link,
-   which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.
+1. In your profile, open **Messenger accounts** and select **Link through {Connection}** of the Bridge Connection.
+2. On the tab **Token**, Muster shows a token of 43 characters, with **Copy**, and, when the bridge declares a link that
+   opens a chat with its bot, that link as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token
+   to the bot of that Connection in a direct message, or open the link, which hands the token to the bot. The token
+   works once, and only with the bot of the Connection you chose.
+
+    ![The dialog Link through Team chat on its tab Token: the token, Copy and the time it expires](../assets/screenshots/messengers/account-links/05-bridge-token.png){ .screenshot }
+
 3. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
    and the handle the bridge reported for your account.
 
@@ -106,12 +123,15 @@ The code is offered only when the bridge declares how it finds people — its **
 login, username or user id — and that its bot can start a direct chat. Your profile names the field after that kind:
 **Email**, **Login**, **Username** or **User id**.
 
-1. In your profile, choose the Bridge Connection, enter your email address, login, username or user id in the
-   messenger, as the field asks, and select **Send code**.
+1. In your profile, select **Link through {Connection}** of the Bridge Connection and the tab **Code**. Enter your
+   email address, login, username or user id in the messenger, as the field asks, and select **Send code**.
 2. The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
    code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the same. The link is made at
-   once, and the bot sends no confirmation.
+3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the
+   same. Select **Link**: the link is made at once, and the bot sends no confirmation.
+
+    ![The tab Code of Link through Team chat after Send code: the login alice, the code entry and 5 attempts left](../assets/screenshots/messengers/account-links/06-bridge-code.png){ .screenshot }
+
 
 If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
@@ -144,8 +164,18 @@ Route editor and the Alert Group page name each Destination's Connection and cha
 
 ## Unlink
 
-In your profile, under **Messenger accounts**, remove the link. Nothing can be unlinked from a chat. Removing a link,
-like making one, is recorded in the Audit log with who did it and from where.
+Nothing can be unlinked from a chat. Removing a link, like making one, is recorded in the Audit log with who did it and
+from where.
+
+1. In your profile, open **Messenger accounts**. It lists each link with the messenger, the Connection, the account,
+   when it was last used and when it was linked.
+
+    ![Messenger accounts with four links: through the Bridge Team chat, Mattermost, Slack and Telegram for all Telegram bots](../assets/screenshots/messengers/account-links/07-linked-accounts.png){ .screenshot }
+
+2. Select **Unlink** on the row, and **Unlink** again in the dialog. Presses from that account no longer act as you.
+
+    ![The dialog that confirms unlinking @oncall_admin](../assets/screenshots/messengers/account-links/08-unlink.png){ .screenshot }
+
 
 ## What Admins can do
 

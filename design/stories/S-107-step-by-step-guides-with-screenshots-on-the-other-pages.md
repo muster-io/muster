@@ -178,6 +178,15 @@ None.
   waiting, and the screenshot shows whatever times that gives.
 - The pages before sign-in are not shown in the guides beyond the sign-in form and the TOTP prompt, which
   `access.spec.ts` takes before signing in.
+- As implemented, beside the contract above:
+  - `integrations.spec.ts` makes the Heartbeat of its own Integration Lost without moving the development clock, which
+    only a clock spec may do: it moves that Integration's last signal ten minutes back in the database, and the
+    Leader's Heartbeat check, every 10 seconds, finds it overdue. Deleting the Integration at the end removes the row
+    and resolves `MusterHeartbeatLost`.
+  - The Grafana Snapshot is sent with Playwright's `fetch` to the ingest endpoint, the same request as `curl` would
+    send.
+  - `organization.spec.ts` sets the outgoing heartbeat through the API and reverts it there, not through its page:
+    saving that page stores a proxy type even with the proxy off, which the API cannot clear again.
 
 ## Coverage
 

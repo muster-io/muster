@@ -132,6 +132,21 @@ with its Static labels, for `MusterHeartbeatLost`, and the Destination for `Must
 Metrics and rules need Prometheus. To notice that Muster, its cluster or its network is down altogether, configure the
 [outgoing heartbeat](outgoing-heartbeat.md): an external service alerts you when the calls stop.
 
-The **System status** page (**Organization → System status**, Admins only) shows the same from the inside: the Leader and
-every live replica with the key ids it holds, recovery after downtime, delivery queues, Broken Destinations, Integrations
-that need attention, template errors, Storms and the outgoing heartbeat.
+The **System status** page shows the same from the inside: see [System status](#system-status).
+
+## System status
+
+**Organization → System status** (Admins only) shows the state of the installation from the inside. It only reads: it
+lists what is wrong, and you fix it on the pages it links to.
+
+1. Open **Organization → System status**. At the top, the version of Muster and the **Replicas**: every live replica,
+   the Leader marked, with the key ids it holds and when its record was last refreshed. Below them, **Recovery after
+   downtime** and the **Delivery queues**.
+
+    ![System status: the version, one replica that is the Leader with its keys, not recovering, and the delivery queues](../assets/screenshots/operations/monitoring/01-system-status.png){ .screenshot }
+
+2. Further down: **Broken Destinations**, **Integrations needing attention** — Heartbeat lost or Snapshots truncated —,
+   **Template errors**, **Storms**, and the **Outgoing heartbeat**, with the result of its last call or a link to set
+   one up. Each says **None** when there is nothing to show.
+
+    ![System status further down: not recovering, no delivery queues, Broken Destinations, Integrations needing attention, template errors or Storms, and the outgoing heartbeat last sent OK](../assets/screenshots/operations/monitoring/02-system-status-more.png){ .screenshot }
