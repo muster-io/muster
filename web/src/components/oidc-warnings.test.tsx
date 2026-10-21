@@ -37,10 +37,13 @@ describe("OIDC warnings", () => {
     );
     const warning = screen.getByTestId("oidc-warning");
     await expect
-      .element(warning)
-      .toHaveTextContent(
-        'No sign-in has shown the groups claim "idp-groups" yet, so group mappings cannot match and only the Role for users without a matching group applies.',
-      );
+      .element(
+        warning.getByText(
+          'No sign-in has shown the groups claim "idp-groups" yet, so group mappings cannot match and only the Role for users without a matching group applies.',
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
     await expect.element(warning).not.toHaveTextContent(NOBODY);
     const fix = warning.getByRole("link", {
       name: "How to fix: Groups claim not seen yet (opens in a new tab)",
@@ -84,9 +87,14 @@ describe("OIDC warnings", () => {
       ),
     );
     await expect
-      .element(screen.getByTestId("oidc-warning"))
-      .toHaveTextContent(
-        "Ни один вход ещё не передал claim с группами «groups», поэтому сопоставления групп не сработают и будет назначаться только роль для пользователей без подходящей группы.",
-      );
+      .element(
+        screen
+          .getByTestId("oidc-warning")
+          .getByText(
+            "Ни один вход ещё не передал claim с группами «groups», поэтому сопоставления групп не сработают и будет назначаться только роль для пользователей без подходящей группы.",
+            { exact: true },
+          ),
+      )
+      .toBeVisible();
   });
 });
