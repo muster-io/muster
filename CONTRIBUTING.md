@@ -24,10 +24,10 @@ You need Go 1.27, Node 24 (see `.node-version`), pnpm 12, GNU make and git. With
 the exact version that `packageManager` in `web/package.json` pins. The Makefile runs pnpm from the repository root,
 which has no `package.json`, so with corepack also run `corepack install -g pnpm@<that version>`; otherwise corepack
 starts its default pnpm, which refuses the project. The Makefile installs its pinned tools (golangci-lint,
-go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform, promtool) into `bin/tools/` on first use, built
-with the project's toolchain. `make compose-check` also needs the Docker CLI with the compose plugin, but no running
-daemon; `make dev-db` and `make dev` need Docker with the compose plugin and a running daemon. `make e2e-go` also
-pulls the example bridge's image (`ghcr.io/muster-io/muster-example-bridge`, pinned by digest in
+go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform, oras, promtool) into `bin/tools/` on first use,
+built with the project's toolchain. `make compose-check` also needs the Docker CLI with the compose plugin, but no
+running daemon; `make dev-db` and `make dev` need Docker with the compose plugin and a running daemon. `make e2e-go`
+also pulls the example bridge's image (`ghcr.io/muster-io/muster-example-bridge`, pinned by digest in
 `test/e2e/bridge_example_test.go`) from GitHub Container Registry and runs it with host networking, so it needs Docker
 Engine on Linux, as on the CI runners.
 

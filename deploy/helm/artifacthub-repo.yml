@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# The Artifact Hub metadata of the chart repository oci://ghcr.io/muster-io/charts/muster
+# (https://github.com/artifacthub/hub/blob/master/docs/metadata/artifacthub-repo.yml). release.yml pushes it with oras
+# as ghcr.io/muster-io/charts/muster:artifacthub.io with each release; an empty repositoryID fails that step.
+
+# The ID of the repository muster on artifacthub.io, shown on its card in the control panel of the organization
+# muster-io. Artifact Hub marks the repository a verified publisher when it next processes it and finds this ID.
+repositoryID: 2458eaf0-bb28-4156-a6c5-a6806fb67c86
+
+# The Artifact Hub users who may claim the ownership of the repository, which verification does not need; the email
+# must be the one they sign in with.
+# owners:
+#   - name: <name>
+#     email: <email>

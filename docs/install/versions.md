@@ -77,9 +77,9 @@ The images are `ghcr.io/muster-io/muster` and the tags are:
     that builds them skips signing. Use these commands from the first release on, with its tag.
 
 A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image
-with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so a valid signature
-proves that the image was built by that workflow on that tag. Install cosign v3 or newer (the release signs with v3.1.3,
-in the new signature format), then:
+and the Helm chart with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so
+a valid signature proves that the image or the chart was built by that workflow on that tag. Install cosign v3 or newer
+(the release signs with v3.1.3, in the new signature format), then verify the image:
 
 ```sh
 VERSION=vX.Y.Z
@@ -92,6 +92,27 @@ It prints the verified signature and exits `0`. To accept any release tag, repla
 `--certificate-identity-regexp '^https://github\.com/muster-io/muster/\.github/workflows/release\.yml@refs/tags/v'`.
 The signature covers the multi-architecture index and the image of each platform. To pin what you run, deploy the digest
 you verified, `ghcr.io/muster-io/muster@sha256:…`, rather than the tag.
+
+**The Helm chart** is signed the same way, by the same workflow run. Its tag is the version without the `v`:
+
+```sh
+VERSION=vX.Y.Z
+cosign verify ghcr.io/muster-io/charts/muster:${VERSION#v} \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To install exactly the chart you verified, verify it by its digest and install by the same digest. `helm pull` prints
+the digest as `Digest: sha256:…`:
+
+```sh
+helm pull oci://ghcr.io/muster-io/charts/muster --version ${VERSION#v}
+cosign verify ghcr.io/muster-io/charts/muster@sha256:… \
+  --certificate-identity "https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm install muster oci://ghcr.io/muster-io/charts/muster@sha256:… \
+  --namespace muster --create-namespace -f values.yaml
+```
 
 **The SBOM of the image** is an attestation that BuildKit attaches when the image is pushed, not a cosign attestation.
 Read it with Docker:
@@ -112,5 +133,3 @@ sha256sum --ignore-missing -c checksums.txt
 
 On macOS use `shasum -a 256 -c checksums.txt --ignore-missing`. `checksums.txt` is not signed: it finds a broken or
 swapped download from the same release, not a swapped release. For that, verify the image.
-
-The Helm chart is pushed with the release to `oci://ghcr.io/muster-io/charts` and is not signed by the release workflow.

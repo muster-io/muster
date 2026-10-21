@@ -11,6 +11,29 @@ home: https://github.com/muster-io/muster
 icon: https://raw.githubusercontent.com/muster-io/muster/master/docs/brand/muster-mark-tile.svg
 sources:
   - https://github.com/muster-io/muster
+keywords:
+  - alerting
+  - alertmanager
+  - on-call
+  - incident-response
+  - mattermost
+  - telegram
+  - slack
+maintainers:
+  - name: Muster Authors
+    url: https://github.com/muster-io
 kubeVersion: ">=1.30.0-0"
+# Artifact Hub reads these; release.yml adds artifacthub.io/images, changes, containsSecurityUpdates and prerelease for
+# each release with internal/tools/chartannotate.
 annotations:
+  artifacthub.io/category: monitoring-logging
   artifacthub.io/license: AGPL-3.0-only
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://muster-io.github.io/muster/
+    - name: Install with Helm
+      url: https://muster-io.github.io/muster/latest/install/helm/
+    - name: Source
+      url: https://github.com/muster-io/muster
+    - name: support
+      url: https://github.com/muster-io/muster/issues
