@@ -486,7 +486,8 @@ demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.
 # The documentation screenshots (C-21.FR-10): the Playwright suite under web/e2e/screenshots/ with
 # playwright.screenshots.config.ts, on a muster dev of its own with the fake servers (the global setup of make e2e). The
 # system fonts the SPA uses differ between machines, so it runs only on Linux with Docker, inside PLAYWRIGHT_IMAGE, with
-# the host's network (muster dev and the development PostgreSQL), the checkout at its own path and the caller's user id;
+# the host's network (muster dev and the development PostgreSQL), the host's IPC namespace and an init process, as
+# Playwright recommends for Chromium, the checkout at its own path and the caller's user id;
 # docs-screenshots-environment, its only prerequisite, refuses anything else before dev-db and build run, also under -j. One Playwright run takes every spec but
 # the *.clock.spec.ts ones, which each run alone, as they move the development clock; each run starts a muster dev on a
 # fresh database. The specs write under bin/docs-screenshots/images/<page path>/; only when every run passed does each
@@ -494,8 +495,8 @@ demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.
 # directories no spec wrote go. The images are committed by hand; the nightly job runs this without committing.
 DOCS_SCREENSHOTS_DIR := $(BIN)/docs-screenshots
 SCREENSHOTS_DIR := docs/assets/screenshots
-DOCS_SCREENSHOTS_RUN = $(DOCKER) run --rm --network host --user "$$(id -u):$$(id -g)" -v "$(CURDIR):$(CURDIR)" \
-	-w "$(CURDIR)/web" -e HOME=/tmp -e MUSTER_DOCS_SCREENSHOTS=1 -e MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) \
+DOCS_SCREENSHOTS_RUN = $(DOCKER) run --rm --init --ipc=host --network host --user "$$(id -u):$$(id -g)" \
+	-v "$(CURDIR):$(CURDIR)" -w "$(CURDIR)/web" -e HOME=/tmp -e MUSTER_DOCS_SCREENSHOTS=1 -e MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) \
 	-e MUSTER_E2E_DATABASE_URL -e CI $(PLAYWRIGHT_IMAGE) ./node_modules/.bin/playwright test \
 	--config playwright.screenshots.config.ts
 

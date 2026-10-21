@@ -33,5 +33,15 @@ export default defineConfig({
     trace: "off",
     video: "off",
     screenshot: "off",
+    // Chromium draws rounded borders the same way on every run only without its run-time Skia optimizations and
+    // partial or GPU rasterization; the colour profile is fixed as well.
+    launchOptions: {
+      args: [
+        "--disable-skia-runtime-opts",
+        "--disable-partial-raster",
+        "--disable-gpu-rasterization",
+        "--force-color-profile=srgb",
+      ],
+    },
   },
 });

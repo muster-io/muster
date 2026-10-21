@@ -45,6 +45,8 @@ files_touched:
   - internal/tools/llmsgen/main.go
   - internal/tools/llmsgen/llmsgen_test.go
   - docs/install/helm.md
+  - .github/renovate.json5
+  - design/stories/S-110-documentation-links-on-statistics-profile-access-and-organization-pages.md
   - docs/first-alert.md
   - docs/messengers/mattermost.md
   - docs/messengers/telegram.md
@@ -99,7 +101,8 @@ issue: 335
     they differ. It runs the container with `--network host` (for `muster dev` and the development PostgreSQL), the
     checkout mounted at its own path, the caller's user id, and the image's browsers. On another system, or without
     Docker, it stops before anything runs with: "make docs-screenshots runs only on Linux with Docker, in
-    $(PLAYWRIGHT_IMAGE), so that fonts match; run it on the VM muster-lab or another Linux machine." The
+    $(PLAYWRIGHT_IMAGE), so that fonts match; run it on the VM muster-lab or another Linux machine." Renovate updates
+    the image and `@playwright/test` together, in the group "Playwright" of `.github/renovate.json5`. The
     configuration refuses to load unless `make docs-screenshots` set `MUSTER_DOCS_SCREENSHOTS=1`.
   - **Runs**: it empties `bin/docs-screenshots/images/`, then runs every spec but the `*.clock.spec.ts` ones in one
     Playwright run, then each `*.clock.spec.ts` in a run of its own — each run starts its own `muster dev` on a fresh
@@ -118,7 +121,8 @@ issue: 335
 - **Playwright**: `web/playwright.screenshots.config.ts` extends `playwright.config.ts` as the demo's does, with
   `testDir: "e2e/screenshots"`, `testIgnore: []`, output under `bin/docs-screenshots`, the viewport 1280 × 800,
   `deviceScaleFactor: 1`, `colorScheme: "light"`, `locale: "en-US"`, no trace, no video, and a `globalTimeout` of 45
-  minutes in place of the 15 of `make e2e`, since one run takes every spec but the clock specs;
+  minutes in place of the 15 of `make e2e`, since one run takes every spec but the clock specs, and Chromium flags
+  that rasterize the same pixels on every run (no run-time Skia optimizations, no partial or GPU rasterization, sRGB);
   `web/playwright.config.ts` ignores `screenshots/**` as it ignores `demo.spec.ts`; `web/tsconfig.json` includes the new
   configuration.
 - **Capture helper** (`web/e2e/screenshots/capture.ts`): `capture(page, docsPage, name, options)` writes
@@ -129,7 +133,11 @@ issue: 335
   Playwright's `mask` (`options.mask`); takes the screenshot with `animations: "disabled"` and `caret: "hide"`, of the
   whole viewport or of one element (`options.locator`); and can outline the element the step asks the reader to use
   (`options.highlight`, a 2 px outline in the brand indigo, removed after the shot). Nothing it draws stays on the
-  page.
+  page. So that two runs take the same pixels, it rounds the scroll position to whole
+  pixels, blurs the focused element, and for the shot alone rewrites, inside the captured area and the frames of the
+  page, what changes from run to run to fixed, realistic values, which it puts back afterwards: public ids, absolute
+  times (kept at their distance from a fixed now), latencies and durations, signed button values and the random end of
+  an Idempotency-Key.
 - **Routes of `muster dev`** (`internal/devmode`), beside `SlackRoute`, which matches on the bot token alone; these
   match on the Connection's address and its token, and answer the fake server's address or nothing:
   - `TelegramRoute`: the Bot API base URL `https://api.telegram.org`, the default, with one of the fake Telegram
@@ -190,7 +198,8 @@ issue: 335
   under `docs/`, for an empty alternative text, and, after reading every page, for each PNG under
   `docs/assets/screenshots/` that no page references; it also fails for an image whose source is another site
   (`http:`, `https:` or `//`), which `make docs` does not refuse today (`REMOTE_ASSET_RE` covers scripts and
-  stylesheets) and which a reader's browser would load from that site.
+  stylesheets) and which a reader's browser would load from that site, and for a reference-style image (`![alt][ref]`,
+  `![alt][]`, `![ref]`), which it does not resolve, asking for an inline image instead.
   The Artifact Hub badge that `docs/install/helm.md` loaded from `img.shields.io` becomes a plain link to Artifact Hub.
 - **Pages**:
   - `docs/first-alert.md` (new), "First alert in a messenger", in the `nav` of `mkdocs.yml` right after Quick start. It
@@ -282,6 +291,9 @@ None.
   nothing outside `muster dev` is routed.
 - `llms.txt.tmpl` quotes `docs/messengers/bridge.md` and `docs/messengers/slack.md` at length; a quote that the new
   steps change is updated in the template in the same pull request, as S-107 does, so that `make docs-check` passes.
+- The fakes' display names in the Bridge and Slack screenshots ("Muster fake bridge 1.0.0", "Fake chat", "Fake
+  workspace B") change with their tests in S-110, before it takes the screenshots again: the rename touches more than
+  a dozen test files and specs.
 - The screenshots show the UI before the documentation links of S-108 to S-110; S-110 takes them all again once every
   link is in place.
 - With 44 files the story is above the size signal. The routes of `muster dev` stay in it, as D426 decided, because

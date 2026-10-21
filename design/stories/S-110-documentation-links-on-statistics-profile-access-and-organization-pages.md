@@ -40,6 +40,22 @@ files_touched:
   - web/src/components/keyring-status.tsx
   - web/src/components/keyring-status.test.tsx
   - web/src/components/notice-banners.test.tsx
+  - internal/fakes/fakebridge/fakebridge.go
+  - internal/fakes/fakebridge/fakebridge_test.go
+  - internal/fakes/fakeslack/fakeslack.go
+  - internal/fakes/fakeslack/fakeslack_test.go
+  - internal/connections/bridge_test.go
+  - internal/connections/draft_test.go
+  - internal/api/connections_test.go
+  - internal/slack/check_test.go
+  - web/src/components/destination-label.test.ts
+  - web/e2e/account-links.spec.ts
+  - web/e2e/bridge-connection.spec.ts
+  - web/e2e/bridge-destination.spec.ts
+  - web/e2e/connection-checks.spec.ts
+  - web/e2e/slack-connection.spec.ts
+  - web/e2e/screenshots/bridge.spec.ts
+  - web/e2e/screenshots/slack.spec.ts
 acceptance:
   - "[C-21.FR-11, C-21.AC-8] The pages of the rows of reference.md's \"Next to page titles\" marked S-110 — Statistics, Profile, Access → Users, a User, Service accounts, a Service account and OIDC, and every page of Organization's sub-navigation (General, Severity levels, Alert handling, Security, Outbound addresses, Retention, Keyring, Outgoing heartbeat, Lookup tables and a Lookup table, Link rules and a Link rule, System status, Audit log) — show the Guide link to the row's target; the pages that `organization-form.tsx` draws take their key from their entry of `organization-nav.tsx`."
   - "[C-21.FR-11, C-21.AC-8] \"Learn more\" shows beside OIDC's group mapping, the Security page's TOTP policy, a Service account's Permissions, a Link rule's template, a Lookup table's rows and the allowed networks of Outbound addresses; \"How to fix\" beside the banners \"No replica is leading\" and \"Muster is recovering after downtime\", the OIDC warnings that nobody can sign in and that the client secret expires, the System status's missing outgoing heartbeat and the Keyring's two notices — each to the row's target of reference.md."
@@ -58,6 +74,10 @@ issue: 339
 
 - The Guide links of the Statistics, profile, Access and Organization pages, the System status and the Audit log.
 - "Learn more" in their forms and "How to fix" beside their warnings and the banners every page shows Admins.
+- Neutral display names of the fakes, before the screenshots are taken again: the fake bridge's bridge "Muster fake
+  bridge 1.0.0" and messenger "Fake chat", and the fake Slack server's workspaces "Fake workspace" and "Fake workspace
+  B", show in the guides' screenshots of S-106 (review of S-106, point 7); they become, for example, "Example bridge"
+  and "Example chat", and "Example workspace" and "Example workspace B", with the assertions of their tests and specs.
 
 **OUT**
 

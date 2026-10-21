@@ -8,9 +8,10 @@
 // the directory, an image without alternative text, and an image whose source is another site (http:, https: or //),
 // which a reader's browser would load from that site. After reading every page it names each PNG under
 // assets/screenshots/ that no page references, the output of make docs-screenshots that a page stopped using. It
-// exits with 1 on a problem; make docs-check runs it before the build. References are matched line by line: an image
-// whose alternative text wraps onto the next line, an <img> tag over several lines and a reference-style image
-// (![alt][ref]) are not read.
+// exits with 1 on a problem; make docs-check runs it before the build. A reference-style image — ![alt][ref], ![alt][]
+// or ![ref], whose path a [ref]: definition gives — fails too, asking for an inline image, which the check can follow.
+// References are matched line by line: an image whose alternative text wraps onto the next line and an <img> tag over
+// several lines are not read.
 package main
 
 import (
@@ -35,9 +36,11 @@ const screenshots = "assets/screenshots"
 var (
 	// markdownImage is `![alt](target)`; the target is a path, optionally in <>, and an optional title.
 	markdownImage = regexp.MustCompile(`!\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]*)(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)`)
-	imgTag        = regexp.MustCompile(`(?i)<img\b[^>]*>`)
-	imgAttr       = regexp.MustCompile(`(?i)\b(src|alt)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
-	remote        = regexp.MustCompile(`(?i)^(https?:|//)`)
+	// referenceImage is an image left once the inline ones are gone: ![alt][ref], ![alt][] or ![ref].
+	referenceImage = regexp.MustCompile(`!\[[^\]]*\](?:\[[^\]]*\])?`)
+	imgTag         = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+	imgAttr        = regexp.MustCompile(`(?i)\b(src|alt)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
+	remote         = regexp.MustCompile(`(?i)^(https?:|//)`)
 )
 
 func main() {
@@ -133,6 +136,8 @@ func isExcluded(name string, patterns []string) bool {
 type image struct {
 	line     int
 	src, alt string
+	// reference is the text of a reference-style image, which has no inline path.
+	reference string
 }
 
 // check reads the pages under root in lexical order and returns their problems, by page and line, then the
@@ -180,6 +185,10 @@ func check(root string, excluded []string) ([]string, int, int, error) {
 func problemsOf(fsys fs.FS, page, name string, img image, used map[string]bool) []string {
 	var out []string
 	at := fmt.Sprintf("%s:%d: ", page, img.line)
+	if img.reference != "" {
+		return append(out, at+img.reference+" is a reference-style image; write it inline, ![alt](path), so that the "+
+			"check can follow it")
+	}
 	if strings.TrimSpace(img.alt) == "" {
 		out = append(out, at+img.src+" has no alternative text")
 	}
@@ -224,6 +233,9 @@ func references(content string) []image {
 		line = withoutCode(line)
 		for _, m := range markdownImage.FindAllStringSubmatch(line, -1) {
 			out = append(out, image{line: i + 1, alt: m[1], src: strings.Trim(m[2], "<>")})
+		}
+		for _, ref := range referenceImage.FindAllString(markdownImage.ReplaceAllString(line, ""), -1) {
+			out = append(out, image{line: i + 1, reference: ref})
 		}
 		for _, tag := range imgTag.FindAllString(line, -1) {
 			img := image{line: i + 1}

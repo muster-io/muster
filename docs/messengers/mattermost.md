@@ -40,7 +40,7 @@ The bot token works even when **Enable Personal Access Tokens** is off, its defa
    `MUSTER_INGEST_URL`. [Let button presses reach Muster](#let-button-presses-reach-muster) says what the server
    needs to call it.
 
-    ![The saved Connection Mattermost with its bot and its callback address](../assets/screenshots/messengers/mattermost/03-saved-connection.png){ .screenshot }
+    ![The card Button presses of the saved Connection: the callback address and the hint to allow its host in AllowedUntrustedInternalConnections](../assets/screenshots/messengers/mattermost/03-saved-connection.png){ .screenshot }
 
 ## Check before saving
 

@@ -168,3 +168,26 @@ func TestCommittedSite(t *testing.T) {
 		t.Errorf("exit %d, output:\n%s", code, strings.Join(lines, "\n"))
 	}
 }
+
+// TestReferenceStyleImages: an image whose path a [ref]: definition gives — full, collapsed or shortcut — fails with its
+// page and line and asks for an inline image; a link that is not an image and an inline image beside one do not.
+func TestReferenceStyleImages(t *testing.T) {
+	root, cfg := site(t, map[string]string{
+		"index.md": "# Home\n\n![The list][list] and ![The page][]\n![shortcut]\n" +
+			"A [link][list], ![Inline](assets/a.png) and `![in code][list]`.\n\n" +
+			"[list]: assets/a.png\n[The page]: assets/a.png\n[shortcut]: assets/a.png\n",
+		"assets/a.png": "\x89PNG\r\n\x1a\n",
+	})
+	code, lines := runOn(t, root, cfg)
+	want := []string{
+		root + "/index.md:3: ![The list][list] is a reference-style image; write it inline, ![alt](path), so that the " +
+			"check can follow it",
+		root + "/index.md:3: ![The page][] is a reference-style image; write it inline, ![alt](path), so that the " +
+			"check can follow it",
+		root + "/index.md:4: ![shortcut] is a reference-style image; write it inline, ![alt](path), so that the " +
+			"check can follow it",
+	}
+	if code != 1 || len(lines) != len(want)+1 || !slices.Equal(lines[:len(want)], want) {
+		t.Errorf("exit %d, output:\n%s\nwant:\n%s", code, strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+}
