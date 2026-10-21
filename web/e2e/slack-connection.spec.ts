@@ -39,7 +39,7 @@ const CALLBACK_HINT =
   /^Slack sends button presses to http:\/\/localhost:8081\/api\/v1\/callbacks\/slack\/CN[0-9A-Z]+\. Enter it as the Interactivity Request URL of the Slack app, and the app's Slack signing secret here\. A press on a test message checks both\.$/;
 const SHARED =
   "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.";
-const IDENTITY = "Bot: muster-dev-bot-b · Workspace: Fake workspace B · App: A0MUSTERDEVB";
+const IDENTITY = "Bot: muster-dev-bot-b · Workspace: Example workspace B · App: A0MUSTERDEVB";
 
 let connectionId = "";
 
@@ -121,7 +121,7 @@ test("creates a Slack Connection in Socket Mode, checks it before and after savi
       "Connected as muster-dev-bot-b",
     );
     await expect(steps(page)).toHaveText([
-      /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
       "Scopes: ok · direct",
       /^App-level token: ok · \d+ ms · direct · App: A0MUSTERDEVB$/,
     ]);
@@ -173,7 +173,7 @@ test("creates a Slack Connection in Socket Mode, checks it before and after savi
       .filter({ has: page.getByRole("link", { name: "ui", exact: true }) });
     await expect(row).toContainText("Slack");
     await expect(row.getByTestId("connection-account")).toHaveText(
-      "muster-dev-bot-b · Fake workspace B",
+      "muster-dev-bot-b · Example workspace B",
     );
     expect(csp).toEqual([]);
   } finally {
@@ -282,11 +282,11 @@ test("creates a Slack Connection in HTTP mode and deletes it from its page", asy
   // HTTP mode has no step "App-level token".
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(steps(page)).toHaveText([
-    /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+    /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
     "Scopes: ok · direct",
   ]);
   await expect(page.getByTestId("connection-bot")).toHaveText(
-    "Bot: muster-dev-bot-b · Workspace: Fake workspace B",
+    "Bot: muster-dev-bot-b · Workspace: Example workspace B",
   );
   await shot(page, "slack-connection-http-saved");
 
@@ -342,14 +342,14 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByRole("radio", { name: "Socket Mode" })).toBeChecked();
   await expect(page.getByText("Токен уровня приложения", { exact: true })).toBeVisible();
   await expect(page.getByTestId("connection-bot")).toHaveText(
-    "Бот: muster-dev-bot-b · Рабочее пространство: Fake workspace B · Приложение: A0MUSTERDEVB",
+    "Бот: muster-dev-bot-b · Рабочее пространство: Example workspace B · Приложение: A0MUSTERDEVB",
   );
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText(
     "Подключено как muster-dev-bot-b",
   );
   await expect(steps(page)).toHaveText([
-    /^Токен: успешно · \d+ мс · напрямую · Бот: muster-dev-bot-b · Рабочее пространство: Fake workspace B$/,
+    /^Токен: успешно · \d+ мс · напрямую · Бот: muster-dev-bot-b · Рабочее пространство: Example workspace B$/,
     "Права: успешно · напрямую",
     /^Токен уровня приложения: успешно · \d+ мс · напрямую · Приложение: A0MUSTERDEVB$/,
   ]);

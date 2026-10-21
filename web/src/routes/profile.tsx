@@ -27,6 +27,7 @@ import { useGetOrganization } from "../api/gen/endpoints/organization/organizati
 import { useGetSignInOptions } from "../api/gen/endpoints/sessions/sessions";
 import type { Me, MeUpdate, User } from "../api/gen/model";
 import { UpdateMeBody } from "../api/gen/zod/profile/profile.zod";
+import { PageTitle } from "../components/docs-link";
 import { ProfileAccountLinks } from "../components/profile-account-links";
 import { ProfileSessions } from "../components/profile-sessions";
 import { ProfileTokens } from "../components/profile-tokens";
@@ -470,7 +471,7 @@ function ProfilePage() {
   const user = me.data?.user;
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("profile.title")}</h1>
+      <PageTitle docs="page.profile">{t("profile.title")}</PageTitle>
       {user === undefined ? (
         <p className="text-sm text-muted-foreground">
           {me.isError ? problemText(t, me.error) : t("common.loading")}

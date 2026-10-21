@@ -18,6 +18,7 @@ import { useListRoutes } from "../api/gen/endpoints/routes/routes";
 import type { GetAlertGroupStatisticsParams } from "../api/gen/model";
 import { MultiPicker } from "../components/alert-group-filters";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { type StatisticsSubject, StatisticsTable } from "../components/statistics-table";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Input } from "../components/ui/input";
@@ -266,7 +267,7 @@ function Statistics() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("statistics.title")}</h1>
+        <PageTitle docs="page.statistics">{t("statistics.title")}</PageTitle>
         <p className="text-sm text-muted-foreground">{t("statistics.hint", { timeZone })}</p>
       </div>
       <div

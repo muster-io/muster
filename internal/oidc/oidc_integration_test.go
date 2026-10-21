@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -122,7 +123,7 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 		Network: oidc.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(d.Pool), org.ID,
 			clock.Real{}), Log: log, Real: clock.Real{}}})
 	if err := svc.EnsureDemo(ctx, oidc.Demo{IssuerURL: idp.URL(), ClientID: "muster-dev", ClientSecret: "dev",
-		DisplayName: "Dev IdP", AllowNetwork: "127.0.0.0/8", Mappings: []oidc.GroupMapping{
+		DisplayName: "Example SSO", AllowNetwork: "127.0.0.0/8", Mappings: []oidc.GroupMapping{
 			{Group: "muster-admins", Role: auth.RoleAdmin}, {Group: "oncall", Role: auth.RoleResponder}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +300,7 @@ func TestIntegrationSettings(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		w := setup(t, s)
 		st, err := w.svc.Get(t.Context())
-		if err != nil || st.Version != 1 || !st.ClientSecret.Set || st.ButtonName() != "Dev IdP" {
+		if err != nil || st.Version != 1 || !st.ClientSecret.Set || st.ButtonName() != "Example SSO" {
 			t.Fatalf("demo = %+v, %v", st, err)
 		}
 		if allowed := w.scalar(t, `SELECT array_to_string(allowed, ',') FROM outbound_policies`); allowed != "127.0.0.0/8" {
@@ -325,6 +326,50 @@ func TestIntegrationSettings(t *testing.T) {
 		}
 		if v := w.scalar(t, `SELECT version FROM oidc_settings`); v != int64(2) {
 			t.Errorf("a check moved the version to %v", v)
+		}
+	})
+}
+
+// TestIntegrationDemoRename: settings of an earlier `muster dev` that carry the demo's earlier display name get the
+// current one at start, once, with their secret and version kept apart from the rename; other settings stay.
+func TestIntegrationDemoRename(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		w := setup(t, s)
+		if _, err := w.d.Pool.Exec(t.Context(), `UPDATE oidc_settings SET display_name = 'Dev IdP' WHERE org_id = $1`,
+			w.orgID); err != nil {
+			t.Fatal(err)
+		}
+		secret := w.scalar(t, `SELECT client_secret_ciphertext FROM oidc_settings WHERE org_id = $1`, w.orgID)
+		demo := oidc.Demo{IssuerURL: w.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev",
+			DisplayName: "Example SSO", DisplayNameWas: "Dev IdP", AllowNetwork: "127.0.0.0/8",
+			Mappings: []oidc.GroupMapping{{Group: "oncall", Role: auth.RoleResponder}}}
+		for range 2 {
+			if err := w.svc.EnsureDemo(t.Context(), demo); err != nil {
+				t.Fatal(err)
+			}
+		}
+		st, err := w.svc.Get(t.Context())
+		if err != nil || st.ButtonName() != "Example SSO" || st.Version != 2 || !st.ClientSecret.Set {
+			t.Fatalf("renamed = %+v, %v", st, err)
+		}
+		if got := w.scalar(t, `SELECT client_secret_ciphertext FROM oidc_settings WHERE org_id = $1`,
+			w.orgID); fmt.Sprint(got) != fmt.Sprint(secret) {
+			t.Error("the rename changed the client secret")
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM audit_log WHERE org_id = $1 AND action = $2
+			AND diff @> '[{"pointer": "/display_name", "before": "Dev IdP", "after": "Example SSO"}]'`, w.orgID,
+			oidc.ActionSettingsUpdated); n != int64(1) {
+			t.Errorf("%v audit entries of the rename", n)
+		}
+		if _, err := w.d.Pool.Exec(t.Context(), `UPDATE oidc_settings SET display_name = 'Corporate SSO'
+			WHERE org_id = $1`, w.orgID); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.svc.EnsureDemo(t.Context(), demo); err != nil {
+			t.Fatal(err)
+		}
+		if name := w.scalar(t, `SELECT display_name FROM oidc_settings WHERE org_id = $1`, w.orgID); name != "Corporate SSO" {
+			t.Errorf("other settings renamed to %v", name)
 		}
 	})
 }

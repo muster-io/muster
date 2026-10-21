@@ -12,6 +12,7 @@ import { getListLookupTablesQueryKey, listLookupTables } from "../api/gen/endpoi
 import type { LookupTable } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/admin/organization/lookup-tables/")({
@@ -82,7 +83,7 @@ function LookupTablesPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{t("lookupTables.title")}</h1>
+            <PageTitle docs="page.lookup_tables">{t("lookupTables.title")}</PageTitle>
             <p className="text-muted-foreground">{t("lookupTables.hint")}</p>
           </div>
           {canWrite && (

@@ -23,6 +23,7 @@ import {
 } from "../api/gen/endpoints/links/links";
 import type { LookupTable, LookupTableBase } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -530,9 +531,17 @@ export function LookupTableEditor({
       </div>
       <fieldset
         className="flex min-w-0 flex-col gap-2"
+        aria-labelledby={`${ID}-grid-title`}
         aria-describedby={`${ID}-grid-hint${tableError === undefined ? "" : ` ${ID}-grid-error`}`}
       >
-        <legend className="mb-2 text-base font-semibold">{t("lookupTables.grid.title")}</legend>
+        <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+          <span id={`${ID}-grid-title`}>{t("lookupTables.grid.title")}</span>
+          <DocsLink
+            to="field.lookup_table"
+            kind="learn_more"
+            about={t("docs.fields.lookupTable")}
+          />
+        </legend>
         <p id={`${ID}-grid-hint`} className="text-sm text-muted-foreground">
           {t("lookupTables.grid.hint")}
         </p>

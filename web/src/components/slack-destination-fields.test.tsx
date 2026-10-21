@@ -56,7 +56,7 @@ function slackConnection(id: string, name: string, bot: string | null): SlackCon
     bot_name: bot,
     bot_user_id: bot === null ? null : "U0MUSTERBOTB",
     team_id: bot === null ? null : "T0MUSTERDEVB",
-    team_name: bot === null ? null : "Fake workspace B",
+    team_name: bot === null ? null : "Example workspace B",
     app_id: null,
     proxy: { enabled: false },
     destination_count: 0,
@@ -71,7 +71,7 @@ const UNCHECKED = slackConnection("CN0000000000SU", "ui-unchecked", null);
 const MM: MattermostConnection = {
   id: "CN0000000000MM",
   type: "mattermost",
-  name: "Dev Mattermost",
+  name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: SET,
@@ -237,7 +237,7 @@ describe("DestinationForm with the Slack fields", () => {
     // Only the Slack Connections.
     await expect.element(page.getByRole("option", { name: "ui", exact: true })).toBeInTheDocument();
     await expect
-      .element(page.getByRole("option", { name: "Dev Mattermost" }))
+      .element(page.getByRole("option", { name: "Example Mattermost" }))
       .not.toBeInTheDocument();
     await userEvent.selectOptions(page.getByLabelText("Connection", { exact: true }), "ui");
     const picker = page.getByLabelText("Channel", { exact: true });

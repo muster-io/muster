@@ -89,7 +89,7 @@ func TestDevModeFakes(t *testing.T) {
 		if !me.OK || !me.Result.IsBot || me.Result.Username != "muster_dev_bot" || me.Result.ID != 123456 {
 			t.Errorf("getMe = %+v", me)
 		}
-		// The demo Connection "Dev Telegram" polls the fake from the start, so the getMe is among the recorded paths.
+		// The demo Connection "Example Telegram" polls the fake from the start, so the getMe is among the recorded paths.
 		if paths := recordedPaths(t, h.Fakes.Telegram); !slices.Contains(paths, "/bot123:abc/getMe") {
 			t.Errorf("recorded paths %v, want /bot123:abc/getMe among them", paths)
 		}
@@ -242,7 +242,7 @@ func TestFakesSurviveReplicaRestart(t *testing.T) {
 		t.Errorf("the restarted replica printed %q", r.Output())
 	}
 
-	// The replica's demo Connection "Dev Telegram" polls the fake with its own token; only the getMe has this one.
+	// The replica's demo Connection "Example Telegram" polls the fake with its own token; only the getMe has this one.
 	var ours []string
 	for _, p := range recordedPaths(t, h.Fakes.Telegram) {
 		if strings.Contains(p, "123:abc") {

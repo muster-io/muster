@@ -137,7 +137,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   await expect(page.getByRole("heading", { name: "Connections", level: 1 })).toBeVisible();
   const demo = page
     .getByRole("row")
-    .filter({ has: page.getByRole("link", { name: "Dev Mattermost", exact: true }) });
+    .filter({ has: page.getByRole("link", { name: "Example Mattermost", exact: true }) });
   await expect(demo).toContainText("Mattermost");
   await page.getByRole("link", { name: "Create connection" }).click();
   await page.getByRole("radio", { name: "Mattermost" }).check();

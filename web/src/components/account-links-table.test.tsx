@@ -71,8 +71,8 @@ const BR_CONNECTION: BridgeConnection = {
   callback_url: "http://127.0.0.1:8081/api/v1/callbacks/bridge/CN000000000BRB",
   info: {
     protocol_version: "1",
-    bridge: { name: "Muster fake bridge", version: "1.0.0" },
-    messenger: { name: "Fake chat" },
+    bridge: { name: "Example bridge", version: "1.0.0" },
+    messenger: { name: "Example chat" },
     capabilities: {},
     limits: { max_body_length: 4000, edit_max_age_seconds: null },
     user_lookup: "login",
@@ -86,9 +86,9 @@ const BR_CONNECTION: BridgeConnection = {
 };
 
 const CONNECTIONS: LinkableConnection[] = [
-  { id: "CN000000000TGA", name: "Dev Telegram", messenger: "telegram" },
+  { id: "CN000000000TGA", name: "Example Telegram", messenger: "telegram" },
   { id: "CN000000000TGB", name: "tg-b", messenger: "telegram" },
-  { id: "CN000000000MMA", name: "Dev Mattermost", messenger: "mattermost" },
+  { id: "CN000000000MMA", name: "Example Mattermost", messenger: "mattermost" },
   {
     id: "CN000000000BRB",
     name: "br",
@@ -228,7 +228,7 @@ describe("the Account links", () => {
     );
     await expect
       .element(page.getByTestId("account-link-summary"))
-      .toHaveTextContent("Fake chat · Bob Brown · via br");
+      .toHaveTextContent("Example chat · Bob Brown · via br");
     await expect.element(page.getByTestId("account-link-via")).toHaveTextContent("Never");
   });
 
@@ -264,7 +264,7 @@ describe("the Account links", () => {
     await expect.element(page.getByRole("button", { name: "Link through br" })).toBeVisible();
     await expect
       .element(page.getByTestId("account-link-summary"))
-      .toHaveTextContent("Fake chat · Bob Brown · via br");
+      .toHaveTextContent("Example chat · Bob Brown · via br");
     await expect.element(page.getByRole("button", { name: "Unlink Bob Brown" })).toBeVisible();
   });
 

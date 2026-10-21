@@ -117,11 +117,11 @@ func TestAuthTest(t *testing.T) {
 		want                map[string]any
 	}{
 		{"bot a", fakeslack.BotToken, fakeslack.DefaultScopes, map[string]any{"ok": true,
-			"url": "https://fake-workspace.slack.com/", "team": "Fake workspace", "user": "muster-dev-bot",
+			"url": "https://fake-workspace.slack.com/", "team": "Example workspace", "user": "muster-dev-bot",
 			"team_id": "T0MUSTERDEVA", "user_id": "U0MUSTERBOTA", "bot_id": "B0MUSTERDEVA",
 			"is_enterprise_install": false}},
 		{"bot b", fakeslack.SecondBotToken, fakeslack.DefaultScopes, map[string]any{"ok": true, "url": b.TeamURL,
-			"team": "Fake workspace B", "user": b.BotName, "team_id": b.TeamID, "user_id": b.BotUserID,
+			"team": "Example workspace B", "user": b.BotName, "team_id": b.TeamID, "user_id": b.BotUserID,
 			"bot_id": b.BotID, "is_enterprise_install": false}},
 		{"app-level a", fakeslack.AppToken, fakeslack.AppTokenScopes, map[string]any{"ok": true, "app_id": a.AppID}},
 		{"app-level b", fakeslack.SecondAppToken, fakeslack.AppTokenScopes, map[string]any{"ok": true,
@@ -422,7 +422,7 @@ func TestPublishedTokens(t *testing.T) {
 	apps := fakeslack.Apps()
 	if len(apps) != 2 || apps[0].Key != fakeslack.AppA || apps[1].Key != fakeslack.AppB ||
 		apps[0].SigningSecret != "muster-dev-slack-signing-secret" ||
-		apps[1].SigningSecret != "muster-dev-slack-signing-secret-b" || apps[1].TeamName != "Fake workspace B" {
+		apps[1].SigningSecret != "muster-dev-slack-signing-secret-b" || apps[1].TeamName != "Example workspace B" {
 		t.Fatalf("apps %+v", apps)
 	}
 	for _, a := range apps {

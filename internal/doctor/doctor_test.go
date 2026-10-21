@@ -475,10 +475,10 @@ func TestReadOnly(t *testing.T) {
 	}
 }
 
-// messengerDB is a fake database with the Mattermost Connection "Dev Mattermost" of the fake server, its bot token
-// sealed with key, and its Destinations "alerts" and "no-bot", the Telegram Connection "Dev Telegram" of the fake
-// Bot API with its Destinations "tg-alerts" and "tg-no-comments", the Bridge Connection "Dev Bridge" of the fake
-// bridge with its Destinations "br-alerts" and "br-no-bot", and the Slack Connection "Dev Slack" of the fake Slack
+// messengerDB is a fake database with the Mattermost Connection "Example Mattermost" of the fake server, its bot token
+// sealed with key, and its Destinations "alerts" and "no-bot", the Telegram Connection "Example Telegram" of the fake
+// Bot API with its Destinations "tg-alerts" and "tg-no-comments", the Bridge Connection "Example Bridge" of the fake
+// bridge with its Destinations "br-alerts" and "br-no-bot", and the Slack Connection "Example Slack" of the fake Slack
 // server in socket mode, which the doctor reaches through the route of `muster dev`, with its Destinations "sl-alerts"
 // and "sl-no-bot", under an outbound policy that allows the loopback network.
 func messengerDB(t *testing.T, key string) *fakeDB {
@@ -541,19 +541,19 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	d.answers["ListConnections"] = &rows{values: [][]any{
 		connectionRow(cdb.ListConnectionsRow{ID: 1, PublicID: "CNAAAAAAAAAAA1", Type: "mattermost",
-			Name: "Dev Mattermost", MattermostServerUrl: text(f.URL()), BotTokenCiphertext: ciphertext,
+			Name: "Example Mattermost", MattermostServerUrl: text(f.URL()), BotTokenCiphertext: ciphertext,
 			BotTokenKeyID: text(keyID), BotTokenUpdatedAt: time.Now(), Proxy: []byte(`{"enabled":false}`),
 			LimiterLimit: 5, LimiterPerSeconds: 1, CreatedAt: time.Now(), Version: 1, DestinationCount: 2}),
 		connectionRow(cdb.ListConnectionsRow{ID: 2, PublicID: "CNAAAAAAAAAAT1", Type: "telegram",
-			Name: "Dev Telegram", TelegramBotApiBaseUrl: text(tg.URL()), TelegramUpdateMode: text("long_polling"),
+			Name: "Example Telegram", TelegramBotApiBaseUrl: text(tg.URL()), TelegramUpdateMode: text("long_polling"),
 			BotTokenCiphertext: tgCiphertext, BotTokenKeyID: text(tgKeyID), BotTokenUpdatedAt: time.Now(),
 			Proxy: []byte(`{"enabled":false}`), LimiterLimit: 15, LimiterPerSeconds: 1, CreatedAt: time.Now(),
 			Version: 1}),
-		connectionRow(cdb.ListConnectionsRow{ID: 3, PublicID: "CNAAAAAAAAAAB1", Type: "bridge", Name: "Dev Bridge",
+		connectionRow(cdb.ListConnectionsRow{ID: 3, PublicID: "CNAAAAAAAAAAB1", Type: "bridge", Name: "Example Bridge",
 			BridgeBaseUrl: text(br.URL()), BridgeEventDelivery: text("poll"), BotTokenCiphertext: brCiphertext,
 			BotTokenKeyID: text(brKeyID), BotTokenUpdatedAt: time.Now(), Proxy: []byte(`{"enabled":false}`),
 			LimiterLimit: 10, LimiterPerSeconds: 1, CreatedAt: time.Now(), Version: 1}),
-		connectionRow(cdb.ListConnectionsRow{ID: 4, PublicID: "CNAAAAAAAAAAS1", Type: "slack", Name: "Dev Slack",
+		connectionRow(cdb.ListConnectionsRow{ID: 4, PublicID: "CNAAAAAAAAAAS1", Type: "slack", Name: "Example Slack",
 			SlackEventMode: text("socket"), BotTokenCiphertext: slCiphertext, BotTokenKeyID: text(slKeyID),
 			BotTokenUpdatedAt: time.Now(), SlackAppTokenCiphertext: appCiphertext, SlackAppTokenKeyID: text(appKeyID),
 			SlackAppTokenUpdatedAt: now, Proxy: []byte(`{"enabled":false}`), LimiterLimit: 50, LimiterPerSeconds: 60,
@@ -613,10 +613,10 @@ func TestMessengerChecks(t *testing.T) {
 	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
 	before := background.Get()
 	out, ok := run(t, d, environ(key))
-	want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
-		"OK   connection Dev Telegram: ok\n" +
-		"OK   connection Dev Bridge: ok\n" +
-		"OK   connection Dev Slack: ok\n" +
+	want := "WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+		"OK   connection Example Telegram: ok\n" +
+		"OK   connection Example Bridge: ok\n" +
+		"OK   connection Example Slack: ok\n" +
 		"OK   destination alerts: ok\n" +
 		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n" +
 		"OK   destination tg-alerts: ok\n" +
@@ -641,13 +641,13 @@ func TestMessengerChecks(t *testing.T) {
 	}
 
 	out, ok = run(t, d, environ(""))
-	if ok || !strings.Contains(out, "FAIL connection Dev Mattermost: the bot token cannot be opened: the master keys "+
+	if ok || !strings.Contains(out, "FAIL connection Example Mattermost: the bot token cannot be opened: the master keys "+
 		"could not be loaded\n") || !strings.Contains(out, "FAIL destination alerts: its Connection failed its check") ||
-		!strings.Contains(out, "FAIL connection Dev Telegram: the bot token cannot be opened") ||
+		!strings.Contains(out, "FAIL connection Example Telegram: the bot token cannot be opened") ||
 		!strings.Contains(out, "FAIL destination tg-alerts: its Connection failed its check") ||
-		!strings.Contains(out, "FAIL connection Dev Bridge: the bot token cannot be opened") ||
+		!strings.Contains(out, "FAIL connection Example Bridge: the bot token cannot be opened") ||
 		!strings.Contains(out, "FAIL destination br-alerts: its Connection failed its check") ||
-		!strings.Contains(out, "FAIL connection Dev Slack: the bot token cannot be opened") ||
+		!strings.Contains(out, "FAIL connection Example Slack: the bot token cannot be opened") ||
 		!strings.Contains(out, "FAIL destination sl-alerts: its Connection failed its check") {
 		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
 	}
@@ -725,8 +725,8 @@ func TestDevRoutes(t *testing.T) {
 	d.routes = &routes{mattermost: route(doctorToken), telegram: route(doctorTelegramToken),
 		bridge: route(fakebridge.Token)}
 	out, _ := run(t, d, environ(key))
-	for _, want := range []string{"WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n",
-		"OK   connection Dev Telegram: ok\n", "OK   connection Dev Bridge: ok\n", "OK   destination alerts: ok\n",
+	for _, want := range []string{"WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n",
+		"OK   connection Example Telegram: ok\n", "OK   connection Example Bridge: ok\n", "OK   destination alerts: ok\n",
 		"OK   destination tg-alerts: ok\n", "OK   destination br-alerts: ok\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("routed, the output lacks %q:\n%s", want, out)
@@ -735,7 +735,7 @@ func TestDevRoutes(t *testing.T) {
 
 	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string(nil), []string(nil)}}}
 	out, ok := run(t, d, environ(key))
-	for _, name := range []string{"Dev Mattermost", "Dev Telegram", "Dev Bridge"} {
+	for _, name := range []string{"Example Mattermost", "Example Telegram", "Example Bridge"} {
 		_, line, _ := strings.Cut(out, "FAIL connection "+name+": ")
 		line, _, _ = strings.Cut(line, "\n")
 		if ok || !strings.Contains(line, "blocked by the outbound address policy: 127.0.0.1 is loopback") {

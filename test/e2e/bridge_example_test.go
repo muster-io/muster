@@ -426,7 +426,7 @@ func TestBridgeExampleFlows(t *testing.T) {
 	x.restart(exampleRun{})
 	b := &brd{mm: newMM(t, h, r)}
 	e := &bridgeLinksEnv{linksEnv: &linksEnv{timersEnv: &timersEnv{tgd: &tgd{mm: b.mm}}}, b: b}
-	created, _ := json.Marshal(map[string]any{"type": "bridge", "name": "Example bridge", "base_url": exampleURL,
+	created, _ := json.Marshal(map[string]any{"type": "bridge", "name": "Team chat", "base_url": exampleURL,
 		"bot_token": x.token, "event_delivery": "poll", "proxy": map[string]bool{"enabled": false},
 		"limiter": map[string]int{"limit": 10, "per_seconds": 1}})
 	b.conn, _ = b.api.json(http.MethodPost, "/api/v1/connections", string(created), http.StatusCreated)["id"].(string)
@@ -487,7 +487,7 @@ func TestBridgeExampleFlows(t *testing.T) {
 	})
 	l := linkOf(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK), "bridge")
 	if connection, _ := l["connection"].(map[string]any); l["external_id"] != "alice" ||
-		l["display_name"] != "Alice Smith" || connection["name"] != "Example bridge" {
+		l["display_name"] != "Alice Smith" || connection["name"] != "Team chat" {
 		t.Errorf("alice's bridge link %v", l)
 	}
 	x.press(root.ID, "alice", x.button(root, "Ack"))

@@ -1762,10 +1762,10 @@ docker run --rm --network host -v "$PWD/token:/token:ro" ghcr.io/muster-io/muste
 ### The fake bridge of `muster dev`
 
 `muster dev` starts a fake bridge on `127.0.0.1:18094` that offers every feature and both event delivery modes, and
-creates a Bridge Connection "Dev Bridge" to it in poll mode, with the token `muster-dev-bridge-token`. The fake serves
-a second bot with the token `muster-dev-bridge-token-b`, which `muster dev` creates no Connection for, so you can run
-the check against it without touching the demo. Its channels are `ch-alerts` and `ch-alerts-prod`, and `ch-nobot` is one
-it refuses with `forbidden`. It records every request at `/_fake/requests` and takes scripted faults at
+creates a Bridge Connection "Example Bridge" to it in poll mode, with the token `muster-dev-bridge-token`. The fake
+serves a second bot with the token `muster-dev-bridge-token-b`, which `muster dev` creates no Connection for, so you can
+run the check against it without touching the demo. Its channels are `ch-alerts` and `ch-alerts-prod`, and `ch-nobot` is
+one it refuses with `forbidden`. It records every request at `/_fake/requests` and takes scripted faults at
 `/_fake/faults`. It is for Muster's own tests and for trying Muster; it is not a messenger.
 
 ### The example bridge

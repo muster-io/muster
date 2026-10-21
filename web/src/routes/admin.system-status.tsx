@@ -9,6 +9,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { OrganizationLayout } from "../components/organization-nav";
 import { SystemStatusSections, useSystemStatus } from "../components/system-status-sections";
 import { problemText } from "../lib/api";
@@ -25,7 +26,7 @@ function SystemStatusView() {
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("systemStatus.title")}</h1>
+        <PageTitle docs="page.system_status">{t("systemStatus.title")}</PageTitle>
         <p className="text-muted-foreground">{t("systemStatus.hint")}</p>
       </div>
       {query.data === undefined ? (

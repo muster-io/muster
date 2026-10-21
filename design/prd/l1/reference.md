@@ -209,7 +209,7 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Outgoing webhook Destination, templates · extraction rules · Secrets · Signing secret | `field.webhook_templates` · `field.webhook_extraction` · `field.webhook_secrets` · `field.webhook_signing_secret` | `outgoing-webhooks/templates.md#what-the-templates-read` · `outgoing-webhooks/templates.md#extraction-rules-and-response` · `outgoing-webhooks/events.md#secrets` · `outgoing-webhooks/events.md#verify-the-signature` | S-109 |
 | OIDC, group mapping | `field.oidc_groups` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` | S-110 |
 | Security, TOTP policy | `field.totp_policy` | `sign-in/totp.md#the-policy` | S-110 |
-| Service account, Permissions | `field.permissions` | `configure/api-tokens.md#two-kinds-of-token` | S-110 |
+| A Service account, its Role (which gives it its Permissions) | `field.permissions` | `configure/api-tokens.md#two-kinds-of-token` | S-110 |
 | Link rule, its template · Lookup table, its rows | `field.link_rule` · `field.lookup_table` | `configure/messages-and-templates.md#links` | S-110 |
 | Outbound addresses, the allowed networks | `field.outbound_policy` | `messengers/proxies.md#what-the-outbound-address-policy-checks` | S-110 |
 
@@ -246,7 +246,7 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Every page, Admins: no replica is leading · recovering after downtime | `fix.no_leader` · `fix.after_downtime` | `operations/runbooks/MusterNoLeader.md` · `operations/high-availability.md#after-downtime` | S-110 |
 | OIDC settings, nobody can sign in · the client secret expires | `fix.oidc_mapping` · `fix.oidc_secret` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` · `operations/runbooks/MusterOIDCSecretExpiring.md` | S-110 |
 | System status, outgoing heartbeat not set | `fix.outgoing_heartbeat` | `operations/outgoing-heartbeat.md` | S-110 |
-| Keyring, a key no longer needed · activation refused | `fix.keyring` | `operations/key-rotation.md` | S-110 |
+| Keyring, a key that can be removed · a key missing on replicas ("Missing on {replicas}"), which cannot be activated until every replica holds it | `fix.keyring` | `operations/key-rotation.md` | S-110 |
 
 The codes of the checks without a link: `request_failed`, whose `message` names an error no page can foresee, and
 `webhook_set`, a step that passed. A code a type never gives, such as `not_slack` of a Telegram check, has no link

@@ -13,6 +13,7 @@ import { getListUsersQueryKey, listUsers } from "../api/gen/endpoints/users/user
 import type { ListUsersParams, User } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { NativeSelect, NativeSelectOption } from "../components/ui/native-select";
@@ -221,7 +222,7 @@ function UsersPage() {
     <RequirePermission permission="users:read">
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("users.title")}</h1>
+          <PageTitle docs="page.users">{t("users.title")}</PageTitle>
           {canWrite && <UserCreateDialog />}
         </div>
         <Filters search={search} />

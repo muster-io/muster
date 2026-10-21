@@ -503,11 +503,19 @@ test("Keyring follows the activation of a key without a reload", async ({ page }
   await expect(row(other.id).getByTestId("keyring-key-state")).toHaveText("Active", {
     timeout: 30_000,
   });
-  await expect(row(first.id).getByTestId("keyring-key-state")).toHaveText(
-    new RegExp(
-      `^(Still needed|Key ${first.id} is no longer used and can be removed from MUSTER_SECRET_KEYS\\.)$`,
-    ),
-  );
+  // The removable key's sentence is matched on its own element, apart from its "How to fix" link, which
+  // keyring-status.test.tsx checks.
+  const state = row(first.id).getByTestId("keyring-key-state");
+  await expect(
+    state
+      .getByText("Still needed", { exact: true })
+      .or(
+        state.getByText(
+          `Key ${first.id} is no longer used and can be removed from MUSTER_SECRET_KEYS.`,
+          { exact: true },
+        ),
+      ),
+  ).toBeVisible();
   await shot(page, "organization-keyring-activated");
   expect(csp).toEqual([]);
 });

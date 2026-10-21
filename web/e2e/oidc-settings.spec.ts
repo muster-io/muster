@@ -195,7 +195,7 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   // ada signs in through the IdP as an Admin, then the bootstrap Admin becomes a Responder.
   await nextIdpUser("u-web-ada", "ada", ["muster-admins"]);
   await page.goto("/sign-in");
-  await page.getByText("Sign in with Dev IdP").click();
+  await page.getByText("Sign in with Example SSO").click();
   await expect(page.getByTestId("user-menu-name")).toHaveText("ada");
   const api = await adminApi();
   const { items } = await api.call<{ items: { id: string; etag: string; name: string }[] }>(

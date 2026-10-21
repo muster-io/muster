@@ -213,6 +213,7 @@ type Queries interface {
 	RefuseUser(ctx context.Context, arg dbgen.RefuseUserParams) error
 	CapOIDCSessions(ctx context.Context, arg dbgen.CapOIDCSessionsParams) (int64, error)
 	InsertDemoSettings(ctx context.Context, arg dbgen.InsertDemoSettingsParams) (int64, error)
+	RenameDemoSettings(ctx context.Context, arg dbgen.RenameDemoSettingsParams) (int64, error)
 	AllowNetwork(ctx context.Context, arg dbgen.AllowNetworkParams) (int64, error)
 	audit.Store
 }
@@ -733,14 +734,17 @@ type Demo struct {
 	ClientID     string
 	ClientSecret logging.Secret
 	DisplayName  string
-	Mappings     []GroupMapping
+	// DisplayNameWas is the display name an earlier version gave the demo configuration, renamed to DisplayName.
+	DisplayNameWas string
+	Mappings       []GroupMapping
 	// AllowNetwork is added to the Organization's allowed outbound networks, so that Muster may call the fakes.
 	AllowNetwork string
 }
 
 // EnsureDemo is the start-up step of `muster dev`: when the Organization has no OIDC settings it stores the demo
 // configuration, enabled, and records it in the Audit log as done by the system; it then allows the demo's network.
-// It never runs outside development mode.
+// Settings that still carry the demo's earlier display name, kept in a development database from an earlier version,
+// get its current one; any other settings stay as they are. It never runs outside development mode.
 func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 	now := s.cfg.Clocks.Business.Now().UTC()
 	ct, keyID, err := s.cfg.Keyring.Encrypt(fieldClientSecret, []byte(d.ClientSecret))
@@ -765,7 +769,7 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 			return fmt.Errorf("allow %s for the demo: %w", d.AllowNetwork, err)
 		}
 		if n == 0 {
-			return nil
+			return s.renameDemo(ctx, q, d, now)
 		}
 		return s.cfg.Audit.Record(ctx, q, audit.Entry{
 			OrgID: s.cfg.OrgID, Actor: audit.System, Transport: audit.TransportSystem, Action: ActionSettingsUpdated,
@@ -773,6 +777,28 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 			Diff:     []audit.Change{{Pointer: "/client_secret", SecretChanged: true}},
 			Details:  map[string]any{"development_demo": true, "issuer_url": d.IssuerURL},
 		})
+	})
+}
+
+// renameDemo gives settings with the demo's earlier display name its current one, recorded in the Audit log as done
+// by the system.
+func (s *Service) renameDemo(ctx context.Context, q Queries, d Demo, now time.Time) error {
+	if d.DisplayNameWas == "" {
+		return nil
+	}
+	n, err := q.RenameDemoSettings(ctx, dbgen.RenameDemoSettingsParams{OrgID: s.cfg.OrgID,
+		DisplayName: optText(d.DisplayName), Was: optText(d.DisplayNameWas), UpdatedAt: now})
+	if err != nil {
+		return fmt.Errorf("rename the demo OIDC settings: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	return s.cfg.Audit.Record(ctx, q, audit.Entry{
+		OrgID: s.cfg.OrgID, Actor: audit.System, Transport: audit.TransportSystem, Action: ActionSettingsUpdated,
+		Resource: audit.Resource{Type: ResourceSettings, Name: d.DisplayName},
+		Diff:     audit.Changed("/display_name", d.DisplayNameWas, d.DisplayName),
+		Details:  map[string]any{"development_demo": true},
 	})
 }
 

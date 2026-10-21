@@ -105,10 +105,8 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
     "Event delivery: ok · direct",
   ]);
   const info = page.getByTestId("bridge-info");
-  await expect(info.getByTestId("bridge-info-bridge")).toHaveText(
-    "Bridge: Muster fake bridge 1.0.0",
-  );
-  await expect(info.getByTestId("bridge-info-messenger")).toHaveText("Messenger: Fake chat");
+  await expect(info.getByTestId("bridge-info-bridge")).toHaveText("Bridge: Example bridge 1.0.0");
+  await expect(info.getByTestId("bridge-info-messenger")).toHaveText("Messenger: Example chat");
   await expect(info.getByTestId("bridge-info-protocol")).toHaveText("Protocol version 1");
   await expect(info.getByTestId("bridge-info-features")).toContainText("Buttons");
   await expect(info.getByTestId("bridge-info-features")).toContainText("Thread messages");
@@ -170,11 +168,11 @@ test("creates a Bridge Connection, checks it and shows what the bridge offers", 
   const row = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "br", exact: true }) });
-  await expect(row).toContainText("Fake chat");
+  await expect(row).toContainText("Example chat");
   await expect(row.getByTestId("connection-account")).toHaveText("127.0.0.1:18094");
   await shot(page, "bridge-connection-list");
   await page.setViewportSize({ width: 360, height: 740 });
-  await expect(row).toContainText("Fake chat");
+  await expect(row).toContainText("Example chat");
   await expectNoHorizontalScroll(page);
 
   // A new Bridge Connection at phone width, in push mode too: the callback address comes once it is saved.
@@ -273,7 +271,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
     "Доставка событий: успешно · напрямую",
   ]);
   await expect(page.getByTestId("bridge-info-protocol")).toHaveText("Версия протокола 1");
-  await expect(page.getByTestId("bridge-info-messenger")).toHaveText("Мессенджер: Fake chat");
+  await expect(page.getByTestId("bridge-info-messenger")).toHaveText("Мессенджер: Example chat");
   await expectNoHorizontalScroll(page);
   await shot(page, "bridge-connection-ru-360");
   // Push mode with the callback address, without saving.
@@ -291,7 +289,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   const row = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "br", exact: true }) });
-  await expect(row).toContainText("Fake chat");
+  await expect(row).toContainText("Example chat");
   await expectNoHorizontalScroll(page);
   expect(csp).toEqual([]);
   await context.close();

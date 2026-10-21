@@ -130,7 +130,7 @@ const CONNECTIONS: Connection[] = [
   mmConnection("CN000000000MMA", "mm-a", "http://127.0.0.1:18065"),
   mmConnection("CN000000000MMB", "mm-b", "http://127.0.0.1:18065/"),
   mmConnection("CN000000000MM2", "mm-2", "http://127.0.0.1:18066"),
-  tgConnection("CN000000000TGA", "Dev Telegram"),
+  tgConnection("CN000000000TGA", "Example Telegram"),
   tgConnection("CN000000000TGB", "tg-b"),
 ];
 
@@ -235,7 +235,7 @@ describe("the Destinations of the Route editor", () => {
     await renderEditor([TG_A.id, HOOK.id]);
     await expect
       .element(rows().nth(0).getByTestId("route-destination-label"))
-      .toHaveTextContent("tg-a-alerts · Telegram · via Dev Telegram · Muster alerts");
+      .toHaveTextContent("tg-a-alerts · Telegram · via Example Telegram · Muster alerts");
     await expect
       .element(rows().nth(0).getByTestId("destination-health"))
       .toHaveTextContent("Healthy");
@@ -285,14 +285,14 @@ describe("the Destinations of the Route editor", () => {
       releaseConnections?.();
       await expect
         .element(rows().nth(0).getByTestId("route-destination-label"))
-        .toHaveTextContent("tg-a-alerts · Telegram · via Dev Telegram · Muster alerts");
+        .toHaveTextContent("tg-a-alerts · Telegram · via Example Telegram · Muster alerts");
       expect(rows().nth(0).getByTestId("route-destination-label-pending").query()).toBeNull();
     } finally {
       observer.disconnect();
     }
     expect([...seen].filter((text) => text !== "")).toEqual([
       "tg-a-alerts",
-      "tg-a-alerts · Telegram · via Dev Telegram · Muster alerts",
+      "tg-a-alerts · Telegram · via Example Telegram · Muster alerts",
     ]);
   });
 

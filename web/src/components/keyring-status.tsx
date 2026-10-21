@@ -2,11 +2,14 @@
 // Copyright The Muster Authors
 
 // The Keyring status (C-20.FR-6, C-20.AC-2): every master key by its id, which one is active, the replicas that hold or
-// lack it, and whether an older key is still needed or can be removed from MUSTER_SECRET_KEYS.
+// lack it, and whether an older key is still needed or can be removed from MUSTER_SECRET_KEYS. Its two notices, a key
+// that can be removed and a key missing on replicas, which keeps it from being activated, link to the key rotation
+// guide.
 
 import { useTranslation } from "react-i18next";
 
 import type { KeyringKey } from "../api/gen/model";
+import { DocsLink } from "./docs-link";
 
 function KeyState({ keyring }: { keyring: KeyringKey }) {
   const { t } = useTranslation();
@@ -18,7 +21,12 @@ function KeyState({ keyring }: { keyring: KeyringKey }) {
     case "not_active_yet":
       return <span>{t("organization.keyring.notActiveYet")}</span>;
     default:
-      return <span>{t("organization.keyring.removable", { id: keyring.id })}</span>;
+      return (
+        <span>
+          <span>{t("organization.keyring.removable", { id: keyring.id })}</span>{" "}
+          <DocsLink to="fix.keyring" kind="how_to_fix" about={t("docs.fixes.keyringRemovable")} />
+        </span>
+      );
   }
 }
 
@@ -59,8 +67,17 @@ export function KeyringStatus({ keys }: { keys: readonly KeyringKey[] }) {
                     </span>
                   )}
                   {key.missing_on.length > 0 && (
-                    <span className="text-destructive">
-                      {t("organization.keyring.missingOn", { replicas: key.missing_on.join(", ") })}
+                    <span>
+                      <span className="text-destructive">
+                        {t("organization.keyring.missingOn", {
+                          replicas: key.missing_on.join(", "),
+                        })}
+                      </span>{" "}
+                      <DocsLink
+                        to="fix.keyring"
+                        kind="how_to_fix"
+                        about={t("docs.fixes.keyringMissing")}
+                      />
                     </span>
                   )}
                 </div>

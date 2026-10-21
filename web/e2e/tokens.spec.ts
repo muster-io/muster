@@ -208,7 +208,7 @@ test("an OIDC account without an offline token sees until when its tokens work",
   expect(res.ok).toBe(true);
   await nextIdpUser("u-web-olga", "olga", ["oncall"]);
   await page.goto("/sign-in");
-  await page.getByText("Sign in with Dev IdP").click();
+  await page.getByText("Sign in with Example SSO").click();
   await expect(page.getByTestId("user-menu-name")).toHaveText("olga");
   await page.goto("/profile");
   await expect(page.getByRole("heading", { name: "Personal access tokens" })).toBeVisible();

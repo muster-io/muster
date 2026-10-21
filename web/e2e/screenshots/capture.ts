@@ -459,8 +459,8 @@ async function stabilizeFrame(frame: Frame, fixed: Fixed): Promise<void> {
  * (mstr_int_, mstr_pat_, mstr_sat_), Signing secrets (whsec_), the token of a password setup link, signed values of
  * at least 20 characters in JSON strings, such as callback_data, and the random end
  * of an Idempotency-Key take fixed characters of the same length, one value the same wherever it shows; and the fake
- * webhook receiver shows as https://hooks.example.org. Text nodes and the values of inputs and text areas are
- * rewritten; nothing else changes.
+ * webhook receiver shows as https://hooks.example.org; the address that starts a session's line shows as 203.0.113.24.
+ * Text nodes and the values of inputs and text areas are rewritten; nothing else changes.
  */
 function stabilize(root: Element, fixed: Fixed): void {
   const now = fixed.reference ?? Date.now();
@@ -558,6 +558,10 @@ function stabilize(root: Element, fixed: Fixed): void {
         return `${weekday}, ${pad(t.getUTCDate())} ${months[t.getUTCMonth()] ?? ""} ${t.getUTCFullYear()} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:00 GMT`;
       },
     ],
+    // The address of a session, which its line starts with before " · " and the browser: the loopback address of the
+    // run, IPv4 or IPv6, shows as an address of the documentation range. Addresses elsewhere, such as networks of the
+    // outbound address policy or a URL's host and port, stay.
+    [/^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]*::[0-9a-f:.]*)(?= · )/g, () => "203.0.113.24"],
     // The fake webhook receiver of muster dev shows as the receiver of the examples.
     [/http:\/\/127\.0\.0\.1:18093/g, () => "https://hooks.example.org"],
     [/\b127\.0\.0\.1:18093\b/g, () => "hooks.example.org"],

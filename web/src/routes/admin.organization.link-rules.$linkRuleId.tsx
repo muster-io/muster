@@ -21,6 +21,7 @@ import {
 } from "../api/gen/endpoints/links/links";
 import type { LinkRule } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { LinkRuleDeleteDialog, LinkRuleForm } from "../components/link-rule-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
@@ -108,9 +109,7 @@ function LinkRuleView({ linkRuleId }: { linkRuleId: string }) {
           {t("linkRules.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
-            {rule?.name ?? t("linkRules.edit.title")}
-          </h1>
+          <PageTitle docs="page.link_rules">{rule?.name ?? t("linkRules.edit.title")}</PageTitle>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && rule !== undefined && <LinkRuleDeleteDialog rule={rule} />}
         </div>

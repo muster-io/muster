@@ -108,11 +108,11 @@ type App struct {
 }
 
 var apps = []App{
-	{Key: AppA, AppID: "A0MUSTERDEVA", TeamID: "T0MUSTERDEVA", TeamName: "Fake workspace",
+	{Key: AppA, AppID: "A0MUSTERDEVA", TeamID: "T0MUSTERDEVA", TeamName: "Example workspace",
 		TeamURL: "https://fake-workspace.slack.com/", BotID: "B0MUSTERDEVA", BotUserID: "U0MUSTERBOTA",
 		BotName: "muster-dev-bot", BotToken: BotToken, AppToken: AppToken, SigningSecret: SigningSecret,
 		VerificationToken: VerificationToken},
-	{Key: AppB, AppID: "A0MUSTERDEVB", TeamID: "T0MUSTERDEVB", TeamName: "Fake workspace B",
+	{Key: AppB, AppID: "A0MUSTERDEVB", TeamID: "T0MUSTERDEVB", TeamName: "Example workspace B",
 		TeamURL: "https://fake-workspace-b.slack.com/", BotID: "B0MUSTERDEVB", BotUserID: "U0MUSTERBOTB",
 		BotName: "muster-dev-bot-b", BotToken: SecondBotToken, AppToken: SecondAppToken,
 		SigningSecret: SecondSigningSecret, VerificationToken: SecondVerificationToken},

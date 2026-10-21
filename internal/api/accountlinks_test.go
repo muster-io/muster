@@ -51,11 +51,11 @@ func (f *fakeAccountLinks) Connections(context.Context) ([]accountlinks.Linkable
 	f.calls = append(f.calls, "connections")
 	return []accountlinks.LinkableConnection{
 		{PublicID: "CNAAAAAAAAAAA4", Name: "br", Messenger: "bridge", LinkMethods: []string{"token"}},
-		{PublicID: "CNAAAAAAAAAAA3", Name: "Dev Bridge", Messenger: "bridge", LinkMethods: []string{"token", "code"},
+		{PublicID: "CNAAAAAAAAAAA3", Name: "Example Bridge", Messenger: "bridge", LinkMethods: []string{"token", "code"},
 			HandleKind: "email"},
 		{PublicID: "CNAAAAAAAAAAA2", Name: "mm", Messenger: "mattermost"},
 		{PublicID: "CNAAAAAAAAAAA5", Name: "sl", Messenger: "slack"},
-		{PublicID: "CNAAAAAAAAAAA1", Name: "Dev Telegram", Messenger: "telegram"}}, f.err
+		{PublicID: "CNAAAAAAAAAAA1", Name: "Example Telegram", Messenger: "telegram"}}, f.err
 }
 
 func (f *fakeAccountLinks) Unlink(_ context.Context, r accountlinks.Requester, id string) error {
@@ -123,12 +123,12 @@ func newAccountLinksAPI(t *testing.T) (*testAPI, *fakeAccountLinks) {
 	used := t0.Add(time.Hour)
 	f := &fakeAccountLinks{links: []accountlinks.Link{
 		{PublicID: "AKAAAAAAAAAAA1", Messenger: "telegram", ConnectionPublicID: "CNAAAAAAAAAAA1",
-			ConnectionName: "Dev Telegram", ExternalID: "7001", Username: ptr("alice_t"), LastUsedAt: &used,
+			ConnectionName: "Example Telegram", ExternalID: "7001", Username: ptr("alice_t"), LastUsedAt: &used,
 			CreatedAt: t0},
 		{PublicID: "AKAAAAAAAAAAA2", Messenger: "mattermost", ConnectionPublicID: "CNAAAAAAAAAAA2",
 			ConnectionName: "mm", ExternalID: "u-bob", CreatedAt: t0},
 		{PublicID: "AKAAAAAAAAAAA3", Messenger: "bridge", ConnectionPublicID: "CNAAAAAAAAAAA3",
-			ConnectionName: "Dev Bridge", ExternalID: "u-alice", Username: ptr("alice@example.org"),
+			ConnectionName: "Example Bridge", ExternalID: "u-alice", Username: ptr("alice@example.org"),
 			DisplayName: ptr("Alice Smith"), CreatedAt: t0},
 	}}
 	x.srv.accountLinks = f
@@ -152,7 +152,7 @@ func TestAccountLinksLists(t *testing.T) {
 	conn := first["connection"].(map[string]any)
 	_, hasName := second["display_name"]
 	if first["username"] != "alice_t" || first["last_used_at"] != "2026-10-05T13:00:00Z" ||
-		conn["id"] != "CNAAAAAAAAAAA1" || conn["name"] != "Dev Telegram" || second["username"] != nil ||
+		conn["id"] != "CNAAAAAAAAAAA1" || conn["name"] != "Example Telegram" || second["username"] != nil ||
 		second["last_used_at"] != nil || second["messenger"] != "mattermost" || hasName ||
 		third["messenger"] != "bridge" || third["display_name"] != "Alice Smith" ||
 		third["username"] != "alice@example.org" {
@@ -160,11 +160,11 @@ func TestAccountLinksLists(t *testing.T) {
 	}
 	a = x.call(t, http.MethodGet, "/api/v1/me/account-links/connections", "", "Cookie", "viewer-cookie")
 	for _, want := range []string{`{"id":"CNAAAAAAAAAAA2","messenger":"mattermost","name":"mm"}`,
-		`{"id":"CNAAAAAAAAAAA1","messenger":"telegram","name":"Dev Telegram"}`,
+		`{"id":"CNAAAAAAAAAAA1","messenger":"telegram","name":"Example Telegram"}`,
 		`{"id":"CNAAAAAAAAAAA5","messenger":"slack","name":"sl"}`,
 		`{"handle_kind":null,"id":"CNAAAAAAAAAAA4","link_methods":["token"],"messenger":"bridge","name":"br"}`,
 		`{"handle_kind":"email","id":"CNAAAAAAAAAAA3","link_methods":["token","code"],"messenger":"bridge",` +
-			`"name":"Dev Bridge"}`} {
+			`"name":"Example Bridge"}`} {
 		if a.status != http.StatusOK || !strings.Contains(string(a.body), want) {
 			t.Errorf("connections = %d %s, want %s", a.status, a.body, want)
 		}

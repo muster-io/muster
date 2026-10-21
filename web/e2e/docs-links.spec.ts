@@ -149,7 +149,12 @@ test.beforeAll(async () => {
     for (const c of connections.items) {
       ids.connections[c.name] = c.id;
     }
-    for (const name of ["Dev Mattermost", "Dev Telegram", "Dev Slack", "Dev Bridge"]) {
+    for (const name of [
+      "Example Mattermost",
+      "Example Telegram",
+      "Example Slack",
+      "Example Bridge",
+    ]) {
       expect(ids.connections[name], `the demo Connection ${name}`).toBeDefined();
     }
 
@@ -163,14 +168,14 @@ test.beforeAll(async () => {
     ids.destinations.telegram = await create({
       type: "telegram",
       name: "docs-telegram",
-      connection_id: ids.connections["Dev Telegram"],
+      connection_id: ids.connections["Example Telegram"],
       channel_id: "@muster_alerts",
       limiter: { limit: 30, per_seconds: 1 },
     });
     ids.destinations.slack = await create({
       type: "slack",
       name: "docs-slack",
-      connection_id: ids.connections["Dev Slack"],
+      connection_id: ids.connections["Example Slack"],
       channel_id: "C0FAKEALERTS",
       limiter: { limit: 1, per_seconds: 1 },
     });
@@ -296,10 +301,10 @@ test("every page of Alert Groups, Integrations, Routes, Connections and Destinat
   await page.goto("/connections/new");
   await expectGuide(page, "New Connection", "Connections", "messengers/");
   for (const [name, about, target] of [
-    ["Dev Telegram", "Telegram Connection", "messengers/telegram/"],
-    ["Dev Mattermost", "Mattermost Connection", "messengers/mattermost/"],
-    ["Dev Slack", "Slack Connection", "messengers/slack/"],
-    ["Dev Bridge", "Bridge Connection", "messengers/bridge/"],
+    ["Example Telegram", "Telegram Connection", "messengers/telegram/"],
+    ["Example Mattermost", "Mattermost Connection", "messengers/mattermost/"],
+    ["Example Slack", "Slack Connection", "messengers/slack/"],
+    ["Example Bridge", "Bridge Connection", "messengers/bridge/"],
   ] as const) {
     await page.goto(`/connections/${ids.connections[name]}`);
     await expectGuide(page, name, about, target);
@@ -336,7 +341,7 @@ test("every page of Alert Groups, Integrations, Routes, Connections and Destinat
 
   // From the list: Connections → the demo Telegram Connection.
   await page.goto("/connections");
-  await page.getByRole("link", { name: "Dev Telegram", exact: true }).click();
+  await page.getByRole("link", { name: "Example Telegram", exact: true }).click();
   await expect(guide(page, "Telegram Connection")).toHaveAttribute(
     "href",
     `${DOCS}messengers/telegram/`,
@@ -365,7 +370,7 @@ async function narrow(browser: Browser): Promise<void> {
   await signInAdmin(page);
   for (const [address, about] of [
     ["/routes", "Routes"],
-    [`/connections/${ids.connections["Dev Telegram"]}`, "Telegram Connection"],
+    [`/connections/${ids.connections["Example Telegram"]}`, "Telegram Connection"],
     [`/destinations/${ids.destinations.slack}`, "Slack Destination"],
     [`/destinations/${ids.destinations.template}`, "Outgoing webhook templates"],
     [`/alert-groups/${ids.alertGroup}`, "Alert Group statuses and commands"],
@@ -399,7 +404,7 @@ test("the link reads «Руководство» in Russian", async ({ browser })
   });
   await expect(link).toHaveText("Руководство");
   await expect(link).toHaveAttribute("href", `${DOCS}concepts/routes-and-group-keys/`);
-  await page.goto(`/connections/${ids.connections["Dev Telegram"]}`);
+  await page.goto(`/connections/${ids.connections["Example Telegram"]}`);
   await expect(
     page.getByRole("link", {
       name: "Руководство: Подключение Telegram (откроется в новой вкладке)",

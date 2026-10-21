@@ -94,7 +94,7 @@ function brConnection(
   id: string,
   name: string,
   baseUrl: string,
-  messenger: string | null = "Fake chat",
+  messenger: string | null = "Example chat",
 ): BridgeConnection {
   return {
     id,
@@ -111,7 +111,7 @@ function brConnection(
         ? null
         : {
             protocol_version: "1",
-            bridge: { name: "Muster fake bridge", version: "1.0.0" },
+            bridge: { name: "Example bridge", version: "1.0.0" },
             messenger: { name: messenger },
             capabilities: {},
             limits: { max_body_length: 4000, edit_max_age_seconds: null },
@@ -141,7 +141,7 @@ function slackConnection(id: string, name: string, botName: string | null): Slac
     bot_name: botName,
     bot_user_id: botName === null ? null : "U0000000001",
     team_id: botName === null ? null : "T0000000001",
-    team_name: botName === null ? null : "Fake workspace",
+    team_name: botName === null ? null : "Example workspace",
     app_id: botName === null ? null : "A0000000001",
     proxy: { enabled: false },
     destination_count: 0,
@@ -247,13 +247,13 @@ const CONNECTIONS = new Map<string, Connection>(
     mmConnection("CN000000000MMA", "mm-a", "http://127.0.0.1:18065"),
     mmConnection("CN000000000MMB", "mm-b", "HTTP://127.0.0.1:18065/"),
     mmConnection("CN000000000MM2", "mm-2", "http://127.0.0.1:18066"),
-    tgConnection("CN000000000TGA", "Dev Telegram"),
+    tgConnection("CN000000000TGA", "Example Telegram"),
     tgConnection("CN000000000TGB", "tg-b"),
     brConnection("CN000000000BRA", "br", "http://127.0.0.1:18094"),
     brConnection("CN000000000BRB", "br-b", "HTTP://127.0.0.1:18094/"),
     brConnection("CN000000000BR2", "br-2", "http://127.0.0.1:18095", "Other chat"),
     brConnection("CN000000000BRU", "br-unread", "http://127.0.0.1:18096", null),
-    slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot"),
+    slackConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot"),
     slackConnection("CN000000000SLB", "slack-b", "muster-dev-slack-bot-b"),
     { ...slackConnection("CN000000000SL2", "slack-2", "other-bot"), team_id: "T0000000002" },
     slackConnection("CN000000000SLU", "slack-unchecked", null),
@@ -352,7 +352,7 @@ describe("the label", () => {
 
   test("reads a Bridge Destination with the messenger of its Connection's info, else Bridge", async () => {
     expect(fullLabel(i18n.t, br("DS6", "alerts", "CN000000000BRA"), CONNECTIONS)).toBe(
-      "alerts · Fake chat · via br · alerts",
+      "alerts · Example chat · via br · alerts",
     );
     expect(fullLabel(i18n.t, br("DS6", "alerts", "CN000000000BR2"), CONNECTIONS)).toBe(
       "alerts · Other chat · via br-2 · alerts",
@@ -367,14 +367,16 @@ describe("the label", () => {
     // Without the channel's name, its id.
     const unnamed = br("DS6", "alerts", "CN000000000BRA", { channel_name: null });
     expect(destinationPlace(unnamed)).toBe("ch-alerts");
-    expect(fullLabel(i18n.t, unnamed, CONNECTIONS)).toBe("alerts · Fake chat · via br · ch-alerts");
+    expect(fullLabel(i18n.t, unnamed, CONNECTIONS)).toBe(
+      "alerts · Example chat · via br · ch-alerts",
+    );
     expect(connectionPlace(br("DS6", "alerts", "CN000000000BRA"), CONNECTIONS)).toBe("br · alerts");
     await i18n.changeLanguage("ru");
     expect(fullLabel(i18n.t, br("DS6", "alerts", "CN000000000BRU"), CONNECTIONS)).toBe(
       "alerts · Мост · через br-unread · alerts",
     );
     expect(fullLabel(i18n.t, br("DS6", "alerts", "CN000000000BRA"), CONNECTIONS)).toBe(
-      "alerts · Fake chat · через br · alerts",
+      "alerts · Example chat · через br · alerts",
     );
   });
 });
@@ -405,21 +407,21 @@ describe("a Slack Destination", () => {
     const d: Destination = sl("DS7", "slack-alerts", "CN000000000SLA");
     expect(destinationTypeName(i18n.t, "slack")).toBe("Slack");
     expect(fullLabel(i18n.t, d, CONNECTIONS)).toBe(
-      "slack-alerts · Slack · via Dev Slack · #alerts",
+      "slack-alerts · Slack · via Example Slack · #alerts",
     );
-    expect(connectionPlace(d, CONNECTIONS)).toBe("Dev Slack · #alerts");
+    expect(connectionPlace(d, CONNECTIONS)).toBe("Example Slack · #alerts");
     expect(fullLabel(i18n.t, d, new Map())).toBe("slack-alerts · Slack · #alerts");
     await i18n.changeLanguage("ru");
     expect(destinationTypeName(i18n.t, "slack")).toBe("Slack");
     expect(fullLabel(i18n.t, d, CONNECTIONS)).toBe(
-      "slack-alerts · Slack · через Dev Slack · #alerts",
+      "slack-alerts · Slack · через Example Slack · #alerts",
     );
   });
 });
 
 describe("the Connections list", () => {
   test("names a Bridge by the messenger from its info and the host of its base URL", async () => {
-    expect(connectionMessengerName(i18n.t, byId("CN000000000BRA"))).toBe("Fake chat");
+    expect(connectionMessengerName(i18n.t, byId("CN000000000BRA"))).toBe("Example chat");
     expect(connectionMessengerName(i18n.t, byId("CN000000000BRU"))).toBe("Bridge");
     expect(connectionMessengerName(i18n.t, byId("CN000000000MMA"))).toBe("Mattermost");
     expect(connectionMessengerName(i18n.t, byId("CN000000000TGA"))).toBe("Telegram");
@@ -446,10 +448,10 @@ describe("the Connections list", () => {
   });
 
   test("names a Slack Connection Slack, with its bot and workspace once a check found them and no address", async () => {
-    const checked = slackConnection("CN000000000SLA", "Dev Slack", "muster-dev-slack-bot");
+    const checked = slackConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot");
     const unchecked = slackConnection("CN000000000SLU", "slack-unchecked", null);
     expect(connectionMessengerName(i18n.t, checked)).toBe("Slack");
-    expect(connectionAccount(checked)).toBe("muster-dev-slack-bot · Fake workspace");
+    expect(connectionAccount(checked)).toBe("muster-dev-slack-bot · Example workspace");
     expect(connectionAccount({ ...checked, team_name: null })).toBe("muster-dev-slack-bot");
     expect(connectionAccount(unchecked)).toBeUndefined();
     expect(connectionAccount({ ...unchecked, bot_name: "" })).toBeUndefined();

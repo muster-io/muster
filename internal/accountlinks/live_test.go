@@ -173,7 +173,7 @@ func TestLiveLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 		conns := map[string]int64{}
-		for _, c := range []struct{ id, typ, name string }{{"CNAAAAAAAAAAT1", "telegram", "Dev Telegram"},
+		for _, c := range []struct{ id, typ, name string }{{"CNAAAAAAAAAAT1", "telegram", "Example Telegram"},
 			{"CNAAAAAAAAAAT2", "telegram", "Second"}, {"CNAAAAAAAAAAM1", "mattermost", "mm"}} {
 			var id int64
 			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
@@ -313,11 +313,11 @@ func TestLiveLinks(t *testing.T) {
 		}
 		// Lists, the Connections to link through, the last use.
 		mine, err := svc.List(ctx, users["alice"])
-		if err != nil || len(mine) != 1 || mine[0].ExternalID != "7004" || mine[0].ConnectionName != "Dev Telegram" {
+		if err != nil || len(mine) != 1 || mine[0].ExternalID != "7004" || mine[0].ConnectionName != "Example Telegram" {
 			t.Fatalf("List = %+v, %v", mine, err)
 		}
 		cs, err := svc.Connections(ctx)
-		if err != nil || len(cs) != 3 || cs[0].Name != "mm" || cs[1].Name != "Dev Telegram" {
+		if err != nil || len(cs) != 3 || cs[0].Name != "mm" || cs[1].Name != "Example Telegram" {
 			t.Errorf("Connections = %+v, %v", cs, err)
 		}
 		if _, err := svc.Lookup(ctx, accountlinks.SpaceTelegram, "7004"); err != nil ||
@@ -828,7 +828,7 @@ func TestLiveBridgeLinks(t *testing.T) {
 		for _, c := range []struct {
 			id, typ, name string
 			info          *string
-		}{{"CNAAAAAAAAAAT1", "telegram", "tg", nil}, {"CNAAAAAAAAAAB1", "bridge", "Dev Bridge", new(info)},
+		}{{"CNAAAAAAAAAAT1", "telegram", "tg", nil}, {"CNAAAAAAAAAAB1", "bridge", "Example Bridge", new(info)},
 			{"CNAAAAAAAAAAB2", "bridge", "br", nil}} {
 			var id int64
 			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
@@ -873,7 +873,7 @@ func TestLiveBridgeLinks(t *testing.T) {
 		// The Connections with the link methods of their stored info.
 		cs, err := svc.Connections(ctx)
 		if err != nil || len(cs) != 3 || cs[0].Name != "br" || !slices.Equal(cs[0].LinkMethods, []string{"token"}) ||
-			cs[0].HandleKind != "" || cs[1].Name != "Dev Bridge" ||
+			cs[0].HandleKind != "" || cs[1].Name != "Example Bridge" ||
 			!slices.Equal(cs[1].LinkMethods, []string{"token", "code"}) || cs[1].HandleKind != "email" ||
 			cs[2].Messenger != "telegram" || cs[2].LinkMethods != nil {
 			t.Fatalf("Connections = %+v, %v", cs, err)
@@ -1134,7 +1134,7 @@ func TestLiveSlackLinks(t *testing.T) {
 		for _, c := range []struct {
 			id, name string
 			deleted  bool
-		}{{"CNAAAAAAAAAAS1", "sl", false}, {"CNAAAAAAAAAAS2", "Dev Slack", false}, {"CNAAAAAAAAAAS3", "gone", true}} {
+		}{{"CNAAAAAAAAAAS1", "sl", false}, {"CNAAAAAAAAAAS2", "Example Slack", false}, {"CNAAAAAAAAAAS3", "gone", true}} {
 			var id int64
 			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
 				bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, slack_app_token_ciphertext,
@@ -1176,7 +1176,7 @@ func TestLiveSlackLinks(t *testing.T) {
 		s1, s2 := accountlinks.SpaceSlack(conns["CNAAAAAAAAAAS1"]), accountlinks.SpaceSlack(conns["CNAAAAAAAAAAS2"])
 		// The Slack Connections that are not deleted, by name, without link methods.
 		cs, err := svc.Connections(ctx)
-		if err != nil || len(cs) != 2 || cs[0].Name != "Dev Slack" || cs[1].Name != "sl" ||
+		if err != nil || len(cs) != 2 || cs[0].Name != "Example Slack" || cs[1].Name != "sl" ||
 			cs[0].Messenger != accountlinks.MessengerSlack || cs[0].LinkMethods != nil || cs[0].HandleKind != "" {
 			t.Fatalf("Connections = %+v, %v", cs, err)
 		}
@@ -1213,7 +1213,7 @@ func TestLiveSlackLinks(t *testing.T) {
 			details->>'messenger' = 'slack'`) != 1 {
 			t.Fatalf("the replacing link = %+v, %v", l, err)
 		}
-		// Bob cannot link dana's account; alice links through Dev Slack, a space of its own.
+		// Bob cannot link dana's account; alice links through Example Slack, a space of its own.
 		if _, err := svc.StartSlack(ctx, as("bob"), "CNAAAAAAAAAAS1", "dana@example.org"); !errors.Is(err,
 			accountlinks.ErrLinkedElsewhere) || count(`SELECT count(*) FROM audit_log WHERE
 			action = 'account_link.link_rejected' AND details->>'reason' = 'conflict' AND
@@ -1257,7 +1257,7 @@ func TestLiveSlackLinks(t *testing.T) {
 			attempts = 5 AND voided_at IS NOT NULL`, started.RequestPublicID) != 1 {
 			t.Errorf("the right code after five wrong ones = %v", err)
 		}
-		// The footer of an Alert Group alice acknowledged: by the display name of her link through Dev Slack, and
+		// The footer of an Alert Group alice acknowledged: by the display name of her link through Example Slack, and
 		// through sl, whose link has none, by none, which leaves her Muster display name.
 		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
 			t.Fatal(err)

@@ -96,7 +96,7 @@ func newOIDCAPI(t *testing.T) (*testAPI, *fakeOIDC) {
 	expires := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
 	updated := t0
 	f := &fakeOIDC{settings: oidc.Settings{
-		Configured: true, Enabled: true, DisplayName: "Dev IdP", IssuerURL: "http://127.0.0.1:18090", ClientID: "muster",
+		Configured: true, Enabled: true, DisplayName: "Example SSO", IssuerURL: "http://127.0.0.1:18090", ClientID: "muster",
 		ClientSecret: keyring.SecretStatus{Set: true, UpdatedAt: &updated}, ClientSecretExpiresOn: &expires,
 		Scopes: []string{"profile"}, GroupsClaim: "groups", UnmatchedRole: "none", SyncRole: true,
 		GroupMappings: []oidc.GroupMapping{{Group: "oncall", Role: "responder"}},
@@ -115,7 +115,7 @@ func newOIDCAPI(t *testing.T) (*testAPI, *fakeOIDC) {
 func TestSignInOptionsWithOIDC(t *testing.T) {
 	x, f := newOIDCAPI(t)
 	a := x.call(t, http.MethodGet, "/api/v1/sign-in-options", "")
-	if a.status != http.StatusOK || string(a.body) != `{"oidc":{"display_name":"Dev IdP","enabled":true}}`+"\n" {
+	if a.status != http.StatusOK || string(a.body) != `{"oidc":{"display_name":"Example SSO","enabled":true}}`+"\n" {
 		t.Fatalf("= %d %s", a.status, a.body)
 	}
 	f.settings.Enabled = false
@@ -179,7 +179,7 @@ func TestUpdateOidcSettings(t *testing.T) {
 	if *f.versions[0] != 3 || !in.ClientSecret.Given || in.ClientSecret.Value != "s3cr3t-new" || !in.Proxy.Password.Null ||
 		!in.Proxy.UsernameSet || in.Proxy.Username != nil || *in.Proxy.Type != "http" || !in.ExpiresOnSet ||
 		in.ClientSecretExpiresOn.Format(time.DateOnly) != "2026-10-16" || in.GroupMappings[0].Role != "responder" ||
-		*in.DisplayName != "Dev IdP" {
+		*in.DisplayName != "Example SSO" {
 		t.Errorf("input = %+v", in)
 	}
 	delete(m, "client_secret")

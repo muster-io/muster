@@ -36,6 +36,7 @@ import type { PasswordSetupLink, User } from "../api/gen/model";
 import { UpdateUserBody } from "../api/gen/zod/users/users.zod";
 import { AccountLinksTable, accountName } from "../components/account-links-table";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { SetupLinkDialog } from "../components/setup-link-dialog";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button, buttonVariants } from "../components/ui/button";
@@ -573,9 +574,7 @@ function UserView({ userId }: { userId: string }) {
           <ArrowLeftIcon aria-hidden="true" />
           {t("users.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight break-words">
-          {user?.name ?? t("users.page.title")}
-        </h1>
+        <PageTitle docs="page.users">{user?.name ?? t("users.page.title")}</PageTitle>
       </div>
       {user === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

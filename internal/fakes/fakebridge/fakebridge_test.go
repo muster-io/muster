@@ -209,12 +209,12 @@ func (s *spec) configure(t *testing.T, patch string) {
 }
 
 // TestInfo is C-01.FR-13: both bots get the default info, which matches api/bridge.yaml and Muster accepts: the
-// messenger "Fake chat", protocol version 1, every feature and both event delivery modes.
+// messenger "Example chat", protocol version 1, every feature and both event delivery modes.
 func TestInfo(t *testing.T) {
 	s := start(t)
 	for _, token := range []string{fakebridge.Token, fakebridge.SecondToken} {
 		i := s.getInfo(t, token).valid(t)
-		if i.Messenger.Name != "Fake chat" || i.ProtocolVersion != "1" || i.Bridge.Name != fakebridge.BridgeName ||
+		if i.Messenger.Name != "Example chat" || i.ProtocolVersion != "1" || i.Bridge.Name != fakebridge.BridgeName ||
 			i.Bridge.Version != fakebridge.BridgeVersion || i.UserLookup != gen.Login ||
 			!slices.Equal(i.EventDelivery, []gen.InfoEventDelivery{gen.Poll, gen.Push}) ||
 			!slices.Equal(i.Features(), allFeatures) {

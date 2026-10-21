@@ -29,7 +29,7 @@ variable replaces its default.
                          tokens xapp-muster-dev-slack-token and xapp-muster-dev-slack-token-b), and the fake
                          HTTP and SOCKS5 proxies on 127.0.0.1:18091 and 127.0.0.1:18092, then Muster against
                          the development database (make dev-db), migrated on start, with the demo OIDC
-                         configuration "Dev IdP"
+                         configuration "Example SSO"
   muster dev --replica   run an additional replica on :9080, :9081 and :9082, without fake servers
   muster dev <command>   run another command with the development defaults, such as muster dev migrate
 `

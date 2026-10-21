@@ -452,10 +452,10 @@ func TestOutage(t *testing.T) {
 	}
 }
 
-// TestTelegramEnsureDemo: `muster dev` ensures "Dev Telegram" in the long-polling mode once.
+// TestTelegramEnsureDemo: `muster dev` ensures "Example Telegram" in the long-polling mode once.
 func TestTelegramEnsureDemo(t *testing.T) {
 	e := newTGEnv(t)
-	d := connections.Demo{Type: connections.TypeTelegram, Name: "Dev Telegram", BaseURL: e.tg.URL(),
+	d := connections.Demo{Type: connections.TypeTelegram, Name: "Example Telegram", BaseURL: e.tg.URL(),
 		BotToken: logging.Secret(tgToken)}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), d); err != nil {
