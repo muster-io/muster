@@ -129,10 +129,12 @@
       matchDepTypes: ["require", "toolchain"],
       semanticCommitType: "build",
     },
-    // Direct requires that are not in the binary (`go list -deps ./cmd/muster`): test, lint and build tooling.
+    // The two lists below are checked against go.mod and `go list -deps ./cmd/muster` by internal/tools/renovatecheck
+    // (`make lint`). Direct requires that are not in the binary: test, lint and build tooling.
     {
       matchManagers: ["gomod"],
       matchPackageNames: [
+        // renovatecheck:begin not-shipped
         "github.com/VictoriaMetrics/metricsql",
         "github.com/pganalyze/pg_query_go/v6",
         "github.com/testcontainers/testcontainers-go",
@@ -141,8 +143,41 @@
         "go.yaml.in/yaml/v3",
         "golang.org/x/tools",
         "google.golang.org/protobuf",
+        // renovatecheck:end
       ],
       semanticCommitType: "chore",
+    },
+    // Indirect requires are updated only to fix a vulnerability; such a fix of a module linked into the binary ships.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["indirect"],
+      matchJsonata: ["isVulnerabilityAlert = true"],
+      matchPackageNames: [
+        // renovatecheck:begin indirect-shipped
+        "dario.cat/mergo",
+        "github.com/apapsch/go-jsonmerge/v2",
+        "github.com/gabriel-vasile/mimetype",
+        "github.com/go-openapi/jsonpointer",
+        "github.com/go-playground/locales",
+        "github.com/go-playground/universal-translator",
+        "github.com/google/uuid",
+        "github.com/gorilla/mux",
+        "github.com/jackc/pgpassfile",
+        "github.com/jackc/pgservicefile",
+        "github.com/jackc/puddle/v2",
+        "github.com/leodido/go-urn",
+        "github.com/oasdiff/yaml",
+        "github.com/oasdiff/yaml3",
+        "github.com/santhosh-tekuri/jsonschema/v6",
+        "github.com/spf13/cast",
+        "github.com/valyala/fastrand",
+        "github.com/valyala/histogram",
+        "golang.org/x/sync",
+        "golang.org/x/sys",
+        "golang.org/x/text",
+        // renovatecheck:end
+      ],
+      semanticCommitType: "build",
     },
     {
       matchManagers: ["npm"],
@@ -154,6 +189,11 @@
       matchManagers: ["dockerfile"],
       matchFileNames: ["Dockerfile"],
       semanticCommitType: "build",
+    },
+    // The go.mod files of the architecture lint fixtures are test data, not the binary's modules.
+    {
+      matchFileNames: ["internal/archlint/testdata/**"],
+      semanticCommitType: "chore",
     },
     {
       matchJsonata: ["isLockfileUpdate = true"],

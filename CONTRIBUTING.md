@@ -37,7 +37,7 @@ The Makefile is the only entry point:
 |---|---|
 | `make help` | lists the targets (the default goal) |
 | `make fmt` | formats Go code (gofmt and goimports through golangci-lint) and the SPA (oxfmt) |
-| `make lint` | checks licence headers, runs golangci-lint, Redocly on the spec, TypeScript type check, oxlint and oxfmt check |
+| `make lint` | checks licence headers and the Go module lists of the Renovate configuration, runs golangci-lint, Redocly on the spec, TypeScript type check, oxlint and oxfmt check |
 | `make lint-arch` | runs the architecture lints (see AGENTS.md) |
 | `make test` | runs the unit tests and the coverage gate: 95 % for `internal/groups`, `routing`, `delivery` and `timers`, 80 % for every other package |
 | `make test-race` | the same with the race detector |

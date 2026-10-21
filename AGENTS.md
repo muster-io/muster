@@ -179,7 +179,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 |---|---|---|
 | `make help` | list the targets | S-001 |
 | `make fmt` | gofmt and goimports through `golangci-lint fmt` and oxfmt on the SPA | S-001, S-002 |
-| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check, and the translations (i18next-cli) | S-001, S-002, S-014 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), the Go module lists in `.github/renovate.json5` against `go.mod` and the binary (`internal/tools/renovatecheck`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check, and the translations (i18next-cli) | S-001, S-002, S-014 |
 | `make lint-arch` | the architecture lints | S-001 |
 | `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`, and `make test-web`; the same with the race detector | S-001, S-014 |
 | `make test-web` | the SPA's component tests, Vitest in browser mode on Chromium | S-014 |
