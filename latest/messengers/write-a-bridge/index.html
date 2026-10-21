@@ -5019,10 +5019,10 @@ button of that message in your messenger, or play the person in a script.</p>
 <p>(<code>--network host</code> gives the container your loopback on Linux only.)</p>
 <h3 id="the-fake-bridge-of-muster-dev">The fake bridge of <code>muster dev</code><a class="headerlink" href="#the-fake-bridge-of-muster-dev" title="Permanent link">&para;</a></h3>
 <p><code>muster dev</code> starts a fake bridge on <code>127.0.0.1:18094</code> that offers every feature and both event delivery modes, and
-creates a Bridge Connection "Dev Bridge" to it in poll mode, with the token <code>muster-dev-bridge-token</code>. The fake serves
-a second bot with the token <code>muster-dev-bridge-token-b</code>, which <code>muster dev</code> creates no Connection for, so you can run
-the check against it without touching the demo. Its channels are <code>ch-alerts</code> and <code>ch-alerts-prod</code>, and <code>ch-nobot</code> is one
-it refuses with <code>forbidden</code>. It records every request at <code>/_fake/requests</code> and takes scripted faults at
+creates a Bridge Connection "Example Bridge" to it in poll mode, with the token <code>muster-dev-bridge-token</code>. The fake
+serves a second bot with the token <code>muster-dev-bridge-token-b</code>, which <code>muster dev</code> creates no Connection for, so you can
+run the check against it without touching the demo. Its channels are <code>ch-alerts</code> and <code>ch-alerts-prod</code>, and <code>ch-nobot</code> is
+one it refuses with <code>forbidden</code>. It records every request at <code>/_fake/requests</code> and takes scripted faults at
 <code>/_fake/faults</code>. It is for Muster's own tests and for trying Muster; it is not a messenger.</p>
 <h3 id="the-example-bridge_1">The example bridge<a class="headerlink" href="#the-example-bridge_1" title="Permanent link">&para;</a></h3>
 <p>The <a href="#the-example-bridge">example bridge</a> passes every step of the check, and skips the optional ones when
