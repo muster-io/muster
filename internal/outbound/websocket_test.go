@@ -315,14 +315,34 @@ func TestDialWebSocketConnectForEveryScheme(t *testing.T) {
 	}
 }
 
-// TestWebSocketCut: Cut ends at once a Close whose peer does not answer, directly and through a proxy by CONNECT;
-// CloseNow alone would wait for the library's own five seconds.
+// TestWebSocketCut: Cut closes the TCP connection beneath any TLS, which ends at once a Close whose peer does not
+// answer — ws and wss, directly, through an HTTP or HTTPS proxy by CONNECT, and through a SOCKS5 proxy; CloseNow
+// alone would wait for the library's own five seconds. Cut on a WebSocket DialWebSocket did not build does nothing.
 func TestWebSocketCut(t *testing.T) {
-	for _, viaProxy := range []bool{false, true} {
-		t.Run(map[bool]string{false: "direct", true: "through a proxy"}[viaProxy], func(t *testing.T) {
+	(&WebSocket{}).Cut()
+	cert := testCert(t)
+	tlsConfig := &tls.Config{Certificates: cert.TLS.Certificates, MinVersion: tls.VersionTLS12}
+	for _, tc := range []struct {
+		name   string
+		secure bool
+		proxy  func(t *testing.T) *Proxy
+	}{
+		{name: "ws direct"},
+		{name: "wss direct", secure: true},
+		{name: "ws through http", proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxyHTTP, Address: startRecordingProxy(t, nil, "", false).Addr()}
+		}},
+		{name: "wss through https", secure: true, proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxyHTTPS, Address: startRecordingProxy(t, tlsConfig, "", false).Addr()}
+		}},
+		{name: "wss through socks5", secure: true, proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxySOCKS5, Address: startProxy(t, fakeproxy.SOCKS5, fakeproxy.Options{}).Addr()}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			closing, quit := make(chan struct{}), make(chan struct{})
 			t.Cleanup(func() { close(quit) })
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				//nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
 				accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 				conn, rw, err := http.NewResponseController(w).Hijack()
@@ -340,16 +360,27 @@ func TestWebSocketCut(t *testing.T) {
 					close(closing)
 				}
 				<-quit
-			}))
+			})
+			srv := httptest.NewUnstartedServer(h)
+			if tc.secure {
+				srv.TLS = &tls.Config{Certificates: cert.TLS.Certificates, MinVersion: tls.VersionTLS12}
+				srv.StartTLS()
+			} else {
+				srv.Start()
+			}
 			t.Cleanup(srv.Close)
 			cfg := Config{}
-			if viaProxy {
-				cfg.Proxy = &Proxy{Type: ProxyHTTP, Address: startRecordingProxy(t, nil, "", false).Addr()}
+			if tc.proxy != nil {
+				cfg.Proxy = tc.proxy(t)
 			}
 			c, _ := newTestClient(t, cfg)
+			trust(c, cert.Certificate())
 			conn, err := DialWebSocket(t.Context(), c, strings.Replace(srv.URL, "http", "ws", 1)+"/link/", nil)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, ok := conn.net.(*net.TCPConn); !ok {
+				t.Fatalf("kept %T, want the TCP connection", conn.net)
 			}
 			closed := make(chan time.Time, 1)
 			go func() {
