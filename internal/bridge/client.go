@@ -120,15 +120,21 @@ type Network struct {
 	Recorder outbound.Recorder
 }
 
+// Route names the base URL a Connection's requests go to instead of its own, by that base URL and the token: under
+// `muster dev` the fake bridge for https://bridge.example.org with one of its published tokens; an empty answer is the
+// Connection's own base URL.
+type Route func(baseURL string, token logging.Secret) string
+
 // Settings are a Connection as its client needs it: the normalized base URL, the token, the push secret, which the
-// bridge knows too and is masked like the token, and the proxy, nil for none; and the Connection whose Request log
-// keeps its requests, none for a client that records nothing.
+// bridge knows too and is masked like the token, and the proxy, nil for none; the Connection whose Request log keeps
+// its requests, none for a client that records nothing; and the Route of `muster dev`, nil outside it.
 type Settings struct {
 	BaseURL    string
 	Token      logging.Secret
 	PushSecret logging.Secret
 	Proxy      *outbound.Proxy
 	Owner      outbound.Owner
+	Route      Route
 }
 
 // Client calls the bridge of one Connection, in the interactive, delivery and background client classes; the
@@ -137,6 +143,9 @@ type Client struct {
 	network  Network
 	settings Settings
 	via      string
+	// base is where the requests go: the base URL, or the Route's answer. What the client shows — the address in a
+	// check's message, a test message's request — is the base URL.
+	base string
 
 	mu      sync.Mutex
 	clients map[clientKey]*outbound.Client
@@ -157,10 +166,16 @@ func (k clientKey) timeout() time.Duration {
 	return callTimeout
 }
 
-// NewClient builds the client of the Connection s, checking its settings with the interactive class. The token, the
-// push secret and the proxy password are registered for redaction.
+// NewClient builds the client of the Connection s, checking its settings with the interactive class. Its requests go
+// to the base URL, or to what s.Route answers for it and the token when it answers. The token, the push secret and the
+// proxy password are registered for redaction.
 func NewClient(n Network, s Settings) (*Client, error) {
-	c := &Client{network: n, settings: s, via: ViaDirect, clients: map[clientKey]*outbound.Client{}}
+	c := &Client{network: n, settings: s, via: ViaDirect, base: s.BaseURL, clients: map[clientKey]*outbound.Client{}}
+	if s.Route != nil {
+		if b := s.Route(s.BaseURL, s.Token); b != "" {
+			c.base = b
+		}
+	}
 	if s.Proxy != nil {
 		c.via = ViaProxy
 	}
@@ -198,7 +213,7 @@ func (c *Client) client(k clientKey) (*outbound.Client, error) {
 	}
 	s, n := c.settings, c.network
 	oc, err := outbound.New(outbound.Config{Class: k.class, ConnectTimeout: connectTimeout, Timeout: k.timeout(),
-		Proxy: s.Proxy, Secrets: s.secrets(), BaseURL: s.BaseURL, Policy: n.Policy, Logger: n.Log,
+		Proxy: s.Proxy, Secrets: s.secrets(), BaseURL: c.base, Policy: n.Policy, Logger: n.Log,
 		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err

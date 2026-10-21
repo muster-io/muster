@@ -291,8 +291,9 @@ func TestTrimURL(t *testing.T) {
 
 func TestURLs(t *testing.T) {
 	got := urls("[" + base + "a.md](" + base + "a.md), [https://example.org/x](https://example.org/y) and _" +
-		base + "b.md_.")
-	want := []string{base + "a.md", "https://example.org/x", "https://example.org/y", base + "b.md"}
+		base + "b.md_. ![A screen](" + base + "assets/screenshots/c/01-d.png){ .screenshot }")
+	want := []string{base + "a.md", "https://example.org/x", "https://example.org/y", base + "b.md",
+		base + "assets/screenshots/c/01-d.png"}
 	if !slices.Equal(got, want) {
 		t.Errorf("urls = %q, want %q", got, want)
 	}

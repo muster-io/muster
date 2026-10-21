@@ -59,7 +59,7 @@ func (s *Service) telegramSettings(id string, conn int64, base string, token, pa
 		return telegram.Settings{}, err
 	}
 	return telegram.Settings{BaseURL: base, Token: t, Proxy: p.Outbound(pw),
-		Owner: outbound.Owner{Connection: conn, PublicID: id}}, nil
+		Owner: outbound.Owner{Connection: conn, PublicID: id}, Route: s.cfg.TelegramRoute}, nil
 }
 
 // telegramClient builds the Telegram client of the stored Connection row, whose requests go to its Request log.
@@ -191,6 +191,13 @@ func (s *Service) checkTelegram(ctx context.Context, row dbgen.GetConnectionRow,
 			row.Proxy)
 		if err != nil {
 			return CheckResult{}, err
+		}
+		// Under muster dev the probe goes where the stored token is routed; the token is opened for that alone and
+		// never sent. A token that cannot be opened routes nowhere: the probe needs none.
+		if s.cfg.TelegramRoute != nil {
+			if stored, err := s.cfg.Keyring.OpenSecret(fieldBotToken, storedToken(row)); err == nil {
+				st.Route = func(b string, _ logging.Secret) string { return s.cfg.TelegramRoute(b, stored) }
+			}
 		}
 		if probe, err = telegram.NewClient(telegram.Network(s.cfg.Network), st); err != nil {
 			return CheckResult{}, err

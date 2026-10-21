@@ -342,6 +342,12 @@ type Config struct {
 	// SlackRoute is, under muster dev, where a Slack Connection's requests go instead of Slack by its bot token: the
 	// fake Slack server for its published tokens; nil sends every request to Slack.
 	SlackRoute slack.Route
+	// TelegramRoute, MattermostRoute and BridgeRoute are, under muster dev, where a Connection's requests go instead of
+	// its address, by that address and its token: the fake servers for realistic addresses with their published
+	// tokens; nil sends every request to the Connection's address.
+	TelegramRoute   telegram.Route
+	MattermostRoute mattermost.Route
+	BridgeRoute     bridge.Route
 	// Interactive is the interactive path, which the checks and the channel list take their limiter tokens from.
 	Interactive Interactive
 	// IngestURL is MUSTER_INGEST_URL, the base of the callback address and of the webhook of a Telegram Connection.
@@ -892,7 +898,8 @@ func (s *Service) client(row dbgen.GetConnectionRow) (*mattermost.Client, error)
 		return nil, err
 	}
 	return mattermost.NewClient(s.cfg.Network, mattermost.Settings{ServerURL: row.MattermostServerUrl.String,
-		Token: token, Proxy: p.Outbound(password), Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}})
+		Token: token, Proxy: p.Outbound(password), Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID},
+		Route: s.cfg.MattermostRoute})
 }
 
 // Target is where the Mattermost Destination destinationID posts, for the adapter: its team and channel and the client

@@ -140,6 +140,11 @@ DEV_COMPOSE := deploy/dev/docker-compose.yml
 E2E_REPLICAS ?= 1
 # Flags of `playwright install chromium`, such as --with-deps on a CI runner that lacks the browser's libraries.
 PLAYWRIGHT_INSTALL_FLAGS ?=
+# make docs-screenshots: the official Playwright image of the version of @playwright/test in web/package.json, pinned
+# by digest, whose system fonts every run shares; GUIDES names the specs of web/e2e/screenshots/ to run, such as
+# GUIDES="telegram first-alert", every spec when empty.
+PLAYWRIGHT_IMAGE := mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+GUIDES ?=
 # Flags of the load test, such as LOAD_TEST_FLAGS="-rate 50 -duration 1m".
 LOAD_TEST_FLAGS ?=
 # make quickstart-check: the image the compose example runs and the Git ref its download reads, in place of the release
@@ -150,7 +155,7 @@ QUICKSTART_REF ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
 	vulncheck mutation helm-check rules-test compose-check quickstart-check dev-db dev e2e e2e-go e2e-web load-test ci clean \
-	web-browsers docs docs-serve docs-check docs-api docs-vendor demo
+	web-browsers docs docs-serve docs-check docs-api docs-vendor demo docs-screenshots docs-screenshots-environment
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -478,6 +483,79 @@ demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.
 	test $$size -le 3145728 || { echo "$(DEMO_GIF) is $$size bytes, more than 3 MB"; exit 1; }; \
 	echo "$(DEMO_GIF): $$size bytes"
 
+# The documentation screenshots (C-21.FR-10): the Playwright suite under web/e2e/screenshots/ with
+# playwright.screenshots.config.ts, on a muster dev of its own with the fake servers (the global setup of make e2e). The
+# system fonts the SPA uses differ between machines, so it runs only on Linux with Docker, inside PLAYWRIGHT_IMAGE, with
+# the host's network (muster dev and the development PostgreSQL), the host's IPC namespace and an init process, as
+# Playwright recommends for Chromium, the checkout at its own path and the caller's user id;
+# docs-screenshots-environment, its only prerequisite, refuses anything else before dev-db and build run, also under -j. One Playwright run takes every spec but
+# the *.clock.spec.ts ones, which each run alone, as they move the development clock; each run starts a muster dev on a
+# fresh database. The specs write under bin/docs-screenshots/images/<page path>/; only when every run passed does each
+# page directory written replace its own under docs/assets/screenshots/, and, when GUIDES is empty, the page
+# directories no spec wrote go. The images are committed by hand; the nightly job runs this without committing.
+DOCS_SCREENSHOTS_DIR := $(BIN)/docs-screenshots
+SCREENSHOTS_DIR := docs/assets/screenshots
+DOCS_SCREENSHOTS_RUN = $(DOCKER) run --rm --init --ipc=host --network host --user "$$(id -u):$$(id -g)" \
+	-v "$(CURDIR):$(CURDIR)" -w "$(CURDIR)/web" -e HOME=/tmp -e MUSTER_DOCS_SCREENSHOTS=1 -e MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) \
+	-e MUSTER_E2E_DATABASE_URL -e CI $(PLAYWRIGHT_IMAGE) ./node_modules/.bin/playwright test \
+	--config playwright.screenshots.config.ts
+
+docs-screenshots-environment:
+	@if [ "$$(uname -s)" != Linux ] || ! command -v $(DOCKER) >/dev/null 2>&1 || ! $(DOCKER) info >/dev/null 2>&1; then \
+		echo "make docs-screenshots runs only on Linux with Docker, in $(PLAYWRIGHT_IMAGE), so that fonts match; run it on the VM muster-lab or another Linux machine."; \
+		exit 1; \
+	fi
+	@want=$$(sed -n 's|.*"@playwright/test": *"\([^"]*\)".*|\1|p' web/package.json); \
+	case "$(PLAYWRIGHT_IMAGE)" in \
+		*":v$$want-noble@sha256:"*) ;; \
+		*) echo "PLAYWRIGHT_IMAGE is not the image of @playwright/test $$want of web/package.json: set its tag and digest"; \
+			exit 1;; \
+	esac
+
+docs-screenshots: docs-screenshots-environment ## Take the documentation screenshots on muster dev in the Playwright image (Linux with Docker; run by hand; the nightly job runs it without committing)
+	@$(MAKE) --no-print-directory dev-db build
+	@specs=$$(cd web/e2e/screenshots && ls *.spec.ts); \
+	if [ -n "$(GUIDES)" ]; then \
+		chosen=; \
+		for g in $$(echo "$(GUIDES)" | tr ',' ' '); do \
+			found=$$(echo "$$specs" | grep -xE "$$g(\.clock)?\.spec\.ts" || true); \
+			test -n "$$found" || { echo "GUIDES names $$g, which is no spec of web/e2e/screenshots/"; exit 1; }; \
+			chosen="$$chosen $$found"; \
+		done; \
+		specs=$$chosen; \
+	fi; \
+	plain=$$(printf '%s\n' $$specs | grep -v '\.clock\.spec\.ts$$' || true); \
+	clocks=$$(printf '%s\n' $$specs | grep '\.clock\.spec\.ts$$' || true); \
+	rm -rf $(DOCS_SCREENSHOTS_DIR); \
+	mkdir -p $(DOCS_SCREENSHOTS_DIR)/images; \
+	failed=0; \
+	if [ -n "$$plain" ]; then \
+		echo "screenshots: $$plain" | tr '\n' ' '; echo; \
+		$(DOCS_SCREENSHOTS_RUN) $$(printf 'e2e/screenshots/%s ' $$plain) || failed=1; \
+	fi; \
+	for c in $$clocks; do \
+		echo "screenshots, on a muster dev of its own: $$c"; \
+		$(DOCS_SCREENSHOTS_RUN) "e2e/screenshots/$$c" || failed=1; \
+	done; \
+	if [ $$failed -ne 0 ]; then \
+		echo "a screenshot spec failed: no image under $(SCREENSHOTS_DIR)/ changed; see $(DOCS_SCREENSHOTS_DIR)/"; \
+		exit 1; \
+	fi; \
+	written=$$(cd $(DOCS_SCREENSHOTS_DIR)/images && find . -name '*.png' | sed -e 's|^\./||' -e 's|/[^/]*$$||' | sort -u); \
+	test -n "$$written" || { echo "the specs wrote no screenshot"; exit 1; }; \
+	for d in $$written; do \
+		mkdir -p "$(SCREENSHOTS_DIR)/$$d"; \
+		find "$(SCREENSHOTS_DIR)/$$d" -maxdepth 1 -name '*.png' -delete; \
+		cp $(DOCS_SCREENSHOTS_DIR)/images/$$d/*.png "$(SCREENSHOTS_DIR)/$$d/"; \
+	done; \
+	if [ -z "$(GUIDES)" ]; then \
+		for d in $$(cd $(SCREENSHOTS_DIR) && find . -name '*.png' | sed -e 's|^\./||' -e 's|/[^/]*$$||' | sort -u); do \
+			echo "$$written" | grep -qxF "$$d" || find "$(SCREENSHOTS_DIR)/$$d" -maxdepth 1 -name '*.png' -delete; \
+		done; \
+		find $(SCREENSHOTS_DIR) -mindepth 1 -type d -empty -delete; \
+	fi; \
+	echo "$(SCREENSHOTS_DIR)/: $$(find $(SCREENSHOTS_DIR) -name '*.png' | wc -l) images, $$(echo "$$written" | wc -l) pages written"
+
 # The API reference and the Bridge protocol reference, each rendered by the Redocly CLI that make lint runs;
 # .redocly.yaml keeps its telemetry off, the environment its update check quiet, and --disableGoogleFont the page from
 # loading fonts from Google (NFR-7). Each page then loads Redoc from docs-vendor's copy instead of cdn.redocly.com, with
@@ -559,10 +637,13 @@ docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and ser
 
 # generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page. tablecheck then
 # fails on a table under docs/ that holds inline code longer than 24 characters, which does not fit a table column on a
-# phone: such entries are laid out as a definition list, a block per entry.
-docs-check: ## Fail on stale generated files and on long inline code in tables, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
+# phone: such entries are laid out as a definition list, a block per entry. imagecheck fails, naming the page, the line
+# and the image, on an image that does not exist, has no alternative text or comes from another site, and on a
+# screenshot under docs/assets/screenshots/ that no page references.
+docs-check: ## Fail on stale generated files, on long inline code in tables and on broken images, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
 	$(MAKE) --no-print-directory generate-check
 	$(GO) run ./internal/tools/tablecheck docs
+	$(GO) run ./internal/tools/imagecheck docs
 	$(MAKE) --no-print-directory docs
 
 ci: lint lint-arch generate-check licenses test-race build ## Run the pull-request tier locally

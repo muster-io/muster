@@ -43,16 +43,18 @@ type Draft struct {
 // draftRoute is where and how the check of a draft calls: its address as a save normalizes it, its proxy and the
 // proxy's password, the bot token, empty when only the dry probe may run, what limits its requests and whose Request
 // log they go to; for Slack the app-level token, empty when the step app_token is skipped, and slackBase, where muster
-// dev sends the requests instead of Slack, empty for Slack.
+// dev sends the requests instead of Slack, empty for Slack; for Mattermost, Telegram and Bridge, routeToken, the token
+// whose route of muster dev the requests take (devRouteToken).
 type draftRoute struct {
-	in        Input
-	proxy     proxyconf.Config
-	password  logging.Secret
-	token     logging.Secret
-	appToken  logging.Secret
-	slackBase string
-	subject   delivery.Subject
-	owner     outbound.Owner
+	in         Input
+	proxy      proxyconf.Config
+	password   logging.Secret
+	token      logging.Secret
+	appToken   logging.Secret
+	slackBase  string
+	routeToken logging.Secret
+	subject    delivery.Subject
+	owner      outbound.Owner
 }
 
 // CheckDraft runs the check of a draft Connection d on the interactive path without saving it (C-13.FR-14), with the
@@ -168,6 +170,7 @@ func (s *Service) draftRoute(ctx context.Context, d Draft) (draftRoute, error) {
 			return draftRoute{}, err
 		}
 	}
+	out.routeToken = s.devRouteToken(in.Type, row, out.token)
 	if row != nil {
 		id := row.ID
 		out.subject = delivery.Subject{Connection: &id}
@@ -237,6 +240,27 @@ func (s *Service) slackDraftRoute(d Draft, row *dbgen.GetConnectionRow, same boo
 	return nil
 }
 
+// devRouteToken is the token by which muster dev routes the check of a Mattermost, Telegram or Bridge draft, by the
+// same care as slackDraftRoute: the token that is sent, so that a token routes only where it goes; without one, the
+// stored token of the saved Connection row, opened for the route of its dry probe alone and never sent, and none when it
+// cannot be opened, as the dry probe needs no token; none for a new Connection, whose dry probe goes to the address in
+// the form. Outside muster dev it is empty.
+func (s *Service) devRouteToken(typ string, row *dbgen.GetConnectionRow, token logging.Secret) logging.Secret {
+	routed := typ == TypeMattermost && s.cfg.MattermostRoute != nil || typ == TypeTelegram && s.cfg.TelegramRoute != nil ||
+		typ == TypeBridge && s.cfg.BridgeRoute != nil
+	switch {
+	case !routed:
+		return ""
+	case token != "" || row == nil:
+		return token
+	}
+	stored, err := s.cfg.Keyring.OpenSecret(fieldBotToken, storedToken(*row))
+	if err != nil {
+		return ""
+	}
+	return stored
+}
+
 // sameRoute reports whether the proxies a and b send a request the same way: both disabled, whatever type and address
 // they remember, or both enabled with the same type and address.
 func sameRoute(a, b proxyconf.Config) bool {
@@ -293,8 +317,12 @@ func draftRunner(in Interactive, subject delivery.Subject) func(ctx context.Cont
 // checkMattermostDraft checks a Mattermost draft (C-13.FR-2): with a token the step token and the read of the bot's
 // roles, as Check makes them; without one the dry probe, and the step token skipped.
 func (s *Service) checkMattermostDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
+	var route mattermost.Route
+	if s.cfg.MattermostRoute != nil {
+		route = func(serverURL string, _ logging.Secret) string { return s.cfg.MattermostRoute(serverURL, r.routeToken) }
+	}
 	c, err := mattermost.NewClient(s.cfg.Network, mattermost.Settings{ServerURL: r.in.ServerURL, Token: r.token,
-		Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
+		Proxy: r.proxy.Outbound(r.password), Owner: r.owner, Route: route})
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -321,8 +349,12 @@ func (s *Service) checkMattermostDraft(ctx context.Context, r draftRoute) (Check
 // checkTelegramDraft checks a Telegram draft (C-14.FR-11) with telegram.RunCheck: the dry probe, getMe and
 // getWebhookInfo with a token, the dry probe alone without one.
 func (s *Service) checkTelegramDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
+	var route telegram.Route
+	if s.cfg.TelegramRoute != nil {
+		route = func(baseURL string, _ logging.Secret) string { return s.cfg.TelegramRoute(baseURL, r.routeToken) }
+	}
 	c, err := telegram.NewClient(telegram.Network(s.cfg.Network), telegram.Settings{BaseURL: r.in.BotAPIBaseURL,
-		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
+		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner, Route: route})
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -340,8 +372,12 @@ func (s *Service) checkTelegramDraft(ctx context.Context, r draftRoute) (CheckRe
 // checkBridgeDraft checks a Bridge draft (C-22.FR-2): with a token the steps info, whose info is returned and neither
 // stored nor kept, and event_delivery; without one the dry probe, and both steps skipped.
 func (s *Service) checkBridgeDraft(ctx context.Context, r draftRoute) (CheckResult, error) {
+	var route bridge.Route
+	if s.cfg.BridgeRoute != nil {
+		route = func(baseURL string, _ logging.Secret) string { return s.cfg.BridgeRoute(baseURL, r.routeToken) }
+	}
 	c, err := bridge.NewClient(bridge.Network(s.cfg.Network), bridge.Settings{BaseURL: r.in.BridgeBaseURL,
-		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner})
+		Token: r.token, Proxy: r.proxy.Outbound(r.password), Owner: r.owner, Route: route})
 	if err != nil {
 		return CheckResult{}, err
 	}

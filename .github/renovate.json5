@@ -52,6 +52,18 @@
         "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*const \\w+ = \"[^\":]+:(?<currentValue>[^\"@]+)@(?<currentDigest>sha256:[0-9a-f]{64})\"",
       ],
     },
+    // The Playwright image of make docs-screenshots, pinned by digest, whose tag must name the version of
+    // @playwright/test in web/package.json: the group "Playwright" below updates both in one pull request.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^Makefile$/"],
+      matchStrings: [
+        "PLAYWRIGHT_IMAGE\\s*[:?]?=\\s*mcr\\.microsoft\\.com/playwright:(?<currentValue>v[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+      ],
+      datasourceTemplate: "docker",
+      depNameTemplate: "mcr.microsoft.com/playwright",
+      versioningTemplate: "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<compatibility>noble)$",
+    },
   ],
   packageRules: [
     {
@@ -95,6 +107,12 @@
     {
       matchPackageNames: ["oxlint", "oxfmt"],
       groupName: "oxlint/oxfmt",
+    },
+    // The Playwright image of make docs-screenshots refuses to run unless its tag is the version of @playwright/test,
+    // so the three move together; this rule follows the ecosystem groups above, so that it wins.
+    {
+      matchPackageNames: ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
+      groupName: "Playwright",
     },
     {
       matchPackageNames: ["/oapi-codegen/", "/orval/"],

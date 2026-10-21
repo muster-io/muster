@@ -40,6 +40,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/slack"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // recorder is a fake server that records the requests it gets.
@@ -1246,4 +1247,104 @@ func TestCheckSlackDraftRefusals(t *testing.T) {
 		}
 	}
 	e.path.limited = false
+}
+
+// TestCheckDraftDevRoutes is the routes of muster dev for the check of a draft (C-21.FR-10), by the care of
+// slackDraftRoute: a typed token the route publishes reaches the fake at the routed address, another typed token goes
+// to the address in the form; without a token a new Connection's dry probe goes to that address, while the dry probe of
+// a saved Connection goes where its stored token is routed, without sending it; and a draft whose stored token is sent
+// to its saved address takes that token's route.
+func TestCheckDraftDevRoutes(t *testing.T) {
+	e := newDraftEnv(t)
+	const (
+		chat   = "https://chat.example.org"
+		bridge = "https://bridge.example.org"
+	)
+	tgBase := telegram.DefaultBaseURL
+	route := devRoutes{
+		mm: func(a string, tok logging.Secret) string {
+			if strings.TrimSuffix(a, "/") == chat && tok == botToken {
+				return e.fake.URL()
+			}
+			return ""
+		},
+		tg: func(a string, tok logging.Secret) string {
+			if a == tgBase && tok == tgToken {
+				return e.tg.URL()
+			}
+			return ""
+		},
+		br: func(a string, tok logging.Secret) string {
+			if a == bridge && tok == fakebridge.Token {
+				return e.br.URL()
+			}
+			return ""
+		},
+	}
+	svc, dns := routedService(t, e.env, route, "127.0.0.0/8")
+	savedMM, err := e.svc.Create(t.Context(), by, input("mm-routed", chat))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type tc struct {
+		name  string
+		draft connections.Draft
+		steps string
+		fake  recorder
+		paths []string
+		hosts []string
+	}
+	for _, c := range []tc{
+		{name: "a new Mattermost Connection with a published token", draft: of(mmDraft(chat), "", botToken),
+			steps: "token:ok", fake: e.fake, paths: []string{"/api/v4/users/me", "/api/v4/roles/names"}},
+		{name: "a new Mattermost Connection with another token", draft: of(mmDraft(chat), "", otherToken),
+			steps: "token:dns_failed", fake: e.fake, hosts: []string{"chat.example.org"}},
+		{name: "a new Mattermost Connection without a token", draft: mmDraft(chat),
+			steps: "dry_probe:dns_failed token:skip", fake: e.fake, hosts: []string{"chat.example.org"}},
+		{name: "a saved Mattermost Connection at another spelling of its address", draft: of(mmDraft(chat+"/"),
+			savedMM.PublicID, ""), steps: "dry_probe:ok token:skip", fake: e.fake,
+			paths: []string{"/api/v4/system/ping"}},
+		{name: "a saved Mattermost Connection with its stored token", draft: of(mmDraft(chat), savedMM.PublicID, ""),
+			steps: "token:ok", fake: e.fake, paths: []string{"/api/v4/users/me", "/api/v4/roles/names"}},
+		{name: "a new Telegram Connection with a published token", draft: of(tgDraft(tgBase), "", tgToken),
+			steps: "dry_probe:ok get_me:ok get_webhook_info:ok", fake: e.tg,
+			paths: []string{"/bot0:x/getMe", "/bot" + tgToken + "/getMe", "/bot" + tgToken + "/getWebhookInfo"}},
+		{name: "a new Telegram Connection with another token", draft: of(tgDraft(tgBase), "", tgOtherToken),
+			steps: "dry_probe:dns_failed get_me:skip get_webhook_info:skip", fake: e.tg, hosts: []string{"api.telegram.org"}},
+		{name: "a new Bridge with a published token", draft: of(brDraft(bridge), "", fakebridge.Token),
+			steps: "info:ok event_delivery:ok", fake: e.br, paths: []string{"/v1/info"}},
+		{name: "a new Bridge with another token", draft: of(brDraft(bridge), "", fakebridge.SecondToken),
+			steps: "info:dns_failed event_delivery:skip", fake: e.br, hosts: []string{"bridge.example.org"}},
+	} {
+		e.reset()
+		dns.take()
+		res, err := svc.CheckDraft(t.Context(), c.draft)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := stepsOf(res); got != c.steps {
+			t.Errorf("%s: steps %q, want %q", c.name, got, c.steps)
+		}
+		var paths []string
+		for _, r := range c.fake.Requests() {
+			paths = append(paths, r.Path)
+		}
+		if !slices.Equal(paths, c.paths) {
+			t.Errorf("%s: the fake got %v, want %v", c.name, paths, c.paths)
+		}
+		if hosts := dns.take(); !slices.Equal(hosts, c.hosts) {
+			t.Errorf("%s: resolved %v, want %v", c.name, hosts, c.hosts)
+		}
+	}
+
+	// A stored token that cannot be opened routes nowhere: the dry probe goes to the address in the form.
+	e.reset()
+	e.store.rows[savedMM.ID].row.BotTokenCiphertext = []byte("garbage")
+	res, err := svc.CheckDraft(t.Context(), of(mmDraft(chat+"/"), savedMM.PublicID, ""))
+	if err != nil || stepsOf(res) != "dry_probe:dns_failed token:skip" || len(e.fake.Requests()) != 0 {
+		t.Errorf("an unreadable stored token: %q, %v", stepsOf(res), err)
+	}
+	if hosts := dns.take(); !slices.Equal(hosts, []string{"chat.example.org"}) {
+		t.Errorf("an unreadable stored token resolved %v", hosts)
+	}
 }

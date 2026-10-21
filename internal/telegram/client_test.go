@@ -19,6 +19,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/logging"
@@ -452,5 +453,62 @@ func TestRequestLog(t *testing.T) {
 		if noUpdates(200, []byte(body)) != want {
 			t.Errorf("noUpdates(%s) = %v", body, !want)
 		}
+	}
+}
+
+// TestRoute is the route of `muster dev` (C-21.FR-10): a client whose Route answers for its base URL and token sends
+// every request there, while what it shows, such as its origin, stays the Bot API base URL; an empty
+// answer sends to the base URL, and the Route sees the token the client sends. A routed request still passes the
+// outbound address policy: without the loopback network it is blocked.
+func TestRoute(t *testing.T) {
+	f := startFake(t)
+	var seen []string
+	route := func(base string, token logging.Secret) string {
+		seen = append(seen, base+" "+string(token))
+		if base == DefaultBaseURL && token == testToken {
+			return f.URL()
+		}
+		return ""
+	}
+	c := newClient(t, Settings{BaseURL: DefaultBaseURL, Token: testToken, Route: route})
+	if u, r := c.GetMe(t.Context(), outbound.ClassInteractive); !r.OK() || u.Username != faketelegram.BotUsername {
+		t.Fatalf("routed getMe = %+v %+v", u, r)
+	}
+	if got := paths(f); !slices.Equal(got, []string{"/bot" + testToken + "/getMe"}) {
+		t.Fatalf("paths %v", got)
+	}
+	if c.Origin() != DefaultBaseURL || !slices.Equal(seen, []string{DefaultBaseURL + " " + testToken}) {
+		t.Fatalf("origin %q, route asked %v", c.Origin(), seen)
+	}
+	clocks := clock.Clocks{Business: clock.Real{}, Real: clock.Real{}}
+	id := int64(7)
+	check, err := RunCheck(t.Context(), c, nil, Interactive(deliverytest.Unlimited(1, clocks),
+		delivery.Subject{Connection: &id}), clock.Real{})
+	if err != nil || !check.OK() || check.Bot == nil || check.Bot.Username != faketelegram.BotUsername {
+		t.Fatalf("routed check = %+v, %v", check, err)
+	}
+
+	// Not routed: another token goes to the base URL, here an address that refuses connections.
+	other := newClient(t, Settings{BaseURL: "http://127.0.0.1:1", Token: otherToken, Route: route})
+	if _, r := other.GetMe(t.Context(), outbound.ClassInteractive); r.OK() || r.Network == "" {
+		t.Fatalf("unrouted getMe = %+v", r)
+	}
+	if n := len(paths(f)); n != 4 {
+		t.Fatalf("the fake got %d requests, want the 4 of the routed client", n)
+	}
+
+	p, _ := outbound.ParsePolicy("standard", nil, nil)
+	n := network(t, nil)
+	n.Policy = outbound.StaticPolicy(p)
+	blocked, err := NewClient(n, Settings{BaseURL: DefaultBaseURL, Token: testToken, Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, r := blocked.GetMe(t.Context(), outbound.ClassInteractive); !r.Blocked ||
+		r.FailureCode() != delivery.CodeBlocked {
+		t.Fatalf("routed getMe without loopback = %+v", r)
+	}
+	if n := len(paths(f)); n != 4 {
+		t.Fatalf("a blocked request reached the fake: %d requests", n)
 	}
 }

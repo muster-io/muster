@@ -70,7 +70,9 @@ var (
 	listItemRe   = regexp.MustCompile(`^([-*+]|\d{1,9}[.)])([ \t]+|$)`)
 	schemeRe     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 	idRe         = regexp.MustCompile(`\sid="([^"]*)"`)
-	urlRe        = regexp.MustCompile("https?://[^\\s<>\"'`|\\[\\]]+")
+	// A URL ends before a brace, which RFC 3986 does not allow unescaped, such as the attribute list of an image:
+	// ![…](…png){ .screenshot }.
+	urlRe = regexp.MustCompile("https?://[^\\s<>\"'`|\\[\\]{}]+")
 )
 
 const refDef = `^[ \t]*(?:(?:>[ \t]*|(?:[-*+]|\d{1,9}[.)])[ \t]+))*\[[^\]^\n][^\]\n]*\]:[ \t]*(?:<([^>\n]*)>|(\S+))`

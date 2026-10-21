@@ -181,7 +181,7 @@ func (s *Service) bridgeClient(row dbgen.GetConnectionRow) (*bridge.Client, erro
 	}
 	return bridge.NewClient(bridge.Network(s.cfg.Network), bridge.Settings{BaseURL: row.BridgeBaseUrl.String,
 		Token: token, PushSecret: pushSecret, Proxy: p.Outbound(password),
-		Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}})
+		Owner: outbound.Owner{Connection: row.ID, PublicID: row.PublicID}, Route: s.cfg.BridgeRoute})
 }
 
 // cachedBridgeClient is the Bridge client of the Connection id at version for delivery, built again when the version

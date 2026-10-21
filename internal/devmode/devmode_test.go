@@ -754,6 +754,52 @@ func TestSlackRoute(t *testing.T) {
 	}
 }
 
+// TestRoutes is C-21.FR-10: under `muster dev` a Telegram Connection on the default Bot API base URL, a Mattermost
+// Connection on https://chat.example.org and a Bridge Connection on https://bridge.example.org call their fake server
+// when their token is one of its published tokens, a trailing / of the address aside; any other address or token calls
+// the address the Connection names, so a real token never reaches a fake.
+func TestRoutes(t *testing.T) {
+	tg, mm, br := "http://"+devmode.TelegramAddr, "http://"+devmode.MattermostAddr, "http://"+devmode.BridgeAddr
+	tests := []struct {
+		name  string
+		route func(string, logging.Secret) string
+		addr  string
+		token string
+		want  string
+	}{
+		{"telegram, the demo bot", devmode.TelegramRoute, "https://api.telegram.org", "123456:dev-telegram-token", tg},
+		{"telegram, the second bot", devmode.TelegramRoute, "https://api.telegram.org/", "234567:dev-telegram-token-b",
+			tg},
+		{"telegram, another token", devmode.TelegramRoute, "https://api.telegram.org", "999:not-published", ""},
+		{"telegram, another address", devmode.TelegramRoute, "https://tg.example.org", "234567:dev-telegram-token-b",
+			""},
+		{"telegram, the fake's own address", devmode.TelegramRoute, tg, "234567:dev-telegram-token-b", ""},
+		{"telegram, no token", devmode.TelegramRoute, "https://api.telegram.org", "", ""},
+		{"mattermost, the demo bot", devmode.MattermostRoute, "https://chat.example.org", "muster-dev-mattermost-token",
+			mm},
+		{"mattermost, the second bot", devmode.MattermostRoute, "https://chat.example.org/",
+			"muster-dev-mattermost-token-b", mm},
+		{"mattermost, another token", devmode.MattermostRoute, "https://chat.example.org", "real-token", ""},
+		{"mattermost, another address", devmode.MattermostRoute, "https://mm.example.org",
+			"muster-dev-mattermost-token-b", ""},
+		{"bridge, the demo bot", devmode.BridgeRoute, "https://bridge.example.org", "muster-dev-bridge-token", br},
+		{"bridge, the second bot", devmode.BridgeRoute, "https://bridge.example.org/", "muster-dev-bridge-token-b", br},
+		{"bridge, another token", devmode.BridgeRoute, "https://bridge.example.org", "real-token", ""},
+		{"bridge, a path prefix", devmode.BridgeRoute, "https://bridge.example.org/muster", "muster-dev-bridge-token-b",
+			""},
+		{"bridge, a token of another fake", devmode.BridgeRoute, "https://bridge.example.org",
+			"muster-dev-mattermost-token-b", ""},
+	}
+	for _, tt := range tests {
+		if got := tt.route(tt.addr, logging.Secret(tt.token)); got != tt.want {
+			t.Errorf("%s: route(%q, %q) = %q, want %q", tt.name, tt.addr, tt.token, got, tt.want)
+		}
+	}
+	if devmode.MattermostRouteURL != "https://chat.example.org" || devmode.BridgeRouteURL != "https://bridge.example.org" {
+		t.Errorf("the route addresses are %q and %q", devmode.MattermostRouteURL, devmode.BridgeRouteURL)
+	}
+}
+
 // TestRunBusySlackPort: a busy port of the fake Slack server fails the start, naming it, and closes the fakes already
 // started.
 func TestRunBusySlackPort(t *testing.T) {

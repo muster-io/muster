@@ -27,9 +27,7 @@ helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
 
 The release signs the chart with cosign, keyless, as it signs the image; [Verify a release](versions.md#verify-a-release)
 shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
-with its changes and the image it runs, pinned by digest:
-
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/muster)](https://artifacthub.io/packages/search?repo=muster)
+with its changes and the image it runs, pinned by digest: [Muster on Artifact Hub](https://artifacthub.io/packages/search?repo=muster).
 
 !!! note "Before the first release"
     Nothing is released yet, so the registry holds no chart. Install it from a clone of the repository instead, with the

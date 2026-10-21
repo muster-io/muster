@@ -35,6 +35,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 
 - [Quick start](quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
   in about five minutes.
+- [First alert in a messenger](first-alert.md): connect Telegram, route the Alert Groups of one service to a channel
+  and acknowledge one from Telegram, step by step with screenshots.
 - [Install](install/helm.md): run Muster in production with [Helm](install/helm.md) and an external
   [PostgreSQL](install/database.md), and read the [requirements and tested versions](install/versions.md) and how
   to verify a release.
