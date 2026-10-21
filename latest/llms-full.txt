@@ -4120,7 +4120,7 @@ writes every message the bot posts to the log. From a clone of the repository, w
 token, the one a Bridge Connection in Muster would hold:
 
 ```sh
-git clone https://github.com/muster-io/muster-bridge-go && cd muster-bridge-go
+git clone --branch v0.1.0 https://github.com/muster-io/muster-bridge-go && cd muster-bridge-go
 printf example-token > /tmp/bt
 go run ./examples/minimal -token-file /tmp/bt
 ```
@@ -4411,7 +4411,7 @@ and writes every message the bot posts to the log. With the library installed as
 uvicorn beside the library and run the example with a token, the one a Bridge Connection in Muster would hold:
 
 ```sh
-git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
+git clone --branch v0.1.0 https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
 pip install uvicorn
 printf example-token > /tmp/bt
 python examples/memory_bridge.py --token-file /tmp/bt
