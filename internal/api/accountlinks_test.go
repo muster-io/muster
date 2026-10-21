@@ -686,9 +686,26 @@ func TestProblemCodesOfSlackLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(doc.Components.Schemas["Problem"].Value.Extensions["x-problem-codes"])
-	for _, code := range []string{accountlinks.CodeHandleAmbiguous, codeMessagesTabDisabled} {
-		if !strings.Contains(string(raw), `"code":"`+code+`"`) {
-			t.Errorf("%s is not catalogued", code)
+	var catalogue []struct {
+		Type  string `json:"type"`
+		In    string `json:"in"`
+		Codes []struct {
+			Code string `json:"code"`
+		} `json:"codes"`
+	}
+	if err := json.Unmarshal(raw, &catalogue); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, c := range catalogue {
+		for _, code := range c.Codes {
+			found[c.Type+" "+c.In+" "+code.Code] = true
+		}
+	}
+	for _, c := range []string{typeValidationFailed + " errors[].code " + accountlinks.CodeHandleAmbiguous,
+		typeConflict + " code " + codeMessagesTabDisabled} {
+		if !found[c] {
+			t.Errorf("%s is not catalogued", c)
 		}
 	}
 }
