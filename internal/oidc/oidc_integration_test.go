@@ -441,10 +441,20 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		if got := fmt.Sprint(w.scalar(t, `SELECT groups_claim_seen_at::text FROM oidc_settings`)); got != first {
 			t.Errorf("a later sign-in moved the claim first seen from %s to %s", first, got)
 		}
+		update(t, func(in *oidc.Input) { in.UnmatchedRole = oidc.UnmatchedViewer })
+		before = rowVersion(t)
+		if out := w.signIn(t, fakeoidc.User{Subject: "u-3", PreferredUsername: "nina", NoGroupsClaim: true},
+			""); out.Session == nil {
+			t.Fatalf("sign-in without the claim = %+v", out)
+		}
+		if rowVersion(t) != before {
+			t.Error("a sign-in without the claim after it was seen wrote the row")
+		}
+		expect(t, "a sign-in without the claim after it was seen", "seen=t missing=f version=2 warned=false")
 
 		// The fake issues no "roles" claim: vic's sign-ins carry none.
-		update(t, func(in *oidc.Input) { in.GroupsClaim = "roles"; in.UnmatchedRole = oidc.UnmatchedViewer })
-		expect(t, "another groups claim", "seen=f missing=f version=2 warned=false")
+		update(t, func(in *oidc.Input) { in.GroupsClaim = "roles" })
+		expect(t, "another groups claim", "seen=f missing=f version=3 warned=false")
 		before = rowVersion(t)
 		if out := w.signIn(t, vic, ""); out.Session == nil {
 			t.Fatalf("sign-in without the claim = %+v", out)
@@ -456,17 +466,17 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 			t.Error("a check after another groups claim did not warn")
 		}
 		w.signIn(t, vic, "")
-		expect(t, "a sign-in without the claim after a check warned", "seen=f missing=t version=2 warned=true")
+		expect(t, "a sign-in without the claim after a check warned", "seen=f missing=t version=3 warned=true")
 		set(t, true, false)
 		w.signIn(t, vic, "")
-		expect(t, "a sign-in without the claim after it was seen", "seen=t missing=f version=2 warned=false")
+		expect(t, "a sign-in without the claim after it was seen", "seen=t missing=f version=3 warned=false")
 
 		set(t, true, true)
-		expect(t, "a 0.1.0 state", "seen=t missing=t version=2 warned=false")
+		expect(t, "a 0.1.0 state", "seen=t missing=t version=3 warned=false")
 		if check(t) {
 			t.Error("a check on a 0.1.0 state warned")
 		}
-		expect(t, "a check on a 0.1.0 state", "seen=t missing=f version=2 warned=false")
+		expect(t, "a check on a 0.1.0 state", "seen=t missing=f version=3 warned=false")
 		set(t, true, true)
 		st, err := w.svc.Get(t.Context())
 		if err != nil {
@@ -477,7 +487,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		if n, err := q.RecordGroupsClaimSeen(t.Context(), seen); err != nil || n != 1 {
 			t.Errorf("a sign-in on a 0.1.0 state: %d rows, %v", n, err)
 		}
-		expect(t, "a sign-in on a 0.1.0 state", "seen=t missing=f version=2 warned=false")
+		expect(t, "a sign-in on a 0.1.0 state", "seen=t missing=f version=3 warned=false")
 		if got := fmt.Sprint(w.scalar(t, `SELECT groups_claim_seen_at = $1 FROM oidc_settings`, t0)); got != "true" {
 			t.Error("a sign-in on a 0.1.0 state moved the claim first seen")
 		}
@@ -502,7 +512,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 			if err1 != nil || err2 != nil || n1 != 0 || n2 != 0 {
 				t.Errorf("stale %s records: %d, %v; %d, %v", tc.name, n1, err1, n2, err2)
 			}
-			expect(t, "stale "+tc.name+" records", "seen=f missing=t version=2 warned=true")
+			expect(t, "stale "+tc.name+" records", "seen=f missing=t version=3 warned=true")
 		}
 
 		for i, tc := range []struct {
@@ -515,7 +525,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		} {
 			set(t, true, true)
 			update(t, tc.change)
-			expect(t, "another "+tc.name, fmt.Sprintf("seen=f missing=f version=%d warned=false", 3+i))
+			expect(t, "another "+tc.name, fmt.Sprintf("seen=f missing=f version=%d warned=false", 4+i))
 		}
 	})
 }

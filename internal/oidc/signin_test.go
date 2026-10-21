@@ -463,12 +463,15 @@ func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
 	}
 	e.store.mu.Unlock()
 
-	// The fake always issues the groups claim, so the sign-ins without it are the records of their callbacks.
-	st, _ := e.svc.Get(t.Context())
-	if err := e.svc.recordGroupsClaim(t.Context(), st, false); err != nil {
-		t.Fatal(err)
+	writes = e.store.writes
+	nina := fakeoidc.User{Subject: "u-3", PreferredUsername: "nina", NoGroupsClaim: true}
+	if out := e.signIn(t, nina, ""); out.Session == nil {
+		t.Fatalf("sign-in without the claim = %+v", out)
 	}
 	expect(t, "a sign-in without the claim after it was seen", "seen=true missing=false warned=false")
+	if e.store.writes != writes {
+		t.Error("a sign-in without the claim wrote the row")
+	}
 	e.configure(t, func(in *Input) { in.GroupsClaim = "roles"; in.UnmatchedRole = UnmatchedViewer })
 	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
 	expect(t, "a sign-in without the claim before it was seen", "seen=false missing=false warned=false")

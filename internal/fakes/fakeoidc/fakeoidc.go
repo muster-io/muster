@@ -46,6 +46,9 @@ type User struct {
 	AMR               []string `json:"amr,omitempty"`
 	// GroupsInUserinfoOnly leaves the groups claim out of the ID token; userinfo still carries it.
 	GroupsInUserinfoOnly bool `json:"groups_in_userinfo_only,omitempty"`
+	// NoGroupsClaim leaves the groups claim out of the ID token and userinfo, as identity providers do for a user in
+	// no group.
+	NoGroupsClaim bool `json:"no_groups_claim,omitempty"`
 }
 
 // Config is the behaviour of the fake that /_fake/config changes; a field that a request omits keeps its value.
@@ -354,7 +357,7 @@ func (f *Fake) issue(w http.ResponseWriter, r *http.Request, g grant, withNonce 
 	if len(g.user.AMR) > 0 {
 		claims["amr"] = g.user.AMR
 	}
-	if !g.user.GroupsInUserinfoOnly {
+	if !g.user.GroupsInUserinfoOnly && !g.user.NoGroupsClaim {
 		claims[GroupsClaim] = groups(g.user)
 	}
 	idToken, err := f.Sign(claims)
@@ -394,7 +397,10 @@ func (f *Fake) userinfo(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteError(w, http.StatusUnauthorized, "invalid_token")
 		return
 	}
-	claims := map[string]any{"sub": u.Subject, GroupsClaim: groups(u)}
+	claims := map[string]any{"sub": u.Subject}
+	if !u.NoGroupsClaim {
+		claims[GroupsClaim] = groups(u)
+	}
 	for k, v := range map[string]string{"preferred_username": u.PreferredUsername, "email": u.Email, "name": u.Name} {
 		if v != "" {
 			claims[k] = v

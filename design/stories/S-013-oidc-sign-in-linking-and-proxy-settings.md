@@ -164,7 +164,7 @@ issue: 13
   error.
 - **Fake IdP** (`internal/fakes/fakeoidc`): discovery, key set, an authorization endpoint that approves the scripted
   next user (`sub`, `preferred_username`, `email`, `name`, `groups`, `amr`, optionally with the groups only in
-  userinfo), a token endpoint that checks PKCE and rotates refresh tokens, userinfo, and control endpoints under
+  userinfo or with no groups claim at all), a token endpoint that checks PKCE and rotates refresh tokens, userinfo, and control endpoints under
   `/_fake/`: the next user (`POST /_fake/next-user`), disabling and enabling a user (`POST
   /_fake/users/{sub}/disable`, `enable`; refresh then answers `invalid_grant`), `POST /_fake/config` with
   `grant_offline_access` and `omit_groups_claim` (from discovery), `POST /_fake/rotate-keys`, and the faults of the

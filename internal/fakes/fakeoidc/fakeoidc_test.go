@@ -208,6 +208,36 @@ func TestCodeFlowWithPKCEAndRefreshRotation(t *testing.T) {
 	}
 }
 
+// TestNoGroupsClaim: a user scripted without the groups claim gets neither an ID token nor userinfo that carries it.
+func TestNoGroupsClaim(t *testing.T) {
+	f := start(t)
+	code, _ := post(t, f.URL()+"/_fake/next-user", nil, `{"sub":"u-3","no_groups_claim":true}`)
+	if code != http.StatusNoContent {
+		t.Fatalf("next-user = %d", code)
+	}
+	q := authorize(t, f, "openid")
+	status, body := post(t, f.URL()+"/token", url.Values{"grant_type": {"authorization_code"}, "code": {q.Get("code")},
+		"redirect_uri": {redirectURI}, "code_verifier": {verifier}, "client_id": {"muster"}}, "")
+	if status != http.StatusOK {
+		t.Fatalf("exchange = %d %v", status, body)
+	}
+	if _, ok := verify(t, f, body["id_token"].(string))["groups"]; ok {
+		t.Error("the ID token carries the groups claim")
+	}
+	var info map[string]any
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+body["access_token"].(string))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	_ = resp.Body.Close()
+	if _, ok := info["groups"]; ok || info["sub"] != "u-3" {
+		t.Errorf("userinfo = %v", info)
+	}
+}
+
 func TestWithheldOfflineAccessGroupsInUserinfoAndKeyRotation(t *testing.T) {
 	f := start(t)
 	f.Configure(Config{GrantOfflineAccess: new(false)})
