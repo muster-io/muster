@@ -74,15 +74,16 @@ their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-de
 `muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
 `/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's, the app of each
 token, the channels of each app, merged by id, a page size for `conversations.list`, the `request_url` of each app,
-its Interactivity Request URL, and the `extra_connections` of each app, the Socket Mode connections of other programs
-that its `hello` counts; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other",
-without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in every channel with the
-bot. Each app's directory pages them with `users.list` over three pages, beside Slackbot, two accounts whose display
-name is "Sam", a bot whose display name is "Bob", the app's bot user and a deleted account whose display name is "bob";
-`users.lookupByEmail` finds them by `alice@example.org` and the like in any letter case, `users.info` by user id, and
-`conversations.open` answers the bot's direct chat with one of them. `chat.postMessage` to a person's user id posts into
-that direct chat, `cannot_dm_bot` for a bot and `user_not_found` for a deleted account, and
-`GET /_fake/dms?user=U…&app=a|b` lists what the bot sent there, such as an Account link code. In Socket Mode
+its Interactivity Request URL, the `extra_connections` of each app, the Socket Mode connections of other programs
+that its `hello` counts, and `messages_tab_off`, the apps whose Messages tab is off, whose bot's direct messages to a
+person answer `messages_tab_disabled`; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and
+`C0FAKEOTHER` "other", without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in
+every channel with the bot. Each app's directory pages them with `users.list` over three pages, beside Slackbot, two
+accounts whose display name is "Sam", a bot whose display name is "Bob", the app's bot user and a deleted account whose
+display name is "bob"; `users.lookupByEmail` finds them by `alice@example.org` and the like in any letter case,
+`users.info` by user id, and `conversations.open` answers the bot's direct chat with one of them. `chat.postMessage` to
+a person's user id posts into that direct chat, `cannot_dm_bot` for a bot and `user_not_found` for a deleted account,
+and `GET /_fake/dms?user=U…&app=a|b` lists what the bot sent there, such as an Account link code. In Socket Mode
 `apps.connections.open` answers an address `ws://127.0.0.1:18097/link/?ticket=…&app_id=…` with a single-use ticket;
 `/link/` accepts one WebSocket for it and sends `hello`, whose `num_connections` counts the app's open sockets that
 said `hello` and its `extra_connections`, or `too_many_websockets` when that would exceed ten.
@@ -126,6 +127,11 @@ builds the binaries, the archives with their SBOMs and the checksums, and the mu
 `ghcr.io/muster-io/muster`, signed keylessly with cosign; the workflow then pushes the chart to
 `oci://ghcr.io/muster-io/charts/muster` and publishes the release.
 
+The version follows [Version numbers](docs/install/versions.md#version-numbers): while it is `0.x`, a `feat` or a `fix`
+raises the patch, and a breaking change raises the minor, so it waits for the next layer, which starts with a
+`release-as` of its `0.N.0`. The release pull request also sets the version in `api/openapi.yaml` (`info.version`), in
+the compose example and in the Quick start; the generated code does not carry it.
+
 ## Working a story
 
 1. Every story in its `depends_on` is merged.
@@ -146,7 +152,10 @@ and live checks advance the development clock.
 
 - Commit messages are [conventional commits](https://www.conventionalcommits.org/) on one line:
   `<type>(<scope>): <description>`, with `feat`, `fix`, `docs`, `build`, `ci`, `test`, `refactor`, `perf` or `chore`.
-  Say what changed; leave out story and phase IDs.
+  Say what changed; leave out story and phase IDs. `build` means a change of a dependency that ships, the type Renovate
+  uses for those: like `feat` and `fix` it is user-facing, the changelog lists it under "Dependencies", and on its own it
+  opens or updates the release pull request for a patch release; nothing is released until a maintainer merges that
+  pull request. Work on the build system or the tooling uses `chore` or `ci`.
 - Pull requests are squash-merged, so the title becomes the commit message, and the changelog is written from it.
 - The pull request template asks for the issue it closes, the story ID, a table with every acceptance statement and its
   evidence, the output of `verify`, every change to the story file with its reason, and a dependency statement.

@@ -6,6 +6,13 @@
   extends: ["config:best-practices"],
   rangeStrategy: "pin",
   postUpdateOptions: ["gomodTidy"],
+  // Updates of what ships are committed as `build(deps): …`, which release-please lists under "Dependencies" instead of
+  // "Bug Fixes". config:best-practices types every update `chore` and the runtime dependencies `fix` through package
+  // rules, which a top-level semanticCommitType cannot override: the rules at the end of packageRules replace them with
+  // `build` for what ships, and the other updates stay `chore`, outside the changelog. A grouped update takes the
+  // highest type of its members.
+  semanticCommits: "enabled",
+  semanticCommitScope: "deps",
   // config:best-practices ignores every test/ directory; test/ holds the end-to-end tests, whose image pins below are
   // the only dependencies there. The rest of its list stays.
   ignorePaths: [
@@ -114,6 +121,43 @@
       matchManagers: ["docker-compose"],
       matchPackageNames: ["ghcr.io/muster-io/muster"],
       enabled: false,
+    },
+    // What ships: the Go modules the binary requires and the Go toolchain with its standard library, the SPA's
+    // production dependencies and the base image of the Muster image.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["require", "toolchain"],
+      semanticCommitType: "build",
+    },
+    // Direct requires that are not in the binary (`go list -deps ./cmd/muster`): test, lint and build tooling.
+    {
+      matchManagers: ["gomod"],
+      matchPackageNames: [
+        "github.com/VictoriaMetrics/metricsql",
+        "github.com/pganalyze/pg_query_go/v6",
+        "github.com/testcontainers/testcontainers-go",
+        "github.com/testcontainers/testcontainers-go/modules/postgres",
+        "github.com/wasilibs/go-pgquery",
+        "go.yaml.in/yaml/v3",
+        "golang.org/x/tools",
+        "google.golang.org/protobuf",
+      ],
+      semanticCommitType: "chore",
+    },
+    {
+      matchManagers: ["npm"],
+      matchFileNames: ["web/package.json"],
+      matchDepTypes: ["dependencies"],
+      semanticCommitType: "build",
+    },
+    {
+      matchManagers: ["dockerfile"],
+      matchFileNames: ["Dockerfile"],
+      semanticCommitType: "build",
+    },
+    {
+      matchJsonata: ["isLockfileUpdate = true"],
+      semanticCommitType: "chore",
     },
   ],
   lockFileMaintenance: {

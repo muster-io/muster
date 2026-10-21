@@ -3,6 +3,9 @@
 `openapi.yaml` is the source of truth for the HTTP API (OpenAPI 3.1.2). It is written before the code it describes, reviewed
 like code, and served by the binary at `/api/v1/openapi.yaml`. Generated code (`internal/api/gen/`, `pkg/apiclient/`,
 `web/src/api/gen/`) is checked in, `make generate` regenerates it, and CI's `generate` job fails on stale output.
+`info.version` is Muster's version: release-please sets it in the release pull request, and the generated code leaves
+it out, so a release changes no generated file. Compatibility is guarded by the path `/api/v1` and CI's `oasdiff` job,
+not by this number.
 
 ## How the spec is organised
 
