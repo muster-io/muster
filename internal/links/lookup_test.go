@@ -761,6 +761,19 @@ func TestLookupCells(t *testing.T) {
 	if f.cells != 3 {
 		t.Errorf("unreadable names read rows: %d", f.cells)
 	}
+	// An empty key, a missing label's, or an empty table name matches no row, reads none and spends no budget.
+	left := l.left
+	for range MaxLookups + 1 {
+		if got, err := l.lookup("grafana", "", "address"); err != nil || got != "" {
+			t.Fatalf("empty key: %q %v", got, err)
+		}
+		if got, err := l.lookup("", "prod", "address"); err != nil || got != "" {
+			t.Fatalf("empty table: %q %v", got, err)
+		}
+	}
+	if f.cells != 3 || l.left != left {
+		t.Errorf("empty keys read %d rows, budget %d → %d", f.cells, left, l.left)
+	}
 	for i := range MaxLookups {
 		if _, err := l.lookup("grafana", strings.Repeat("k", i+1), "address"); err != nil && i < MaxLookups-3 {
 			t.Fatalf("lookup %d: %v", i, err)

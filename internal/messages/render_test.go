@@ -1133,6 +1133,7 @@ func TestLayoutCommonMark(t *testing.T) {
 		"\n\n- pod: a\n    \\# head\n- ~~pod: b\n\t\\- x~~\n- pod: c\n    1\\. x\n- pod: d\n    \\===\n\n")
 	src.Route.Line = ptr(`{{ .Annotations.description }}`)
 	src.Alerts[0].Annotations["description"] = "x\n\t# y\n  \t1) z"
+	src.Alerts[1].Annotations["description"] = "w"
 	out = r.Root(src, MarkupCommonMark)
 	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- x\n\t\\# y\n  \t1\\) z\n- ")
 
@@ -1148,6 +1149,7 @@ func TestLayoutCommonMark(t *testing.T) {
 		"> **team** web\nrest \\*x\\*\\\n> **zone** z\n\n", "\n\n- pod: a\n      code \\*x\\*\n- ")
 	src.Route.Line = ptr(`{{ .Annotations.description }}`)
 	src.Alerts[0].Annotations["description"] = "\n\n\tcode"
+	src.Alerts[1].Annotations["description"] = "w"
 	out = r.Root(src, MarkupCommonMark)
 	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- code\n- ")
 

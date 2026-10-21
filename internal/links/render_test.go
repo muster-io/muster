@@ -6,6 +6,7 @@ package links
 import (
 	"errors"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -178,8 +179,8 @@ func TestEvaluateWithoutTable(t *testing.T) {
 
 // TestEvaluateExploreWithoutKey: with the Lookup table "grafana", an Alert Group without the environment and the
 // cluster label gets no Explore link, no error, no count and no log line, while the same Alert Group with the
-// environment label gets its link; a rule someone wrote that passes the missing label to lookup still fails and is
-// counted and logged.
+// environment label gets its link; a rule that passes the missing label to lookup, as the previous built-in template
+// does, reads an empty key and gives no link, no count and no log line either (C-12.FR-9).
 func TestEvaluateExploreWithoutKey(t *testing.T) {
 	ctx := t.Context()
 	f := newFake()
@@ -224,12 +225,63 @@ func TestEvaluateExploreWithoutKey(t *testing.T) {
 	if err != nil || strings.Contains(strings.Join(names(got), "|"), "Explore") {
 		t.Errorf("links %v %v", names(got), err)
 	}
-	if d := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() - before; d != 1 {
-		t.Errorf("muster_template_errors_total grew by %d, want 1", d)
+	if d := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() - before; d != 0 {
+		t.Errorf("muster_template_errors_total grew by %d, want 0", d)
 	}
-	if !strings.Contains(log.String(), `"event":"link_rule_failed"`) ||
-		!strings.Contains(log.String(), `"link_rule":"`+old.PublicID+`"`) {
-		t.Errorf("the written rule is logged: %s", log.String())
+	if strings.Contains(log.String(), "link_rule_failed") || strings.Contains(log.String(), `"link_rule":"`+old.PublicID+`"`) {
+		t.Errorf("a missing label is no error: %s", log.String())
+	}
+}
+
+// TestLinkRuleMissingLabel: a Link rule of C-12.FR-9's kind, reading a Lookup table keyed by a label, is saved while
+// the recent Stored Snapshots lack the label; an Alert Group without it gets no link, no error, no count and no log
+// line, and one with it gets the URL of its row. A real mistake in the template is still refused at save.
+func TestLinkRuleMissingLabel(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, log := newService(t, f)
+	f.snapshots = [][]byte{webhook(`{"alertname":"DiskFull","namespace":"api"}`),
+		webhook(`{"alertname":"HighLatency","namespace":"shop"}`)}
+	if _, err := s.CreateTable(ctx, by, TableInput{Name: "dashboards", Columns: []string{"url"},
+		Entries: []Entry{{Key: "prod", Values: map[string]string{"url": "https://grafana.example.org/d/abc123/prod"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rule := RuleInput{Name: "Dashboard", Scope: Scope{Type: ScopeAlertGroup},
+		URLTemplate: `{{ lookup "dashboards" .Labels.cluster "url" }}`}
+	created, err := s.CreateRule(ctx, by, rule)
+	if err != nil {
+		t.Fatalf("the save is refused: %v", err)
+	}
+	in := highLatency()
+	delete(in.Data.CommonLabels, "cluster")
+	for _, a := range in.Data.Alerts {
+		delete(a.Labels, "cluster")
+	}
+	before := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get()
+	got, err := s.Evaluate(ctx, nil, in)
+	if err != nil || strings.Contains(strings.Join(names(got), "|"), "Dashboard") {
+		t.Errorf("without the label: %v %v", names(got), err)
+	}
+	if metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() != before ||
+		strings.Contains(log.String(), "link_rule_failed") || strings.Contains(log.String(), `"link_rule":"`+created.PublicID+`"`) {
+		t.Errorf("a missing label is no error: %s", log.String())
+	}
+	in.Data.CommonLabels["cluster"] = "prod"
+	got, err = s.Evaluate(ctx, nil, in)
+	if err != nil || !slices.Contains(names(got), "Dashboard https://grafana.example.org/d/abc123/prod") {
+		t.Errorf("with the label: %v %v", names(got), err)
+	}
+	for src, code := range map[string]string{
+		`{{ lookup "dashboards" .Lables.cluster "url" }}`:  CodeTemplateSyntax,
+		`{{ lookup "dashboards" .Labels.cluster }}`:        CodeTemplateSyntax,
+		`{{ lookup "dashboards" .Labels.cluster "url"`:     CodeTemplateSyntax,
+		`{{ lookups "dashboards" .Labels.cluster "url" }}`: CodeUnknownFunction,
+	} {
+		rule.Name, rule.URLTemplate = "Broken", src
+		if _, err := s.CreateRule(ctx, by, rule); fieldError(t, err).Code != code {
+			t.Errorf("%s: %v, want %s", src, err, code)
+		}
 	}
 }
 

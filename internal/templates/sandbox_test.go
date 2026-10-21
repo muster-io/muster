@@ -271,7 +271,7 @@ func TestSandboxAlertmanagerTemplates(t *testing.T) {
 	}
 	line := LineData{Alert: data.Alerts[0], AlertGroup: data.AlertGroup}
 	if out, err := render(t, `{{ .Labels.instance }} of #{{ .AlertGroup.Number }}{{ .Labels.missing }}`, line); err !=
-		nil || out != "db-1 of #7<no value>" {
+		nil || out != "db-1 of #7" {
 		t.Errorf("line = %q, %v", out, err)
 	}
 	for _, src := range []string{`{{ tz "Nowhere/City" now }}`, `{{ match "(" "x" }}`, `{{ reReplaceAll "(" "" "" }}`,
@@ -340,6 +340,42 @@ func TestLookupAndLookupTables(t *testing.T) {
 	failing := Env{Lookup: func(string, string, string) (string, error) { return "", errors.New("no database") }}
 	if _, err := tmpl.ExecuteIn(failing, data); err == nil || !strings.Contains(err.Error(), "no database") {
 		t.Errorf("a failing lookup: %v", err)
+	}
+}
+
+// TestMissingKey: as in Alertmanager, a label or annotation that is not there is empty text, printed or passed to a
+// function, `lookup` included; a field the data does not have is still an error.
+func TestMissingKey(t *testing.T) {
+	data := LineData{Alert: Alert{Labels: KV{"instance": "db-1"}, Annotations: KV{}}}
+	for src, want := range map[string]string{
+		`[{{ .Labels.cluster }}]`:                           "[]",
+		`[{{ .Labels.cluster | toUpper }}]`:                 "[]",
+		`[{{ .Annotations.summary | trunc 3 }}]`:            "[]",
+		`{{ if .Labels.cluster }}x{{ else }}none{{ end }}`:  "none",
+		`{{ or .Labels.cluster .Labels.instance }}`:         "db-1",
+		`[{{ index .Labels "cluster" }}]`:                   "[]",
+		`[{{ .Labels.cluster | toJson }}]`:                  `[""]`,
+		`{{ or .Labels.cluster "none" }}`:                   "none",
+		`[{{ lookup "dashboards" .Labels.cluster "url" }}]`: "[?]",
+	} {
+		tmpl, err := sandbox().Parse("t", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		out, err := tmpl.ExecuteIn(Env{Lookup: func(_, key, _ string) (string, error) {
+			if key == "" {
+				return "?", nil
+			}
+			return "", errors.New("key " + key)
+		}}, data)
+		if err != nil || out != want {
+			t.Errorf("%s = %q, %v; want %q", src, out, err, want)
+		}
+	}
+	for _, src := range []string{`{{ .Lables.cluster }}`, `{{ .Alert.Cluster }}`, `{{ .Labels.cluster.name }}`} {
+		if _, err := render(t, src, data); err == nil {
+			t.Errorf("%s: no error", src)
+		}
 	}
 }
 

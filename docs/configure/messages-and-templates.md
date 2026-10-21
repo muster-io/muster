@@ -51,6 +51,9 @@ Templates are Go templates, the language of Alertmanager's own templates, and ru
   and the editor names an unknown function when you save.
 - Loops are capped, a template may run for 2 seconds, and the output is cut at about 50,000 characters
   (`template.output_cap`).
+- A label or annotation that is not there is empty text, as in Alertmanager: `{{ .Labels.cluster }}` prints nothing
+  and passes `""` to a function, so `toJson` gives `""`, not `null`. Tell a missing value apart with `if` or `or`,
+  as in `{{ or .CommonLabels.team "none" }}`.
 
 What the Root message template reads:
 

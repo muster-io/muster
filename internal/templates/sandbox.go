@@ -10,7 +10,9 @@
 // error, output stops at OutputCap characters, and the range and template guards stop an execution that ran for
 // longer than ExecutionLimit on the real clock. One sandbox serves messages, Link rules and outgoing webhooks: `lookup`
 // reads one cell of a Lookup table through the Env of an execution, and `mention` writes a trusted Mention token that
-// only an adapter turns into a Mention (C-12.FR-8, FR-9).
+// only an adapter turns into a Mention (C-12.FR-8, FR-9). A key that a map of labels or annotations does not have is
+// empty text, as in Alertmanager, whose templates set missingkey=zero: `.Labels.cluster` without the label prints
+// nothing and passes "" to a function such as `lookup`, while a field the data does not have is still an error.
 package templates
 
 import (
@@ -526,7 +528,7 @@ func (s *Sandbox) Parse(name, src string) (*Template, error) {
 				Detail: fmt.Sprintf("function %q is not defined", id.Ident)}
 		}
 	}
-	root := template.New(name).Funcs(s.funcs).Funcs(execFuncs(nil))
+	root := template.New(name).Option("missingkey=zero").Funcs(s.funcs).Funcs(execFuncs(nil))
 	for _, tree := range sortedTrees(trees) {
 		guard(tree, tree.Root)
 		if _, err := root.AddParseTree(tree.Name, tree); err != nil {
