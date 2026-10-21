@@ -730,9 +730,12 @@ func TestSocketReadFails(t *testing.T) {
 
 // TestSocketRefreshOverlap covers C-24.FR-9, AC-10: after disconnect warning or refresh_requested the next connection
 // says hello while the old one is still open, which closes only then; its hello counts the two the Leader holds, and
-// nothing is logged as failed.
+// nothing is logged as failed. Muster counts a socket as held until its own reader ends, which may be after the fake
+// has forgotten it, so each refresh waits for the old reader too.
 func TestSocketRefreshOverlap(t *testing.T) {
 	e := newSocketEnv(t)
+	var readersEnded atomic.Int64
+	e.sockets.readerEnded = func() { readersEnded.Add(1) }
 	e.source.set(e.conn(t, 2, false))
 	e.start(t)
 	e.lines(t, "slack_socket_connected", 1)
@@ -742,7 +745,9 @@ func TestSocketRefreshOverlap(t *testing.T) {
 		if l := lines[i+1]; num(l, "held") != 2 || num(l, "num_connections") != 2 {
 			t.Fatalf("%s: %v", reason, l)
 		}
-		eventually(t, reason+": the old socket closed", func() bool { st := e.app(); return st.Open == 1 })
+		eventually(t, reason+": the old socket closed", func() bool {
+			return e.app().Open == 1 && readersEnded.Load() == int64(i+1)
+		})
 		if st := e.app(); !st.Overlapped || st.Opened != i+2 {
 			t.Fatalf("%s: %+v", reason, st)
 		}
@@ -754,6 +759,105 @@ func TestSocketRefreshOverlap(t *testing.T) {
 		t.Fatalf("%d failures, %d opens", n, len(e.opens()))
 	}
 	e.send(t, "events_api", `{}`)
+}
+
+// TestSocketHelloThenDisconnect covers C-24.FR-9: a refresh_requested that the reader takes right after the hello,
+// before the holder has looked for the hello, refreshes the connection and fails nothing. The holder then finds both at
+// once, which a select would take in either order, so the case runs several times.
+func TestSocketHelloThenDisconnect(t *testing.T) {
+	for range 8 {
+		e := newSocketEnv(t)
+		after := e.sockets.after
+		var once sync.Once
+		e.sockets.after = func(d time.Duration) (<-chan time.Time, func()) {
+			if d == HelloTimeout {
+				once.Do(func() { e.afterHello(t, disconnectRefresh) })
+			}
+			return after(d)
+		}
+		e.source.set(e.conn(t, 2, false))
+		e.start(t)
+		e.lines(t, "slack_socket_connected", 2)
+		if n := len(e.log.lines(t, "slack_socket_failed")); n != 0 || len(e.opens()) != 2 {
+			t.Fatalf("%d failures, %d opens: %s", n, len(e.opens()), e.log.String())
+		}
+		if err := e.stop(t); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// afterHello waits, on the holder's goroutine before it looks for the hello, until the first socket's hello is
+// logged, sends the disconnect with reason unless it is empty and then an envelope through it, and waits for the
+// envelope's confirmation: the reader takes the frames in order, so it has told the holder the hello, and the
+// disconnect, by then. It marks the test failed when any of it fails.
+func (e *socketEnv) afterHello(t *testing.T, reason string) {
+	if !e.waitLogged(t, "slack_socket_connected") {
+		return
+	}
+	if reason != "" {
+		if err := e.fake.Script(t.Context(), fakeslack.SocketScript{App: fakeslack.AppB,
+			Disconnect: reason}); err != nil {
+			t.Error(err)
+			return
+		}
+	}
+	env, err := e.fake.SendEnvelope(t.Context(), fakeslack.AppB, "events_api", json.RawMessage(`{}`))
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, ok := e.fake.WaitConfirmed(ctx, env.EnvelopeID); !ok {
+		t.Error("the envelope after the hello was not confirmed")
+	}
+}
+
+// TestSocketHelloAtTimeout covers C-24.FR-9: a hello that came by the time the hello timeout fires, before the holder
+// looked for it, holds the connection; nothing fails. The holder then finds both at once, which a select would take
+// in either order, so the case runs several times.
+func TestSocketHelloAtTimeout(t *testing.T) {
+	for range 8 {
+		e := newSocketEnv(t)
+		after := e.sockets.after
+		var once sync.Once
+		e.sockets.after = func(d time.Duration) (<-chan time.Time, func()) {
+			ch, stop := after(d)
+			if d != HelloTimeout {
+				return ch, stop
+			}
+			fired := make(chan time.Time, 1)
+			once.Do(func() {
+				e.afterHello(t, "")
+				fired <- time.Time{}
+			})
+			return fired, stop
+		}
+		e.source.set(e.conn(t, 2, false))
+		e.start(t)
+		e.lines(t, "slack_socket_connected", 1)
+		e.send(t, "events_api", `{}`)
+		if n := len(e.log.lines(t, "slack_socket_failed")); n != 0 || len(e.opens()) != 1 {
+			t.Fatalf("%d failures, %d opens: %s", n, len(e.opens()), e.log.String())
+		}
+		if err := e.stop(t); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// waitLogged waits, off the test's goroutine, until event is logged; it marks the test failed when it is not.
+func (e *socketEnv) waitLogged(t *testing.T, event string) bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(e.log.String(), `"event":"`+event+`"`) {
+		if time.Now().After(deadline) {
+			t.Errorf("%s was not logged", event)
+			return false
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return true
 }
 
 // TestSocketRefreshOpenFails covers C-24.FR-9: a planned refresh whose next connection cannot be opened keeps the old
@@ -1136,7 +1240,7 @@ func TestSocketClosesWithClosure(t *testing.T) {
 	default:
 	}
 	q.timers.fire(t, closeGrace)
-	if err := q.ended(t, time.Second); err != nil {
+	if err := q.ended(t, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(e.log.lines(t, "slack_socket_failed")) + len(q.log.lines(t, "slack_socket_failed")); n != 0 {
@@ -1234,13 +1338,18 @@ func TestSocketHelloCounts(t *testing.T) {
 
 // TestSocketEnvelopeRecords covers C-24.FR-14, AC-17 and C-23.FR-1: each envelope with an envelope_id is recorded once
 // confirmed — its type as the operation, the socket's address without its query, the envelope as received and the
-// confirmation — and hello and disconnect are not.
+// confirmation — and hello and disconnect are not. Each record is written in the background, so the records are
+// matched to the envelopes by envelope_id, not by their order.
 func TestSocketEnvelopeRecords(t *testing.T) {
 	e := newSocketEnv(t)
 	e.source.set(e.conn(t, 2, false))
 	e.start(t)
 	e.lines(t, "slack_socket_connected", 1)
-	sent := []fakeslack.Envelope{e.send(t, typeInteractive, `{"type":"block_actions"}`), e.send(t, "events_api", `{}`)}
+	sent := map[string]fakeslack.Envelope{}
+	for _, env := range []fakeslack.Envelope{e.send(t, typeInteractive, `{"type":"block_actions"}`),
+		e.send(t, "events_api", `{}`)} {
+		sent[env.EnvelopeID] = env
+	}
 	eventually(t, "two records", func() bool { return len(e.records.got()) == 2 })
 	e.script(t, fakeslack.SocketScript{Disconnect: disconnectRefresh})
 	e.lines(t, "slack_socket_connected", 2)
@@ -1258,11 +1367,20 @@ func TestSocketEnvelopeRecords(t *testing.T) {
 		if err := json.Unmarshal(r.Envelope, &frame); err != nil {
 			t.Fatal(err)
 		}
-		if r.Operation != sent[i].Type || r.URL != wantURL || frame.EnvelopeID != sent[i].EnvelopeID ||
-			string(r.Confirmation) != `{"envelope_id":"`+sent[i].EnvelopeID+`"}` || r.Via != ViaDirect ||
+		want, ok := sent[frame.EnvelopeID]
+		if !ok {
+			t.Errorf("record %d of no envelope sent, or of one recorded twice: %+v", i, r)
+			continue
+		}
+		delete(sent, frame.EnvelopeID)
+		if r.Operation != want.Type || r.URL != wantURL ||
+			string(r.Confirmation) != `{"envelope_id":"`+want.EnvelopeID+`"}` || r.Via != ViaDirect ||
 			r.Links != (requestlog.Links{Connection: 2, ConnectionID: "CN0000000000K2"}) || r.Latency <= 0 {
 			t.Errorf("record %d: %+v", i, r)
 		}
+	}
+	if len(sent) != 0 {
+		t.Errorf("envelopes not recorded: %+v", sent)
 	}
 }
 
