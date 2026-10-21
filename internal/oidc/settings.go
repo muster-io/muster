@@ -670,7 +670,8 @@ func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 	}
 	res.OK, res.Discovery = true, d
 	if err := s.cfg.Store.RecordGroupsClaimAdvertised(ctx, dbgen.RecordGroupsClaimAdvertisedParams{
-		OrgID: s.cfg.OrgID, Advertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),
+		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL,
+		Advertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),
 	}); err != nil {
 		return CheckResult{}, fmt.Errorf("record the groups claim: %w", err)
 	}
@@ -696,13 +697,15 @@ func masked(err error) string {
 }
 
 // recordGroupsClaim records whether a sign-in or a link found the groups claim in the tokens, when that changes what
-// st says: the claim seen clears groups_claim_missing, the claim absent raises it.
+// st says: the claim seen clears groups_claim_missing, the claim absent raises it. The record applies only while the
+// groups claim and the issuer are still those of st.
 func (s *Service) recordGroupsClaim(ctx context.Context, st Settings, found bool) error {
 	if found == st.GroupsClaimSeen && found != st.GroupsClaimMissing {
 		return nil
 	}
 	if err := s.cfg.Store.RecordGroupsClaimInTokens(ctx, dbgen.RecordGroupsClaimInTokensParams{
-		OrgID: s.cfg.OrgID, Found: found, At: s.businessNow(),
+		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, Found: found,
+		At: s.businessNow(),
 	}); err != nil {
 		return fmt.Errorf("record the groups claim: %w", err)
 	}

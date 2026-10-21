@@ -58,8 +58,9 @@ SET enabled = @enabled, display_name = sqlc.narg('display_name'), issuer_url = @
 WHERE org_id = @org_id AND version = @version;
 
 -- RecordGroupsClaimInTokens records what a sign-in or a link found in the identity provider's tokens: with the claim,
--- when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. The
--- warning is not a configured value, so the version stays.
+-- when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. It
+-- changes nothing when an Admin saved another groups claim or issuer since the sign-in read them. The warning is not a
+-- configured value, so the version stays.
 -- name: RecordGroupsClaimInTokens :exec
 UPDATE oidc_settings
 SET groups_claim_seen_at = CASE WHEN @found::boolean THEN @at::timestamptz END,
@@ -67,11 +68,12 @@ SET groups_claim_seen_at = CASE WHEN @found::boolean THEN @at::timestamptz END,
         WHEN @found::boolean THEN NULL
         ELSE coalesce(groups_claim_missing_since, @at::timestamptz)
     END
-WHERE org_id = @org_id;
+WHERE org_id = @org_id AND groups_claim = @groups_claim AND issuer_url = @issuer_url;
 
 -- RecordGroupsClaimAdvertised records what a check found in discovery: a listed claim clears the warning; an unlisted
 -- one raises it only while no sign-in has seen the claim in a token, since the list is optional and some identity
--- providers leave the claims of their mappers out of it.
+-- providers leave the claims of their mappers out of it. It changes nothing when an Admin saved another groups claim or
+-- issuer since the check read them.
 -- name: RecordGroupsClaimAdvertised :exec
 UPDATE oidc_settings
 SET groups_claim_missing_since = CASE
@@ -79,7 +81,7 @@ SET groups_claim_missing_since = CASE
         WHEN groups_claim_seen_at IS NOT NULL THEN groups_claim_missing_since
         ELSE coalesce(groups_claim_missing_since, @at::timestamptz)
     END
-WHERE org_id = @org_id;
+WHERE org_id = @org_id AND groups_claim = @groups_claim AND issuer_url = @issuer_url;
 
 -- LatestKeptAdmin reads the latest entry in which Role sync kept the last active Admin, with the user it names, that
 -- user's last OIDC contact and how many active Admins there are now.

@@ -450,6 +450,27 @@ func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
 	}
 }
 
+// TestStaleGroupsClaimRecord: a sign-in that read the settings before an Admin saved another groups claim records
+// nothing about the new one.
+func TestStaleGroupsClaimRecord(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	stale, err := e.svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.configure(t, func(in *Input) { in.GroupsClaim = "roles" })
+	for _, found := range []bool{true, false} {
+		if err := e.svc.recordGroupsClaim(t.Context(), stale, found); err != nil {
+			t.Fatal(err)
+		}
+		if st, _ := e.svc.Get(t.Context()); st.GroupsClaimSeen || st.GroupsClaimMissing {
+			t.Errorf("a stale record (found %v) changed the state: seen %v, missing %v", found, st.GroupsClaimSeen,
+				st.GroupsClaimMissing)
+		}
+	}
+}
+
 // TestPendingRequestsAreBounded: starts need no credentials, so the requests in flight per Organization are capped.
 func TestPendingRequestsAreBounded(t *testing.T) {
 	e := newEnv(t)

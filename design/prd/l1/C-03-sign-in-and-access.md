@@ -55,9 +55,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   While the expiry date is less than `oidc.secret_expiry_lead` away, the OIDC settings page shows the expiry warning;
   the Internal alert for it is C-19.FR-5.
 - **C-03.FR-6** Saving OIDC settings with an empty mapping and no Role for unmatched users shows the warning
-  `nobody_can_sign_in`, "Nobody will be able to sign in through OIDC". The warning `groups_claim_missing` says that no
-  sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: a
-  sign-in whose token and userinfo lack the claim raises it; a sign-in whose token carries the claim clears it; the
+  `nobody_can_sign_in`, "Nobody will be able to sign in through OIDC". The warning `groups_claim_missing` says that the last
+  sign-in carried no groups claim, or that no sign-in has carried it yet, so group mappings cannot match and only the
+  Role for unmatched users applies: a sign-in whose token and userinfo lack the claim raises it; a sign-in whose token carries the claim clears it; the
   connection check (FR-8) clears it when discovery advertises the claim and raises it when discovery does not, but
   only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed, because
   discovery's list of claims is optional and some identity providers leave the claims of their mappers out of it, so

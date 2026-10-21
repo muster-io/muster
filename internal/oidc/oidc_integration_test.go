@@ -333,7 +333,8 @@ func TestIntegrationSettings(t *testing.T) {
 // TestIntegrationGroupsClaimSeen is C-03.FR-6 against PostgreSQL: a check of discovery without the groups claim warns
 // before any sign-in; a sign-in whose token carries the claim records groups_claim_seen_at and clears the warning, which
 // later checks do not raise again, without moving the version; saving another groups claim forgets the claim seen, so
-// the next check warns; a sign-in whose token lacks the claim raises the warning even after the claim was seen.
+// the next check warns; a sign-in whose token lacks the claim raises the warning even after the claim was seen; records
+// for a groups claim or issuer that are no longer saved change nothing; saving another issuer forgets the claim seen.
 func TestIntegrationGroupsClaimSeen(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		w := setup(t, s)
@@ -406,6 +407,42 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		}
 		if ws := check(t); !missing(ws) {
 			t.Errorf("a check after a sign-in without the claim: %+v", ws)
+		}
+
+		// A sign-in or a check that read another groups claim or issuer than the saved ones records nothing.
+		q := oidcdb.New(w.d.Pool)
+		stales := []struct{ claim, issuer string }{{"groups", st.IssuerURL}, {"roles", "http://127.0.0.1:1"}}
+		for _, stale := range stales {
+			if err := q.RecordGroupsClaimInTokens(t.Context(), oidcdb.RecordGroupsClaimInTokensParams{OrgID: w.orgID,
+				GroupsClaim: stale.claim, IssuerUrl: stale.issuer, Found: true, At: t0}); err != nil {
+				t.Fatal(err)
+			}
+			if err := q.RecordGroupsClaimAdvertised(t.Context(), oidcdb.RecordGroupsClaimAdvertisedParams{
+				OrgID: w.orgID, GroupsClaim: stale.claim, IssuerUrl: stale.issuer, Advertised: true, At: t0}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := state(t); got != "seen=f missing=t version=2" {
+			t.Errorf("after stale records: %s", got)
+		}
+
+		// Another issuer forgets the claim seen, as another groups claim does.
+		if _, err := w.d.Pool.Exec(t.Context(), `UPDATE oidc_settings
+			SET groups_claim_seen_at = $1, groups_claim_missing_since = NULL`, t0); err != nil {
+			t.Fatal(err)
+		}
+		if st, err = w.svc.Get(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		scopes = st.Scopes
+		if _, err := w.svc.Update(t.Context(), oidc.Requester{Actor: audit.System, Transport: audit.TransportUI},
+			&st.Version, oidc.Input{Enabled: st.Enabled, DisplayName: &st.DisplayName, IssuerURL: "http://127.0.0.1:1",
+				ClientID: st.ClientID, Scopes: &scopes, GroupsClaim: st.GroupsClaim, GroupMappings: st.GroupMappings,
+				UnmatchedRole: st.UnmatchedRole, SyncRole: st.SyncRole}); err != nil {
+			t.Fatal(err)
+		}
+		if got := state(t); got != "seen=f missing=f version=3" {
+			t.Errorf("after another issuer: %s", got)
 		}
 	})
 }

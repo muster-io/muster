@@ -1740,7 +1740,7 @@
     },
     "title": "OIDC",
     "warnings": {
-      "groupsClaimMissing": "No sign-in has shown the groups claim \"{{claim}}\" yet, so group mappings cannot match and only the Role for users without a matching group applies.",
+      "groupsClaimMissing": "The last sign-in carried no groups claim ‘{{claim}}’, or no sign-in has carried it yet, so group mappings cannot match and only the Role for users without a matching group applies.",
       "lastAdminKept": "{{user}} stays Admin: they are the last active Admin, and the identity provider maps them to {{role}}. Make another user Admin first.",
       "nobodyCanSignIn": "Nobody will be able to sign in through OIDC.",
       "secretExpiring": "The client secret expires on {{date}}. Issue a new one in the identity provider and enter it here."

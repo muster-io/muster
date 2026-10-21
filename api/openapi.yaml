@@ -9370,10 +9370,10 @@ components:
           - secret_expiring
           - last_admin_kept
           description: '`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`:
-            no sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users
-            applies: the last sign-in carried no such claim, or discovery does not advertise it and no sign-in has seen
-            it in a token since the groups claim or the issuer last changed. `secret_expiring`: see
-            `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin,
+            the last sign-in carried no groups claim, or no sign-in has carried it yet, so group mappings cannot match and
+            only the Role for unmatched users applies: the token and userinfo of the last sign-in lacked it, or discovery
+            does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed.
+            `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin,
             although the identity provider maps them to `role`.'
         expires_on:
           type:

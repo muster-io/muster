@@ -5615,7 +5615,7 @@ type OidcUnmatchedRole string
 type OidcWarning struct {
 	ExpiresOn nullable.Nullable[openapi_types.Date] `json:"expires_on,omitempty"`
 
-	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: the last sign-in carried no such claim, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: the last sign-in carried no groups claim, or no sign-in has carried it yet, so group mappings cannot match and only the Role for unmatched users applies: the token and userinfo of the last sign-in lacked it, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 	Kind OidcWarningKind `json:"kind"`
 
 	// Role For `last_admin_kept`, the Role the identity provider maps the user to.
@@ -5625,7 +5625,7 @@ type OidcWarning struct {
 	User *UserRef `json:"user,omitempty"`
 }
 
-// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: the last sign-in carried no such claim, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: the last sign-in carried no groups claim, or no sign-in has carried it yet, so group mappings cannot match and only the Role for unmatched users applies: the token and userinfo of the last sign-in lacked it, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 type OidcWarningKind string
 
 // Organization defines model for Organization.

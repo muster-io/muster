@@ -39,7 +39,7 @@ describe("OIDC warnings", () => {
     await expect
       .element(
         warning.getByText(
-          'No sign-in has shown the groups claim "idp-groups" yet, so group mappings cannot match and only the Role for users without a matching group applies.',
+          "The last sign-in carried no groups claim ‘idp-groups’, or no sign-in has carried it yet, so group mappings cannot match and only the Role for users without a matching group applies.",
           { exact: true },
         ),
       )
@@ -75,7 +75,7 @@ describe("OIDC warnings", () => {
       )
       .toBeVisible();
     await expect
-      .element(warnings.filter({ hasText: 'No sign-in has shown the groups claim "groups" yet' }))
+      .element(warnings.filter({ hasText: "The last sign-in carried no groups claim ‘groups’" }))
       .toBeVisible();
   });
 
@@ -91,7 +91,7 @@ describe("OIDC warnings", () => {
         screen
           .getByTestId("oidc-warning")
           .getByText(
-            "Ни один вход ещё не передал claim с группами «groups», поэтому сопоставления групп не сработают и будет назначаться только роль для пользователей без подходящей группы.",
+            "Claim с группами «groups» не пришёл при последнем входе или ещё ни при одном входе, поэтому сопоставления групп не сработают: назначается только роль для пользователей без подходящей группы.",
             { exact: true },
           ),
       )

@@ -149,7 +149,7 @@ func (s *memStore) RecordGroupsClaimInTokens(_ context.Context, a dbgen.RecordGr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.writes++
-	if s.settings == nil {
+	if s.settings == nil || s.settings.GroupsClaim != a.GroupsClaim || s.settings.IssuerUrl != a.IssuerUrl {
 		return nil
 	}
 	if a.Found {
@@ -168,7 +168,7 @@ func (s *memStore) RecordGroupsClaimAdvertised(_ context.Context, a dbgen.Record
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case s.settings == nil:
+	case s.settings == nil, s.settings.GroupsClaim != a.GroupsClaim, s.settings.IssuerUrl != a.IssuerUrl:
 	case a.Advertised:
 		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
 	case !s.settings.GroupsClaimSeenAt.Valid && !s.settings.GroupsClaimMissingSince.Valid:

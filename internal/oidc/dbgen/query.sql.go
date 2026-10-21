@@ -919,20 +919,29 @@ SET groups_claim_missing_since = CASE
         WHEN groups_claim_seen_at IS NOT NULL THEN groups_claim_missing_since
         ELSE coalesce(groups_claim_missing_since, $2::timestamptz)
     END
-WHERE org_id = $3
+WHERE org_id = $3 AND groups_claim = $4 AND issuer_url = $5
 `
 
 type RecordGroupsClaimAdvertisedParams struct {
-	Advertised bool
-	At         time.Time
-	OrgID      int64
+	Advertised  bool
+	At          time.Time
+	OrgID       int64
+	GroupsClaim string
+	IssuerUrl   string
 }
 
 // RecordGroupsClaimAdvertised records what a check found in discovery: a listed claim clears the warning; an unlisted
 // one raises it only while no sign-in has seen the claim in a token, since the list is optional and some identity
-// providers leave the claims of their mappers out of it.
+// providers leave the claims of their mappers out of it. It changes nothing when an Admin saved another groups claim or
+// issuer since the check read them.
 func (q *Queries) RecordGroupsClaimAdvertised(ctx context.Context, arg RecordGroupsClaimAdvertisedParams) error {
-	_, err := q.db.Exec(ctx, recordGroupsClaimAdvertised, arg.Advertised, arg.At, arg.OrgID)
+	_, err := q.db.Exec(ctx, recordGroupsClaimAdvertised,
+		arg.Advertised,
+		arg.At,
+		arg.OrgID,
+		arg.GroupsClaim,
+		arg.IssuerUrl,
+	)
 	return err
 }
 
@@ -943,20 +952,29 @@ SET groups_claim_seen_at = CASE WHEN $1::boolean THEN $2::timestamptz END,
         WHEN $1::boolean THEN NULL
         ELSE coalesce(groups_claim_missing_since, $2::timestamptz)
     END
-WHERE org_id = $3
+WHERE org_id = $3 AND groups_claim = $4 AND issuer_url = $5
 `
 
 type RecordGroupsClaimInTokensParams struct {
-	Found bool
-	At    time.Time
-	OrgID int64
+	Found       bool
+	At          time.Time
+	OrgID       int64
+	GroupsClaim string
+	IssuerUrl   string
 }
 
 // RecordGroupsClaimInTokens records what a sign-in or a link found in the identity provider's tokens: with the claim,
-// when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. The
-// warning is not a configured value, so the version stays.
+// when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. It
+// changes nothing when an Admin saved another groups claim or issuer since the sign-in read them. The warning is not a
+// configured value, so the version stays.
 func (q *Queries) RecordGroupsClaimInTokens(ctx context.Context, arg RecordGroupsClaimInTokensParams) error {
-	_, err := q.db.Exec(ctx, recordGroupsClaimInTokens, arg.Found, arg.At, arg.OrgID)
+	_, err := q.db.Exec(ctx, recordGroupsClaimInTokens,
+		arg.Found,
+		arg.At,
+		arg.OrgID,
+		arg.GroupsClaim,
+		arg.IssuerUrl,
+	)
 	return err
 }
 
