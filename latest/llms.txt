@@ -27,7 +27,7 @@
 
 ### Write a bridge in Python
 
-1. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-python-library): The Python library. The libraries are released when Muster's first release is. Until then the package is not on PyPI: install it from a clone of its repository with `git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python`, then `python3 -m venv .venv && . .venv/bin/activate` and `pip install .`.
+1. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-python-library): The Python library, installed in a virtual environment, `python3 -m venv .venv && . .venv/bin/activate`, with `pip install muster-bridge`. Its versions stay `0.x` until Muster 1.0.
 2. [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): the Bridge Connection and its Destinations, as an Admin sets them up.
 3. [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) and its specification, [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml).
 4. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
@@ -165,4 +165,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 716556 bytes, about 179139 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 715082 bytes, about 178770 tokens.

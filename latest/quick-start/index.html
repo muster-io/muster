@@ -2837,13 +2837,6 @@ Muster beside its own PostgreSQL; for a production installation, <a href="../ins
   browser["Browser"] -- "web UI, port 8080" --&gt; muster
   muster --&gt; pg["PostgreSQL"]</code></pre>
 <h2 id="start-muster">Start Muster<a class="headerlink" href="#start-muster" title="Permanent link">&para;</a></h2>
-<div class="admonition note">
-<p class="admonition-title">Before the first release</p>
-<p>Until Muster's first release, the tag in the download command below does not exist yet. Download from <code>master</code>
-instead: replace the tag in the URL, the part that starts with <code>v</code>, with <code>master</code>. Then, after you write <code>.env</code>,
-append the development image to it with <code>echo MUSTER_IMAGE=ghcr.io/muster-io/muster:edge &gt;&gt; .env</code>: <code>edge</code> is the
-image built from the newest commit on <code>master</code>.</p>
-</div>
 <p>Download the compose example into a new directory:</p>
 <!-- quickstart -->
 <div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>muster<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster

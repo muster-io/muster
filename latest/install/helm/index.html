@@ -2914,21 +2914,11 @@ include PostgreSQL: Muster takes an <a href="../database/">external database</a>
 <div class="highlight"><pre><span></span><code>helm<span class="w"> </span>install<span class="w"> </span>muster<span class="w"> </span>oci://ghcr.io/muster-io/charts/muster<span class="w"> </span>--version<span class="w"> </span>&lt;version&gt;<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--namespace<span class="w"> </span>muster<span class="w"> </span>--create-namespace<span class="w"> </span>-f<span class="w"> </span>values.yaml
 </code></pre></div>
+<p><code>&lt;version&gt;</code> is a Muster release without the <code>v</code>, such as <code>0.1.0</code> for the release <code>v0.1.0</code>. The chart's <code>appVersion</code> is
+the release's tag, and <code>image.tag</code> defaults to it, so each chart runs the image of its own release.</p>
 <p>The release signs the chart with cosign, keyless, as it signs the image; <a href="../versions/#verify-a-release">Verify a release</a>
 shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
 with its changes and the image it runs, pinned by digest: <a href="https://artifacthub.io/packages/search?repo=muster">Muster on Artifact Hub</a>.</p>
-<div class="admonition note">
-<p class="admonition-title">Before the first release</p>
-<p>Nothing is released yet, so the registry holds no chart. Install it from a clone of the repository instead, with the
-development image of <code>master</code>:</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/muster-io/muster<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster
-helm<span class="w"> </span>install<span class="w"> </span>muster<span class="w"> </span>deploy/helm/muster<span class="w"> </span>--namespace<span class="w"> </span>muster<span class="w"> </span>--create-namespace<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-f<span class="w"> </span>values.yaml<span class="w"> </span>--set<span class="w"> </span>image.tag<span class="o">=</span>edge
-</code></pre></div>
-<p>The chart in the repository has the version <code>0.0.0</code>, and its <code>image.tag</code> defaults to <code>appVersion</code>, which names no
-existing image. A release sets the chart's version to its tag without the <code>v</code>, such as <code>1.2.3</code>, and <code>appVersion</code> to
-the tag itself, such as <code>v1.2.3</code>.</p>
-</div>
 <h2 id="create-the-secret">Create the Secret<a class="headerlink" href="#create-the-secret" title="Permanent link">&para;</a></h2>
 <p>The chart never generates the master keys. Create a Secret yourself and name it in <code>existingSecret</code>; rendering fails
 without it. The Secret holds, under the key names that the values <code>masterKeysKey</code>, <code>database.passwordKey</code> and

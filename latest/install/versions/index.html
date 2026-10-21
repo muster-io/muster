@@ -2902,16 +2902,11 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 <li><code>sha-&lt;7 hex digits&gt;</code>: the development image of one commit.</li>
 </ul>
 <h2 id="verify-a-release">Verify a release<a class="headerlink" href="#verify-a-release" title="Permanent link">&para;</a></h2>
-<div class="admonition note">
-<p class="admonition-title">Before the first release</p>
-<p>No release exists yet, so there is nothing to verify, and the commands below have not been run against a real
-release. The development images, <code>edge</code> and <code>sha-…</code>, are <strong>not signed</strong> and carry no SBOM attestation: the workflow
-that builds them skips signing. Use these commands from the first release on, with its tag.</p>
-</div>
-<p>A release is built by the workflow <code>release.yml</code> of the repository, on a tag <code>vX.Y.Z</code>. It signs the container image
-and the Helm chart with <a href="https://docs.sigstore.dev/cosign/">cosign</a>, keyless, with the identity of that workflow run, so
-a valid signature proves that the image or the chart was built by that workflow on that tag. Install cosign v3 or newer
-(the release signs with v3.1.3, in the new signature format), then verify the image:</p>
+<p>A release is built by the workflow <code>release.yml</code> of the repository, on a tag <code>vX.Y.Z</code>. It signs the container image and
+the Helm chart with <a href="https://docs.sigstore.dev/cosign/">cosign</a>, keyless, with the identity of that workflow run, so a
+valid signature proves that the image or the chart was built by that workflow on that tag. The development images,
+<code>edge</code> and <code>sha-…</code>, are <strong>not signed</strong> and carry no SBOM attestation: the workflow that builds them skips signing.
+Install cosign v3 or newer (the release signs with v3.1.3, in the new signature format), then verify the image:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">VERSION</span><span class="o">=</span>vX.Y.Z
 cosign<span class="w"> </span>verify<span class="w"> </span>ghcr.io/muster-io/muster:<span class="nv">$VERSION</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--certificate-identity<span class="w"> </span><span class="s2">"https://github.com/muster-io/muster/.github/workflows/release.yml@refs/tags/</span><span class="nv">$VERSION</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>

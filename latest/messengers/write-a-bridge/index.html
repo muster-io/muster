@@ -3580,10 +3580,9 @@ same holds for every bridge library of the project.</p>
 <p>The Go module is <code>github.com/muster-io/muster-bridge-go</code>, and its package is <code>bridge</code>.</p>
 <div class="highlight"><pre><span></span><code>go<span class="w"> </span>get<span class="w"> </span>github.com/muster-io/muster-bridge-go
 </code></pre></div>
-<p>The libraries are released when Muster's first release is, and <code>go get</code> without a version takes the latest commit of the
-module's <code>master</code> branch until then. Each release is a tag <code>vX.Y.Z</code>. Versions stay <code>0.x</code> until Muster 1.0, and every
-library release speaks the protocol versions Muster supports at that time, today protocol version 1; a breaking protocol
-change is a new protocol version, not a new major version of a library.</p>
+<p>Each release of a library is a tag <code>vX.Y.Z</code>, and <code>go get</code> without a version takes the newest release. Versions stay
+<code>0.x</code> until Muster 1.0, and every library release speaks the protocol versions Muster supports at that time, today
+protocol version 1; a breaking protocol change is a new protocol version, not a new major version of a library.</p>
 <p><strong>1. Implement <code>bridge.Messenger</code>.</strong> It has five methods, each given the name of the bot whose token Muster sent:
 <code>PostMessage</code>, <code>EditMessage</code>, <code>ReplyInThread</code>, <code>CheckChannel</code> and <code>AnswerEvent</code>. The sketch below is for Parley, a
 fictional messenger; its client <code>parleyClient</code> stands for whatever library your messenger has.</p>
@@ -3774,9 +3773,9 @@ every feature of the protocol. In another terminal:</p>
 curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s1">'Authorization: Bearer example-token'</span><span class="w"> </span><span class="m">127</span>.0.0.1:18095/v1/info<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">'{protocol_version, user_lookup}'</span><span class="w">                                 </span><span class="c1"># {"protocol_version":"1","user_lookup":"login"}</span>
 </code></pre></div>
-<p>Then run <code>muster bridge check</code> against it, here from Muster's development image, which reaches the host's loopback
-with <code>--network host</code> on Linux only:</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>-v<span class="w"> </span>/tmp/bt:/token:ro<span class="w"> </span>ghcr.io/muster-io/muster:edge<span class="w"> </span>bridge<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
+<p>Then run <code>muster bridge check</code> against it, here from Muster's image, which reaches the host's loopback with
+<code>--network host</code> on Linux only:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>-v<span class="w"> </span>/tmp/bt:/token:ro<span class="w"> </span>ghcr.io/muster-io/muster:latest<span class="w"> </span>bridge<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>http://127.0.0.1:18095<span class="w"> </span>--token-file<span class="w"> </span>/token<span class="w"> </span>--channel<span class="w"> </span>alerts<span class="w"> </span>--forbidden-channel<span class="w"> </span>nobot<span class="w"> </span>--handle<span class="w"> </span>alice<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--no-interactive
 </code></pre></div>
@@ -3802,15 +3801,10 @@ PASS answer
 <p>The Python library is <code>muster-bridge</code> on PyPI, and its import package is <code>muster_bridge</code>. It needs Python 3.11 or
 newer and depends only on Starlette, httpx and pydantic 2. Like the Go library, it is released from its own repository,
 <code>muster-bridge-python</code>, under the MIT licence and without a CLA.</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>muster-bridge
+<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>.<span class="w"> </span>.venv/bin/activate
+pip<span class="w"> </span>install<span class="w"> </span>muster-bridge
 </code></pre></div>
-<p>The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
-<code>pip install muster-bridge</code> finds nothing: install it from a clone of its repository with <code>pip install .</code>. Its versions
-stay <code>0.x</code> until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/muster-io/muster-bridge-python<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-python
-python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>.<span class="w"> </span>.venv/bin/activate
-pip<span class="w"> </span>install<span class="w"> </span>.
-</code></pre></div>
+<p>Its versions stay <code>0.x</code> until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.</p>
 <p>The library serves the protocol as an ASGI application, <code>BridgeApp</code>, and calls your code with <code>async</code> methods on the
 event loop that serves the bridge. Call your messenger with an asynchronous client, or move a blocking call off the
 loop with <code>asyncio.to_thread</code>.</p>
@@ -4017,9 +4011,10 @@ it as <code>Config(store=...)</code>. Long polls and pushes are woken in the pro
 processes over one store, run each bot in one process only.</p>
 <p><strong>8. Check it.</strong> Run <code>muster bridge check</code> against your bridge (see <a href="#test-your-bridge">Test your bridge</a>).</p>
 <p>The library's repository has a complete bridge in one file, <code>examples/memory_bridge.py</code>: its messenger lives in memory
-and writes every message the bot posts to the log. In the clone, with the library installed as above, install uvicorn
-beside it and run the example with a token, the one a Bridge Connection in Muster would hold:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>uvicorn
+and writes every message the bot posts to the log. With the library installed as above, clone the repository, install
+uvicorn beside the library and run the example with a token, the one a Bridge Connection in Muster would hold:</p>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/muster-io/muster-bridge-python<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-python
+pip<span class="w"> </span>install<span class="w"> </span>uvicorn
 <span class="nb">printf</span><span class="w"> </span>example-token<span class="w"> </span>&gt;<span class="w"> </span>/tmp/bt
 python<span class="w"> </span>examples/memory_bridge.py<span class="w"> </span>--token-file<span class="w"> </span>/tmp/bt
 </code></pre></div>
@@ -4035,9 +4030,9 @@ loopback.</p>
 that runs in memory, with a web page: channels, Threads, buttons, direct chats between a person and the bot, and users
 found by login. It offers every feature of the protocol, one by one switchable, and both event delivery modes. Use it
 to try Muster without a real messenger, and as a reference for your own bridge.</p>
-<p>Its image is <code>ghcr.io/muster-io/muster-example-bridge</code>. Until the libraries' first release, use the tag <code>edge</code>, which
-follows the <code>master</code> branch of the library's repository; releases will be tagged <code>vX.Y.Z</code>.</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8095</span>:8095<span class="w"> </span>-e<span class="w"> </span><span class="nv">BRIDGE_TOKEN</span><span class="o">=</span>example-token<span class="w"> </span>ghcr.io/muster-io/muster-example-bridge:edge
+<p>Its image is <code>ghcr.io/muster-io/muster-example-bridge</code>, tagged <code>vX.Y.Z</code> with each release of the Go library; <code>edge</code>
+follows the <code>master</code> branch of the library's repository.</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8095</span>:8095<span class="w"> </span>-e<span class="w"> </span><span class="nv">BRIDGE_TOKEN</span><span class="o">=</span>example-token<span class="w"> </span>ghcr.io/muster-io/muster-example-bridge:v0.1.0
 </code></pre></div>
 <p>The page is then at <code>http://127.0.0.1:8095/</code>, and the protocol under <code>/v1/</code> on the same port. <code>BRIDGE_FEATURES</code> limits
 the features the example offers, comma-separated: with <code>BRIDGE_FEATURES=thread_messages</code>, for one, it shows no buttons,
@@ -4077,7 +4072,7 @@ name and nothing on the host's loopback is involved.</p>
 cat<span class="w"> </span>&gt;compose.override.yaml<span class="w"> </span><span class="s">&lt;&lt;'EOF'</span>
 <span class="s">services:</span>
 <span class="s">  example-bridge:</span>
-<span class="s">    image: ghcr.io/muster-io/muster-example-bridge:edge</span>
+<span class="s">    image: ghcr.io/muster-io/muster-example-bridge:v0.1.0</span>
 <span class="s">    environment:</span>
 <span class="s">      BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}</span>
 <span class="s">    ports:</span>
@@ -5011,8 +5006,8 @@ bridge does not declare is skipped.</p>
 prints <code>PUSH &lt;url&gt; &lt;secret&gt;</code> (or <code>PUSH &lt;url&gt;</code> with <code>--push-secret-file</code>): point your bridge's push target there with
 that secret. Before it waits, up to five minutes, for a press, it prints <code>WAIT press: …, message_id &lt;id&gt;</code>; press a
 button of that message in your messenger, or play the person in a script.</p>
-<p>The check runs from the <code>muster</code> binary, or from the development image:</p>
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/token:/token:ro"</span><span class="w"> </span>ghcr.io/muster-io/muster:edge<span class="w"> </span>bridge<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
+<p>The check runs from the <code>muster</code> binary, or from Muster's image:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>-v<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/token:/token:ro"</span><span class="w"> </span>ghcr.io/muster-io/muster:latest<span class="w"> </span>bridge<span class="w"> </span>check<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>http://127.0.0.1:18095<span class="w"> </span>--token-file<span class="w"> </span>/token<span class="w"> </span>--channel<span class="w"> </span>alerts<span class="w"> </span>--forbidden-channel<span class="w"> </span>nobot<span class="w"> </span>--handle<span class="w"> </span>alice<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--no-interactive
 </code></pre></div>
