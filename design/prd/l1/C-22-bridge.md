@@ -269,8 +269,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   signed, with retries, and turns a direct message that carries an Account link token into an `account_link` event.
   Each library keeps a copy of `api/bridge.yaml`, generates its types from it and fails its CI when the copy differs
   from the one on Muster's `master`; its CI runs `muster bridge check` from Muster's development image against a bridge
-  built on it. The libraries are `0.x` until Muster's first release, then `1.x` for protocol version 1; a Go release is
-  a tag, a Python release is published to PyPI.
+  built on it. The libraries stay `0.x` until Muster 1.0, and every `0.x` release speaks protocol version 1; a Go
+  release is a tag, a Python release is published to PyPI.
 
 ## UI
 

@@ -20,7 +20,7 @@ table in the same pull request.
 | `MUSTER_DATABASE_SESSION_URL`, or `MUSTER_DATABASE_SESSION_HOST` and `_PORT` | the main connection; other fields inherited | environment | C-02 | decided |
 | `pool_max_conns` of `MUSTER_DATABASE_URL` | max(10, CPUs) connections in a replica's main pool when the URL sets none, also with the `MUSTER_DATABASE_*` fields; the session connections (the LISTEN connection, the Leader's and partition maintenance's) come on top, about 3 per replica | environment | C-02 | P-50 |
 | `MUSTER_SECRET_KEYS` / `_FILE` | none (required) | environment | C-02 | decided |
-| `MUSTER_PUBLIC_URL` | none (required) | environment | C-02 | decided |
+| `MUSTER_PUBLIC_URL` | none (required); plain `http` only on `localhost`, a name under `.localhost` or a loopback address, else the start logs `public_url_insecure` | environment | C-02 | decided |
 | `MUSTER_INGEST_URL` | `MUSTER_PUBLIC_URL` | environment | C-02 | decided |
 | `MUSTER_LISTEN_APP` / `MUSTER_LISTEN_INGEST` / `MUSTER_LISTEN_INTERNAL` | `:8080` / `:8081` / `:8082` (not `:9090`, which Prometheus uses by default); the compose example sets ingest to the app address | environment | C-02 | decided |
 | `MUSTER_LOG_LEVEL` | `info`; one of `info`, `warn` and `error`, the levels of the log event registry | environment | C-02 | decided |
@@ -55,7 +55,7 @@ table in the same pull request.
 | `auth.session_idle_timeout` / `auth.session_lifetime` | 12 h / 7 days | built in | C-03 | decided |
 | `auth.oidc_recheck_interval` | 15 min; a background re-check of every OIDC user with an offline token and a live session or a usable Personal access token | built in | C-03 | decided |
 | `auth.oidc_fallback_session_lifetime` | 12 h from sign-in, for an OIDC session of a user without an offline token | built in | C-03 | decided |
-| `auth.oidc_token_grace` | 7 days since the owner's last OIDC sign-in; only for OIDC accounts without an offline token | Organization | C-04, C-20 | decided |
+| `auth.oidc_token_grace` | 7 days since the owner's last OIDC sign-in; only for OIDC accounts without an offline token; days in the UI, seconds in the API (`oidc_token_grace_seconds`) | Organization | C-04, C-20 | decided |
 | `auth.password_setup_link_ttl` | single use, 24 h | built in | C-03 | decided |
 | `auth.password_setup_prune_after` | 7 days after a password setup link expired, used and superseded links included, so that a late click still answers `410` instead of `404`; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-03 | decided |
 | `auth.password_min_length` | 12 characters | built in | C-03 | decided |

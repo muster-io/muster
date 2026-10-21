@@ -79,8 +79,8 @@ You write:
 - the reports of what people do: a press, a message in a Thread, a deleted message and a direct message;
 - the rendering of the envelope in the messenger's markup (see [Rendering the envelope](#rendering-the-envelope)).
 
-The Go library, `muster-bridge-go`, follows the protocol's major version and is released from its own repository,
-under the MIT licence and without a CLA. The same holds for every bridge library of the project.
+The Go library, `muster-bridge-go`, is released from its own repository, under the MIT licence and without a CLA. The
+same holds for every bridge library of the project.
 
 ### The Go library
 
@@ -90,9 +90,10 @@ The Go module is `github.com/muster-io/muster-bridge-go`, and its package is `br
 go get github.com/muster-io/muster-bridge-go
 ```
 
-The libraries are released when Muster's first release is. The module is at `0.x` until then, and `go get` without a
-version takes the latest commit of its `master` branch. From the first release, `1.x` speaks protocol version 1, and
-each release is a tag `vX.Y.Z`.
+The libraries are released when Muster's first release is, and `go get` without a version takes the latest commit of
+the module's `master` branch until then. Each release is a tag `vX.Y.Z`. Versions stay `0.x` until Muster 1.0, and every
+`0.x` release speaks protocol version 1; a breaking protocol change would be a new protocol version, not a new major
+version of a library.
 
 **1. Implement `bridge.Messenger`.** It has five methods, each given the name of the bot whose token Muster sent:
 `PostMessage`, `EditMessage`, `ReplyInThread`, `CheckChannel` and `AnswerEvent`. The sketch below is for Parley, a
@@ -350,8 +351,8 @@ pip install muster-bridge
 ```
 
 The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
-`pip install muster-bridge` finds nothing: install it from a clone of its repository with `pip install .`. Its version
-is `0.x` until Muster's first release; from then, `1.x` speaks protocol version 1.
+`pip install muster-bridge` finds nothing: install it from a clone of its repository with `pip install .`. Its versions
+stay `0.x` until Muster 1.0, and every `0.x` release speaks protocol version 1, as the Go library's do.
 
 ```sh
 git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python

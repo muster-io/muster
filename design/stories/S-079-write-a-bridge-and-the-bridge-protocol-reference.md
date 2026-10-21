@@ -59,21 +59,21 @@ issue: 237
   and direct messages, a `Store` that survives restarts, and `muster bridge check` against it, with the minimal example
   of the library's README; the example bridge on the library, its image `ghcr.io/muster-io/muster-example-bridge:edge`
   until the libraries' first release, then the tag `vX.Y.Z` (D366), and how to try it next to `muster dev`; that the
-  libraries follow the protocol's major version and are released from their own repositories. Then, for a bridge written
-  without a library, the protocol in the order a bridge author implements it — `getInfo`, `checkChannel`, `postMessage`,
-  `editMessage`, `replyInThread`, events — with the request and answer of each, taken from the examples of
-  `api/bridge.yaml` where it has them and otherwise built from its schemas and valid against them; required and optional
-  features and how Muster behaves without each (no buttons: the commands line and Text commands; no direct messages:
-  tokens only); rendering the envelope: the CommonMark Muster writes, Mention markers, colours and emoji, Quiet
-  messages; `Idempotency-Key`, why a bridge must keep keys for 24 hours and keep them per token; `thread_ref`;
-  confirming presses at once and answering later through `answerEvent`; the error classes with an example mapping for a
-  fictional messenger, who decides `gone`, why a missing channel is `forbidden`, how Muster reads an answer without a
-  `class` (and never as `gone`), the `edit_window_closed` reason and what Muster does past an edit window; safe
-  truncation; polling with cursors and pushing with Standard Webhooks signatures, with a verification snippet; testing
-  with `muster bridge check`, the fake bridge of `muster dev` and the example bridge; running a bridge — its token and
-  push secret, logs without secrets, monitoring through the Destination's health; the licence — the protocol, the
-  libraries and the example are MIT, a bridge may stay closed, the libraries take contributions without a CLA, and
-  contributions to `api/bridge.yaml` in Muster's repository fall under the CLA.
+  libraries stay `0.x` until Muster 1.0, speak protocol version 1 and are released from their own repositories. Then,
+  for a bridge written without a library, the protocol in the order a bridge author implements it — `getInfo`,
+  `checkChannel`, `postMessage`, `editMessage`, `replyInThread`, events — with the request and answer of each, taken
+  from the examples of `api/bridge.yaml` where it has them and otherwise built from its schemas and valid against them;
+  required and optional features and how Muster behaves without each (no buttons: the commands line and Text commands;
+  no direct messages: tokens only); rendering the envelope: the CommonMark Muster writes, Mention markers, colours and
+  emoji, Quiet messages; `Idempotency-Key`, why a bridge must keep keys for 24 hours and keep them per token;
+  `thread_ref`; confirming presses at once and answering later through `answerEvent`; the error classes with an example
+  mapping for a fictional messenger, who decides `gone`, why a missing channel is `forbidden`, how Muster reads an
+  answer without a `class` (and never as `gone`), the `edit_window_closed` reason and what Muster does past an edit
+  window; safe truncation; polling with cursors and pushing with Standard Webhooks signatures, with a verification
+  snippet; testing with `muster bridge check`, the fake bridge of `muster dev` and the example bridge; running a bridge
+  — its token and push secret, logs without secrets, monitoring through the Destination's health; the licence — the
+  protocol, the libraries and the example are MIT, a bridge may stay closed, the libraries take contributions without a
+  CLA, and contributions to `api/bridge.yaml` in Muster's repository fall under the CLA.
 - **Reference** (`Makefile`, `.gitignore`, `internal/tools/refgen`): `make docs` builds
   `docs/reference/bridge/spec/index.html` from `api/bridge.yaml` with the same Redocly command as the API reference and
   the same rewrite that `docs-api` applies since the documentation site stopped loading third-party scripts: Redoc from

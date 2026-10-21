@@ -70,6 +70,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   sessions, while the session that made the change continues.
   OIDC accounts are re-checked at the IdP in the background (FR-30). Users can list their sessions and end all of them
   from the profile (`me/sessions`).
+  The cookie is never weakened, so a browser keeps it only over HTTPS or on `localhost`: when `MUSTER_PUBLIC_URL` is
+  plain `http` on a host that is not `localhost`, a name under `.localhost` or a loopback address, the server logs
+  `public_url_insecure` (WARN, with the host) at start.
 - **C-03.FR-10** TOTP (RFC 6238) is available to every user, local or OIDC, enrolled from the profile with a QR code and
   confirmed with a first code; enrolment issues `auth.totp_recovery_codes` single-use recovery codes, shown once. A user
   with TOTP gives the code (or a recovery code) as the second step of every sign-in, local or OIDC (FR-24). The
@@ -143,7 +146,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   (`sessions/current/totp`); under a TOTP policy that covers a user without TOTP the session is
   `totp_enrolment_required`. A limited session can read itself, sign out, give the code or enrol; every other call is
   refused with `403` and the code `totp_required` or `totp_enrolment_required`. A wrong login, password or code is `401`
-  and never says which part was wrong.
+  and never says which part was wrong. When the page is not a secure context, where the browser drops the session
+  cookie (FR-9), the sign-in page says so above the form, which stays usable: sign-in needs HTTPS, or an SSH tunnel to
+  `localhost`.
 - **C-03.FR-25** OIDC sign-in flow. `sessions/oidc/start` redirects the browser to the IdP with PKCE (`S256`), `state`
   and `nonce`, all mandatory; the redirect URI to register at the IdP is
   `MUSTER_PUBLIC_URL/api/v1/sessions/oidc/callback` on the app listener. The callback always ends in a redirect to the
