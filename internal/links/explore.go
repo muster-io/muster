@@ -44,7 +44,7 @@ const ExploreTemplate = `{{- $key := or .Labels.environment .Labels.cluster -}}
 
 // previousExploreTemplates are the URL templates the built-in rule was created with before ExploreTemplate, oldest
 // first. The first one passed a missing key to lookup, which failed for an Alert Group without the environment and
-// the cluster label.
+// the cluster label until a missing label became empty text.
 var previousExploreTemplates = []string{
 	`{{- $key := or .Labels.environment .Labels.cluster -}}
 {{- $address := lookup "grafana" $key "address" -}}

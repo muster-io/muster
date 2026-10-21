@@ -96,7 +96,8 @@ requests go through Muster's outbound address policy and the Destination's proxy
 
 Alert data reach the templates **as received**, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with `toJson` (or `js` inside a string), so that a label with a quote or a line break cannot
-break the body.
+break the body. A label or annotation the Alerts do not have is empty text, as in Alertmanager, so `toJson` gives
+`""`, not `null`; tell a missing value apart with `if` or `or`, as in `{{ or .CommonLabels.team "none" }}`.
 
 Read a Secret as `{{ .Secrets.<name> }}` and an extracted value as `{{ .Response.<name> }}` — or with `$.` in front, or
 as `{{ index .Secrets "<name>" }}` with a quoted name. Any other use, such as `{{ with .Secrets }}`, `{{ $s := .Secrets }}`

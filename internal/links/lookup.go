@@ -725,8 +725,12 @@ func (s *Service) newLookups(ctx context.Context, q Queries) *lookups {
 // errTooManyLookups is a render that reads more than MaxLookups rows.
 var errTooManyLookups = fmt.Errorf("lookup: the templates read more than %d rows", MaxLookups)
 
-// lookup reads one cell: a missing table, key or column is the empty string.
+// lookup reads one cell: a missing table, key or column is the empty string. An empty table name or key, as a missing
+// label gives, matches no row, since neither can be empty, and costs no read.
 func (l *lookups) lookup(table, key, column string) (string, error) {
+	if table == "" || key == "" {
+		return "", nil
+	}
 	if !readable(table) || !readable(key) {
 		return "", nil // no table or key has such a name, and the database would refuse it
 	}
