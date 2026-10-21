@@ -126,7 +126,7 @@
       enabled: false,
     },
     // The example bridge that the end-to-end tests run (ADR-0017): a pull request of its own, so that a red run names
-    // the image that broke. A new digest of its edge tag has no release date, which minimumReleaseAge would wait for
+    // the image that broke. GitHub Container Registry reports no release date, which minimumReleaseAge would wait for
     // forever.
     {
       matchDatasources: ["docker"],

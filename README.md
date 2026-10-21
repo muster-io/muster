@@ -26,12 +26,16 @@ Connect, or with a token for automation — and each User's Role, Admin, Respond
 change. People link their messenger accounts to their User themselves, with
 [Account links](docs/messengers/account-links.md), so that a button pressed in a messenger acts as them.
 
-## Status
+## Install
 
-The first release, L1, is being completed: the features listed under L1 below are implemented, and there is no release
-yet. Each commit on `master` is built into a development image, and `ghcr.io/muster-io/muster:edge` is the newest. To
-try it, follow [Quick start](docs/quick-start.md) with its note for the time before the first release; the
-[documentation](https://muster-io.github.io/muster/) covers installing, connecting Alertmanager and messengers, and
+The first release, L1, is Muster `0.1.x`. [Requirements and tested versions](docs/install/versions.md) lists what
+Muster needs and explains its version numbers and image tags.
+
+- [Quick start](docs/quick-start.md): Docker Compose on one machine, beside its own PostgreSQL, in about five minutes.
+- [Install with Helm](docs/install/helm.md): the chart `oci://ghcr.io/muster-io/charts/muster` on Kubernetes, with an
+  external PostgreSQL.
+
+The [documentation](https://muster-io.github.io/muster/) covers installing, connecting Alertmanager and messengers, and
 running Muster. The product requirements, architecture decisions, database schema, API specification and the story
 contracts that the implementation follows are in [`design/`](design/) and [`api/`](api/).
 
