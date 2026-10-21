@@ -40,9 +40,24 @@ Create one **Integration** for each Grafana cluster, and for each Grafana organi
 
 ### Create the Integration and a token
 
-In **Integrations**, create the Integration, then **Create token**. Muster shows the token **once**, with a snippet for
-Alertmanager; Grafana needs only the token (`mstr_int_…`), the `credentials` of that snippet. Copy it before you close
-the dialog.
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name**, such as `grafana-prod`, and
+   add the [Static labels](alertmanager.md#static-labels) with **Add label**, such as `cluster=prod-eu`. Select
+   **Create**.
+
+    ![The form of a new Integration: the name grafana-prod and the Static label cluster=prod-eu](../assets/screenshots/integrations/grafana/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `grafana`, and
+   select **Create**. Muster shows the token **once**, with a snippet for Alertmanager; Grafana needs only the
+   **Token** (`mstr_int_…`), the `credentials` of that snippet. Copy it with **Copy** before you select **Done**.
+
+    ![The dialog Token created with the token outlined, above the Alertmanager configuration that Grafana does not need](../assets/screenshots/integrations/grafana/02-token.png){ .screenshot }
+
+3. Create the contact point and the notification policy in Grafana, as the next two sections say. Once Grafana sends
+   its first Snapshot, the Integration page shows it under **Snapshots**: the time of the last one and how many were
+   received. In the screenshot, the address starts with `http://localhost:8081`, the ingest address of a development
+   installation; yours starts with your `MUSTER_INGEST_URL`.
+
+    ![The Integration grafana-prod after the first Snapshot from Grafana: the last Snapshot and one Snapshot received](../assets/screenshots/integrations/grafana/03-first-snapshot.png){ .screenshot }
 
 ### Create a webhook contact point
 
@@ -107,7 +122,8 @@ In **Alerting** → **Notification policies**, send the alerts to the contact po
   **Alerting** → **Settings**.
 
 On its first start, Grafana applies provisioned policies within about a minute. Grafana sends the first Snapshot when
-an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received.
+an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received, as
+in [Create the Integration and a token](#create-the-integration-and-a-token).
 
 ### Repeat intervals
 

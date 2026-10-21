@@ -1608,6 +1608,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#create-a-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create a Route
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2967,6 +2978,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#create-a-route" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create a Route
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3049,6 +3071,13 @@ from fields; the API takes the same structure; an invalid expression is refused 
 <dd>Takes everything except the Watchdog.</dd>
 </dl>
 <p>A missing label counts as an empty value. So <code>team!="payments"</code> also matches an Alert that has no <code>team</code> label.</p>
+<p>In the Route editor, under <strong>Matchers</strong>:</p>
+<ol>
+<li>Select <strong>Add matcher</strong>. A row appears with the label, the operator and the value.</li>
+<li>Enter the label, such as <code>team</code>, choose the operator, <code>=</code> by default, and enter the value, such as <code>payments</code>. The ×
+   at the end of a row removes it.</li>
+</ol>
+<p><img alt="The Matchers of a Route: one row, team = payments, and the button Add matcher" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/01-matchers.png" /></p>
 <h3 id="order-and-the-default-route">Order, and the Default route<a class="headerlink" href="#order-and-the-default-route" title="Permanent link">&para;</a></h3>
 <p>Routes are evaluated in list order, and the first Route that matches takes the Alert. Put the narrow Routes first and
 the broad ones after them. Drag the Routes on the Routes page to reorder them.</p>
@@ -3168,6 +3197,12 @@ labels go to the same Alert Group. A label that an Alert lacks counts as an empt
 with one Acknowledge. A fine key gives more Alert Groups and a clearer ownership of each. Pick the labels that tell
 "who should look at this" apart. A good start is the labels your teams split on: the alert name, the cluster and the
 namespace or the service.</p>
+<p>In the Route editor, the <strong>Group key</strong> shows its labels in order:</p>
+<ol>
+<li>To take a label out, select the × next to it.</li>
+<li>To add one, type its name in the field under the labels and select <strong>Add label</strong>.</li>
+</ol>
+<p><img alt="The Group key of a new Route, alertname, severity and cluster, beside its preview: 2 Alert Groups" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/02-group-key.png" /></p>
 <h3 id="preview-before-you-save">Preview before you save<a class="headerlink" href="#preview-before-you-save" title="Permanent link">&para;</a></h3>
 <p>The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
 default, at most the retention of Stored Snapshots; <code>routing.group_key_preview_period</code>) and shows how many Alert Groups
@@ -3175,6 +3210,16 @@ the current and the proposed key would produce, with the 5 largest as examples (
 It covers the Alerts that the Route would take
 at its place in the current order, each Alert once, and it works for a Route you are still creating. Use it before every
 change of a key.</p>
+<ol>
+<li>Change the Matchers or the Group key in the Route editor.</li>
+<li>Under <strong>Group key preview</strong>, choose the <strong>Period</strong>, 24 hours by default, and select <strong>Preview</strong>.</li>
+<li>Compare <strong>Current</strong>, the saved key, with <strong>Proposed</strong>, the key in the editor: each table lists the largest Alert
+   Groups with the values of the key's labels and the number of Alerts. A new Route has only the proposed side. When
+   you change the Matchers, the key or the period after a preview, the preview says so; select <strong>Preview</strong> again.</li>
+</ol>
+<p><img alt="The Group key preview of a saved Route with namespace instead of severity in its key: Current 2 Alert Groups, Proposed 3 Alert Groups" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/03-preview.png" /></p>
+<p>The screenshot shows the four Alerts of the table above: with <code>namespace</code> in place of <code>severity</code>, the Alerts of <code>prod</code>
+split by namespace.</p>
 <h3 id="do-not-put-instance-labels-in-the-key">Do not put Instance labels in the key<a class="headerlink" href="#do-not-put-instance-labels-in-the-key" title="Permanent link">&para;</a></h3>
 <p><strong>Instance labels</strong> change when the process that reports an Alert restarts, such as <code>pod</code> and <code>instance</code>. If one is in the
 Group key, every restart of a pod starts an Alert Group of its own and the old one stays open. Keep <code>pod</code> and <code>instance</code>
@@ -3189,6 +3234,39 @@ the Alertmanager cluster knows and the rules do not, such as <code>cluster=prod-
 include <code>cluster</code>: set it as a Static label on each Integration, and Alert Groups of different clusters stay apart even
 when the alerting rules never mention the cluster. See <a href="../../integrations/alertmanager/#static-labels">Static
 labels</a>.</p>
+<h2 id="create-a-route">Create a Route<a class="headerlink" href="#create-a-route" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p>Open <strong>Routes</strong> and select <strong>Create route</strong>. Choose a <a href="#route-profiles">Route profile</a>, <strong>On-call</strong> or
+   <strong>Informational</strong>; <strong>Choose another profile</strong> takes you back.</p>
+<p><img alt="Create route: the choice between the profiles On-call and Informational" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png" /></p>
+</li>
+<li>
+<p>Enter a <strong>Name</strong> and, if you like, a <strong>Description</strong>. Add the <a href="#matchers">Matchers</a>, turn on <strong>Urgent</strong> if every
+   Alert Group of the Route is <a href="#urgent">Urgent</a>, and check the <a href="#group-keys">Group key</a> with its
+   <a href="#preview-before-you-save">preview</a>.</p>
+<p><img alt="The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/05-new-route.png" /></p>
+</li>
+<li>
+<p>Under <strong>Destinations</strong>, choose each Destination in <strong>Add a Destination</strong>. The list shows each one with its type and
+   health; a Route without Destinations sends no messages.</p>
+<p><img alt="The Destinations of the Route: the outgoing webhook payments, Healthy" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png" /></p>
+</li>
+<li>
+<p>Check the policy below, filled in by the profile: <strong>Lifecycle</strong> (the Reopen window and the Grace period),
+   <strong>Delivery</strong> (the Thread batching window and the Storm threshold), <strong>Snooze durations</strong>, <strong>Ack timeout and
+   Reminders</strong> — see <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and commands</a> —
+   and <strong>Message</strong>, which <a href="../../configure/messages-and-templates/#edit-a-routes-message">Messages and templates</a>
+   explains.</p>
+<p><img alt="The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-policy.png" /></p>
+</li>
+<li>
+<p>Select <strong>Create</strong>. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Group key and its open Alert Groups; drag it, or use its arrows, to <a href="#order-and-the-default-route">change the order</a>.
+   Above the list, Muster may suggest Routes for its own alerts.</p>
+<p><img alt="The Routes list: the Route payments first, then the Default route, under two suggestions" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png" /></p>
+</li>
+</ol>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <p><strong>Only the Default route.</strong> Every Alert goes to one Route, grouped by <code>alertname</code>, <code>severity</code> and <code>cluster</code>. Add one
 Destination to the Default route and everything reaches one place. This is the setup of the <a href="../../quick-start/">Quick start</a>

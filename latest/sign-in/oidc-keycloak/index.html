@@ -3038,6 +3038,23 @@ background:</p>
 <p>The settings behind the three rows above Proxy are <code>oidc.unmatched_role</code> (none: sign-in is refused), <code>oidc.sync_role</code>
 (on) and
 <code>oidc.skip_totp_with_idp_mfa</code> (off).</p>
+<p>In the web UI:</p>
+<ol>
+<li>
+<p>Open <strong>Access → OIDC</strong>. Under <strong>Identity provider</strong>, turn on <strong>Allow sign-in through OIDC</strong> and fill in the <strong>Issuer
+   URL</strong>, the <strong>Provider name</strong> (the display name), the <strong>Client ID</strong>, the <strong>Client secret</strong> — <strong>Set a value</strong>, or
+   <strong>Replace</strong> once one is set —, <strong>Client secret expires on</strong> and the <strong>Scopes</strong>.</p>
+<p><img alt="The OIDC settings: the issuer https://sso.example.org/realms/muster, the provider name Keycloak, the client muster and the scopes profile email" class="screenshot" src="../../assets/screenshots/sign-in/oidc-keycloak/01-identity-provider.png" /></p>
+</li>
+<li>
+<p>Under <strong>Roles</strong>, enter the <strong>Groups claim</strong> and map each group with <strong>Add IdP group</strong>: the group's name and its
+   Role. Choose the <strong>Role for users without a matching group</strong>, and whether to <strong>Sync the Role at every sign-in</strong> and
+   to <strong>Skip TOTP when the identity provider confirmed multi-factor authentication</strong>. Set the proxy below if Muster
+   needs one, and select <strong>Save</strong>.</p>
+<p><img alt="The Roles of the OIDC settings: the groups claim groups, muster-admins mapped to Admin and oncall to Responder" class="screenshot" src="../../assets/screenshots/sign-in/oidc-keycloak/02-roles.png" /></p>
+</li>
+</ol>
+<p>The screenshots show the form filled in, before <strong>Save</strong>.</p>
 <p>Then press <strong>Check connection</strong>. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled (<code>direct</code> or <code>proxy</code>), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.</p>

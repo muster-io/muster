@@ -2875,6 +2875,33 @@ Integration.</p>
 keep it a few times the interval at which Alertmanager signals. The Heartbeat then <strong>waits for the first signal</strong>:
 nothing is raised and nothing goes Stale until it arrives, however long that takes. The first signal makes it
 <strong>live</strong>.</p>
+<ol>
+<li>
+<p>Open <strong>Integrations</strong> and the Integration. Next to its name, the Heartbeat badge says <strong>Not configured</strong>, and a
+   banner warns that Muster will not notice when Alertmanager goes quiet. The list of <strong>Integrations</strong> shows the same
+   badge in its column <strong>Heartbeat</strong>.</p>
+<p><img alt="An Integration without a Heartbeat: the badge Not configured and the banner No Heartbeat" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/01-not-configured.png" /></p>
+</li>
+<li>
+<p>Select <strong>Edit</strong>. Under <strong>Heartbeat</strong>, turn on <strong>Watch for Heartbeat signals</strong>, keep or change the <strong>Timeout</strong> in
+   minutes, and note the <a href="#the-heartbeat-url">Heartbeat URL</a>. Select <strong>Save</strong>. A new Integration can have the
+   Heartbeat on from the start: the same switch is in its form.</p>
+<p><img alt="The Heartbeat settings of an Integration: Watch for Heartbeat signals on, the timeout of 5 minutes and the Heartbeat URL" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/02-turn-on.png" /></p>
+</li>
+<li>
+<p>The badge says <strong>Waiting</strong> until the first signal arrives.</p>
+<p><img alt="The Integration waiting for its first Heartbeat signal: the badge Waiting and its banner" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/03-waiting.png" /></p>
+</li>
+<li>
+<p>Select <strong>Create token</strong> and <strong>Create</strong>. With the Heartbeat on, the dialog also shows the <strong>Heartbeat
+   configuration</strong>: add it to Prometheus and Alertmanager as <a href="#the-snippet">The snippet</a> explains, and reload them.</p>
+<p><img alt="The dialog Token created with the Heartbeat configuration under the Alertmanager configuration" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/04-token-and-snippet.png" /></p>
+</li>
+<li>
+<p>The first signal makes the badge <strong>Live</strong>, and the banner goes.</p>
+<p><img alt="The Integration with a live Heartbeat: the badge Live and no banner" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/05-live.png" /></p>
+</li>
+</ol>
 <p>While the Heartbeat is off, Muster answers a signal with <code>204</code> and records nothing, so turning it on later always
 starts from waiting. Turning it off resolves an open <code>MusterHeartbeatLost</code>.</p>
 <h2 id="the-heartbeat-url">The Heartbeat URL<a class="headerlink" href="#the-heartbeat-url" title="Permanent link">&para;</a></h2>
@@ -2937,6 +2964,9 @@ exactly the path your alerts take. Prefer it.</p>
   still fire.</li>
 <li>The chart's rule <code>MusterHeartbeatLost</code> on <code>muster_heartbeat_lost</code> is the backup when Muster itself cannot deliver.</li>
 </ul>
+<p>On the Integration page, the badge says <strong>Lost</strong> and the banner names the time of the last signal; the list of
+<strong>Integrations</strong> and <strong>Organization → System status</strong> show the loss too.</p>
+<p><img alt="An Integration whose Heartbeat is lost: the badge Lost and the banner No contact with Alertmanager since the last signal" class="screenshot" src="../../assets/screenshots/integrations/heartbeat/06-lost.png" /></p>
 <p>The next signal makes the Heartbeat live again and resolves <code>MusterHeartbeatLost</code>. Deleting the Integration resolves it
 too.</p>
 <p>After Muster itself was down, the timeout counts from the moment the Leader started leading again, so that Muster's own

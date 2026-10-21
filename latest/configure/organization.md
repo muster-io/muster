@@ -26,6 +26,12 @@ The defaults below are what a new installation has.
     time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
     See [statuses and commands](../concepts/statuses-and-commands.md).
 
+1. Open **Organization**; **General** opens first.
+2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
+   of the working day** or the **First day of the week**, and select **Save**. "Saved." confirms it.
+
+    ![Organization → General: the time zone Asia/Tokyo and the working day starting at 08:30, saved](../assets/screenshots/configure/organization/01-general.png){ .screenshot }
+
 ## Severity levels
 
 **Organization → Severity levels**
@@ -47,6 +53,12 @@ info.
 :   The values of the severity label that arrived, with their counts. A value with no mapping is marked "No mapping —
     counts as warning" and has a **Map** action. If your alerts use `P1` and `page`, map them to critical here.
 
+1. Open **Organization → Severity levels**.
+2. Under **Mapping**, select **Add value**, enter the value, such as `P1`, and choose its level; or select **Map** next
+   to a value under **Values seen**. Select **Save**.
+
+    ![The Mapping of the Severity levels with the value P1 mapped to critical](../assets/screenshots/configure/organization/02-severity-levels.png){ .screenshot }
+
 ## Alert handling
 
 **Organization → Alert handling**
@@ -61,6 +73,12 @@ info.
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.
 
+1. Open **Organization → Alert handling**.
+2. Turn **Critical is Urgent** on or off, and change the **Instance labels**: **Add label** adds one, the × next to a
+   label removes it. Select **Save**.
+
+    ![Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved](../assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+
 ## Security
 
 **Organization → Security**
@@ -74,6 +92,12 @@ status.
     Personal access tokens work while their last OIDC sign-in is no older than this; after that they get `401` with the
     code `oidc_recheck_required` until the person signs in through OIDC again. Service account tokens are not affected.
     See [API tokens and automation](api-tokens.md).
+
+1. Open **Organization → Security**.
+2. Choose who must have TOTP under **TOTP required**, and change the **Token grace for OIDC users without an offline
+   token (days)**. Select **Save**.
+
+    ![Organization → Security: TOTP required for nobody and a token grace of 14 days, saved](../assets/screenshots/configure/organization/04-security.png){ .screenshot }
 
 ## Outbound addresses
 
@@ -90,6 +114,14 @@ resolved, so a name that points at a blocked address is blocked.
 such as `10.0.0.0/8`, an address, a host name or a domain such as `*.example.org`. A denied entry always wins. Some
 addresses are always blocked and no allowed entry opens them: link-local, cloud metadata, unspecified and multicast
 addresses. A chat server on the loopback address, for one, needs `127.0.0.0/8` in **Allowed** under Standard.
+
+1. Open **Organization → Outbound addresses**.
+2. Choose the **Outbound address policy**. Add entries with **Add allowed entry** and **Add denied entry**, and remove
+   one with the × next to it. Select **Save**.
+
+    ![Organization → Outbound addresses: the policy Standard, with 127.0.0.0/8 and 10.20.0.0/16 allowed](../assets/screenshots/configure/organization/05-outbound-addresses.png){ .screenshot }
+
+The screenshot is of a development installation, whose test chat servers listen on the loopback address.
 
 ## Retention
 
@@ -110,12 +142,38 @@ addresses. A chat server on the loopback address, for one, needs `127.0.0.0/8` i
 Each period is 1 to 36,500 days. The summaries must be kept at least as long as the details, because details go first;
 a save that breaks this is refused (`retention_order`).
 
+1. Open **Organization → Retention**.
+2. Enter the number of days of each period and select **Save**.
+
+    ![Organization → Retention: Stored Snapshots kept 30 days, the other periods at their defaults, saved](../assets/screenshots/configure/organization/06-retention.png){ .screenshot }
+
+## Audit log
+
+**Organization → Audit log** (Admins only) records who changed or did what, newest first, for the last 7 days by
+default: the time, the actor with the token or the Transport it acted through, the action, the resource and the changes
+with their values before and after. Secrets show only that they changed. Entries are kept for `retention.audit_log`
+days, as [Retention](#retention) sets.
+
+1. Open **Organization → Audit log**.
+
+    ![The Audit log: the newest entries, changes of the Organization and of its outbound address policy by admin through the web UI](../assets/screenshots/configure/organization/07-audit-log.png){ .screenshot }
+
+2. Narrow it with the filters: **From** and **To**, the **Actor**, the **Action**, such as `organization.updated`, and
+   the **Resource type**, such as `organization`; select **Apply**, and **Clear filters** to see everything again. The
+   filters are kept in the address, so a link to a filtered list can be shared.
+
+    ![The Audit log filtered by the resource type organization](../assets/screenshots/configure/organization/08-audit-log-filtered.png){ .screenshot }
+
+3. Read the changes of an entry in its **Changes**: each field with its value before and after.
+
+    ![One entry of the Audit log: the time zone of messages changed from UTC to Asia/Tokyo and the start of the working day to 08:30](../assets/screenshots/configure/organization/09-audit-log-entry.png){ .screenshot }
+
 ## Elsewhere
 
 Other Organization pages have their own guides: **Keyring** in [Key rotation](../operations/key-rotation.md), **Outgoing
 heartbeat** (`outgoing_heartbeat.url`, unset) in [Outgoing heartbeat](../operations/outgoing-heartbeat.md), **Lookup
-tables** and **Link rules** in [Messages and templates](messages-and-templates.md#links), and **System status** and the
-**Audit log** for what is wrong or who changed what.
+tables** and **Link rules** in [Messages and templates](messages-and-templates.md#links), and **System status** in
+[Monitoring](../operations/monitoring.md#system-status).
 
 ## The API
 

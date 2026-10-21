@@ -3107,9 +3107,27 @@ send the alerts to it with a notification policy.</p>
   <code>cluster=prod-eu</code>.</li>
 </ul>
 <h3 id="create-the-integration-and-a-token">Create the Integration and a token<a class="headerlink" href="#create-the-integration-and-a-token" title="Permanent link">&para;</a></h3>
-<p>In <strong>Integrations</strong>, create the Integration, then <strong>Create token</strong>. Muster shows the token <strong>once</strong>, with a snippet for
-Alertmanager; Grafana needs only the token (<code>mstr_int_…</code>), the <code>credentials</code> of that snippet. Copy it before you close
-the dialog.</p>
+<ol>
+<li>
+<p>In Muster, open <strong>Integrations</strong> and select <strong>Create integration</strong>. Enter a <strong>Name</strong>, such as <code>grafana-prod</code>, and
+   add the <a href="../alertmanager/#static-labels">Static labels</a> with <strong>Add label</strong>, such as <code>cluster=prod-eu</code>. Select
+   <strong>Create</strong>.</p>
+<p><img alt="The form of a new Integration: the name grafana-prod and the Static label cluster=prod-eu" class="screenshot" src="../../assets/screenshots/integrations/grafana/01-new-integration.png" /></p>
+</li>
+<li>
+<p>On the Integration page, select <strong>Create token</strong>, give the token a <strong>Name</strong> if you like, such as <code>grafana</code>, and
+   select <strong>Create</strong>. Muster shows the token <strong>once</strong>, with a snippet for Alertmanager; Grafana needs only the
+   <strong>Token</strong> (<code>mstr_int_…</code>), the <code>credentials</code> of that snippet. Copy it with <strong>Copy</strong> before you select <strong>Done</strong>.</p>
+<p><img alt="The dialog Token created with the token outlined, above the Alertmanager configuration that Grafana does not need" class="screenshot" src="../../assets/screenshots/integrations/grafana/02-token.png" /></p>
+</li>
+<li>
+<p>Create the contact point and the notification policy in Grafana, as the next two sections say. Once Grafana sends
+   its first Snapshot, the Integration page shows it under <strong>Snapshots</strong>: the time of the last one and how many were
+   received. In the screenshot, the address starts with <code>http://localhost:8081</code>, the ingest address of a development
+   installation; yours starts with your <code>MUSTER_INGEST_URL</code>.</p>
+<p><img alt="The Integration grafana-prod after the first Snapshot from Grafana: the last Snapshot and one Snapshot received" class="screenshot" src="../../assets/screenshots/integrations/grafana/03-first-snapshot.png" /></p>
+</li>
+</ol>
 <h3 id="create-a-webhook-contact-point">Create a webhook contact point<a class="headerlink" href="#create-a-webhook-contact-point" title="Permanent link">&para;</a></h3>
 <p>In Grafana, open <strong>Alerting</strong> → <strong>Contact points</strong> → <strong>Add contact point</strong> and choose the integration <strong>Webhook</strong>:</p>
 <ol>
@@ -3167,7 +3185,8 @@ file, then restart Grafana or reload the provisioned files through its Admin API
   <strong>Alerting</strong> → <strong>Settings</strong>.</li>
 </ul>
 <p>On its first start, Grafana applies provisioned policies within about a minute. Grafana sends the first Snapshot when
-an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received.</p>
+an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received, as
+in <a href="#create-the-integration-and-a-token">Create the Integration and a token</a>.</p>
 <h3 id="repeat-intervals">Repeat intervals<a class="headerlink" href="#repeat-intervals" title="Permanent link">&para;</a></h3>
 <p>Repeats are how Muster learns when an alert is <strong>Gone</strong> or <strong>Stale</strong>, as with Alertmanager; see
 <a href="../alertmanager/#repeat-intervals">Repeat intervals</a>. Grafana sends no <code>notification_reason</code>, so Muster recognises a

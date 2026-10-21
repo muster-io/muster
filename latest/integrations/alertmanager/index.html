@@ -2978,9 +2978,24 @@ and messages can tell the clusters apart.</p>
 <p>Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connection mode is <code>webhook-only</code>
 (<code>integration.connection_mode</code>), the only mode in this version.</p>
 <h2 id="create-a-token-and-paste-the-snippet">Create a token and paste the snippet<a class="headerlink" href="#create-a-token-and-paste-the-snippet" title="Permanent link">&para;</a></h2>
-<p>In <strong>Integrations</strong>, create the Integration, then <strong>Create token</strong>. Muster shows the token and a ready Alertmanager
-snippet <strong>once</strong>; copy it before you close the dialog. Only a hash of the token is kept, so a lost token cannot be shown
-again: create a new one.</p>
+<ol>
+<li>
+<p>In Muster, open <strong>Integrations</strong> and select <strong>Create integration</strong>. Enter a <strong>Name</strong> after the Alertmanager cluster,
+   such as <code>prod-eu</code>, and add its <a href="#static-labels">Static labels</a> with <strong>Add label</strong>, such as <code>cluster=prod-eu</code>. Keep
+   the <strong>Duplicate window</strong> of 45 seconds. Select <strong>Create</strong>.</p>
+<p><img alt="The form of a new Integration: the name prod-eu, the Static label cluster=prod-eu and the duplicate window of 45 seconds" class="screenshot" src="../../assets/screenshots/integrations/alertmanager/01-new-integration.png" /></p>
+</li>
+<li>
+<p>On the Integration page, select <strong>Create token</strong>, give the token a <strong>Name</strong> if you like, such as <code>alertmanager</code>, and
+   select <strong>Create</strong>. Muster shows the token and a ready Alertmanager snippet, the <strong>Alertmanager configuration</strong>,
+   <strong>once</strong>; copy it with <strong>Copy</strong> before you select <strong>Done</strong>. Only a hash of the token is kept, so a lost token cannot
+   be shown again: create a new one.</p>
+<p><img alt="The dialog Token created: the token, the Alertmanager configuration with the receiver and the route, and the warning that the token is shown once" class="screenshot" src="../../assets/screenshots/integrations/alertmanager/02-token-and-snippet.png" /></p>
+</li>
+<li>
+<p>Paste the snippet into the Alertmanager configuration, as the rest of this section explains, and reload Alertmanager.</p>
+</li>
+</ol>
 <p>The snippet has two parts. The Alertmanager receiver goes into <code>receivers</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">receivers</span><span class="p">:</span>
 <span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster-prod-eu</span>
@@ -3044,7 +3059,12 @@ severity=warning</code> prints the receivers an alert reaches; it should list Mu
   <a href="#repeat-intervals">Repeat intervals</a> for why.</li>
 </ul>
 <p>Reload Alertmanager (<code>POST /-/reload</code> or <code>SIGHUP</code>). The Integration page then shows the time of the last Snapshot and
-the Stored Snapshots as received.</p>
+the Stored Snapshots as received. In the screenshots, the addresses start with <code>http://localhost:8081</code>, the ingest
+address of a development installation; yours start with your <code>MUSTER_INGEST_URL</code>.</p>
+<p><img alt="The Integration prod-eu after its first Snapshot: the last Snapshot, one Snapshot received, the token last used and the Alertmanager route Muster saw" class="screenshot" src="../../assets/screenshots/integrations/alertmanager/03-first-snapshot.png" /></p>
+<p>Further down, <strong>Stored Snapshots</strong> lists each Snapshot as received, newest first, with its group key and its state;
+select one to see its body.</p>
+<p><img alt="The Stored Snapshots of the Integration: one Snapshot, Processed" class="screenshot" src="../../assets/screenshots/integrations/alertmanager/04-stored-snapshots.png" /></p>
 <h2 id="repeat-intervals">Repeat intervals<a class="headerlink" href="#repeat-intervals" title="Permanent link">&para;</a></h2>
 <p>Keep the <code>repeat_interval</code> of the route that sends to Muster between <strong>5 and 15 minutes</strong>. It is a setting of the
 route, not of the receiver, so a route that sends only some alerts to Muster can have its own.</p>
@@ -3081,13 +3101,21 @@ Alertmanager; the <a href="../../operations/runbooks/MusterSnapshotTruncated/">r
 <p>Static labels belong to the Integration, not to Alertmanager. Add them in the Integration's settings, such as
 <code>cluster=prod-eu</code>; Muster adds them to every Alert of the Integration before it routes the Alert, so a Route and a Group
 key can use them as if the rules had set them.</p>
-<ul>
-<li>Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
-  default Group key of a Route includes <code>cluster</code>, so Alert Groups of different clusters stay apart.</li>
+<ol>
+<li>Open the Integration and select <strong>Edit</strong>, or set them in the form of a new Integration.</li>
+<li>
+<p>Under <strong>Static labels</strong>, select <strong>Add label</strong> and enter the label's name and value, one label per row; <strong>Remove
+   label</strong> takes a row away. Select <strong>Save</strong>.</p>
+<p><img alt="The field Static labels of an Integration with the label cluster=prod-eu" class="screenshot" src="../../assets/screenshots/integrations/alertmanager/05-static-labels.png" /></p>
+</li>
+<li>
+<p>Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
+  default Group key of a Route includes <code>cluster</code>, so Alert Groups of different clusters stay apart.</p>
+</li>
 <li>An Alert that already has the label keeps its own value. Muster then warns about the label on the Alert and in its
   Alert Group's Timeline, and the Alerts view of the Integration shows the warning. A Static label never overwrites a
   label that a rule set.</li>
-</ul>
+</ol>
 <h2 id="instance-labels-in-informational-alerts">Instance labels in informational alerts<a class="headerlink" href="#instance-labels-in-informational-alerts" title="Permanent link">&para;</a></h2>
 <p><strong>Instance labels</strong> are the labels that change when the process that reports an Alert restarts, such as <code>pod</code> and
 <code>instance</code>. The Organization lists them in <code>organization.instance_labels</code> (by default <code>pod</code>, <code>instance</code>, <code>container</code>

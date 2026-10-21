@@ -2959,7 +2959,28 @@ forward. Muster renders nothing for a chat here; for a chat with a REST API, use
 <p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code> and the receiving endpoint is
 <code>https://automation.example.org/muster</code>.</p>
 <h2 id="create-the-destination">Create the Destination<a class="headerlink" href="#create-the-destination" title="Permanent link">&para;</a></h2>
-<p>Create a Destination of type <code>webhook</code> with the mode <code>events</code>:</p>
+<p>In the web UI:</p>
+<ol>
+<li>Open <strong>Destinations</strong>, select <strong>Create destination</strong> and choose <strong>Outgoing webhook</strong>. Keep the <strong>Mode</strong> <strong>Events</strong>.</li>
+<li>
+<p>Under <strong>Events request</strong>, enter the <strong>URL</strong> and, with <strong>Add header</strong>, each header's name and value; a value reads a
+   <a href="#secrets">Secret</a> as <code>{{ .Secrets.&lt;name&gt; }}</code>. Set the <strong>Proxy</strong> if the endpoint needs one, and give the
+   Destination a <strong>Name</strong>. Select <strong>Save</strong>.</p>
+<p><img alt="The form of a new outgoing webhook in the mode Events: the URL and the header Authorization that reads the Secret token" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/01-new-destination.png" /></p>
+</li>
+<li>
+<p>Muster shows the <strong>Signing secret</strong> once: copy it to the receiving endpoint, which verifies the signatures with it
+   (see <a href="#verify-the-signature">Verify the signature</a>), and close the dialog.</p>
+<p><img alt="The dialog Signing secret: the secret whsec_… and the warning that it is shown once" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/02-signing-secret.png" /></p>
+</li>
+<li>
+<p>The saved Destination shows its type and health, its <strong>Routes</strong> and its settings, with the tab <strong>Request log</strong> beside
+   <strong>Settings</strong>. Add it to a Route to send it events. In the screenshots, the receiving endpoint is
+   <code>https://hooks.example.org</code>.</p>
+<p><img alt="The saved Destination automation: Outgoing webhook, Healthy, no Route yet, and its Events request" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/03-saved-destination.png" /></p>
+</li>
+</ol>
+<p>Through the API, create a Destination of type <code>webhook</code> with the mode <code>events</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"automation"</span><span class="p">,</span>
@@ -2988,7 +3009,21 @@ forward. Muster renders nothing for a chat here; for a chat with a REST API, use
 <p>The answer to the creation carries the <strong>Signing secret</strong> once, in <code>signing_secret</code>. Store it where the endpoint verifies the signatures; Muster
 never shows it again.</p>
 <h2 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h2>
-<p>Credentials the endpoint needs go into the Destination's <strong>Secrets</strong>, never into the URL or a header as text:</p>
+<p>Credentials the endpoint needs go into the Destination's <strong>Secrets</strong>, never into the URL or a header as text.</p>
+<ol>
+<li>
+<p>On the page of the Destination, under <strong>Secrets</strong>, select <strong>Add secret</strong>. Enter the <strong>Name</strong>, such as <code>token</code>, and the
+   <strong>Value</strong>, and select <strong>Save</strong>.</p>
+<p><img alt="Secrets of the Destination: the form with the name token and a hidden value" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/04-add-secret.png" /></p>
+</li>
+<li>
+<p>The list shows the Secret's name, that it is set and when it changed, and its reference, <code>{{ .Secrets.token }}</code>,
+   which the URL and the headers read. <strong>Replace</strong> sets a new value and <strong>Remove</strong> deletes it; the value is never shown
+   again.</p>
+<p><img alt="Secrets of the Destination: token, set, with its reference" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/05-secrets.png" /></p>
+</li>
+</ol>
+<p>Through the API:</p>
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/secrets/token<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"value":"the-token-of-the-endpoint"}'</span>
@@ -3206,7 +3241,19 @@ timestamp, so do not use it in a receiver — for a body saved in <code>body.jso
 <span class="k">case</span><span class="w"> </span><span class="s2">" </span><span class="nv">$WEBHOOK_SIGNATURE</span><span class="s2"> "</span><span class="w"> </span><span class="k">in</span><span class="w"> </span>*<span class="s2">" </span><span class="nv">$EXPECTED</span><span class="s2"> "</span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>valid<span class="w"> </span><span class="p">;;</span><span class="w"> </span>*<span class="o">)</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>invalid<span class="w"> </span><span class="p">;;</span><span class="w"> </span><span class="k">esac</span>
 </code></pre></div>
 <h2 id="regenerate-and-retire-the-signing-secret">Regenerate and retire the Signing secret<a class="headerlink" href="#regenerate-and-retire-the-signing-secret" title="Permanent link">&para;</a></h2>
-<p><code>POST /api/v1/destinations/{id}/signing-secret</code> makes a new Signing secret and shows it once. Until you retire the
+<ol>
+<li>
+<p>On the page of the Destination, under <strong>Signing secret</strong>, select <strong>Regenerate</strong>, and <strong>Regenerate</strong> again in the
+   dialog. Muster shows the new secret once: deploy it to the receiving endpoint.</p>
+<p><img alt="The dialog Regenerate the Signing secret?" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/06-regenerate.png" /></p>
+</li>
+<li>
+<p>Until you retire it, the previous secret still signs, and the Destination says since when. Once the endpoint
+   verifies with the new secret, select <strong>Retire previous secret</strong>.</p>
+<p><img alt="The Signing secret with the previous secret still signing and the button Retire previous secret" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/events/07-previous-secret.png" /></p>
+</li>
+</ol>
+<p>Through the API, <code>POST /api/v1/destinations/{id}/signing-secret</code> makes a new Signing secret and shows it once. Until you retire the
 previous one, requests carry two signatures — with the new and with the previous secret — and the Destination shows the
 warning <code>previous_signing_secret_active</code> with the date since when: deploy the new secret to the receiving endpoint, then retire
 the previous one with <code>DELETE /api/v1/destinations/{id}/signing-secret/previous</code>. Requests then carry one signature.

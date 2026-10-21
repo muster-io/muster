@@ -32,9 +32,15 @@ nothing.
 2. Give it a **Name** that says where it is used, such as `laptop-scripts`.
 3. Under **Permissions** tick what the script needs. You see only the Permissions you hold. A script that reads Alert
    Groups needs `alert-groups:read`; one that also acknowledges needs `alert-groups:acknowledge`.
-4. Choose **Expires on**. A token may have no expiry (`token.expiry` is none by default), but the page warns about a
-   token that never expires: choose a date.
-5. Select **Create**. The dialog shows the token once. Copy it before you close it: only a hash is kept.
+4. Choose **Expires on**: **30 days**, **90 days**, **365 days** or a date of your own. A token may have **No expiry**
+   (`token.expiry` is none by default), but the page warns about a token that never expires: choose a date.
+
+    ![The dialog Create token: the name laptop-scripts, 90 days, and alert-groups:read and alert-groups:acknowledge ticked](../assets/screenshots/configure/api-tokens/01-create-token.png){ .screenshot }
+
+5. Select **Create**. The dialog shows the token once. Copy it with **Copy** before you select **Done**: only a hash is
+   kept.
+
+    ![The dialog Token created with the token mstr_pat_… and the warning that it is shown once](../assets/screenshots/configure/api-tokens/02-token-created.png){ .screenshot }
 
 The list shows when each token was created, when and from which address it was last used, and when it expires.
 **Revoke** stops a script that uses it at once. The Audit log records a request made with a token as "alex via token
@@ -44,7 +50,18 @@ laptop-scripts".
 
 1. Open **Access → Service accounts** and select **Create service account**.
 2. Give it a **Name** and a **Role**: Admin, Responder or Viewer. You can give only a Role whose Permissions you hold.
-3. On its page, under **Tokens**, select **Create token**, give it a name and an expiry, and copy the value once.
+   Select **Create**.
+
+    ![The dialog Create service account: the name terraform and the Role Admin](../assets/screenshots/configure/api-tokens/03-create-service-account.png){ .screenshot }
+
+3. On its page, under **Tokens**, select **Create token**, give it a name and an expiry, select **Create**, and copy the
+   value once.
+
+    ![The dialog Token created with the token mstr_sat_… of the Service account](../assets/screenshots/configure/api-tokens/04-service-account-token.png){ .screenshot }
+
+4. The page of the Service account shows its Role, its status and its tokens, with **Disable** and **Delete**.
+
+    ![The Service account terraform: its details, its Role, its actions and the token pipeline](../assets/screenshots/configure/api-tokens/05-service-account.png){ .screenshot }
 
 Its tokens act with the Role of the account, and changing the Role changes every token at once. To change a token
 without a gap, create the second token, switch the pipeline to it and revoke the first. **Disable** stops all its tokens

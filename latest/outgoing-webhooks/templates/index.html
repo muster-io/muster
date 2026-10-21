@@ -2929,7 +2929,32 @@ You write each request as Go templates; Muster sends them, signed, and reads the
 <p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code> and the chat's API is
 <code>https://chat.example.org/api</code>.</p>
 <h2 id="create-the-destination">Create the Destination<a class="headerlink" href="#create-the-destination" title="Permanent link">&para;</a></h2>
-<p>Create a Destination of type <code>webhook</code> with the mode <code>template</code> (or <code>both</code>, with the <code>events</code> request too):</p>
+<p>In the web UI:</p>
+<ol>
+<li>
+<p>Open <strong>Destinations</strong>, select <strong>Create destination</strong>, choose <strong>Outgoing webhook</strong> and the <strong>Mode</strong> <strong>Template</strong> (or
+   <strong>Both</strong>, with the <strong>Events request</strong> too). Under <strong>Requests</strong>, <strong>Create</strong> and <strong>Update</strong> are required; <strong>Open
+   thread</strong> and <strong>Reply in thread</strong> are optional.</p>
+<p><img alt="The form of a new outgoing webhook in the mode Template, with its requests" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/templates/01-template-mode.png" /></p>
+</li>
+<li>
+<p>In <strong>Create</strong>, choose the <strong>Method</strong>, enter the <strong>URL</strong>, the headers with <strong>Add header</strong> and the <strong>Body</strong>, and add
+   the <a href="#extraction-rules-and-response">extraction rules</a> with <strong>Add rule</strong>: a name and a JSONPath into the answer.</p>
+<p><img alt="The request Create: POST to the chat's messages, the body template and the extraction rule id at $.data.id" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/templates/02-create-request.png" /></p>
+</li>
+<li>
+<p>In <strong>Update</strong>, enter the request that edits the message; it reads the extracted values as <code>{{ .Response.&lt;name&gt; }}</code>.</p>
+<p><img alt="The request Update: PUT to the message by its id, read as .Response.id, with the same body" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/templates/03-update-request.png" /></p>
+</li>
+<li>
+<p>Give the Destination a <strong>Name</strong> and select <strong>Save</strong>. Muster shows the Signing secret once, as in the
+   <a href="../events/#create-the-destination">events mode</a>, and then the saved Destination. In the screenshots, the chat's API
+   is at <code>https://hooks.example.org/chat/ops</code>.</p>
+<p><img alt="The saved Destination team chat in the mode Template" class="screenshot" src="../../assets/screenshots/outgoing-webhooks/templates/04-saved-destination.png" /></p>
+</li>
+</ol>
+<p>Through the API, create a Destination of type <code>webhook</code> with the mode <code>template</code> (or <code>both</code>, with the <code>events</code> request
+too):</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"webhook"</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team chat"</span><span class="p">,</span>
@@ -2996,7 +3021,8 @@ Route's Alert Groups in Muster).</dd>
 </dl>
 <p>Alert data reach the templates <strong>as received</strong>, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with <code>toJson</code> (or <code>js</code> inside a string), so that a label with a quote or a line break cannot
-break the body.</p>
+break the body. A label or annotation the Alerts do not have is empty text, as in Alertmanager, so <code>toJson</code> gives
+<code>""</code>, not <code>null</code>; tell a missing value apart with <code>if</code> or <code>or</code>, as in <code>{{ or .CommonLabels.team "none" }}</code>.</p>
 <p>Read a Secret as <code>{{ .Secrets.&lt;name&gt; }}</code> and an extracted value as <code>{{ .Response.&lt;name&gt; }}</code> — or with <code>$.</code> in front, or
 as <code>{{ index .Secrets "&lt;name&gt;" }}</code> with a quoted name. Any other use, such as <code>{{ with .Secrets }}</code>, <code>{{ $s := .Secrets }}</code>
 or <code>{{ toJson .Response }}</code>, is refused when you save: Muster checks before each request that every Secret and value a

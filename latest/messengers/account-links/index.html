@@ -2992,11 +2992,17 @@ linking needs no extra password or TOTP code, and why an API token, an Admin's i
 remove a link of its own User.</p>
 <h2 id="link-telegram">Link Telegram<a class="headerlink" href="#link-telegram" title="Permanent link">&para;</a></h2>
 <ol>
-<li>In your profile, open <strong>Messenger accounts</strong>, choose the Telegram Connection and select <strong>Link Telegram</strong> — or
-   <strong>Relink Telegram</strong> once you have a Telegram link, which the new link replaces.</li>
-<li>Muster shows a link <code>https://t.me/&lt;bot&gt;?start=&lt;token&gt;</code>. Open it on the device where you use Telegram, within 10
-   minutes (<code>account_link.telegram_token_ttl</code>); the link works once.</li>
-<li>Telegram opens a chat with the bot. Press <strong>Start</strong>.</li>
+<li>In your profile, open <strong>Messenger accounts</strong> and select <strong>Link Telegram</strong> — or <strong>Relink Telegram</strong> once you have a
+   Telegram link, which the new link replaces.</li>
+<li>
+<p>Choose the Telegram <strong>Connection</strong>, when there are several, and select <strong>Get link</strong>. Muster shows a link <code>https://t.me/&lt;bot&gt;?start=&lt;token&gt;</code> as <strong>Open Telegram</strong> and as a QR code
+   to scan with your phone. Open it on the device where you use Telegram, within 10 minutes
+   (<code>account_link.telegram_token_ttl</code>); the link works once.</p>
+<p><img alt="The dialog Link Telegram: Open Telegram, the QR code, covered here, and the time the link expires" class="screenshot" src="../../assets/screenshots/messengers/account-links/01-link-telegram.png" /></p>
+</li>
+<li>
+<p>Telegram opens a chat with the bot. Press <strong>Start</strong>.</p>
+</li>
 <li>The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link at once.</li>
 </ol>
 <p>If the bot answers "This link is invalid or expired. Start again from your Muster profile.", the link was used
@@ -3005,12 +3011,20 @@ answers "This account is linked to another user. Its owner or an admin can unlin
 linked to someone else; nothing changed.</p>
 <h2 id="link-mattermost">Link Mattermost<a class="headerlink" href="#link-mattermost" title="Permanent link">&para;</a></h2>
 <ol>
-<li>In your profile, open <strong>Messenger accounts</strong>, choose the Mattermost Connection, enter your Mattermost username —
-   with or without the <code>@</code> — and select <strong>Send code</strong>.</li>
-<li>The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
-   8-character code. If you did not ask for it, ignore it.</li>
-<li>Type the code into your profile within 10 minutes (<code>account_link.mattermost_code</code>); capital and small letters are the same. The bot confirms
-   "Linked to Muster user {your name}".</li>
+<li>
+<p>In your profile, open <strong>Messenger accounts</strong> and select <strong>Link Mattermost</strong>. Choose the <strong>Connection</strong>, enter
+   <strong>Your Mattermost username</strong> — with or without the <code>@</code> — and select <strong>Send code</strong>.</p>
+<p><img alt="The dialog Link Mattermost: the Connection chat.example.org and the username alice" class="screenshot" src="../../assets/screenshots/messengers/account-links/02-link-mattermost.png" /></p>
+</li>
+<li>
+<p>The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
+   8-character code. If you did not ask for it, ignore it.</p>
+</li>
+<li>
+<p>Type the code into your profile within 10 minutes (<code>account_link.mattermost_code</code>); capital and small letters are
+   the same. Select <strong>Link</strong>. The bot confirms "Linked to Muster user {your name}".</p>
+<p><img alt="The code entry of Link Mattermost: Enter the code the bot sent you in Mattermost, 5 attempts left" class="screenshot" src="../../assets/screenshots/messengers/account-links/03-mattermost-code.png" /></p>
+</li>
 </ol>
 <p>A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
 A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
@@ -3019,14 +3033,19 @@ know, a bot account and a deactivated account cannot be linked. An account that 
 <p>The bot must be allowed to open direct messages with you; see <a href="../mattermost/#direct-messages">Direct messages</a>.</p>
 <h2 id="link-slack">Link Slack<a class="headerlink" href="#link-slack" title="Permanent link">&para;</a></h2>
 <ol>
-<li>In your profile, open <strong>Messenger accounts</strong>, choose the Slack Connection, enter your Slack email or name and select
-   <strong>Send code</strong>. An email finds your account for sure; a name is compared with the name and the display name of each
-   account, regardless of case.</li>
-<li>The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
+<li>
+<p>In your profile, open <strong>Messenger accounts</strong> and select <strong>Link Slack</strong>. Choose the <strong>Connection</strong>, enter <strong>Your
+   Slack email or name</strong> and select <strong>Send code</strong>. An email finds your account for sure; a name is compared with the
+   name and the display name of each account, regardless of case.</p>
+<p><img alt="The dialog Link Slack: the Connection Example workspace and the email alice@example.org" class="screenshot" src="../../assets/screenshots/messengers/account-links/04-link-slack.png" /></p>
+</li>
+<li>
+<p>The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. It shows in the <strong>Messages</strong> tab of the bot's app, which is read-only, so you can read the code and
-   cannot write to the bot. If you did not ask for it, ignore it.</li>
+   cannot write to the bot. If you did not ask for it, ignore it.</p>
+</li>
 <li>Type the code into your profile within 10 minutes (<code>account_link.slack_code</code>); capital and small letters are the
-   same. The bot confirms "Linked to Muster user {your name}".</li>
+   same, and select <strong>Link</strong>. The bot confirms "Linked to Muster user {your name}".</li>
 </ol>
 <p>If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
 Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
@@ -3050,12 +3069,18 @@ acknowledged, snoozed or resolved names you by that name. Without a link, a Ment
 which notifies nobody.</p>
 <h3 id="by-a-token-sent-to-the-bot">By a token sent to the bot<a class="headerlink" href="#by-a-token-sent-to-the-bot" title="Permanent link">&para;</a></h3>
 <ol>
-<li>In your profile, open <strong>Messenger accounts</strong>, choose the Bridge Connection and select <strong>Link</strong>.</li>
-<li>Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
-   as well. Within 10 minutes (<code>account_link.bridge_token_ttl</code>), send the token to the bot of that Connection in a direct message, or open the link,
-   which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.</li>
-<li>The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
-   and the handle the bridge reported for your account.</li>
+<li>In your profile, open <strong>Messenger accounts</strong> and select <strong>Link through {Connection}</strong> of the Bridge Connection.</li>
+<li>
+<p>On the tab <strong>Token</strong>, Muster shows a token of 43 characters, with <strong>Copy</strong>, and, when the bridge declares a link that
+   opens a chat with its bot, that link as well. Within 10 minutes (<code>account_link.bridge_token_ttl</code>), send the token
+   to the bot of that Connection in a direct message, or open the link, which hands the token to the bot. The token
+   works once, and only with the bot of the Connection you chose.</p>
+<p><img alt="The dialog Link through Team chat on its tab Token: the token, Copy and the time it expires" class="screenshot" src="../../assets/screenshots/messengers/account-links/05-bridge-token.png" /></p>
+</li>
+<li>
+<p>The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
+   and the handle the bridge reported for your account.</p>
+</li>
 </ol>
 <p>If the bot answers "This link is invalid or expired. Start again from your Muster profile.", the token was used
 already, expired, was started for another Connection — another bridge, or another bot of the same bridge — or was
@@ -3066,12 +3091,15 @@ admin can unlink it.", that account is linked to someone else; nothing changed.<
 login, username or user id — and that its bot can start a direct chat. Your profile names the field after that kind:
 <strong>Email</strong>, <strong>Login</strong>, <strong>Username</strong> or <strong>User id</strong>.</p>
 <ol>
-<li>In your profile, choose the Bridge Connection, enter your email address, login, username or user id in the
-   messenger, as the field asks, and select <strong>Send code</strong>.</li>
+<li>In your profile, select <strong>Link through {Connection}</strong> of the Bridge Connection and the tab <strong>Code</strong>. Enter your
+   email address, login, username or user id in the messenger, as the field asks, and select <strong>Send code</strong>.</li>
 <li>The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
    code. If you did not ask for it, ignore it.</li>
-<li>Type the code into your profile within 10 minutes (<code>account_link.bridge_code</code>); capital and small letters are the same. The link is made at
-   once, and the bot sends no confirmation.</li>
+<li>
+<p>Type the code into your profile within 10 minutes (<code>account_link.bridge_code</code>); capital and small letters are the
+   same. Select <strong>Link</strong>: the link is made at once, and the bot sends no confirmation.</p>
+<p><img alt="The tab Code of Link through Team chat after Send code: the login alice, the code entry and 5 attempts left" class="screenshot" src="../../assets/screenshots/messengers/account-links/06-bridge-code.png" /></p>
+</li>
 </ol>
 <p>If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
@@ -3100,8 +3128,19 @@ is allowed, but the Route editor warns when two or more of a Route's Destination
 Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
 Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.</p>
 <h2 id="unlink">Unlink<a class="headerlink" href="#unlink" title="Permanent link">&para;</a></h2>
-<p>In your profile, under <strong>Messenger accounts</strong>, remove the link. Nothing can be unlinked from a chat. Removing a link,
-like making one, is recorded in the Audit log with who did it and from where.</p>
+<p>Nothing can be unlinked from a chat. Removing a link, like making one, is recorded in the Audit log with who did it and
+from where.</p>
+<ol>
+<li>
+<p>In your profile, open <strong>Messenger accounts</strong>. It lists each link with the messenger, the Connection, the account,
+   when it was last used and when it was linked.</p>
+<p><img alt="Messenger accounts with four links: through the Bridge Team chat, Mattermost, Slack and Telegram for all Telegram bots" class="screenshot" src="../../assets/screenshots/messengers/account-links/07-linked-accounts.png" /></p>
+</li>
+<li>
+<p>Select <strong>Unlink</strong> on the row, and <strong>Unlink</strong> again in the dialog. Presses from that account no longer act as you.</p>
+<p><img alt="The dialog that confirms unlinking @oncall_admin" class="screenshot" src="../../assets/screenshots/messengers/account-links/08-unlink.png" /></p>
+</li>
+</ol>
 <h2 id="what-admins-can-do">What Admins can do<a class="headerlink" href="#what-admins-can-do" title="Permanent link">&para;</a></h2>
 <p>Admins see the links of every User on the user page, under <strong>Account links</strong>, and can remove any of them — their own
 from the web session only, as above. They cannot create a link for someone else. Deleting a User removes their links and voids the links they had started.</p>

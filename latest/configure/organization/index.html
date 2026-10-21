@@ -635,6 +635,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Audit log
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#elsewhere" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2855,6 +2866,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Audit log
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#elsewhere" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2918,6 +2940,14 @@ web UI in their own time zone, which they set in their profile.</dd>
 time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
 See <a href="../../concepts/statuses-and-commands/">statuses and commands</a>.</dd>
 </dl>
+<ol>
+<li>Open <strong>Organization</strong>; <strong>General</strong> opens first.</li>
+<li>
+<p>Change the <strong>Name</strong>, the <strong>Time zone of messages</strong> — type in <strong>Search time zones</strong> to narrow the list —, the <strong>Start
+   of the working day</strong> or the <strong>First day of the week</strong>, and select <strong>Save</strong>. "Saved." confirms it.</p>
+<p><img alt="Organization → General: the time zone Asia/Tokyo and the working day starting at 08:30, saved" class="screenshot" src="../../assets/screenshots/configure/organization/01-general.png" /></p>
+</li>
+</ol>
 <h2 id="severity-levels">Severity levels<a class="headerlink" href="#severity-levels" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Severity levels</strong></p>
 <p>Alerts say how bad they are in a label. Muster turns its values into three <strong>Severity levels</strong>: critical, warning and
@@ -2934,6 +2964,14 @@ are info. A label that is missing counts as info; any other value counts as warn
 <dd>The values of the severity label that arrived, with their counts. A value with no mapping is marked "No mapping —
 counts as warning" and has a <strong>Map</strong> action. If your alerts use <code>P1</code> and <code>page</code>, map them to critical here.</dd>
 </dl>
+<ol>
+<li>Open <strong>Organization → Severity levels</strong>.</li>
+<li>
+<p>Under <strong>Mapping</strong>, select <strong>Add value</strong>, enter the value, such as <code>P1</code>, and choose its level; or select <strong>Map</strong> next
+   to a value under <strong>Values seen</strong>. Select <strong>Save</strong>.</p>
+<p><img alt="The Mapping of the Severity levels with the value P1 mapped to critical" class="screenshot" src="../../assets/screenshots/configure/organization/02-severity-levels.png" /></p>
+</li>
+</ol>
 <h2 id="alert-handling">Alert handling<a class="headerlink" href="#alert-handling" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Alert handling</strong></p>
 <dl>
@@ -2945,6 +2983,14 @@ Group, and the Timeline names the label that changed.</dd>
 </dl>
 <p>Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.</p>
+<ol>
+<li>Open <strong>Organization → Alert handling</strong>.</li>
+<li>
+<p>Turn <strong>Critical is Urgent</strong> on or off, and change the <strong>Instance labels</strong>: <strong>Add label</strong> adds one, the × next to a
+   label removes it. Select <strong>Save</strong>.</p>
+<p><img alt="Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved" class="screenshot" src="../../assets/screenshots/configure/organization/03-alert-handling.png" /></p>
+</li>
+</ol>
 <h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Security</strong></p>
 <dl>
@@ -2957,6 +3003,14 @@ Personal access tokens work while their last OIDC sign-in is no older than this;
 code <code>oidc_recheck_required</code> until the person signs in through OIDC again. Service account tokens are not affected.
 See <a href="../api-tokens/">API tokens and automation</a>.</dd>
 </dl>
+<ol>
+<li>Open <strong>Organization → Security</strong>.</li>
+<li>
+<p>Choose who must have TOTP under <strong>TOTP required</strong>, and change the <strong>Token grace for OIDC users without an offline
+   token (days)</strong>. Select <strong>Save</strong>.</p>
+<p><img alt="Organization → Security: TOTP required for nobody and a token grace of 14 days, saved" class="screenshot" src="../../assets/screenshots/configure/organization/04-security.png" /></p>
+</li>
+</ol>
 <h2 id="outbound-addresses">Outbound addresses<a class="headerlink" href="#outbound-addresses" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Outbound addresses</strong></p>
 <p>The <strong>Outbound address policy</strong> (<code>organization.outbound_policy</code>) says which network addresses Muster may call:
@@ -2970,6 +3024,15 @@ resolved, so a name that points at a blocked address is blocked.</p>
 such as <code>10.0.0.0/8</code>, an address, a host name or a domain such as <code>*.example.org</code>. A denied entry always wins. Some
 addresses are always blocked and no allowed entry opens them: link-local, cloud metadata, unspecified and multicast
 addresses. A chat server on the loopback address, for one, needs <code>127.0.0.0/8</code> in <strong>Allowed</strong> under Standard.</p>
+<ol>
+<li>Open <strong>Organization → Outbound addresses</strong>.</li>
+<li>
+<p>Choose the <strong>Outbound address policy</strong>. Add entries with <strong>Add allowed entry</strong> and <strong>Add denied entry</strong>, and remove
+   one with the × next to it. Select <strong>Save</strong>.</p>
+<p><img alt="Organization → Outbound addresses: the policy Standard, with 127.0.0.0/8 and 10.20.0.0/16 allowed" class="screenshot" src="../../assets/screenshots/configure/organization/05-outbound-addresses.png" /></p>
+</li>
+</ol>
+<p>The screenshot is of a development installation, whose test chat servers listen on the loopback address.</p>
 <h2 id="retention">Retention<a class="headerlink" href="#retention" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Retention</strong></p>
 <dl>
@@ -2984,11 +3047,39 @@ addresses. A chat server on the loopback address, for one, needs <code>127.0.0.0
 </dl>
 <p>Each period is 1 to 36,500 days. The summaries must be kept at least as long as the details, because details go first;
 a save that breaks this is refused (<code>retention_order</code>).</p>
+<ol>
+<li>Open <strong>Organization → Retention</strong>.</li>
+<li>
+<p>Enter the number of days of each period and select <strong>Save</strong>.</p>
+<p><img alt="Organization → Retention: Stored Snapshots kept 30 days, the other periods at their defaults, saved" class="screenshot" src="../../assets/screenshots/configure/organization/06-retention.png" /></p>
+</li>
+</ol>
+<h2 id="audit-log">Audit log<a class="headerlink" href="#audit-log" title="Permanent link">&para;</a></h2>
+<p><strong>Organization → Audit log</strong> (Admins only) records who changed or did what, newest first, for the last 7 days by
+default: the time, the actor with the token or the Transport it acted through, the action, the resource and the changes
+with their values before and after. Secrets show only that they changed. Entries are kept for <code>retention.audit_log</code>
+days, as <a href="#retention">Retention</a> sets.</p>
+<ol>
+<li>
+<p>Open <strong>Organization → Audit log</strong>.</p>
+<p><img alt="The Audit log: the newest entries, changes of the Organization and of its outbound address policy by admin through the web UI" class="screenshot" src="../../assets/screenshots/configure/organization/07-audit-log.png" /></p>
+</li>
+<li>
+<p>Narrow it with the filters: <strong>From</strong> and <strong>To</strong>, the <strong>Actor</strong>, the <strong>Action</strong>, such as <code>organization.updated</code>, and
+   the <strong>Resource type</strong>, such as <code>organization</code>; select <strong>Apply</strong>, and <strong>Clear filters</strong> to see everything again. The
+   filters are kept in the address, so a link to a filtered list can be shared.</p>
+<p><img alt="The Audit log filtered by the resource type organization" class="screenshot" src="../../assets/screenshots/configure/organization/08-audit-log-filtered.png" /></p>
+</li>
+<li>
+<p>Read the changes of an entry in its <strong>Changes</strong>: each field with its value before and after.</p>
+<p><img alt="One entry of the Audit log: the time zone of messages changed from UTC to Asia/Tokyo and the start of the working day to 08:30" class="screenshot" src="../../assets/screenshots/configure/organization/09-audit-log-entry.png" /></p>
+</li>
+</ol>
 <h2 id="elsewhere">Elsewhere<a class="headerlink" href="#elsewhere" title="Permanent link">&para;</a></h2>
 <p>Other Organization pages have their own guides: <strong>Keyring</strong> in <a href="../../operations/key-rotation/">Key rotation</a>, <strong>Outgoing
 heartbeat</strong> (<code>outgoing_heartbeat.url</code>, unset) in <a href="../../operations/outgoing-heartbeat/">Outgoing heartbeat</a>, <strong>Lookup
-tables</strong> and <strong>Link rules</strong> in <a href="../messages-and-templates/#links">Messages and templates</a>, and <strong>System status</strong> and the
-<strong>Audit log</strong> for what is wrong or who changed what.</p>
+tables</strong> and <strong>Link rules</strong> in <a href="../messages-and-templates/#links">Messages and templates</a>, and <strong>System status</strong> in
+<a href="../../operations/monitoring/#system-status">Monitoring</a>.</p>
 <h2 id="the-api">The API<a class="headerlink" href="#the-api" title="Permanent link">&para;</a></h2>
 <p><code>GET /api/v1/organization</code> reads the Organization and its <code>ETag</code>; <code>PUT /api/v1/organization</code> replaces the fields above
 with <code>If-Match</code> set to that ETag, as <a href="../api-tokens/#conventions">API tokens and automation</a> shows. The fields are

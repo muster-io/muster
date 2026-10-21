@@ -48,6 +48,14 @@ from fields; the API takes the same structure; an invalid expression is refused 
 
 A missing label counts as an empty value. So `team!="payments"` also matches an Alert that has no `team` label.
 
+In the Route editor, under **Matchers**:
+
+1. Select **Add matcher**. A row appears with the label, the operator and the value.
+2. Enter the label, such as `team`, choose the operator, `=` by default, and enter the value, such as `payments`. The ×
+   at the end of a row removes it.
+
+![The Matchers of a Route: one row, team = payments, and the button Add matcher](../assets/screenshots/concepts/routes-and-group-keys/01-matchers.png){ .screenshot }
+
 ### Order, and the Default route
 
 Routes are evaluated in list order, and the first Route that matches takes the Alert. Put the narrow Routes first and
@@ -121,6 +129,13 @@ with one Acknowledge. A fine key gives more Alert Groups and a clearer ownership
 "who should look at this" apart. A good start is the labels your teams split on: the alert name, the cluster and the
 namespace or the service.
 
+In the Route editor, the **Group key** shows its labels in order:
+
+1. To take a label out, select the × next to it.
+2. To add one, type its name in the field under the labels and select **Add label**.
+
+![The Group key of a new Route, alertname, severity and cluster, beside its preview: 2 Alert Groups](../assets/screenshots/concepts/routes-and-group-keys/02-group-key.png){ .screenshot }
+
 ### Preview before you save
 
 The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
@@ -129,6 +144,17 @@ the current and the proposed key would produce, with the 5 largest as examples (
 It covers the Alerts that the Route would take
 at its place in the current order, each Alert once, and it works for a Route you are still creating. Use it before every
 change of a key.
+
+1. Change the Matchers or the Group key in the Route editor.
+2. Under **Group key preview**, choose the **Period**, 24 hours by default, and select **Preview**.
+3. Compare **Current**, the saved key, with **Proposed**, the key in the editor: each table lists the largest Alert
+   Groups with the values of the key's labels and the number of Alerts. A new Route has only the proposed side. When
+   you change the Matchers, the key or the period after a preview, the preview says so; select **Preview** again.
+
+![The Group key preview of a saved Route with namespace instead of severity in its key: Current 2 Alert Groups, Proposed 3 Alert Groups](../assets/screenshots/concepts/routes-and-group-keys/03-preview.png){ .screenshot }
+
+The screenshot shows the four Alerts of the table above: with `namespace` in place of `severity`, the Alerts of `prod`
+split by namespace.
 
 ### Do not put Instance labels in the key
 
@@ -147,6 +173,38 @@ the Alertmanager cluster knows and the rules do not, such as `cluster=prod-eu`. 
 include `cluster`: set it as a Static label on each Integration, and Alert Groups of different clusters stay apart even
 when the alerting rules never mention the cluster. See [Static
 labels](../integrations/alertmanager.md#static-labels).
+
+## Create a Route
+
+1. Open **Routes** and select **Create route**. Choose a [Route profile](#route-profiles), **On-call** or
+   **Informational**; **Choose another profile** takes you back.
+
+    ![Create route: the choice between the profiles On-call and Informational](../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
+
+2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](#matchers), turn on **Urgent** if every
+   Alert Group of the Route is [Urgent](#urgent), and check the [Group key](#group-keys) with its
+   [preview](#preview-before-you-save).
+
+    ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](../assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
+
+3. Under **Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
+   health; a Route without Destinations sends no messages.
+
+    ![The Destinations of the Route: the outgoing webhook payments, Healthy](../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
+
+4. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
+   **Delivery** (the Thread batching window and the Storm threshold), **Snooze durations**, **Ack timeout and
+   Reminders** — see [Statuses and commands](statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) —
+   and **Message**, which [Messages and templates](../configure/messages-and-templates.md#edit-a-routes-message)
+   explains.
+
+    ![The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](../assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+
+5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](#order-and-the-default-route).
+   Above the list, Muster may suggest Routes for its own alerts.
+
+    ![The Routes list: the Route payments first, then the Default route, under two suggestions](../assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png){ .screenshot }
 
 ## Examples
 

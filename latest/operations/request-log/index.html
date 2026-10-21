@@ -2996,21 +2996,34 @@ Every masked value reads <code>[redacted]</code>.</p>
 it, and opening one of them needs <code>connections:read</code>. The built-in Roles — Admin, Responder and Viewer — hold both
 Permissions; a Personal access token may hold fewer.</p>
 <h2 id="where-to-find-it">Where to find it<a class="headerlink" href="#where-to-find-it" title="Permanent link">&para;</a></h2>
+<p>The Request log of a Connection, or of an outgoing webhook Destination, is a tab of its page:</p>
+<ol>
+<li>
+<p>Open <strong>Connections → a Connection</strong>, of any type, or <strong>Destinations → an outgoing webhook</strong>, and select the tab
+   <strong>Request log</strong>. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in
+   your time zone, the direction arrow, the operation with the kind of check below it, the status — or, without an
+   answer, what failed — and the latency; <strong>Load more</strong> shows older records.</p>
+<p><img alt="The tab Request log of the Mattermost Connection: the requests of its check, with the operation, the status and the latency" class="screenshot" src="../../assets/screenshots/operations/request-log/01-connection-request-log.png" /></p>
+</li>
+<li>
+<p>Narrow the list by <strong>Direction</strong>, <strong>Status</strong> — the class <code>2xx</code>, <code>3xx</code>, <code>4xx</code>, <code>5xx</code> or <strong>No answer</strong> — and
+   <strong>Operation</strong>, and select <strong>Apply</strong>. The filters are kept in the address, such as
+   <code>?tab=request-log&amp;direction=inbound&amp;status_class=4xx</code>, so a link to a filtered list can be shared.</p>
+</li>
+<li>
+<p>Select an operation to open its record: the request — method, URL, headers, body — and the answer — status,
+   headers, body — side by side on a wide screen and one under the other on a narrow one; a JSON body is indented.
+   <strong>Copy URL</strong>, <strong>Copy headers</strong> and <strong>Copy body</strong> copy each, the body as it is stored rather than indented. A record
+   links to its Destination, its Alert Group and the other requests of its check.</p>
+<p><img alt="A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body" class="screenshot" src="../../assets/screenshots/operations/request-log/02-record.png" /></p>
+</li>
+</ol>
+<p>The same records show in two more places:</p>
 <ul>
-<li><strong>Connections → a Connection → Request log</strong>, for every type, and <strong>Destinations → an outgoing webhook → Request
-  log</strong>. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in your time
-  zone, the direction arrow, the operation with the kind of check below it, the status — or, without an answer, what
-  failed — and the latency; <strong>Load more</strong> shows older records. Filters by direction, status class (<code>2xx</code>, <code>3xx</code>,
-  <code>4xx</code>, <code>5xx</code> or <strong>No answer</strong>) and operation are kept in the address, such as
-  <code>?tab=request-log&amp;direction=inbound&amp;status_class=4xx</code>, so a link to a filtered list can be shared.</li>
 <li><strong>The Alert Group page → Delivery → Requests</strong> on each Destination's row: what was sent to that Destination for this
   Alert Group and what came back.</li>
 <li><strong>Requests of this check</strong> under the result of the Connection check, of the check before saving and of the
   Destination's check and test: the requests that check or test made.</li>
-<li><strong>A record</strong> opens with the request — method, URL, headers, body — and the answer — status, headers, body — side by
-  side on a wide screen and one under the other on a narrow one; a JSON body is indented. <strong>Copy URL</strong>, <strong>Copy
-  headers</strong> and <strong>Copy body</strong> copy each, the body as it is stored rather than indented. A record links to its
-  Destination, its Alert Group and the other requests of its check.</li>
 </ul>
 <p>The API reads the same records: <code>listRequestLog</code> and <code>getRequestRecord</code> in the <a href="../../reference/api/">API reference</a>,
 with the check run in the results of the Connection check, the check before saving, the Destination check and the

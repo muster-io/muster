@@ -2913,9 +2913,16 @@ nothing.</p>
 <li>Give it a <strong>Name</strong> that says where it is used, such as <code>laptop-scripts</code>.</li>
 <li>Under <strong>Permissions</strong> tick what the script needs. You see only the Permissions you hold. A script that reads Alert
    Groups needs <code>alert-groups:read</code>; one that also acknowledges needs <code>alert-groups:acknowledge</code>.</li>
-<li>Choose <strong>Expires on</strong>. A token may have no expiry (<code>token.expiry</code> is none by default), but the page warns about a
-   token that never expires: choose a date.</li>
-<li>Select <strong>Create</strong>. The dialog shows the token once. Copy it before you close it: only a hash is kept.</li>
+<li>
+<p>Choose <strong>Expires on</strong>: <strong>30 days</strong>, <strong>90 days</strong>, <strong>365 days</strong> or a date of your own. A token may have <strong>No expiry</strong>
+   (<code>token.expiry</code> is none by default), but the page warns about a token that never expires: choose a date.</p>
+<p><img alt="The dialog Create token: the name laptop-scripts, 90 days, and alert-groups:read and alert-groups:acknowledge ticked" class="screenshot" src="../../assets/screenshots/configure/api-tokens/01-create-token.png" /></p>
+</li>
+<li>
+<p>Select <strong>Create</strong>. The dialog shows the token once. Copy it with <strong>Copy</strong> before you select <strong>Done</strong>: only a hash is
+   kept.</p>
+<p><img alt="The dialog Token created with the token mstr_pat_… and the warning that it is shown once" class="screenshot" src="../../assets/screenshots/configure/api-tokens/02-token-created.png" /></p>
+</li>
 </ol>
 <p>The list shows when each token was created, when and from which address it was last used, and when it expires.
 <strong>Revoke</strong> stops a script that uses it at once. The Audit log records a request made with a token as "alex via token
@@ -2923,8 +2930,20 @@ laptop-scripts".</p>
 <h2 id="create-a-service-account">Create a Service account<a class="headerlink" href="#create-a-service-account" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <strong>Access → Service accounts</strong> and select <strong>Create service account</strong>.</li>
-<li>Give it a <strong>Name</strong> and a <strong>Role</strong>: Admin, Responder or Viewer. You can give only a Role whose Permissions you hold.</li>
-<li>On its page, under <strong>Tokens</strong>, select <strong>Create token</strong>, give it a name and an expiry, and copy the value once.</li>
+<li>
+<p>Give it a <strong>Name</strong> and a <strong>Role</strong>: Admin, Responder or Viewer. You can give only a Role whose Permissions you hold.
+   Select <strong>Create</strong>.</p>
+<p><img alt="The dialog Create service account: the name terraform and the Role Admin" class="screenshot" src="../../assets/screenshots/configure/api-tokens/03-create-service-account.png" /></p>
+</li>
+<li>
+<p>On its page, under <strong>Tokens</strong>, select <strong>Create token</strong>, give it a name and an expiry, select <strong>Create</strong>, and copy the
+   value once.</p>
+<p><img alt="The dialog Token created with the token mstr_sat_… of the Service account" class="screenshot" src="../../assets/screenshots/configure/api-tokens/04-service-account-token.png" /></p>
+</li>
+<li>
+<p>The page of the Service account shows its Role, its status and its tokens, with <strong>Disable</strong> and <strong>Delete</strong>.</p>
+<p><img alt="The Service account terraform: its details, its Role, its actions and the token pipeline" class="screenshot" src="../../assets/screenshots/configure/api-tokens/05-service-account.png" /></p>
+</li>
 </ol>
 <p>Its tokens act with the Role of the account, and changing the Role changes every token at once. To change a token
 without a gap, create the second token, switch the pipeline to it and revoke the first. <strong>Disable</strong> stops all its tokens

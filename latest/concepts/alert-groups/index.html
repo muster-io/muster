@@ -2839,6 +2839,40 @@ Urgent (<code>organization.critical_is_urgent</code>, on by default).</dd>
 </dl>
 <p>The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.</p>
+<h2 id="in-the-web-ui">In the web UI<a class="headerlink" href="#in-the-web-ui" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p>Open <strong>Alert Groups</strong>. The list shows the Alert Groups of the chosen <strong>Time range</strong>, the last 7 days by default,
+   newest first: the status, the number, the title, the severity, the Route and the Integrations first. The tabs
+   above it — <strong>Open</strong>, <strong>Firing</strong>, <strong>Acknowledged</strong>, <strong>Snoozed</strong>, <strong>Resolved</strong> and <strong>All</strong> — choose the statuses and
+   count each one; <strong>Search</strong> finds an Alert Group by its number, such as <code>#412</code>, or by text.</p>
+<p><img alt="The Alert Groups list on the tab All: Alert Groups in each status, with the filters beside it" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/01-list.png" /></p>
+</li>
+</ol>
+<p>The table scrolls sideways inside its box to the columns further right: the Owner, the end of a Snooze, when each
+   Alert Group started, how long it has lasted and its last change.</p>
+<pre><code>![The list scrolled to its right end: the Owner admin, the end of the Snooze, the start, the duration and the last change of each Alert Group](../assets/screenshots/concepts/alert-groups/02-list-columns.png){ .screenshot }
+</code></pre>
+<ol>
+<li>
+<p>Narrow the list with the filters beside it: the <strong>Routes</strong>, the <strong>Integrations</strong>, the <strong>Severity</strong>, <strong>Urgent</strong>, the
+   <strong>Owner</strong>, label Matchers and more. They combine, and they live in the address, so a filtered list can be shared;
+   <strong>Clear filters</strong> removes them. On a phone they open from <strong>Filters</strong>.</p>
+<p><img alt="The list filtered by the Route payments: two Alert Groups" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/03-filters.png" /></p>
+</li>
+<li>
+<p>Select the number or the title of an Alert Group to open its page: the status, the Owner, the command buttons, the
+   <a href="#what-an-alert-group-has">Alerts</a>, the labels, the deliveries to its Destinations and the previous Alert Groups
+   with the same Route and Group key values.</p>
+<p><img alt="The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/04-alert-group.png" /></p>
+</li>
+<li>
+<p>Further down, the <a href="#the-timeline">Timeline</a> lists what happened to it, with the actor and the Transport of each
+   change, and the box to add a Note.</p>
+<p><img alt="The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/05-timeline.png" /></p>
+</li>
+</ol>
+<p>The <a href="../statuses-and-commands/#commands-in-the-web-ui">commands</a> act on the Alert Group from its page.</p>
 <h2 id="live-updates">Live updates<a class="headerlink" href="#live-updates" title="Permanent link">&para;</a></h2>
 <p>The list and the Alert Group page change as soon as something happens, without a reload. A mark in the header of every
 page says whether these live updates reach your browser, so that on a phone at night you know whether the list in front
@@ -2972,6 +3006,21 @@ an Alert Group's status. A new Group key or new Matchers apply only to Alerts th
 <p>A Route that still has open Alert Groups cannot be deleted. Muster refuses and offers to move them to the Default
 route. A moved Alert Group keeps its Group key values, takes no new Alerts, and never reopens; it stays open until its
 Alerts resolve or a person resolves it.</p>
+<h2 id="statistics">Statistics<a class="headerlink" href="#statistics" title="Permanent link">&para;</a></h2>
+<p><strong>Statistics</strong> counts the Alert Groups that started in a period and how fast people took and closed them: for each
+Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
+and of the time to resolve. Days are split in your time zone.</p>
+<ol>
+<li>
+<p>Open <strong>Statistics</strong>. Choose the <strong>Period</strong> — <strong>Last 7 days</strong>, <strong>Last 30 days</strong>, <strong>Last 90 days</strong> or <strong>Custom</strong> — and
+   show it <strong>By route</strong> or <strong>By integration</strong>; add Routes or Integrations to narrow it.</p>
+<p><img alt="Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/06-statistics.png" /></p>
+</li>
+<li>
+<p>Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.</p>
+<p><img alt="The Alert Groups per day of start of the Route payments" class="screenshot" src="../../assets/screenshots/concepts/alert-groups/07-statistics-days.png" /></p>
+</li>
+</ol>
 <h2 id="how-long-alert-groups-are-kept">How long Alert Groups are kept<a class="headerlink" href="#how-long-alert-groups-are-kept" title="Permanent link">&para;</a></h2>
 <dl>
 <dt><code>retention.alert_details</code></dt>

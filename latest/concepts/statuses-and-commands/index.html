@@ -1662,6 +1662,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#commands-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands in the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-a-command-comes-from" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2980,6 +2991,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#commands-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands in the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-a-command-comes-from" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3330,6 +3352,7 @@ dialog opens, on its own clock and in your time zone (the one of your profile, e
 that time zone with the preset. Admins set the start of the working day and the first day of the week on Organization →
 General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
 in the Organization's while the profile follows the browser.</p>
+<p><img alt="The Snooze dialog with Until tomorrow 09:00 chosen: each preset with the end it would set, after the durations 1 h, 4 h and 24 h" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/01-snooze-presets.png" /></p>
 <h4 id="in-messengers">In messengers<a class="headerlink" href="#in-messengers" title="Permanent link">&para;</a></h4>
 <p>On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
 two more Snooze buttons after the durations: "Until tomorrow 09:00" and "Until Monday 09:00", or «До завтра 09:00» and
@@ -3349,6 +3372,35 @@ are <a href="#text-commands">Text commands</a>.</p>
 the command is refused. A <strong>Service account</strong> may run the commands its Role allows, except Acknowledge and Still on it,
 because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
 command is recorded in the Audit log with its actor and the Transport.</p>
+<h2 id="commands-in-the-web-ui">Commands in the web UI<a class="headerlink" href="#commands-in-the-web-ui" title="Permanent link">&para;</a></h2>
+<p>The page of an Alert Group offers the commands its status allows, and the list offers them for several Alert Groups at
+once (<a href="#commands">Bulk commands</a>).</p>
+<ol>
+<li>
+<p>Open the Alert Group from <strong>Alert Groups</strong>. Its command buttons are at the top: <strong>Acknowledge</strong>, <strong>Resolve</strong> and
+   <strong>Snooze</strong> for a firing one.</p>
+<p><img alt="A firing Alert Group with the buttons Acknowledge, Resolve and Snooze" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/02-command-buttons.png" /></p>
+</li>
+<li>
+<p>To add a Note, type it under <strong>Add a note</strong>, further down the page, and select <strong>Add note</strong>. It appears in the
+   Timeline with you as its author.</p>
+<p><img alt="The Note box with a Note typed, and Add note" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/03-note-box.png" /></p>
+</li>
+<li>
+<p><strong>Snooze</strong> opens its dialog: the Route's Snooze durations, the <a href="#snooze-presets">Snooze presets</a>, <strong>Until</strong> a date
+   and time of your choosing, or <strong>No end</strong>, which asks you to confirm with <strong>I understand</strong>. Select <strong>Snooze</strong>.</p>
+<p><img alt="The Snooze dialog with No end chosen and its warning that the Alert Group stays snoozed until someone unsnoozes it" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/04-snooze-dialog.png" /></p>
+</li>
+<li>
+<p><strong>Resolve</strong> opens a dialog with an optional Note, recorded with the resolve.</p>
+<p><img alt="The dialog Resolve with the Note Renewed by cert-manager." class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/05-resolve-dialog.png" /></p>
+</li>
+<li>
+<p>After <strong>Acknowledge</strong>, the page names you as the Owner and offers <strong>Unacknowledge</strong>, <strong>Resolve</strong> and <strong>Snooze</strong>.
+   Another user sees <strong>Take over from {Owner}</strong> instead of <strong>Acknowledge</strong>.</p>
+<p><img alt="An acknowledged Alert Group with its Owner admin and the buttons Unacknowledge, Resolve and Snooze" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/06-acknowledged.png" /></p>
+</li>
+</ol>
 <h2 id="where-a-command-comes-from">Where a command comes from<a class="headerlink" href="#where-a-command-comes-from" title="Permanent link">&para;</a></h2>
 <p>The <strong>Transport</strong> is the way a command reaches Muster. It is recorded with the command, and Muster applies the same rules
 to all of them.</p>

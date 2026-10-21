@@ -1053,6 +1053,22 @@ column.
 The Outgoing webhook Destinations have templates of their own, written the same way: see
 [template mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md).
 
+## Edit a Route's message
+
+1. Open **Routes** and the Route, and scroll to **Message**. Choose the **Language** of its built-in texts. Each
+   template shows **Built-in** or **Custom**, with its **Preview** under it.
+
+    ![The Message section of a Route: the language English and the Root message built in, with its preview](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/01-message.png){ .screenshot }
+
+2. Choose **Custom** for the template you change, such as **Alert line**, and edit the source in the editor; it starts
+   from the built-in template. The **Preview** renders it as you type, against the **Sample** you choose, in the markup
+   of **Mattermost**, **Telegram** or **Slack**. A Route without recent Stored Snapshots renders against the built-in
+   example. [The template language](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-template-language) lists what a template reads.
+
+    ![The Alert line made Custom with the template pod: summary, and its preview of the built-in example](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/02-alert-line.png){ .screenshot }
+
+3. Select **Save**. A template with an error is not saved, and the editor marks the error at its line and column.
+
 ## The template language
 
 Templates are Go templates, the language of Alertmanager's own templates, and run in a sandbox:
@@ -1067,6 +1083,9 @@ Templates are Go templates, the language of Alertmanager's own templates, and ru
   and the editor names an unknown function when you save.
 - Loops are capped, a template may run for 2 seconds, and the output is cut at about 50,000 characters
   (`template.output_cap`).
+- A label or annotation that is not there is empty text, as in Alertmanager: `{{ .Labels.cluster }}` prints nothing
+  and passes `""` to a function, so `toJson` gives `""`, not `null`. Tell a missing value apart with `if` or `or`,
+  as in `{{ or .CommonLabels.team "none" }}`.
 
 What the Root message template reads:
 
@@ -1127,12 +1146,25 @@ in a template is escaped and mentions nobody.
 Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
 in the message and as the **Links** block on the Alert Group page.
 
-A **Lookup table** is a table of values: a key and one value per named column. Open **Organization → Lookup tables →
-Create table**, name it, add the columns and the rows. Limits: 50 columns and 10,000 rows, names and column names up to
-200 characters, a description up to 2,000, a key or value up to 4,096 (`lookup_table.size_max`).
+### Add a Lookup table
 
-A **Link rule** turns an Alert Group, or each value of a label, into a link. Open **Organization → Link rules → Create
-rule** and fill in:
+A **Lookup table** is a table of values: a key and one value per named column. Limits: 50 columns and 10,000 rows,
+names and column names up to 200 characters, a description up to 2,000, a key or value up to 4,096
+(`lookup_table.size_max`).
+
+1. Open **Organization → Lookup tables** and select **Create table**.
+2. Enter the **Name** that Link rules read the table by, and a **Description** if you like. Under **Rows**, name the
+   first column, add more with **Add column**, and add each row with **Add row**: its **Key** and a value per column.
+
+    ![The form of a new Lookup table: the name dashboards, the column url and the rows prod-eu and prod](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/03-new-lookup-table.png){ .screenshot }
+
+3. Select **Create**. The list of Lookup tables shows the table with its number of rows.
+
+    ![The Lookup tables: dashboards with 2 rows](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/04-lookup-tables.png){ .screenshot }
+
+### Add a Link rule
+
+A **Link rule** turns an Alert Group, or each value of a label, into a link. Its fields:
 
 **Name**
 :   Shown as the text of the link.
@@ -1151,6 +1183,16 @@ rule** and fill in:
     "column"` reads one cell and gives an empty text when the table, the key or the column does not exist. A template
     that writes nothing, or something that is not an `http` or `https` URL, gives no link.
 
+1. Open **Organization → Link rules** and select **Create rule**.
+2. Fill in the fields above. The **Preview** under the URL template shows the link that the rule makes for the
+   **Sample** you choose, a built-in example or a recent Alert Group.
+
+    ![The form of a new Link rule: the name Dashboard, no Matchers, the scope Alert Group, the URL template with lookup and its preview link](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/05-new-link-rule.png){ .screenshot }
+
+3. Select **Create**. The list of Link rules shows the rule beside the built-in **Explore**.
+
+    ![The Link rules: Dashboard and the built-in Explore](https://muster-io.github.io/muster/latest/assets/screenshots/configure/messages-and-templates/06-link-rules.png){ .screenshot }
+
 All the Link rules of one message together read at most 100 rows with `lookup` in one render
 (`template.lookups_per_render`); the 101st is a template error, and a Link rule that fails is left out of the message
 and counted.
@@ -1160,7 +1202,8 @@ Example: a dashboard per cluster.
 1. Create the Lookup table `dashboards` with the column `url` and one row for each cluster: the key `prod-eu`, the
    value `https://grafana.example.org/d/abc123/prod-eu`.
 2. Create the Link rule `Dashboard`, scope **Alert Group**, with the URL template
-   `{{ lookup "dashboards" .Labels.cluster "url" }}`.
+   `{{ lookup "dashboards" .Labels.cluster "url" }}`. An Alert Group without a common `cluster` looks up an empty key
+   and gets no link: a missing label is [empty text](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-template-language).
 3. The preview of the rule shows the link for a sample. Alert Groups with `cluster="prod-eu"` now carry **Dashboard**.
 
 A rule with the scope **Each value of label** and the label `pod` can build one log link per pod:
@@ -1214,6 +1257,12 @@ The defaults below are what a new installation has.
     time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
     See [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
 
+1. Open **Organization**; **General** opens first.
+2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
+   of the working day** or the **First day of the week**, and select **Save**. "Saved." confirms it.
+
+    ![Organization → General: the time zone Asia/Tokyo and the working day starting at 08:30, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/01-general.png){ .screenshot }
+
 ## Severity levels
 
 **Organization → Severity levels**
@@ -1235,6 +1284,12 @@ info.
 :   The values of the severity label that arrived, with their counts. A value with no mapping is marked "No mapping —
     counts as warning" and has a **Map** action. If your alerts use `P1` and `page`, map them to critical here.
 
+1. Open **Organization → Severity levels**.
+2. Under **Mapping**, select **Add value**, enter the value, such as `P1`, and choose its level; or select **Map** next
+   to a value under **Values seen**. Select **Save**.
+
+    ![The Mapping of the Severity levels with the value P1 mapped to critical](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/02-severity-levels.png){ .screenshot }
+
 ## Alert handling
 
 **Organization → Alert handling**
@@ -1249,6 +1304,12 @@ info.
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.
 
+1. Open **Organization → Alert handling**.
+2. Turn **Critical is Urgent** on or off, and change the **Instance labels**: **Add label** adds one, the × next to a
+   label removes it. Select **Save**.
+
+    ![Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+
 ## Security
 
 **Organization → Security**
@@ -1262,6 +1323,12 @@ status.
     Personal access tokens work while their last OIDC sign-in is no older than this; after that they get `401` with the
     code `oidc_recheck_required` until the person signs in through OIDC again. Service account tokens are not affected.
     See [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md).
+
+1. Open **Organization → Security**.
+2. Choose who must have TOTP under **TOTP required**, and change the **Token grace for OIDC users without an offline
+   token (days)**. Select **Save**.
+
+    ![Organization → Security: TOTP required for nobody and a token grace of 14 days, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/04-security.png){ .screenshot }
 
 ## Outbound addresses
 
@@ -1278,6 +1345,14 @@ resolved, so a name that points at a blocked address is blocked.
 such as `10.0.0.0/8`, an address, a host name or a domain such as `*.example.org`. A denied entry always wins. Some
 addresses are always blocked and no allowed entry opens them: link-local, cloud metadata, unspecified and multicast
 addresses. A chat server on the loopback address, for one, needs `127.0.0.0/8` in **Allowed** under Standard.
+
+1. Open **Organization → Outbound addresses**.
+2. Choose the **Outbound address policy**. Add entries with **Add allowed entry** and **Add denied entry**, and remove
+   one with the × next to it. Select **Save**.
+
+    ![Organization → Outbound addresses: the policy Standard, with 127.0.0.0/8 and 10.20.0.0/16 allowed](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/05-outbound-addresses.png){ .screenshot }
+
+The screenshot is of a development installation, whose test chat servers listen on the loopback address.
 
 ## Retention
 
@@ -1298,12 +1373,38 @@ addresses. A chat server on the loopback address, for one, needs `127.0.0.0/8` i
 Each period is 1 to 36,500 days. The summaries must be kept at least as long as the details, because details go first;
 a save that breaks this is refused (`retention_order`).
 
+1. Open **Organization → Retention**.
+2. Enter the number of days of each period and select **Save**.
+
+    ![Organization → Retention: Stored Snapshots kept 30 days, the other periods at their defaults, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/06-retention.png){ .screenshot }
+
+## Audit log
+
+**Organization → Audit log** (Admins only) records who changed or did what, newest first, for the last 7 days by
+default: the time, the actor with the token or the Transport it acted through, the action, the resource and the changes
+with their values before and after. Secrets show only that they changed. Entries are kept for `retention.audit_log`
+days, as [Retention](https://muster-io.github.io/muster/latest/configure/organization.md#retention) sets.
+
+1. Open **Organization → Audit log**.
+
+    ![The Audit log: the newest entries, changes of the Organization and of its outbound address policy by admin through the web UI](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/07-audit-log.png){ .screenshot }
+
+2. Narrow it with the filters: **From** and **To**, the **Actor**, the **Action**, such as `organization.updated`, and
+   the **Resource type**, such as `organization`; select **Apply**, and **Clear filters** to see everything again. The
+   filters are kept in the address, so a link to a filtered list can be shared.
+
+    ![The Audit log filtered by the resource type organization](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/08-audit-log-filtered.png){ .screenshot }
+
+3. Read the changes of an entry in its **Changes**: each field with its value before and after.
+
+    ![One entry of the Audit log: the time zone of messages changed from UTC to Asia/Tokyo and the start of the working day to 08:30](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/09-audit-log-entry.png){ .screenshot }
+
 ## Elsewhere
 
 Other Organization pages have their own guides: **Keyring** in [Key rotation](https://muster-io.github.io/muster/latest/operations/key-rotation.md), **Outgoing
 heartbeat** (`outgoing_heartbeat.url`, unset) in [Outgoing heartbeat](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md), **Lookup
-tables** and **Link rules** in [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#links), and **System status** and the
-**Audit log** for what is wrong or who changed what.
+tables** and **Link rules** in [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#links), and **System status** in
+[Monitoring](https://muster-io.github.io/muster/latest/operations/monitoring.md#system-status).
 
 ## The API
 
@@ -1353,9 +1454,15 @@ nothing.
 2. Give it a **Name** that says where it is used, such as `laptop-scripts`.
 3. Under **Permissions** tick what the script needs. You see only the Permissions you hold. A script that reads Alert
    Groups needs `alert-groups:read`; one that also acknowledges needs `alert-groups:acknowledge`.
-4. Choose **Expires on**. A token may have no expiry (`token.expiry` is none by default), but the page warns about a
-   token that never expires: choose a date.
-5. Select **Create**. The dialog shows the token once. Copy it before you close it: only a hash is kept.
+4. Choose **Expires on**: **30 days**, **90 days**, **365 days** or a date of your own. A token may have **No expiry**
+   (`token.expiry` is none by default), but the page warns about a token that never expires: choose a date.
+
+    ![The dialog Create token: the name laptop-scripts, 90 days, and alert-groups:read and alert-groups:acknowledge ticked](https://muster-io.github.io/muster/latest/assets/screenshots/configure/api-tokens/01-create-token.png){ .screenshot }
+
+5. Select **Create**. The dialog shows the token once. Copy it with **Copy** before you select **Done**: only a hash is
+   kept.
+
+    ![The dialog Token created with the token mstr_pat_… and the warning that it is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/configure/api-tokens/02-token-created.png){ .screenshot }
 
 The list shows when each token was created, when and from which address it was last used, and when it expires.
 **Revoke** stops a script that uses it at once. The Audit log records a request made with a token as "alex via token
@@ -1365,7 +1472,18 @@ laptop-scripts".
 
 1. Open **Access → Service accounts** and select **Create service account**.
 2. Give it a **Name** and a **Role**: Admin, Responder or Viewer. You can give only a Role whose Permissions you hold.
-3. On its page, under **Tokens**, select **Create token**, give it a name and an expiry, and copy the value once.
+   Select **Create**.
+
+    ![The dialog Create service account: the name terraform and the Role Admin](https://muster-io.github.io/muster/latest/assets/screenshots/configure/api-tokens/03-create-service-account.png){ .screenshot }
+
+3. On its page, under **Tokens**, select **Create token**, give it a name and an expiry, select **Create**, and copy the
+   value once.
+
+    ![The dialog Token created with the token mstr_sat_… of the Service account](https://muster-io.github.io/muster/latest/assets/screenshots/configure/api-tokens/04-service-account-token.png){ .screenshot }
+
+4. The page of the Service account shows its Role, its status and its tokens, with **Disable** and **Delete**.
+
+    ![The Service account terraform: its details, its Role, its actions and the token pipeline](https://muster-io.github.io/muster/latest/assets/screenshots/configure/api-tokens/05-service-account.png){ .screenshot }
 
 Its tokens act with the Role of the account, and changing the Role changes every token at once. To change a token
 without a gap, create the second token, switch the pipeline to it and revoke the first. **Disable** stops all its tokens
@@ -1471,9 +1589,20 @@ Alertmanager pushes its Snapshots to Muster by webhook: the Integration's connec
 
 ## Create a token and paste the snippet
 
-In **Integrations**, create the Integration, then **Create token**. Muster shows the token and a ready Alertmanager
-snippet **once**; copy it before you close the dialog. Only a hash of the token is kept, so a lost token cannot be shown
-again: create a new one.
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name** after the Alertmanager cluster,
+   such as `prod-eu`, and add its [Static labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels) with **Add label**, such as `cluster=prod-eu`. Keep
+   the **Duplicate window** of 45 seconds. Select **Create**.
+
+    ![The form of a new Integration: the name prod-eu, the Static label cluster=prod-eu and the duplicate window of 45 seconds](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `alertmanager`, and
+   select **Create**. Muster shows the token and a ready Alertmanager snippet, the **Alertmanager configuration**,
+   **once**; copy it with **Copy** before you select **Done**. Only a hash of the token is kept, so a lost token cannot
+   be shown again: create a new one.
+
+    ![The dialog Token created: the token, the Alertmanager configuration with the receiver and the route, and the warning that the token is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/02-token-and-snippet.png){ .screenshot }
+
+3. Paste the snippet into the Alertmanager configuration, as the rest of this section explains, and reload Alertmanager.
 
 The snippet has two parts. The Alertmanager receiver goes into `receivers`:
 
@@ -1548,7 +1677,15 @@ severity=warning` prints the receivers an alert reaches; it should list Muster a
   [Repeat intervals](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#repeat-intervals) for why.
 
 Reload Alertmanager (`POST /-/reload` or `SIGHUP`). The Integration page then shows the time of the last Snapshot and
-the Stored Snapshots as received.
+the Stored Snapshots as received. In the screenshots, the addresses start with `http://localhost:8081`, the ingest
+address of a development installation; yours start with your `MUSTER_INGEST_URL`.
+
+![The Integration prod-eu after its first Snapshot: the last Snapshot, one Snapshot received, the token last used and the Alertmanager route Muster saw](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/03-first-snapshot.png){ .screenshot }
+
+Further down, **Stored Snapshots** lists each Snapshot as received, newest first, with its group key and its state;
+select one to see its body.
+
+![The Stored Snapshots of the Integration: one Snapshot, Processed](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/04-stored-snapshots.png){ .screenshot }
 
 ## Repeat intervals
 
@@ -1593,6 +1730,12 @@ Alertmanager; the [runbook](https://muster-io.github.io/muster/latest/operations
 Static labels belong to the Integration, not to Alertmanager. Add them in the Integration's settings, such as
 `cluster=prod-eu`; Muster adds them to every Alert of the Integration before it routes the Alert, so a Route and a Group
 key can use them as if the rules had set them.
+
+1. Open the Integration and select **Edit**, or set them in the form of a new Integration.
+2. Under **Static labels**, select **Add label** and enter the label's name and value, one label per row; **Remove
+   label** takes a row away. Select **Save**.
+
+    ![The field Static labels of an Integration with the label cluster=prod-eu](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/alertmanager/05-static-labels.png){ .screenshot }
 
 - Use them for what the Alertmanager cluster knows and the rules do not: the cluster, the region, the environment. The
   default Group key of a Route includes `cluster`, so Alert Groups of different clusters stay apart.
@@ -1721,9 +1864,24 @@ Create one **Integration** for each Grafana cluster, and for each Grafana organi
 
 ### Create the Integration and a token
 
-In **Integrations**, create the Integration, then **Create token**. Muster shows the token **once**, with a snippet for
-Alertmanager; Grafana needs only the token (`mstr_int_…`), the `credentials` of that snippet. Copy it before you close
-the dialog.
+1. In Muster, open **Integrations** and select **Create integration**. Enter a **Name**, such as `grafana-prod`, and
+   add the [Static labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels) with **Add label**, such as `cluster=prod-eu`. Select
+   **Create**.
+
+    ![The form of a new Integration: the name grafana-prod and the Static label cluster=prod-eu](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/01-new-integration.png){ .screenshot }
+
+2. On the Integration page, select **Create token**, give the token a **Name** if you like, such as `grafana`, and
+   select **Create**. Muster shows the token **once**, with a snippet for Alertmanager; Grafana needs only the
+   **Token** (`mstr_int_…`), the `credentials` of that snippet. Copy it with **Copy** before you select **Done**.
+
+    ![The dialog Token created with the token outlined, above the Alertmanager configuration that Grafana does not need](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/02-token.png){ .screenshot }
+
+3. Create the contact point and the notification policy in Grafana, as the next two sections say. Once Grafana sends
+   its first Snapshot, the Integration page shows it under **Snapshots**: the time of the last one and how many were
+   received. In the screenshot, the address starts with `http://localhost:8081`, the ingest address of a development
+   installation; yours starts with your `MUSTER_INGEST_URL`.
+
+    ![The Integration grafana-prod after the first Snapshot from Grafana: the last Snapshot and one Snapshot received](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/grafana/03-first-snapshot.png){ .screenshot }
 
 ### Create a webhook contact point
 
@@ -1788,7 +1946,8 @@ In **Alerting** → **Notification policies**, send the alerts to the contact po
   **Alerting** → **Settings**.
 
 On its first start, Grafana applies provisioned policies within about a minute. Grafana sends the first Snapshot when
-an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received.
+an alert fires; the Integration page then shows the time of the last Snapshot and the Stored Snapshots as received, as
+in [Create the Integration and a token](https://muster-io.github.io/muster/latest/integrations/grafana.md#create-the-integration-and-a-token).
 
 ### Repeat intervals
 
@@ -1975,6 +2134,31 @@ keep it a few times the interval at which Alertmanager signals. The Heartbeat th
 nothing is raised and nothing goes Stale until it arrives, however long that takes. The first signal makes it
 **live**.
 
+1. Open **Integrations** and the Integration. Next to its name, the Heartbeat badge says **Not configured**, and a
+   banner warns that Muster will not notice when Alertmanager goes quiet. The list of **Integrations** shows the same
+   badge in its column **Heartbeat**.
+
+    ![An Integration without a Heartbeat: the badge Not configured and the banner No Heartbeat](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/01-not-configured.png){ .screenshot }
+
+2. Select **Edit**. Under **Heartbeat**, turn on **Watch for Heartbeat signals**, keep or change the **Timeout** in
+   minutes, and note the [Heartbeat URL](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#the-heartbeat-url). Select **Save**. A new Integration can have the
+   Heartbeat on from the start: the same switch is in its form.
+
+    ![The Heartbeat settings of an Integration: Watch for Heartbeat signals on, the timeout of 5 minutes and the Heartbeat URL](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/02-turn-on.png){ .screenshot }
+
+3. The badge says **Waiting** until the first signal arrives.
+
+    ![The Integration waiting for its first Heartbeat signal: the badge Waiting and its banner](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/03-waiting.png){ .screenshot }
+
+4. Select **Create token** and **Create**. With the Heartbeat on, the dialog also shows the **Heartbeat
+   configuration**: add it to Prometheus and Alertmanager as [The snippet](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#the-snippet) explains, and reload them.
+
+    ![The dialog Token created with the Heartbeat configuration under the Alertmanager configuration](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/04-token-and-snippet.png){ .screenshot }
+
+5. The first signal makes the badge **Live**, and the banner goes.
+
+    ![The Integration with a live Heartbeat: the badge Live and no banner](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/05-live.png){ .screenshot }
+
 While the Heartbeat is off, Muster answers a signal with `204` and records nothing, so turning it on later always
 starts from waiting. Turning it off resolves an open `MusterHeartbeatLost`.
 
@@ -2062,6 +2246,11 @@ No signal within the timeout makes the Integration **Heartbeat lost**:
   signal returns, does not count towards an alert's time to go Stale, so a broken path never resolves alerts that may
   still fire.
 - The chart's rule `MusterHeartbeatLost` on `muster_heartbeat_lost` is the backup when Muster itself cannot deliver.
+
+On the Integration page, the badge says **Lost** and the banner names the time of the last signal; the list of
+**Integrations** and **Organization → System status** show the loss too.
+
+![An Integration whose Heartbeat is lost: the badge Lost and the banner No contact with Alertmanager since the last signal](https://muster-io.github.io/muster/latest/assets/screenshots/integrations/heartbeat/06-lost.png){ .screenshot }
 
 The next signal makes the Heartbeat live again and resolves `MusterHeartbeatLost`. Deleting the Integration resolves it
 too.
@@ -5502,10 +5691,14 @@ remove a link of its own User.
 
 ## Link Telegram
 
-1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram** — or
-   **Relink Telegram** once you have a Telegram link, which the new link replaces.
-2. Muster shows a link `https://t.me/<bot>?start=<token>`. Open it on the device where you use Telegram, within 10
-   minutes (`account_link.telegram_token_ttl`); the link works once.
+1. In your profile, open **Messenger accounts** and select **Link Telegram** — or **Relink Telegram** once you have a
+   Telegram link, which the new link replaces.
+2. Choose the Telegram **Connection**, when there are several, and select **Get link**. Muster shows a link `https://t.me/<bot>?start=<token>` as **Open Telegram** and as a QR code
+   to scan with your phone. Open it on the device where you use Telegram, within 10 minutes
+   (`account_link.telegram_token_ttl`); the link works once.
+
+    ![The dialog Link Telegram: Open Telegram, the QR code, covered here, and the time the link expires](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/01-link-telegram.png){ .screenshot }
+
 3. Telegram opens a chat with the bot. Press **Start**.
 4. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link at once.
 
@@ -5516,12 +5709,18 @@ linked to someone else; nothing changed.
 
 ## Link Mattermost
 
-1. In your profile, open **Messenger accounts**, choose the Mattermost Connection, enter your Mattermost username —
-   with or without the `@` — and select **Send code**.
+1. In your profile, open **Messenger accounts** and select **Link Mattermost**. Choose the **Connection**, enter
+   **Your Mattermost username** — with or without the `@` — and select **Send code**.
+
+    ![The dialog Link Mattermost: the Connection chat.example.org and the username alice](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/02-link-mattermost.png){ .screenshot }
+
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are the same. The bot confirms
-   "Linked to Muster user {your name}".
+3. Type the code into your profile within 10 minutes (`account_link.mattermost_code`); capital and small letters are
+   the same. Select **Link**. The bot confirms "Linked to Muster user {your name}".
+
+    ![The code entry of Link Mattermost: Enter the code the bot sent you in Mattermost, 5 attempts left](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/03-mattermost-code.png){ .screenshot }
+
 
 A code allows 5 attempts; after five wrong codes it stops working, even with the right code, and you request a new one.
 A new request replaces your earlier one. You can request 5 codes an hour, and one Mattermost account gets at most 3
@@ -5532,14 +5731,17 @@ The bot must be allowed to open direct messages with you; see [Direct messages](
 
 ## Link Slack
 
-1. In your profile, open **Messenger accounts**, choose the Slack Connection, enter your Slack email or name and select
-   **Send code**. An email finds your account for sure; a name is compared with the name and the display name of each
-   account, regardless of case.
+1. In your profile, open **Messenger accounts** and select **Link Slack**. Choose the **Connection**, enter **Your
+   Slack email or name** and select **Send code**. An email finds your account for sure; a name is compared with the
+   name and the display name of each account, regardless of case.
+
+    ![The dialog Link Slack: the Connection Example workspace and the email alice@example.org](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/04-link-slack.png){ .screenshot }
+
 2. The Connection's bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an
    8-character code. It shows in the **Messages** tab of the bot's app, which is read-only, so you can read the code and
    cannot write to the bot. If you did not ask for it, ignore it.
 3. Type the code into your profile within 10 minutes (`account_link.slack_code`); capital and small letters are the
-   same. The bot confirms "Linked to Muster user {your name}".
+   same, and select **Link**. The bot confirms "Linked to Muster user {your name}".
 
 If Muster answers "No Slack account with this email or name was found.", check what you typed. If it answers "Several
 Slack accounts have this name. Enter the email instead.", do. A bot, a deleted account and Slackbot cannot be linked,
@@ -5569,10 +5771,14 @@ which notifies nobody.
 
 ### By a token sent to the bot
 
-1. In your profile, open **Messenger accounts**, choose the Bridge Connection and select **Link**.
-2. Muster shows a token of 43 characters and, when the bridge declares a link that opens a chat with its bot, that link
-   as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token to the bot of that Connection in a direct message, or open the link,
-   which hands the token to the bot. The token works once, and only with the bot of the Connection you chose.
+1. In your profile, open **Messenger accounts** and select **Link through {Connection}** of the Bridge Connection.
+2. On the tab **Token**, Muster shows a token of 43 characters, with **Copy**, and, when the bridge declares a link that
+   opens a chat with its bot, that link as well. Within 10 minutes (`account_link.bridge_token_ttl`), send the token
+   to the bot of that Connection in a direct message, or open the link, which hands the token to the bot. The token
+   works once, and only with the bot of the Connection you chose.
+
+    ![The dialog Link through Team chat on its tab Token: the token, Copy and the time it expires](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/05-bridge-token.png){ .screenshot }
+
 3. The bot answers "Linked to Muster user {your name} ({your login})", and your profile shows the link with the name
    and the handle the bridge reported for your account.
 
@@ -5587,12 +5793,15 @@ The code is offered only when the bridge declares how it finds people — its **
 login, username or user id — and that its bot can start a direct chat. Your profile names the field after that kind:
 **Email**, **Login**, **Username** or **User id**.
 
-1. In your profile, choose the Bridge Connection, enter your email address, login, username or user id in the
-   messenger, as the field asks, and select **Send code**.
+1. In your profile, select **Link through {Connection}** of the Bridge Connection and the tab **Code**. Enter your
+   email address, login, username or user id in the messenger, as the field asks, and select **Send code**.
 2. The bot sends you a direct message: "You requested a link to Muster. Do not share this code." with an 8-character
    code. If you did not ask for it, ignore it.
-3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the same. The link is made at
-   once, and the bot sends no confirmation.
+3. Type the code into your profile within 10 minutes (`account_link.bridge_code`); capital and small letters are the
+   same. Select **Link**: the link is made at once, and the bot sends no confirmation.
+
+    ![The tab Code of Link through Team chat after Send code: the login alice, the code entry and 5 attempts left](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/06-bridge-code.png){ .screenshot }
+
 
 If the bridge finds no one, Muster answers "No account with this email was found." — or login, username or user id. If
 the bot may not write to you, Muster answers "The bot cannot send you a direct message. Send it the token instead."
@@ -5625,8 +5834,18 @@ Route editor and the Alert Group page name each Destination's Connection and cha
 
 ## Unlink
 
-In your profile, under **Messenger accounts**, remove the link. Nothing can be unlinked from a chat. Removing a link,
-like making one, is recorded in the Audit log with who did it and from where.
+Nothing can be unlinked from a chat. Removing a link, like making one, is recorded in the Audit log with who did it and
+from where.
+
+1. In your profile, open **Messenger accounts**. It lists each link with the messenger, the Connection, the account,
+   when it was last used and when it was linked.
+
+    ![Messenger accounts with four links: through the Bridge Team chat, Mattermost, Slack and Telegram for all Telegram bots](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/07-linked-accounts.png){ .screenshot }
+
+2. Select **Unlink** on the row, and **Unlink** again in the dialog. Presses from that account no longer act as you.
+
+    ![The dialog that confirms unlinking @oncall_admin](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/account-links/08-unlink.png){ .screenshot }
+
 
 ## What Admins can do
 
@@ -5658,7 +5877,27 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the rec
 
 ## Create the Destination
 
-Create a Destination of type `webhook` with the mode `events`:
+In the web UI:
+
+1. Open **Destinations**, select **Create destination** and choose **Outgoing webhook**. Keep the **Mode** **Events**.
+2. Under **Events request**, enter the **URL** and, with **Add header**, each header's name and value; a value reads a
+   [Secret](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#secrets) as `{{ .Secrets.<name> }}`. Set the **Proxy** if the endpoint needs one, and give the
+   Destination a **Name**. Select **Save**.
+
+    ![The form of a new outgoing webhook in the mode Events: the URL and the header Authorization that reads the Secret token](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/01-new-destination.png){ .screenshot }
+
+3. Muster shows the **Signing secret** once: copy it to the receiving endpoint, which verifies the signatures with it
+   (see [Verify the signature](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#verify-the-signature)), and close the dialog.
+
+    ![The dialog Signing secret: the secret whsec_… and the warning that it is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/02-signing-secret.png){ .screenshot }
+
+4. The saved Destination shows its type and health, its **Routes** and its settings, with the tab **Request log** beside
+   **Settings**. Add it to a Route to send it events. In the screenshots, the receiving endpoint is
+   `https://hooks.example.org`.
+
+    ![The saved Destination automation: Outgoing webhook, Healthy, no Route yet, and its Events request](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/03-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `events`:
 
 ```json
 {
@@ -5691,7 +5930,20 @@ never shows it again.
 
 ## Secrets
 
-Credentials the endpoint needs go into the Destination's **Secrets**, never into the URL or a header as text:
+Credentials the endpoint needs go into the Destination's **Secrets**, never into the URL or a header as text.
+
+1. On the page of the Destination, under **Secrets**, select **Add secret**. Enter the **Name**, such as `token`, and the
+   **Value**, and select **Save**.
+
+    ![Secrets of the Destination: the form with the name token and a hidden value](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/04-add-secret.png){ .screenshot }
+
+2. The list shows the Secret's name, that it is set and when it changed, and its reference, `{{ .Secrets.token }}`,
+   which the URL and the headers read. **Replace** sets a new value and **Remove** deletes it; the value is never shown
+   again.
+
+    ![Secrets of the Destination: token, set, with its reference](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/05-secrets.png){ .screenshot }
+
+Through the API:
 
 ```sh
 curl -X PUT https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/secrets/token \
@@ -5962,7 +6214,17 @@ case " $WEBHOOK_SIGNATURE " in *" $EXPECTED "*) echo valid ;; *) echo invalid ;;
 
 ## Regenerate and retire the Signing secret
 
-`POST /api/v1/destinations/{id}/signing-secret` makes a new Signing secret and shows it once. Until you retire the
+1. On the page of the Destination, under **Signing secret**, select **Regenerate**, and **Regenerate** again in the
+   dialog. Muster shows the new secret once: deploy it to the receiving endpoint.
+
+    ![The dialog Regenerate the Signing secret?](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/06-regenerate.png){ .screenshot }
+
+2. Until you retire it, the previous secret still signs, and the Destination says since when. Once the endpoint
+   verifies with the new secret, select **Retire previous secret**.
+
+    ![The Signing secret with the previous secret still signing and the button Retire previous secret](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/events/07-previous-secret.png){ .screenshot }
+
+Through the API, `POST /api/v1/destinations/{id}/signing-secret` makes a new Signing secret and shows it once. Until you retire the
 previous one, requests carry two signatures — with the new and with the previous secret — and the Destination shows the
 warning `previous_signing_secret_active` with the date since when: deploy the new secret to the receiving endpoint, then retire
 the previous one with `DELETE /api/v1/destinations/{id}/signing-secret/previous`. Requests then carry one signature.
@@ -5993,7 +6255,31 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the cha
 
 ## Create the Destination
 
-Create a Destination of type `webhook` with the mode `template` (or `both`, with the `events` request too):
+In the web UI:
+
+1. Open **Destinations**, select **Create destination**, choose **Outgoing webhook** and the **Mode** **Template** (or
+   **Both**, with the **Events request** too). Under **Requests**, **Create** and **Update** are required; **Open
+   thread** and **Reply in thread** are optional.
+
+    ![The form of a new outgoing webhook in the mode Template, with its requests](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/01-template-mode.png){ .screenshot }
+
+2. In **Create**, choose the **Method**, enter the **URL**, the headers with **Add header** and the **Body**, and add
+   the [extraction rules](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#extraction-rules-and-response) with **Add rule**: a name and a JSONPath into the answer.
+
+    ![The request Create: POST to the chat's messages, the body template and the extraction rule id at $.data.id](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/02-create-request.png){ .screenshot }
+
+3. In **Update**, enter the request that edits the message; it reads the extracted values as `{{ .Response.<name> }}`.
+
+    ![The request Update: PUT to the message by its id, read as .Response.id, with the same body](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/03-update-request.png){ .screenshot }
+
+4. Give the Destination a **Name** and select **Save**. Muster shows the Signing secret once, as in the
+   [events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#create-the-destination), and then the saved Destination. In the screenshots, the chat's API
+   is at `https://hooks.example.org/chat/ops`.
+
+    ![The saved Destination team chat in the mode Template](https://muster-io.github.io/muster/latest/assets/screenshots/outgoing-webhooks/templates/04-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `template` (or `both`, with the `events` request
+too):
 
 ```json
 {
@@ -6074,7 +6360,8 @@ requests go through Muster's outbound address policy and the Destination's proxy
 
 Alert data reach the templates **as received**, not escaped for any markup, because Muster does not know the chat's
 format. Write JSON bodies with `toJson` (or `js` inside a string), so that a label with a quote or a line break cannot
-break the body.
+break the body. A label or annotation the Alerts do not have is empty text, as in Alertmanager, so `toJson` gives
+`""`, not `null`; tell a missing value apart with `if` or `or`, as in `{{ or .CommonLabels.team "none" }}`.
 
 Read a Secret as `{{ .Secrets.<name> }}` and an extracted value as `{{ .Response.<name> }}` — or with `$.` in front, or
 as `{{ index .Secrets "<name>" }}` with a quoted name. Any other use, such as `{{ with .Secrets }}`, `{{ $s := .Secrets }}`
@@ -6516,6 +6803,50 @@ about every OIDC user who has an offline token and a live session or a usable Pe
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](https://muster-io.github.io/muster/latest/sign-in/closed-networks.md).
 
+## Add a User
+
+An Admin adds a local user; a person who signs in through OpenID Connect gets their User at their first sign-in.
+
+1. Open **Access → Users** and select **Create user**. Enter the **Name**, the **Login** and, if you like, the
+   **Email (optional)**, and choose the [Role](https://muster-io.github.io/muster/latest/sign-in/index.md#roles). Select **Create**.
+
+    ![The dialog Create user: the name Dana Lee, the login dana, an email and the Role Responder](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/01-create-user.png){ .screenshot }
+
+2. Muster shows the **Password setup link** once. Copy it with **Copy** and hand it to the person yourself: Muster sends
+   no email. The link works once, until the time the dialog names. In the screenshot it starts with
+   `http://localhost:8080`, the address of a development installation; yours starts with your `MUSTER_PUBLIC_URL`.
+
+    ![The dialog Password setup link: the link with Copy, until when it works, and that it is shown once](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/02-setup-link.png){ .screenshot }
+
+3. The **Users** list shows the new User with the Role, the source, the sign-in method, the last sign-in, TOTP and the
+   status. If the link is lost or expires, open the User and select **New password setup link**.
+
+    ![The Users list: admin and Dana Lee, a local Responder who has not signed in yet](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/03-users.png){ .screenshot }
+
+4. The person opens the link, sets a password, and signs in on **Sign in to Muster** with the login and the password.
+   With OpenID Connect on, the page also offers **Sign in with {name}**.
+
+    ![The sign-in page with the login dana and a password, and Sign in with the identity provider below](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/04-sign-in.png){ .screenshot }
+
+## Your profile
+
+Every signed-in person opens their own profile from the user menu, their name at the top right: **Profile**.
+
+1. Under **Details**, change your **Name** and select **Save**. Under **Language and time zone**, choose the
+   **Language** and the **Time zone** of the web UI; they apply at once. The time zone also sets when the Snooze
+   presets you press in messengers end.
+
+    ![The profile of Dana Lee: Details with the name, Language and time zone, Sign-in method and Password](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/05-profile.png){ .screenshot }
+
+2. Under **Password**, enter the **Current password** and the new one twice, and select **Change password**; your other
+   sessions are signed out. **Sessions** lists where you are signed in, and **Sign out everywhere** ends them all, this
+   one too.
+
+    ![The profile further down: Password, Two-factor authentication (TOTP) off, and Sessions with one active session](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/index/06-password-and-sessions.png){ .screenshot }
+
+The profile also holds [TOTP](https://muster-io.github.io/muster/latest/sign-in/totp.md#enrol), the [messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md) and the
+[Personal access tokens](https://muster-io.github.io/muster/latest/configure/api-tokens.md#create-a-personal-access-token).
+
 ## Sign-in needs HTTPS or localhost
 
 The session cookie is `Secure`, so browsers keep it only on a page served over HTTPS or from the browser's own machine:
@@ -6647,6 +6978,23 @@ The settings behind the three rows above Proxy are `oidc.unmatched_role` (none: 
 (on) and
 `oidc.skip_totp_with_idp_mfa` (off).
 
+In the web UI:
+
+1. Open **Access → OIDC**. Under **Identity provider**, turn on **Allow sign-in through OIDC** and fill in the **Issuer
+   URL**, the **Provider name** (the display name), the **Client ID**, the **Client secret** — **Set a value**, or
+   **Replace** once one is set —, **Client secret expires on** and the **Scopes**.
+
+    ![The OIDC settings: the issuer https://sso.example.org/realms/muster, the provider name Keycloak, the client muster and the scopes profile email](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/oidc-keycloak/01-identity-provider.png){ .screenshot }
+
+2. Under **Roles**, enter the **Groups claim** and map each group with **Add IdP group**: the group's name and its
+   Role. Choose the **Role for users without a matching group**, and whether to **Sync the Role at every sign-in** and
+   to **Skip TOTP when the identity provider confirmed multi-factor authentication**. Set the proxy below if Muster
+   needs one, and select **Save**.
+
+    ![The Roles of the OIDC settings: the groups claim groups, muster-admins mapped to Admin and oncall to Responder](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/oidc-keycloak/02-roles.png){ .screenshot }
+
+The screenshots show the form filled in, before **Save**.
+
 Then press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.
@@ -6700,9 +7048,29 @@ Enrolment gives the person **10 recovery codes** (`auth.totp_recovery_codes`), e
 save them somewhere safe. In the profile a person can generate new recovery codes, which replace the unused ones, and
 remove TOTP. Removing it needs the current password (a local user) or a current code or recovery code.
 
+1. Open your **Profile** and, under **Two-factor authentication (TOTP)**, select **Set up TOTP**.
+2. Scan the QR code with your authenticator app, or enter the **Secret** by hand. Enter the code the app shows in
+   **Code from the app** and select **Confirm**.
+
+    ![Set up TOTP: the QR code and the secret, covered here, and the field Code from the app](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/totp/01-set-up.png){ .screenshot }
+
+3. Muster shows the recovery codes once: **Copy codes**, keep them somewhere safe, and select **Continue**.
+
+    ![Save these recovery codes: the ten codes, covered here, with Copy codes and Continue](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/totp/02-recovery-codes.png){ .screenshot }
+
+4. The profile says since when TOTP is on and how many recovery codes are left, with **Regenerate recovery codes** and
+   **Remove TOTP**.
+
+    ![TOTP on: since when, 10 recovery codes left, and the buttons to regenerate the codes and to remove TOTP](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/totp/03-totp-on.png){ .screenshot }
+
 A User has one enrolment. From then on, every sign-in asks for a code after the password, or after the redirect from the
-identity provider. A recovery code is accepted in place of a code, and is then used up. Until the code is given, the
-session can only read itself, sign out and give the code.
+identity provider: **Two-factor authentication** asks for the **Code**, and **Use a recovery code instead** takes a
+recovery code.
+
+![The sign-in step Two-factor authentication: the field Code, Continue, Use a recovery code instead and Sign out](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/totp/04-code-prompt.png){ .screenshot }
+
+A recovery code is accepted in place of a code, and is then used up. Until the code is given, the session can only read
+itself, sign out and give the code.
 
 A wrong password or code counts as a failure, and failures slow the next attempts down per account and per source
 address: after 3 in a row, each attempt waits twice as long as the one before, from 1 second up to 60 seconds.
@@ -6717,6 +7085,12 @@ values:
 | nobody (the default) | no one; everyone may enrol if they want |
 | local users | every account that has a password |
 | everyone | every account, local or from OpenID Connect |
+
+1. Open **Organization → Security**.
+2. Under **Two-factor authentication**, choose **TOTP required**: **Nobody**, **Local users** or **Everyone**. Select
+   **Save**.
+
+    ![Organization → Security with TOTP required set to Local users, saved](https://muster-io.github.io/muster/latest/assets/screenshots/sign-in/totp/05-policy.png){ .screenshot }
 
 A person who falls under the policy and has no TOTP yet must enrol right after sign-in, before they can do anything
 else. An account that signs in through OpenID Connect, whether created by it or linked to it, does not count as a local
@@ -6857,6 +7231,39 @@ Timeline
 The Alert Group page shows all of this, the Alerts with their labels and annotations, the labels they share, and the
 previous Alert Groups with the same Route and Group key values. The page and the list work at phone width.
 
+## In the web UI
+
+1. Open **Alert Groups**. The list shows the Alert Groups of the chosen **Time range**, the last 7 days by default,
+   newest first: the status, the number, the title, the severity, the Route and the Integrations first. The tabs
+   above it — **Open**, **Firing**, **Acknowledged**, **Snoozed**, **Resolved** and **All** — choose the statuses and
+   count each one; **Search** finds an Alert Group by its number, such as `#412`, or by text.
+
+    ![The Alert Groups list on the tab All: Alert Groups in each status, with the filters beside it](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/01-list.png){ .screenshot }
+
+   The table scrolls sideways inside its box to the columns further right: the Owner, the end of a Snooze, when each
+   Alert Group started, how long it has lasted and its last change.
+
+    ![The list scrolled to its right end: the Owner admin, the end of the Snooze, the start, the duration and the last change of each Alert Group](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/02-list-columns.png){ .screenshot }
+
+2. Narrow the list with the filters beside it: the **Routes**, the **Integrations**, the **Severity**, **Urgent**, the
+   **Owner**, label Matchers and more. They combine, and they live in the address, so a filtered list can be shared;
+   **Clear filters** removes them. On a phone they open from **Filters**.
+
+    ![The list filtered by the Route payments: two Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/03-filters.png){ .screenshot }
+
+3. Select the number or the title of an Alert Group to open its page: the status, the Owner, the command buttons, the
+   [Alerts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#what-an-alert-group-has), the labels, the deliveries to its Destinations and the previous Alert Groups
+   with the same Route and Group key values.
+
+    ![The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/04-alert-group.png){ .screenshot }
+
+4. Further down, the [Timeline](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#the-timeline) lists what happened to it, with the actor and the Transport of each
+   change, and the box to add a Note.
+
+    ![The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/05-timeline.png){ .screenshot }
+
+The [commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#commands-in-the-web-ui) act on the Alert Group from its page.
+
 ## Live updates
 
 The list and the Alert Group page change as soon as something happens, without a reload. A mark in the header of every
@@ -6967,6 +7374,21 @@ A Route that still has open Alert Groups cannot be deleted. Muster refuses and o
 route. A moved Alert Group keeps its Group key values, takes no new Alerts, and never reopens; it stays open until its
 Alerts resolve or a person resolves it.
 
+## Statistics
+
+**Statistics** counts the Alert Groups that started in a period and how fast people took and closed them: for each
+Route or each Integration, the number of Alert Groups and the median and the 95th percentile of the time to acknowledge
+and of the time to resolve. Days are split in your time zone.
+
+1. Open **Statistics**. Choose the **Period** — **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom** — and
+   show it **By route** or **By integration**; add Routes or Integrations to narrow it.
+
+    ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/06-statistics.png){ .screenshot }
+
+2. Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.
+
+    ![The Alert Groups per day of start of the Route payments](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/alert-groups/07-statistics-days.png){ .screenshot }
+
 ## How long Alert Groups are kept
 
 `retention.alert_details`
@@ -7034,6 +7456,14 @@ from fields; the API takes the same structure; an invalid expression is refused 
 :   Takes everything except the Watchdog.
 
 A missing label counts as an empty value. So `team!="payments"` also matches an Alert that has no `team` label.
+
+In the Route editor, under **Matchers**:
+
+1. Select **Add matcher**. A row appears with the label, the operator and the value.
+2. Enter the label, such as `team`, choose the operator, `=` by default, and enter the value, such as `payments`. The ×
+   at the end of a row removes it.
+
+![The Matchers of a Route: one row, team = payments, and the button Add matcher](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/01-matchers.png){ .screenshot }
 
 ### Order, and the Default route
 
@@ -7108,6 +7538,13 @@ with one Acknowledge. A fine key gives more Alert Groups and a clearer ownership
 "who should look at this" apart. A good start is the labels your teams split on: the alert name, the cluster and the
 namespace or the service.
 
+In the Route editor, the **Group key** shows its labels in order:
+
+1. To take a label out, select the × next to it.
+2. To add one, type its name in the field under the labels and select **Add label**.
+
+![The Group key of a new Route, alertname, severity and cluster, beside its preview: 2 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/02-group-key.png){ .screenshot }
+
 ### Preview before you save
 
 The Group key editor previews what a key would do. It reads the Stored Snapshots of the chosen period (24 hours by
@@ -7116,6 +7553,17 @@ the current and the proposed key would produce, with the 5 largest as examples (
 It covers the Alerts that the Route would take
 at its place in the current order, each Alert once, and it works for a Route you are still creating. Use it before every
 change of a key.
+
+1. Change the Matchers or the Group key in the Route editor.
+2. Under **Group key preview**, choose the **Period**, 24 hours by default, and select **Preview**.
+3. Compare **Current**, the saved key, with **Proposed**, the key in the editor: each table lists the largest Alert
+   Groups with the values of the key's labels and the number of Alerts. A new Route has only the proposed side. When
+   you change the Matchers, the key or the period after a preview, the preview says so; select **Preview** again.
+
+![The Group key preview of a saved Route with namespace instead of severity in its key: Current 2 Alert Groups, Proposed 3 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/03-preview.png){ .screenshot }
+
+The screenshot shows the four Alerts of the table above: with `namespace` in place of `severity`, the Alerts of `prod`
+split by namespace.
 
 ### Do not put Instance labels in the key
 
@@ -7134,6 +7582,38 @@ the Alertmanager cluster knows and the rules do not, such as `cluster=prod-eu`. 
 include `cluster`: set it as a Static label on each Integration, and Alert Groups of different clusters stay apart even
 when the alerting rules never mention the cluster. See [Static
 labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#static-labels).
+
+## Create a Route
+
+1. Open **Routes** and select **Create route**. Choose a [Route profile](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#route-profiles), **On-call** or
+   **Informational**; **Choose another profile** takes you back.
+
+    ![Create route: the choice between the profiles On-call and Informational](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
+
+2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#matchers), turn on **Urgent** if every
+   Alert Group of the Route is [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), and check the [Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#group-keys) with its
+   [preview](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#preview-before-you-save).
+
+    ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
+
+3. Under **Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
+   health; a Route without Destinations sends no messages.
+
+    ![The Destinations of the Route: the outgoing webhook payments, Healthy](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
+
+4. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
+   **Delivery** (the Thread batching window and the Storm threshold), **Snooze durations**, **Ack timeout and
+   Reminders** — see [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) —
+   and **Message**, which [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#edit-a-routes-message)
+   explains.
+
+    ![The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+
+5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#order-and-the-default-route).
+   Above the list, Muster may suggest Routes for its own alerts.
+
+    ![The Routes list: the Route payments first, then the Default route, under two suggestions](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png){ .screenshot }
 
 ## Examples
 
@@ -7769,6 +8249,8 @@ that time zone with the preset. Admins set the start of the working day and the 
 General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
 in the Organization's while the profile follows the browser.
 
+![The Snooze dialog with Until tomorrow 09:00 chosen: each preset with the end it would set, after the durations 1 h, 4 h and 24 h](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/01-snooze-presets.png){ .screenshot }
+
 #### In messengers
 
 On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
@@ -7792,6 +8274,35 @@ A **Responder** or an **Admin** may acknowledge, resolve, snooze and add Notes. 
 the command is refused. A **Service account** may run the commands its Role allows, except Acknowledge and Still on it,
 because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
 command is recorded in the Audit log with its actor and the Transport.
+
+## Commands in the web UI
+
+The page of an Alert Group offers the commands its status allows, and the list offers them for several Alert Groups at
+once ([Bulk commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#commands)).
+
+1. Open the Alert Group from **Alert Groups**. Its command buttons are at the top: **Acknowledge**, **Resolve** and
+   **Snooze** for a firing one.
+
+    ![A firing Alert Group with the buttons Acknowledge, Resolve and Snooze](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/02-command-buttons.png){ .screenshot }
+
+2. To add a Note, type it under **Add a note**, further down the page, and select **Add note**. It appears in the
+   Timeline with you as its author.
+
+    ![The Note box with a Note typed, and Add note](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/03-note-box.png){ .screenshot }
+
+3. **Snooze** opens its dialog: the Route's Snooze durations, the [Snooze presets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets), **Until** a date
+   and time of your choosing, or **No end**, which asks you to confirm with **I understand**. Select **Snooze**.
+
+    ![The Snooze dialog with No end chosen and its warning that the Alert Group stays snoozed until someone unsnoozes it](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/04-snooze-dialog.png){ .screenshot }
+
+4. **Resolve** opens a dialog with an optional Note, recorded with the resolve.
+
+    ![The dialog Resolve with the Note Renewed by cert-manager.](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/05-resolve-dialog.png){ .screenshot }
+
+5. After **Acknowledge**, the page names you as the Owner and offers **Unacknowledge**, **Resolve** and **Snooze**.
+   Another user sees **Take over from {Owner}** instead of **Acknowledge**.
+
+    ![An acknowledged Alert Group with its Owner admin and the buttons Unacknowledge, Resolve and Snooze](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/06-acknowledged.png){ .screenshot }
 
 ## Where a command comes from
 
@@ -8624,9 +9135,24 @@ with its Static labels, for `MusterHeartbeatLost`, and the Destination for `Must
 Metrics and rules need Prometheus. To notice that Muster, its cluster or its network is down altogether, configure the
 [outgoing heartbeat](https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md): an external service alerts you when the calls stop.
 
-The **System status** page (**Organization → System status**, Admins only) shows the same from the inside: the Leader and
-every live replica with the key ids it holds, recovery after downtime, delivery queues, Broken Destinations, Integrations
-that need attention, template errors, Storms and the outgoing heartbeat.
+The **System status** page shows the same from the inside: see [System status](https://muster-io.github.io/muster/latest/operations/monitoring.md#system-status).
+
+## System status
+
+**Organization → System status** (Admins only) shows the state of the installation from the inside. It only reads: it
+lists what is wrong, and you fix it on the pages it links to.
+
+1. Open **Organization → System status**. At the top, the version of Muster and the **Replicas**: every live replica,
+   the Leader marked, with the key ids it holds and when its record was last refreshed. Below them, **Recovery after
+   downtime** and the **Delivery queues**.
+
+    ![System status: the version, one replica that is the Leader with its keys, not recovering, and the delivery queues](https://muster-io.github.io/muster/latest/assets/screenshots/operations/monitoring/01-system-status.png){ .screenshot }
+
+2. Further down: **Broken Destinations**, **Integrations needing attention** — Heartbeat lost or Snapshots truncated —,
+   **Template errors**, **Storms**, and the **Outgoing heartbeat**, with the result of its last call or a link to set
+   one up. Each says **None** when there is nothing to show.
+
+    ![System status further down: not recovering, no delivery queues, Broken Destinations, Integrations needing attention, template errors or Storms, and the outgoing heartbeat last sent OK](https://muster-io.github.io/muster/latest/assets/screenshots/operations/monitoring/02-system-status-more.png){ .screenshot }
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/outgoing-heartbeat.md -->
 # Outgoing heartbeat
@@ -9016,20 +9542,31 @@ Permissions; a Personal access token may hold fewer.
 
 ## Where to find it
 
-- **Connections → a Connection → Request log**, for every type, and **Destinations → an outgoing webhook → Request
-  log**. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in your time
-  zone, the direction arrow, the operation with the kind of check below it, the status — or, without an answer, what
-  failed — and the latency; **Load more** shows older records. Filters by direction, status class (`2xx`, `3xx`,
-  `4xx`, `5xx` or **No answer**) and operation are kept in the address, such as
-  `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+The Request log of a Connection, or of an outgoing webhook Destination, is a tab of its page:
+
+1. Open **Connections → a Connection**, of any type, or **Destinations → an outgoing webhook**, and select the tab
+   **Request log**. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in
+   your time zone, the direction arrow, the operation with the kind of check below it, the status — or, without an
+   answer, what failed — and the latency; **Load more** shows older records.
+
+    ![The tab Request log of the Mattermost Connection: the requests of its check, with the operation, the status and the latency](https://muster-io.github.io/muster/latest/assets/screenshots/operations/request-log/01-connection-request-log.png){ .screenshot }
+
+2. Narrow the list by **Direction**, **Status** — the class `2xx`, `3xx`, `4xx`, `5xx` or **No answer** — and
+   **Operation**, and select **Apply**. The filters are kept in the address, such as
+   `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+3. Select an operation to open its record: the request — method, URL, headers, body — and the answer — status,
+   headers, body — side by side on a wide screen and one under the other on a narrow one; a JSON body is indented.
+   **Copy URL**, **Copy headers** and **Copy body** copy each, the body as it is stored rather than indented. A record
+   links to its Destination, its Alert Group and the other requests of its check.
+
+    ![A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body](https://muster-io.github.io/muster/latest/assets/screenshots/operations/request-log/02-record.png){ .screenshot }
+
+The same records show in two more places:
+
 - **The Alert Group page → Delivery → Requests** on each Destination's row: what was sent to that Destination for this
   Alert Group and what came back.
 - **Requests of this check** under the result of the Connection check, of the check before saving and of the
   Destination's check and test: the requests that check or test made.
-- **A record** opens with the request — method, URL, headers, body — and the answer — status, headers, body — side by
-  side on a wide screen and one under the other on a narrow one; a JSON body is indented. **Copy URL**, **Copy
-  headers** and **Copy body** copy each, the body as it is stored rather than indented. A record links to its
-  Destination, its Alert Group and the other requests of its check.
 
 The API reads the same records: `listRequestLog` and `getRequestRecord` in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md),
 with the check run in the results of the Connection check, the check before saving, the Destination check and the

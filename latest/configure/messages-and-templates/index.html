@@ -553,6 +553,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#edit-a-routes-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edit a Route's message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-template-language" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -582,6 +593,34 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Links">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-a-lookup-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Lookup table
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-link-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Link rule
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2767,6 +2806,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#edit-a-routes-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Edit a Route's message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-template-language" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2796,6 +2846,34 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Links">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add-a-lookup-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Lookup table
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-link-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Link rule
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2860,6 +2938,24 @@ parse, or that calls a function Muster does not have, is <strong>not saved</stro
 column.</p>
 <p>The Outgoing webhook Destinations have templates of their own, written the same way: see
 <a href="../../outgoing-webhooks/templates/">template mode</a>.</p>
+<h2 id="edit-a-routes-message">Edit a Route's message<a class="headerlink" href="#edit-a-routes-message" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p>Open <strong>Routes</strong> and the Route, and scroll to <strong>Message</strong>. Choose the <strong>Language</strong> of its built-in texts. Each
+   template shows <strong>Built-in</strong> or <strong>Custom</strong>, with its <strong>Preview</strong> under it.</p>
+<p><img alt="The Message section of a Route: the language English and the Root message built in, with its preview" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/01-message.png" /></p>
+</li>
+<li>
+<p>Choose <strong>Custom</strong> for the template you change, such as <strong>Alert line</strong>, and edit the source in the editor; it starts
+   from the built-in template. The <strong>Preview</strong> renders it as you type, against the <strong>Sample</strong> you choose, in the markup
+   of <strong>Mattermost</strong>, <strong>Telegram</strong> or <strong>Slack</strong>. A Route without recent Stored Snapshots renders against the built-in
+   example. <a href="#the-template-language">The template language</a> lists what a template reads.</p>
+<p><img alt="The Alert line made Custom with the template pod: summary, and its preview of the built-in example" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/02-alert-line.png" /></p>
+</li>
+<li>
+<p>Select <strong>Save</strong>. A template with an error is not saved, and the editor marks the error at its line and column.</p>
+</li>
+</ol>
 <h2 id="the-template-language">The template language<a class="headerlink" href="#the-template-language" title="Permanent link">&para;</a></h2>
 <p>Templates are Go templates, the language of Alertmanager's own templates, and run in a sandbox:</p>
 <ul>
@@ -2873,6 +2969,9 @@ column.</p>
   and the editor names an unknown function when you save.</li>
 <li>Loops are capped, a template may run for 2 seconds, and the output is cut at about 50,000 characters
   (<code>template.output_cap</code>).</li>
+<li>A label or annotation that is not there is empty text, as in Alertmanager: <code>{{ .Labels.cluster }}</code> prints nothing
+  and passes <code>""</code> to a function, so <code>toJson</code> gives <code>""</code>, not <code>null</code>. Tell a missing value apart with <code>if</code> or <code>or</code>,
+  as in <code>{{ or .CommonLabels.team "none" }}</code>.</li>
 </ul>
 <p>What the Root message template reads:</p>
 <dl>
@@ -2918,11 +3017,24 @@ in a template is escaped and mentions nobody.</p>
 <h2 id="links">Links<a class="headerlink" href="#links" title="Permanent link">&para;</a></h2>
 <p>Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
 in the message and as the <strong>Links</strong> block on the Alert Group page.</p>
-<p>A <strong>Lookup table</strong> is a table of values: a key and one value per named column. Open <strong>Organization → Lookup tables →
-Create table</strong>, name it, add the columns and the rows. Limits: 50 columns and 10,000 rows, names and column names up to
-200 characters, a description up to 2,000, a key or value up to 4,096 (<code>lookup_table.size_max</code>).</p>
-<p>A <strong>Link rule</strong> turns an Alert Group, or each value of a label, into a link. Open <strong>Organization → Link rules → Create
-rule</strong> and fill in:</p>
+<h3 id="add-a-lookup-table">Add a Lookup table<a class="headerlink" href="#add-a-lookup-table" title="Permanent link">&para;</a></h3>
+<p>A <strong>Lookup table</strong> is a table of values: a key and one value per named column. Limits: 50 columns and 10,000 rows,
+names and column names up to 200 characters, a description up to 2,000, a key or value up to 4,096
+(<code>lookup_table.size_max</code>).</p>
+<ol>
+<li>Open <strong>Organization → Lookup tables</strong> and select <strong>Create table</strong>.</li>
+<li>
+<p>Enter the <strong>Name</strong> that Link rules read the table by, and a <strong>Description</strong> if you like. Under <strong>Rows</strong>, name the
+   first column, add more with <strong>Add column</strong>, and add each row with <strong>Add row</strong>: its <strong>Key</strong> and a value per column.</p>
+<p><img alt="The form of a new Lookup table: the name dashboards, the column url and the rows prod-eu and prod" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/03-new-lookup-table.png" /></p>
+</li>
+<li>
+<p>Select <strong>Create</strong>. The list of Lookup tables shows the table with its number of rows.</p>
+<p><img alt="The Lookup tables: dashboards with 2 rows" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/04-lookup-tables.png" /></p>
+</li>
+</ol>
+<h3 id="add-a-link-rule">Add a Link rule<a class="headerlink" href="#add-a-link-rule" title="Permanent link">&para;</a></h3>
+<p>A <strong>Link rule</strong> turns an Alert Group, or each value of a label, into a link. Its fields:</p>
 <dl>
 <dt><strong>Name</strong></dt>
 <dd>Shown as the text of the link.</dd>
@@ -2938,6 +3050,18 @@ the value otherwise), <code>.Value</code> (the label's value) and the data of th
 "column"</code> reads one cell and gives an empty text when the table, the key or the column does not exist. A template
 that writes nothing, or something that is not an <code>http</code> or <code>https</code> URL, gives no link.</dd>
 </dl>
+<ol>
+<li>Open <strong>Organization → Link rules</strong> and select <strong>Create rule</strong>.</li>
+<li>
+<p>Fill in the fields above. The <strong>Preview</strong> under the URL template shows the link that the rule makes for the
+   <strong>Sample</strong> you choose, a built-in example or a recent Alert Group.</p>
+<p><img alt="The form of a new Link rule: the name Dashboard, no Matchers, the scope Alert Group, the URL template with lookup and its preview link" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/05-new-link-rule.png" /></p>
+</li>
+<li>
+<p>Select <strong>Create</strong>. The list of Link rules shows the rule beside the built-in <strong>Explore</strong>.</p>
+<p><img alt="The Link rules: Dashboard and the built-in Explore" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/06-link-rules.png" /></p>
+</li>
+</ol>
 <p>All the Link rules of one message together read at most 100 rows with <code>lookup</code> in one render
 (<code>template.lookups_per_render</code>); the 101st is a template error, and a Link rule that fails is left out of the message
 and counted.</p>
@@ -2946,7 +3070,8 @@ and counted.</p>
 <li>Create the Lookup table <code>dashboards</code> with the column <code>url</code> and one row for each cluster: the key <code>prod-eu</code>, the
    value <code>https://grafana.example.org/d/abc123/prod-eu</code>.</li>
 <li>Create the Link rule <code>Dashboard</code>, scope <strong>Alert Group</strong>, with the URL template
-   <code>{{ lookup "dashboards" .Labels.cluster "url" }}</code>.</li>
+   <code>{{ lookup "dashboards" .Labels.cluster "url" }}</code>. An Alert Group without a common <code>cluster</code> looks up an empty key
+   and gets no link: a missing label is <a href="#the-template-language">empty text</a>.</li>
 <li>The preview of the rule shows the link for a sample. Alert Groups with <code>cluster="prod-eu"</code> now carry <strong>Dashboard</strong>.</li>
 </ol>
 <p>A rule with the scope <strong>Each value of label</strong> and the label <code>pod</code> can build one log link per pod:

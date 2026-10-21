@@ -9,7 +9,27 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org` and the rec
 
 ## Create the Destination
 
-Create a Destination of type `webhook` with the mode `events`:
+In the web UI:
+
+1. Open **Destinations**, select **Create destination** and choose **Outgoing webhook**. Keep the **Mode** **Events**.
+2. Under **Events request**, enter the **URL** and, with **Add header**, each header's name and value; a value reads a
+   [Secret](#secrets) as `{{ .Secrets.<name> }}`. Set the **Proxy** if the endpoint needs one, and give the
+   Destination a **Name**. Select **Save**.
+
+    ![The form of a new outgoing webhook in the mode Events: the URL and the header Authorization that reads the Secret token](../assets/screenshots/outgoing-webhooks/events/01-new-destination.png){ .screenshot }
+
+3. Muster shows the **Signing secret** once: copy it to the receiving endpoint, which verifies the signatures with it
+   (see [Verify the signature](#verify-the-signature)), and close the dialog.
+
+    ![The dialog Signing secret: the secret whsec_… and the warning that it is shown once](../assets/screenshots/outgoing-webhooks/events/02-signing-secret.png){ .screenshot }
+
+4. The saved Destination shows its type and health, its **Routes** and its settings, with the tab **Request log** beside
+   **Settings**. Add it to a Route to send it events. In the screenshots, the receiving endpoint is
+   `https://hooks.example.org`.
+
+    ![The saved Destination automation: Outgoing webhook, Healthy, no Route yet, and its Events request](../assets/screenshots/outgoing-webhooks/events/03-saved-destination.png){ .screenshot }
+
+Through the API, create a Destination of type `webhook` with the mode `events`:
 
 ```json
 {
@@ -42,7 +62,20 @@ never shows it again.
 
 ## Secrets
 
-Credentials the endpoint needs go into the Destination's **Secrets**, never into the URL or a header as text:
+Credentials the endpoint needs go into the Destination's **Secrets**, never into the URL or a header as text.
+
+1. On the page of the Destination, under **Secrets**, select **Add secret**. Enter the **Name**, such as `token`, and the
+   **Value**, and select **Save**.
+
+    ![Secrets of the Destination: the form with the name token and a hidden value](../assets/screenshots/outgoing-webhooks/events/04-add-secret.png){ .screenshot }
+
+2. The list shows the Secret's name, that it is set and when it changed, and its reference, `{{ .Secrets.token }}`,
+   which the URL and the headers read. **Replace** sets a new value and **Remove** deletes it; the value is never shown
+   again.
+
+    ![Secrets of the Destination: token, set, with its reference](../assets/screenshots/outgoing-webhooks/events/05-secrets.png){ .screenshot }
+
+Through the API:
 
 ```sh
 curl -X PUT https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/secrets/token \
@@ -313,7 +346,17 @@ case " $WEBHOOK_SIGNATURE " in *" $EXPECTED "*) echo valid ;; *) echo invalid ;;
 
 ## Regenerate and retire the Signing secret
 
-`POST /api/v1/destinations/{id}/signing-secret` makes a new Signing secret and shows it once. Until you retire the
+1. On the page of the Destination, under **Signing secret**, select **Regenerate**, and **Regenerate** again in the
+   dialog. Muster shows the new secret once: deploy it to the receiving endpoint.
+
+    ![The dialog Regenerate the Signing secret?](../assets/screenshots/outgoing-webhooks/events/06-regenerate.png){ .screenshot }
+
+2. Until you retire it, the previous secret still signs, and the Destination says since when. Once the endpoint
+   verifies with the new secret, select **Retire previous secret**.
+
+    ![The Signing secret with the previous secret still signing and the button Retire previous secret](../assets/screenshots/outgoing-webhooks/events/07-previous-secret.png){ .screenshot }
+
+Through the API, `POST /api/v1/destinations/{id}/signing-secret` makes a new Signing secret and shows it once. Until you retire the
 previous one, requests carry two signatures — with the new and with the previous secret — and the Destination shows the
 warning `previous_signing_secret_active` with the date since when: deploy the new secret to the receiving endpoint, then retire
 the previous one with `DELETE /api/v1/destinations/{id}/signing-secret/previous`. Requests then carry one signature.

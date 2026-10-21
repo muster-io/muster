@@ -2676,6 +2676,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#add-a-user" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a User
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#your-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Your profile
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sign-in-needs-https-or-localhost" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2782,6 +2804,49 @@ ends 12 hours after sign-in (<code>auth.oidc_fallback_session_lifetime</code>), 
 about every OIDC user who has an offline token and a live session or a usable Personal access token, every 15 minutes
 (<code>auth.oidc_recheck_interval</code>).</p>
 <p>When the identity provider is in a network that Muster cannot reach, see <a href="closed-networks/">Closed networks</a>.</p>
+<h2 id="add-a-user">Add a User<a class="headerlink" href="#add-a-user" title="Permanent link">&para;</a></h2>
+<p>An Admin adds a local user; a person who signs in through OpenID Connect gets their User at their first sign-in.</p>
+<ol>
+<li>
+<p>Open <strong>Access → Users</strong> and select <strong>Create user</strong>. Enter the <strong>Name</strong>, the <strong>Login</strong> and, if you like, the
+   <strong>Email (optional)</strong>, and choose the <a href="#roles">Role</a>. Select <strong>Create</strong>.</p>
+<p><img alt="The dialog Create user: the name Dana Lee, the login dana, an email and the Role Responder" class="screenshot" src="../assets/screenshots/sign-in/index/01-create-user.png" /></p>
+</li>
+<li>
+<p>Muster shows the <strong>Password setup link</strong> once. Copy it with <strong>Copy</strong> and hand it to the person yourself: Muster sends
+   no email. The link works once, until the time the dialog names. In the screenshot it starts with
+   <code>http://localhost:8080</code>, the address of a development installation; yours starts with your <code>MUSTER_PUBLIC_URL</code>.</p>
+<p><img alt="The dialog Password setup link: the link with Copy, until when it works, and that it is shown once" class="screenshot" src="../assets/screenshots/sign-in/index/02-setup-link.png" /></p>
+</li>
+<li>
+<p>The <strong>Users</strong> list shows the new User with the Role, the source, the sign-in method, the last sign-in, TOTP and the
+   status. If the link is lost or expires, open the User and select <strong>New password setup link</strong>.</p>
+<p><img alt="The Users list: admin and Dana Lee, a local Responder who has not signed in yet" class="screenshot" src="../assets/screenshots/sign-in/index/03-users.png" /></p>
+</li>
+<li>
+<p>The person opens the link, sets a password, and signs in on <strong>Sign in to Muster</strong> with the login and the password.
+   With OpenID Connect on, the page also offers <strong>Sign in with {name}</strong>.</p>
+<p><img alt="The sign-in page with the login dana and a password, and Sign in with the identity provider below" class="screenshot" src="../assets/screenshots/sign-in/index/04-sign-in.png" /></p>
+</li>
+</ol>
+<h2 id="your-profile">Your profile<a class="headerlink" href="#your-profile" title="Permanent link">&para;</a></h2>
+<p>Every signed-in person opens their own profile from the user menu, their name at the top right: <strong>Profile</strong>.</p>
+<ol>
+<li>
+<p>Under <strong>Details</strong>, change your <strong>Name</strong> and select <strong>Save</strong>. Under <strong>Language and time zone</strong>, choose the
+   <strong>Language</strong> and the <strong>Time zone</strong> of the web UI; they apply at once. The time zone also sets when the Snooze
+   presets you press in messengers end.</p>
+<p><img alt="The profile of Dana Lee: Details with the name, Language and time zone, Sign-in method and Password" class="screenshot" src="../assets/screenshots/sign-in/index/05-profile.png" /></p>
+</li>
+<li>
+<p>Under <strong>Password</strong>, enter the <strong>Current password</strong> and the new one twice, and select <strong>Change password</strong>; your other
+   sessions are signed out. <strong>Sessions</strong> lists where you are signed in, and <strong>Sign out everywhere</strong> ends them all, this
+   one too.</p>
+<p><img alt="The profile further down: Password, Two-factor authentication (TOTP) off, and Sessions with one active session" class="screenshot" src="../assets/screenshots/sign-in/index/06-password-and-sessions.png" /></p>
+</li>
+</ol>
+<p>The profile also holds <a href="totp/#enrol">TOTP</a>, the <a href="../messengers/account-links/">messenger accounts</a> and the
+<a href="../configure/api-tokens/#create-a-personal-access-token">Personal access tokens</a>.</p>
 <h2 id="sign-in-needs-https-or-localhost">Sign-in needs HTTPS or localhost<a class="headerlink" href="#sign-in-needs-https-or-localhost" title="Permanent link">&para;</a></h2>
 <p>The session cookie is <code>Secure</code>, so browsers keep it only on a page served over HTTPS or from the browser's own machine:
 <code>localhost</code>, a name under <code>.localhost</code>, <code>127.0.0.1</code> or <code>[::1]</code>. On plain <code>http://</code> to any other address, such as
