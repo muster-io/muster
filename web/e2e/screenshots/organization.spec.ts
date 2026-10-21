@@ -235,16 +235,23 @@ test("saves each page of the Organization, reads the Audit log, the System statu
   const table = page.getByRole("table", { name: "Audit log" });
   const rows = table.getByRole("row");
   await expect(rows.nth(1)).toContainText("organization.updated");
-  await capture(page, ORGANIZATION, "07-audit-log", { bottom: rows.nth(4) });
+  // Only the rows the image shows lay out the columns: older rows, of other specs of the run, would widen them.
+  const older = table.locator("tbody tr:nth-child(n+5)");
+  await capture(page, ORGANIZATION, "07-audit-log", { bottom: rows.nth(4), hide: older });
 
   await page.getByLabel("Resource type", { exact: true }).fill("organization");
   await page.getByLabel("Resource type", { exact: true }).press("Enter");
   await expect(page).toHaveURL(/resource_type=organization/);
+  // The filtered list has replaced the whole one before rows are hidden for the shot.
+  await expect(table.getByText("outbound_policy.updated", { exact: true })).toHaveCount(0);
   await expect(rows.nth(4)).toContainText("organization.updated");
-  await capture(page, ORGANIZATION, "08-audit-log-filtered", { bottom: rows.nth(4) });
+  await capture(page, ORGANIZATION, "08-audit-log-filtered", { bottom: rows.nth(4), hide: older });
   const general = rows.filter({ hasText: "Asia/Tokyo" }).first();
   await scrollToTop(general);
-  await capture(page, ORGANIZATION, "09-audit-log-entry", { locator: general });
+  await capture(page, ORGANIZATION, "09-audit-log-entry", {
+    locator: general,
+    hide: table.locator("tbody tr").filter({ hasNotText: "Asia/Tokyo" }),
+  });
 
   // System status, with the replica's id, its keys and the commit that change from run to run fixed.
   const admin = keeper ?? (await adminApi());

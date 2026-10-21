@@ -106,6 +106,14 @@ async function bridgeDms(): Promise<string[]> {
   return all.filter((d) => d.bot === 2 && d.user_external_id === BRIDGE_USER).map((d) => d.body);
 }
 
+/**
+ * The profile behind a dialog, which shows at its rounded corners: hidden for the shot, as its list of the Admin's
+ * sessions grows with the specs that ran before.
+ */
+function behind(page: Page): Locator {
+  return page.locator("main");
+}
+
 function accounts(page: Page): Locator {
   return cardOf(page.getByRole("heading", { name: "Messenger accounts", exact: true }));
 }
@@ -161,6 +169,7 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   const qr = dialog.getByRole("img", { name: "QR code of the Telegram link" });
   await capture(page, DOCS, "01-link-telegram", {
     locator: dialog,
+    hide: behind(page),
     waitFor: qr,
     mask: [qr],
     highlight: open,
@@ -180,12 +189,13 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   await dialog.getByLabel("Your Mattermost username").fill("alice");
   await capture(page, DOCS, "02-link-mattermost", {
     locator: dialog,
+    hide: behind(page),
     highlight: dialog.getByRole("button", { name: "Send code" }),
   });
   let before = (await mattermostDms()).length;
   await dialog.getByRole("button", { name: "Send code" }).click();
   await expect(dialog.getByText("5 attempts left")).toBeVisible();
-  await capture(page, DOCS, "03-mattermost-code", { locator: dialog });
+  await capture(page, DOCS, "03-mattermost-code", { locator: dialog, hide: behind(page) });
   await dialog
     .getByLabel("Enter the code the bot sent you in Mattermost")
     .fill(await nextCode(mattermostDms, before));
@@ -199,6 +209,7 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   await dialog.getByLabel("Your Slack email or name").fill("alice@example.org");
   await capture(page, DOCS, "04-link-slack", {
     locator: dialog,
+    hide: behind(page),
     highlight: dialog.getByRole("button", { name: "Send code" }),
   });
   before = (await slackDms()).length;
@@ -218,6 +229,7 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   // The token, made anew in each run, shows as a fixed one of the same form.
   await capture(page, DOCS, "05-bridge-token", {
     locator: dialog,
+    hide: behind(page),
     replace: [[(await token.textContent()) ?? "", "Xk2f9QhLmP4tRw8ZyN3bVc6DsJ7gHa1EeUo5Ti0KqBn"]],
   });
   await fbr("POST", "/link", { user_id: BRIDGE_USER, token: await token.textContent(), bot: 2 });
@@ -230,7 +242,7 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   before = (await bridgeDms()).length;
   await dialog.getByRole("button", { name: "Send code" }).click();
   await expect(dialog.getByTestId("link-bridge-attempts")).toHaveText("5 attempts left");
-  await capture(page, DOCS, "06-bridge-code", { locator: dialog });
+  await capture(page, DOCS, "06-bridge-code", { locator: dialog, hide: behind(page) });
   await dialog
     .getByLabel("Enter the code the bot sent you")
     .fill(await nextCode(bridgeDms, before));
@@ -240,11 +252,17 @@ test("links Telegram, Mattermost, Slack and a Bridge, and unlinks", async ({ pag
   // The four links, and the Telegram one unlinked.
   const rows = accounts(page).getByTestId("account-link-row");
   await expect(rows).toHaveCount(4);
-  await capture(page, DOCS, "07-linked-accounts", { locator: accounts(page) });
+  // The Admin's sessions above the card, as many as the specs before signed in, would move it by a fraction of a pixel
+  // from run to run: they are hidden for the shot.
+  await capture(page, DOCS, "07-linked-accounts", {
+    locator: accounts(page),
+    hide: cardOf(page.getByRole("heading", { name: "Sessions", exact: true })).locator("li"),
+  });
   await page.getByRole("button", { name: "Unlink @oncall_admin", exact: true }).click();
   dialog = page.getByRole("dialog");
   await capture(page, DOCS, "08-unlink", {
     locator: dialog,
+    hide: behind(page),
     highlight: dialog.getByRole("button", { name: "Unlink", exact: true }),
   });
   await dialog.getByRole("button", { name: "Unlink", exact: true }).click();

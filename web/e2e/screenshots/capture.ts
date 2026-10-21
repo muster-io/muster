@@ -89,6 +89,11 @@ export interface CaptureOptions {
    * text the image shows instead.
    */
   replace?: [string, string][];
+  /**
+   * Elements hidden for the shot alone, such as the rows of a list that earlier specs of the run left, which would
+   * otherwise change the widths of the columns the image shows.
+   */
+  hide?: Locator;
 }
 
 /** Takes the screenshot name of the documentation page docsPage. */
@@ -110,15 +115,36 @@ export async function capture(
   if (options.locator !== undefined) {
     await expect(options.locator).toBeVisible();
   }
+  // Hidden for the shot alone, before the layout settles; put back in the finally below. A failure in between fails
+  // the spec anyway.
+  await options.hide?.evaluateAll((els) => {
+    for (const el of els) {
+      if (el instanceof HTMLElement) {
+        el.dataset.captureDisplay = el.style.display;
+        el.style.display = "none";
+      }
+    }
+  });
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
   // The pointer rests where it hovers nothing the shot shows.
   await page.mouse.move(0, 0);
   if (options.locator !== undefined) {
-    await options.locator.evaluate((el) => {
+    await options.locator.evaluate((el, margin) => {
       el.scrollIntoView({ block: "nearest" });
-    });
+      // With padding, the margin around the element comes into view too.
+      const r = el.getBoundingClientRect();
+      // A pixel more than needed, as the scroll position is rounded to whole pixels below.
+      if (margin === 0) {
+        return;
+      }
+      if (r.top - margin < 0) {
+        window.scrollBy(0, Math.floor(r.top - margin) - 1);
+      } else if (r.bottom + margin > window.innerHeight) {
+        window.scrollBy(0, Math.ceil(r.bottom + margin - window.innerHeight) + 1);
+      }
+    }, options.padding ?? 0);
   }
   await page.evaluate(() => {
     window.scrollTo(Math.round(window.scrollX), Math.round(window.scrollY));
@@ -180,16 +206,17 @@ export async function capture(
       const box = await options.locator.boundingBox();
       expect(box, "the locator's box").not.toBeNull();
       const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
-      const x = Math.max(0, Math.floor((box?.x ?? 0) - padding));
-      const y = Math.max(0, Math.floor((box?.y ?? 0) - padding));
-      const right = Math.min(
-        viewport.width,
-        Math.ceil((box?.x ?? 0) + (box?.width ?? 0) + padding),
-      );
-      const bottom = Math.min(
-        viewport.height,
-        Math.ceil((box?.y ?? 0) + (box?.height ?? 0) + padding),
-      );
+      const x = Math.floor((box?.x ?? 0) - padding);
+      const y = Math.floor((box?.y ?? 0) - padding);
+      const right = Math.ceil((box?.x ?? 0) + (box?.width ?? 0) + padding);
+      const bottom = Math.ceil((box?.y ?? 0) + (box?.height ?? 0) + padding);
+      // The element with its padding fits the viewport, or the image would be cut: as for top and bottom, it fails.
+      expect({ x, y, right, bottom }, "the element with its padding, within the viewport").toEqual({
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        right: Math.min(viewport.width, right),
+        bottom: Math.min(viewport.height, bottom),
+      });
       await page.screenshot({ ...shot, clip: { x, y, width: right - x, height: bottom - y } });
     } else if (options.bottom !== undefined || options.top !== undefined) {
       const { start, end } = await verticalClip(page, options);
@@ -207,6 +234,17 @@ export async function capture(
     for (const frame of [page.mainFrame(), ...frames]) {
       await frame.evaluate(restore).catch(() => undefined);
     }
+    await page
+      .locator("[data-capture-display]")
+      .evaluateAll((els) => {
+        for (const el of els) {
+          if (el instanceof HTMLElement) {
+            el.style.display = el.dataset.captureDisplay ?? "";
+            delete el.dataset.captureDisplay;
+          }
+        }
+      })
+      .catch(() => undefined);
     if (outlined !== undefined) {
       await outlined.evaluate((el) => {
         if (!(el instanceof HTMLElement)) {
@@ -376,11 +414,12 @@ async function stabilizeFrame(frame: Frame, fixed: Fixed): Promise<void> {
 
 /**
  * Rewrites, in the page's browser, the text under root that changes from run to run to fixed, realistic values, and
- * keeps the originals for restore: the spec's own replacements come first; public ids get a fixed body after their
+ * keeps the originals for restore: the spec's own replacements come first and stay as written, the rules rewriting
+ * the rest of their text; public ids get a fixed body after their
  * prefix; absolute times as the UI and the messages write them ("Oct 21, 2026, 12:35", with seconds or without,
  * "Oct 21, 2026", "2026-10-21 09:46 UTC", "2026-10-21" in a date field, an HTTP date, "since 12:35", "14:17:21" on its
  * own, Unix seconds or milliseconds near now) keep their distance from now — or from the spec's reference — in steps of
- * five minutes or, beyond a day and a half, in whole days with their time of day, from the fixed now; latencies
+ * five minutes, dates in whole days, from the fixed now; latencies
  * ("5 ms", "Took 12 ms") take fixed values in turn; a running duration shows "1 min"; tokens Muster issues
  * (mstr_int_, mstr_pat_, mstr_sat_), Signing secrets (whsec_), the token of a password setup link, signed values of
  * at least 20 characters in JSON strings, such as callback_data, and the random end
@@ -418,10 +457,9 @@ function stabilize(root: Element, fixed: Fixed): void {
       d.getMinutes(),
     ).getTime();
   };
-  // A time within a day and a half of now keeps its distance from now, in steps of five minutes; a time further off,
-  // such as the expiry of a token on a chosen date, keeps its time of day and its distance in days.
-  const shift = (t: number): number =>
-    Math.abs(t - now) > 1.5 * day ? shiftDay(t) : base + Math.round((t - now) / step) * step;
+  // A time keeps its distance from now, in steps of five minutes. A time that does not follow now, such as the expiry
+  // of a token on a chosen date, would not reproduce this way: the spec shows it through its own replacements.
+  const shift = (t: number): number => base + Math.round((t - now) / step) * step;
   const months = [
     "Jan",
     "Feb",
@@ -581,25 +619,26 @@ function stabilize(root: Element, fixed: Fixed): void {
       (_, prefix = "") => `${prefix}K7M3QX9P2RTA`,
     ],
   ];
-  // The spec's own replacements come first, and a text they changed is left as they wrote it, so that a fixed time
-  // such as the end of a Snooze preset is not moved again.
-  const replaced = (text: string): string =>
-    fixed.replace.reduce(
-      (t, [from, to]) => t.replace(new RegExp(escape(from), "g"), () => to),
+  // The spec's own replacements come first. What they wrote stays as written, so that a fixed time such as the end of
+  // a Snooze preset is not moved again, and the rules then rewrite the rest of the text around it.
+  const rewrite = (text: string): string => {
+    const kept: string[] = [];
+    const marked = fixed.replace.reduce(
+      (t, [from, to]) =>
+        t.replace(new RegExp(escape(from), "g"), () => {
+          kept.push(to);
+          return `\uE000${kept.length - 1}\uE000`;
+        }),
       text,
     );
-  const rewrite = (text: string): string => {
-    const own = replaced(text);
-    if (own !== text) {
-      return own;
-    }
-    return rules.reduce(
+    const ruled = rules.reduce(
       (t, [re, f]) =>
         t.replace(re, (...m: unknown[]) =>
           f(...m.filter((x): x is string => typeof x === "string")),
         ),
-      text,
+      marked,
     );
+    return ruled.replace(/\uE000(\d+)\uE000/g, (_, i = "") => kept[+i] ?? "");
   };
   const saved: { node: Node; text: string }[] = [];
   const fields: { el: HTMLInputElement | HTMLTextAreaElement; value: string }[] = [];

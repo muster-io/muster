@@ -79,6 +79,14 @@ async function createToken(page: Page, name: string): Promise<{ dialog: Locator;
   return { dialog, token };
 }
 
+/**
+ * The page behind a dialog, which shows at its rounded corners: hidden for the shot, as the Integration page goes on
+ * loading its sections meanwhile.
+ */
+function behind(page: Page): Locator {
+  return page.locator("main");
+}
+
 /** The id of the Integration whose page is open. */
 function integrationIdOf(page: Page): string {
   return new URL(page.url()).pathname.split("/")[2] ?? "";
@@ -104,7 +112,10 @@ test("connects Alertmanager and Grafana and turns the Heartbeat on", async ({ pa
   await expect(badge).toHaveText("Heartbeat: Not configured");
   const { dialog, token } = await createToken(page, "alertmanager");
   await expect(dialog.getByTestId("integration-token-snippet")).toContainText(RECEIVER);
-  await capture(page, ALERTMANAGER, "02-token-and-snippet", { locator: dialog });
+  await capture(page, ALERTMANAGER, "02-token-and-snippet", {
+    locator: dialog,
+    hide: behind(page),
+  });
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
@@ -114,7 +125,12 @@ test("connects Alertmanager and Grafana and turns the Heartbeat on", async ({ pa
     route: "{}",
     labels: { alertname: ALERT.labels.alertname },
   });
-  await fam("PUT", `/groups/${AM_GROUP}/alerts/a1`, ALERT);
+  // A start in whole seconds keeps the size of the Snapshot, which its row shows, the same in every run.
+  const started = Math.floor((Date.now() + (await devClockOffset()) * 1000) / 1000) * 1000;
+  await fam("PUT", `/groups/${AM_GROUP}/alerts/a1`, {
+    ...ALERT,
+    starts_at: new Date(started).toISOString().replace(".000Z", "Z"),
+  });
   await notify(integrationId, AM_GROUP, { reason: "first notification" });
   await page.reload();
   await expect(page.getByTestId("integration-snapshot-count")).toHaveText("Snapshots received: 1");
@@ -161,7 +177,10 @@ test("connects Alertmanager and Grafana and turns the Heartbeat on", async ({ pa
       box.scrollTop = box.scrollHeight;
     }
   });
-  await capture(page, HEARTBEAT, "04-token-and-snippet", { locator: second.dialog });
+  await capture(page, HEARTBEAT, "04-token-and-snippet", {
+    locator: second.dialog,
+    hide: behind(page),
+  });
   await second.dialog.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
@@ -196,6 +215,7 @@ test("connects Alertmanager and Grafana and turns the Heartbeat on", async ({ pa
   const grafana = await createToken(page, "grafana");
   await capture(page, GRAFANA, "02-token", {
     locator: grafana.dialog,
+    hide: behind(page),
     highlight: grafana.dialog.getByTestId("integration-token-value"),
   });
   await grafana.dialog.getByRole("button", { name: "Done" }).click();

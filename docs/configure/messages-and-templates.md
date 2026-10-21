@@ -187,9 +187,10 @@ Example: a dashboard per cluster.
    value `https://grafana.example.org/d/abc123/prod-eu`.
 2. Create the Link rule `Dashboard` with the Matcher `cluster=~".+"`, scope **Alert Group**, and the URL template
    `{{ lookup "dashboards" .Labels.cluster "url" }}`. The Matcher keeps the rule to Alert Groups whose Alerts share a
-   `cluster`. A label the Alert Group lacks is no value at all, not an empty key, and `lookup` fails on it: without
-   the Matcher, saving fails with a template error when a recent Alert Group that the rule is checked against has no
-   common `cluster` label.
+   `cluster`. A label the Alert Group lacks is no value at all, not an empty key, and `lookup` fails on it: saving
+   dry-runs the URL template against the up to 20 most recent Stored Snapshots of the Organization that the rule's
+   Matchers match (`template.dry_run_sample`), and without the Matcher it fails with a template error when one of them
+   has no common `cluster` label.
 3. The preview of the rule shows the link for a sample. Alert Groups with `cluster="prod-eu"` now carry **Dashboard**.
 
 A rule with the scope **Each value of label** and the label `pod` can build one log link per pod:

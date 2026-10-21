@@ -287,16 +287,32 @@ test("Alert Groups in each status, their commands, the list and the Statistics",
   await expect(table.getByTestId("alert-group-status")).toHaveCount(5);
   const snoozedUntil: [string, string][] = [[until, "Snoozed until Oct 15, 2026, 09:00"]];
   await shoot(page, GROUPS, "01-list", { waitFor: table, replace: snoozedUntil });
+  // The table scrolls sideways inside its box: from the Owner on, the end of a Snooze, the start and the duration. The
+  // Snooze ends at tomorrow 09:00, a time that does not follow now: it shows for the fixed now of the images.
+  const box = table.locator("xpath=..");
+  await box.evaluate((el) => {
+    const owner = [...el.querySelectorAll("th")].find((th) => th.textContent?.trim() === "Owner");
+    el.scrollLeft = (owner instanceof HTMLElement ? owner.offsetLeft : el.scrollWidth) - 1;
+  });
+  const snoozeEnd = table.getByTestId("snooze-end").filter({ hasText: /\d/ });
+  await expect(snoozeEnd).toHaveCount(1);
+  const columns: [string, string][] = [
+    [(await snoozeEnd.textContent()) ?? "", "Oct 15, 2026, 09:00"],
+  ];
+  await shoot(page, GROUPS, "02-list-columns", { locator: box, replace: columns });
+  await box.evaluate((el) => {
+    el.scrollLeft = 0;
+  });
   await page.getByTestId("filter-route").getByRole("combobox").selectOption({ label: "payments" });
   await expect(table.getByTestId("alert-group-status")).toHaveCount(2);
-  await shoot(page, GROUPS, "02-filters", { waitFor: table, replace: snoozedUntil });
+  await shoot(page, GROUPS, "03-filters", { waitFor: table, replace: snoozedUntil });
 
   await page.goto(`/alert-groups/${crash.id}`);
   await expect(status).toHaveText("Acknowledged");
-  await shoot(page, GROUPS, "03-alert-group", { waitFor: page.getByTestId("alert-group-owner") });
+  await shoot(page, GROUPS, "04-alert-group", { waitFor: page.getByTestId("alert-group-owner") });
   const timeline = cardOf(page.getByRole("heading", { name: "Timeline", exact: true }));
   await scrollToTop(timeline);
-  await shoot(page, GROUPS, "04-timeline", { locator: timeline });
+  await shoot(page, GROUPS, "05-timeline", { locator: timeline });
 
   // Statistics: by route, and the days of one route.
   await nav(page, "Statistics").click();
@@ -305,10 +321,10 @@ test("Alert Groups in each status, their commands, the list and the Statistics",
     .getByTestId("statistics-row")
     .filter({ has: page.getByTestId("statistics-name").getByText("payments", { exact: true }) });
   await expect(payments.getByTestId("statistics-count")).toHaveText("2");
-  await shoot(page, GROUPS, "05-statistics", { waitFor: payments });
+  await shoot(page, GROUPS, "06-statistics", { waitFor: payments });
   await payments.getByRole("button", { name: "payments" }).click();
   const days = page.getByRole("table", { name: "Alert Groups per day of start: payments" });
   await expect(days.getByTestId("day-count")).toHaveText("2");
   await scrollToTop(days);
-  await shoot(page, GROUPS, "06-statistics-days", { locator: days, padding: 16 });
+  await shoot(page, GROUPS, "07-statistics-days", { locator: days, padding: 16 });
 });

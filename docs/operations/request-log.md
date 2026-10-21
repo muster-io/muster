@@ -137,24 +137,31 @@ Permissions; a Personal access token may hold fewer.
 
 ## Where to find it
 
-- **Connections → a Connection → Request log**, for every type, and **Destinations → an outgoing webhook → Request
-  log**. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in your time
-  zone, the direction arrow, the operation with the kind of check below it, the status — or, without an answer, what
-  failed — and the latency; **Load more** shows older records. Filters by direction, status class (`2xx`, `3xx`,
-  `4xx`, `5xx` or **No answer**) and operation are kept in the address, such as
-  `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+The Request log of a Connection, or of an outgoing webhook Destination, is a tab of its page:
+
+1. Open **Connections → a Connection**, of any type, or **Destinations → an outgoing webhook**, and select the tab
+   **Request log**. A messenger Destination's page has no tab of its own. The list shows, newest first, the time in
+   your time zone, the direction arrow, the operation with the kind of check below it, the status — or, without an
+   answer, what failed — and the latency; **Load more** shows older records.
 
     ![The tab Request log of the Mattermost Connection: the requests of its check, with the operation, the status and the latency](../assets/screenshots/operations/request-log/01-connection-request-log.png){ .screenshot }
+
+2. Narrow the list by **Direction**, **Status** — the class `2xx`, `3xx`, `4xx`, `5xx` or **No answer** — and
+   **Operation**, and select **Apply**. The filters are kept in the address, such as
+   `?tab=request-log&direction=inbound&status_class=4xx`, so a link to a filtered list can be shared.
+3. Select an operation to open its record: the request — method, URL, headers, body — and the answer — status,
+   headers, body — side by side on a wide screen and one under the other on a narrow one; a JSON body is indented.
+   **Copy URL**, **Copy headers** and **Copy body** copy each, the body as it is stored rather than indented. A record
+   links to its Destination, its Alert Group and the other requests of its check.
+
+    ![A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body](../assets/screenshots/operations/request-log/02-record.png){ .screenshot }
+
+The same records show in two more places:
+
 - **The Alert Group page → Delivery → Requests** on each Destination's row: what was sent to that Destination for this
   Alert Group and what came back.
 - **Requests of this check** under the result of the Connection check, of the check before saving and of the
   Destination's check and test: the requests that check or test made.
-- **A record** opens with the request — method, URL, headers, body — and the answer — status, headers, body — side by
-  side on a wide screen and one under the other on a narrow one; a JSON body is indented. **Copy URL**, **Copy
-  headers** and **Copy body** copy each, the body as it is stored rather than indented. A record links to its
-  Destination, its Alert Group and the other requests of its check.
-
-    ![A record of the Request log: the request getMe to the Mattermost server with its headers, the token redacted, and the answer 200 with its body](../assets/screenshots/operations/request-log/02-record.png){ .screenshot }
 
 The API reads the same records: `listRequestLog` and `getRequestRecord` in the [API reference](../reference/api.md),
 with the check run in the results of the Connection check, the check before saving, the Destination check and the

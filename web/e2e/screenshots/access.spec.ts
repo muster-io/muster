@@ -232,11 +232,19 @@ test("adds a User who enrols in TOTP, tokens, the OIDC settings and the TOTP pol
   await dialog.getByRole("button", { name: "90 days" }).click();
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(dialog.getByTestId("token-value")).toHaveValue(/^mstr_sat_/);
-  await capture(page, TOKENS, "04-service-account-token", { locator: dialog });
+  // The token expires at the start of the day 90 days on, a time that does not follow now: it shows for the fixed now
+  // of the images, Wednesday, October 14, 2026, also behind the dialog.
+  const expires = page.getByTestId("token-row").getByText(/^Expires /);
+  await expect(expires).toBeVisible();
+  const expiry: [string, string][] = [
+    [(await expires.textContent()) ?? "", "Expires Jan 12, 2027, 00:00"],
+  ];
+  await capture(page, TOKENS, "04-service-account-token", { locator: dialog, replace: expiry });
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await capture(page, TOKENS, "05-service-account", {
     waitFor: page.getByTestId("token-row").first(),
+    replace: expiry,
   });
 
   // 4. Configure Muster: the OIDC settings filled with example values, taken before saving and never saved.

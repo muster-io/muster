@@ -73,29 +73,33 @@ previous Alert Groups with the same Route and Group key values. The page and the
 ## In the web UI
 
 1. Open **Alert Groups**. The list shows the Alert Groups of the chosen **Time range**, the last 7 days by default,
-   newest first: the status, the number, the title, the Route, the Integrations, the Owner, when each started and how
-   long it has lasted. The tabs above it — **Open**, **Firing**, **Acknowledged**, **Snoozed**, **Resolved** and
-   **All** — choose the statuses and count each one; **Search** finds an Alert Group by its number, such as `#412`, or
-   by text.
+   newest first: the status, the number, the title, the severity, the Route and the Integrations first. The tabs
+   above it — **Open**, **Firing**, **Acknowledged**, **Snoozed**, **Resolved** and **All** — choose the statuses and
+   count each one; **Search** finds an Alert Group by its number, such as `#412`, or by text.
 
     ![The Alert Groups list on the tab All: Alert Groups in each status, with the filters beside it](../assets/screenshots/concepts/alert-groups/01-list.png){ .screenshot }
+
+   The table scrolls sideways inside its box to the columns further right: the Owner, the end of a Snooze, when each
+   Alert Group started, how long it has lasted and its last change.
+
+    ![The list scrolled to its right end: the Owner admin, the end of the Snooze, the start, the duration and the last change of each Alert Group](../assets/screenshots/concepts/alert-groups/02-list-columns.png){ .screenshot }
 
 2. Narrow the list with the filters beside it: the **Routes**, the **Integrations**, the **Severity**, **Urgent**, the
    **Owner**, label Matchers and more. They combine, and they live in the address, so a filtered list can be shared;
    **Clear filters** removes them. On a phone they open from **Filters**.
 
-    ![The list filtered by the Route payments: two Alert Groups](../assets/screenshots/concepts/alert-groups/02-filters.png){ .screenshot }
+    ![The list filtered by the Route payments: two Alert Groups](../assets/screenshots/concepts/alert-groups/03-filters.png){ .screenshot }
 
 3. Select the number or the title of an Alert Group to open its page: the status, the Owner, the command buttons, the
    [Alerts](#what-an-alert-group-has), the labels, the deliveries to its Destinations and the previous Alert Groups
    with the same Route and Group key values.
 
-    ![The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts](../assets/screenshots/concepts/alert-groups/03-alert-group.png){ .screenshot }
+    ![The page of an acknowledged Alert Group: its status, its Owner admin, its commands and its Alerts](../assets/screenshots/concepts/alert-groups/04-alert-group.png){ .screenshot }
 
 4. Further down, the [Timeline](#the-timeline) lists what happened to it, with the actor and the Transport of each
    change, and the box to add a Note.
 
-    ![The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI](../assets/screenshots/concepts/alert-groups/04-timeline.png){ .screenshot }
+    ![The Timeline of the Alert Group: Alert Group created by Muster, then Acknowledged by admin via the UI](../assets/screenshots/concepts/alert-groups/05-timeline.png){ .screenshot }
 
 The [commands](statuses-and-commands.md#commands-in-the-web-ui) act on the Alert Group from its page.
 
@@ -218,11 +222,11 @@ and of the time to resolve. Days are split in your time zone.
 1. Open **Statistics**. Choose the **Period** — **Last 7 days**, **Last 30 days**, **Last 90 days** or **Custom** — and
    show it **By route** or **By integration**; add Routes or Integrations to narrow it.
 
-    ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](../assets/screenshots/concepts/alert-groups/05-statistics.png){ .screenshot }
+    ![Statistics of the last 7 days by route: the Alert Groups and the times to acknowledge and to resolve of the Default route and of payments](../assets/screenshots/concepts/alert-groups/06-statistics.png){ .screenshot }
 
 2. Select a Route or an Integration to see its Alert Groups per day of start, with the median times of each day.
 
-    ![The Alert Groups per day of start of the Route payments](../assets/screenshots/concepts/alert-groups/06-statistics-days.png){ .screenshot }
+    ![The Alert Groups per day of start of the Route payments](../assets/screenshots/concepts/alert-groups/07-statistics-days.png){ .screenshot }
 
 ## How long Alert Groups are kept
 
