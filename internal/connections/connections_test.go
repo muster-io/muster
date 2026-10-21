@@ -1476,7 +1476,7 @@ func TestCheckChannel(t *testing.T) {
 // second start finds it by its name.
 func TestEnsureDemo(t *testing.T) {
 	e := newEnv(t)
-	d := connections.Demo{Name: "Dev Mattermost", ServerURL: e.fake.URL(), BotToken: botToken}
+	d := connections.Demo{Name: "Example Mattermost", ServerURL: e.fake.URL(), BotToken: botToken}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), d); err != nil {
 			t.Fatal(err)
@@ -1487,7 +1487,7 @@ func TestEnsureDemo(t *testing.T) {
 	}
 	a := e.store.audit[0]
 	c := e.store.rows[1].row
-	if c.Name != "Dev Mattermost" || c.LimiterLimit != connections.DefaultLimit ||
+	if c.Name != "Example Mattermost" || c.LimiterLimit != connections.DefaultLimit ||
 		c.LimiterPerSeconds != connections.DefaultPerSeconds || a.ActorKind != "system" ||
 		!bytes.Contains(a.Details, []byte(`"development_demo":true`)) || !secretChanged(diffOf(t, a), "/bot_token") {
 		t.Errorf("demo %+v, audit %s %s", c, a.Details, a.Diff)

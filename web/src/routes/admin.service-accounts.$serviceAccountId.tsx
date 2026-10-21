@@ -27,6 +27,7 @@ import {
 } from "../api/gen/endpoints/api-tokens/api-tokens";
 import type { RoleName, ServiceAccount } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { DocsLink, PageTitle } from "../components/docs-link";
 import { TokenList } from "../components/profile-tokens";
 import { serviceAccountFieldText } from "../components/service-account-dialog";
 import { TokenCreateDialog } from "../components/token-created-dialog";
@@ -144,9 +145,12 @@ function RoleCard({ account }: { account: ServiceAccount }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          <h2>{t("serviceAccounts.fields.role")}</h2>
-        </CardTitle>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <CardTitle>
+            <h2>{t("serviceAccounts.fields.role")}</h2>
+          </CardTitle>
+          <DocsLink to="field.permissions" kind="learn_more" about={t("docs.fields.permissions")} />
+        </div>
         <CardDescription>{t("serviceAccounts.page.roleHint")}</CardDescription>
       </CardHeader>
       <CardContent>
@@ -390,9 +394,9 @@ function ServiceAccountView({ serviceAccountId }: { serviceAccountId: string }) 
           <ArrowLeftIcon aria-hidden="true" />
           {t("serviceAccounts.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight break-words">
+        <PageTitle docs="page.service_accounts">
           {account?.name ?? t("serviceAccounts.page.title")}
-        </h1>
+        </PageTitle>
       </div>
       {account === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

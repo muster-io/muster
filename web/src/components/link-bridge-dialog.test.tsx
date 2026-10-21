@@ -37,7 +37,7 @@ const BR: LinkableConnection = {
 };
 const DEVB: LinkableConnection = {
   id: "CN0000000000DB",
-  name: "Dev Bridge",
+  name: "Example Bridge",
   messenger: "bridge",
   link_methods: ["token", "code"],
   handle_kind: "email",
@@ -187,7 +187,7 @@ const dialog = () => page.getByRole("dialog");
 const handleField = (label = "Email") => dialog().getByLabelText(label, { exact: true });
 const codeField = () => dialog().getByLabelText("Enter the code the bot sent you");
 
-/** Opens Dev Bridge on its code tab and sends a code request for the handle. */
+/** Opens Example Bridge on its code tab and sends a code request for the handle. */
 async function requestCode(handle = "bob@example.org") {
   const opened = await openDialog(DEVB);
   await dialog().getByRole("tab", { name: "Code" }).click();

@@ -21,6 +21,7 @@ import {
 } from "../api/gen/endpoints/links/links";
 import type { LookupTable } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { LookupTableDeleteDialog, LookupTableEditor } from "../components/lookup-table-editor";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
@@ -108,9 +109,9 @@ function LookupTableView({ lookupTableId }: { lookupTableId: string }) {
           {t("lookupTables.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="min-w-0 font-mono text-2xl font-semibold tracking-tight wrap-anywhere">
+          <PageTitle docs="page.lookup_tables" className="font-mono">
             {table?.name ?? t("lookupTables.edit.title")}
-          </h1>
+          </PageTitle>
           {/* Outside the editor, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && table !== undefined && <LookupTableDeleteDialog table={table} />}
         </div>

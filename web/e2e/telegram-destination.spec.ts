@@ -2,13 +2,13 @@
 // Copyright The Muster Authors
 
 // The Telegram Destination form, its check and the lost Thread against `muster dev` and its fake Telegram server:
-// Verification steps 5 to 8 of their story. The Admin picks "Dev Telegram" and a channel only: @no_comments is refused
-// because comments are not enabled, @muster_alerts while the bot is a plain member of the discussion group, and nothing
-// is saved; once the bot is an admin there, the Destination is saved and shows the channel and the discussion group it
-// found. "Check" lists the four Telegram checks. A Route sends an Alert Group there; with the copy of its post deleted
-// in the fake, the next Thread reply goes unattached and the Alert Group's Delivery section says so. A reader of
-// Russian sees the Destination and the Delivery section at phone width. No page scrolls sideways at 360 px; no Content
-// Security Policy violation.
+// Verification steps 5 to 8 of their story. The Admin picks "Example Telegram" and a channel only: @no_comments is
+// refused because comments are not enabled, @muster_alerts while the bot is a plain member of the discussion group, and
+// nothing is saved; once the bot is an admin there, the Destination is saved and shows the channel and the discussion
+// group it found. "Check" lists the four Telegram checks. A Route sends an Alert Group there; with the copy of its post
+// deleted in the fake, the next Thread reply goes unattached and the Alert Group's Delivery section says so. A reader
+// of Russian sees the Destination and the Delivery section at phone width. No page scrolls sideways at 360 px; no
+// Content Security Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
 
@@ -157,13 +157,15 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 5. Destinations → "Create destination" → Telegram → "Dev Telegram" → @no_comments → "Save" → refused.
+  // 5. Destinations → "Create destination" → Telegram → "Example Telegram" → @no_comments → "Save" → refused.
   await nav(page, "Destinations").click();
   await page.getByRole("link", { name: "Create destination" }).click();
   await page.getByRole("radio", { name: "Telegram" }).check();
   const fields = page.getByTestId("telegram-fields");
-  await expect(fields.getByRole("option", { name: "Dev Mattermost" })).toHaveCount(0);
-  await fields.getByLabel("Connection", { exact: true }).selectOption({ label: "Dev Telegram" });
+  await expect(fields.getByRole("option", { name: "Example Mattermost" })).toHaveCount(0);
+  await fields
+    .getByLabel("Connection", { exact: true })
+    .selectOption({ label: "Example Telegram" });
   const channel = fields.getByLabel("Channel", { exact: true });
   await expect(channel).toHaveAttribute("placeholder", "@username or chat id");
   await expect(

@@ -21,7 +21,7 @@ import { LinkTelegramDialog } from "./link-telegram-dialog";
 
 const START = "/api/v1/me/account-links/telegram";
 const CONNECTIONS: LinkableConnection[] = [
-  { id: "CN0000000000TG", name: "Dev Telegram", messenger: "telegram" },
+  { id: "CN0000000000TG", name: "Example Telegram", messenger: "telegram" },
 ];
 const TELEGRAM: AccountLink = {
   id: "AK0000000000T1",

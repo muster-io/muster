@@ -1034,7 +1034,7 @@ func TestCheckSlackDraft(t *testing.T) {
 		fakeslack.SecondAppToken, nil))
 	b := fakeslack.Apps()[1]
 	if err != nil || res.BotName != b.BotName || *res.Slack != (connections.SlackIdentity{TeamID: b.TeamID,
-		TeamName: "Fake workspace B", BotUserID: b.BotUserID, AppID: b.AppID}) || res.Warnings != nil {
+		TeamName: "Example workspace B", BotUserID: b.BotUserID, AppID: b.AppID}) || res.Warnings != nil {
 		t.Errorf("what a draft found = %+v %+v, %v", res.BotName, res.Slack, err)
 	}
 	for _, r := range f.Requests() {

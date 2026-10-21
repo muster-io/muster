@@ -174,7 +174,7 @@ func TestIntegrationDoctor(t *testing.T) {
 		exec(`UPDATE outbound_policies SET allowed = '{127.0.0.0/8}'`)
 		exec(`INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, bot_token_ciphertext,
 			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
-			SELECT id, 'CNAAAAAAAAAAA1', 'mattermost', 'Dev Mattermost', $1, $2, $3, $4, 5, 1, $4, $4
+			SELECT id, 'CNAAAAAAAAAAA1', 'mattermost', 'Example Mattermost', $1, $2, $3, $4, 5, 1, $4, $4
 			FROM organizations`, fake.URL(), ciphertext, keyID, now)
 		for _, ds := range [][3]string{{"DSAAAAAAAAAAA1", "alerts", fakemattermost.ChannelAlerts},
 			{"DSAAAAAAAAAAA2", "no-bot", fakemattermost.ChannelNoBot}} {
@@ -190,7 +190,7 @@ func TestIntegrationDoctor(t *testing.T) {
 		exec(`INSERT INTO connections (org_id, public_id, type, name, telegram_bot_api_base_url, telegram_update_mode,
 			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
 			updated_at)
-			SELECT id, 'CNAAAAAAAAAAT1', 'telegram', 'Dev Telegram', $1, 'long_polling', $2, $3, $4, 15, 1, $4, $4
+			SELECT id, 'CNAAAAAAAAAAT1', 'telegram', 'Example Telegram', $1, 'long_polling', $2, $3, $4, 15, 1, $4, $4
 			FROM organizations`, tg.URL(), tgCiphertext, tgKeyID, now)
 		exec(`INSERT INTO destinations (org_id, public_id, type, name, connection_id, telegram_channel_id, mentions,
 			limiter_limit, limiter_per_seconds, health, created_at, updated_at)
@@ -204,8 +204,8 @@ func TestIntegrationDoctor(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("muster doctor with a Mattermost and a Telegram Connection:\n%s", out.String())
-		want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
-			"OK   connection Dev Telegram: ok\n" +
+		want := "WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+			"OK   connection Example Telegram: ok\n" +
 			"OK   destination alerts: ok\n" +
 			"FAIL destination no-bot: The bot is not a member of this channel.\n" +
 			"OK   destination tg-alerts: ok\n"

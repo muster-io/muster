@@ -122,7 +122,7 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 		Network: oidc.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(d.Pool), org.ID,
 			clock.Real{}), Log: log, Real: clock.Real{}}})
 	if err := svc.EnsureDemo(ctx, oidc.Demo{IssuerURL: idp.URL(), ClientID: "muster-dev", ClientSecret: "dev",
-		DisplayName: "Dev IdP", AllowNetwork: "127.0.0.0/8", Mappings: []oidc.GroupMapping{
+		DisplayName: "Example SSO", AllowNetwork: "127.0.0.0/8", Mappings: []oidc.GroupMapping{
 			{Group: "muster-admins", Role: auth.RoleAdmin}, {Group: "oncall", Role: auth.RoleResponder}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestIntegrationSettings(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		w := setup(t, s)
 		st, err := w.svc.Get(t.Context())
-		if err != nil || st.Version != 1 || !st.ClientSecret.Set || st.ButtonName() != "Dev IdP" {
+		if err != nil || st.Version != 1 || !st.ClientSecret.Set || st.ButtonName() != "Example SSO" {
 			t.Fatalf("demo = %+v, %v", st, err)
 		}
 		if allowed := w.scalar(t, `SELECT array_to_string(allowed, ',') FROM outbound_policies`); allowed != "127.0.0.0/8" {

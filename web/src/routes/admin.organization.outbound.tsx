@@ -21,6 +21,7 @@ import {
 } from "../api/gen/endpoints/organization/organization";
 import type { OutboundPolicy, OutboundPolicyPolicy } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { DocsLink } from "../components/docs-link";
 import { NetworkListEditor } from "../components/network-list-editor";
 import { PageHeading, SaveBar, errorText } from "../components/organization-form";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -190,6 +191,13 @@ function OutboundForm({ policy, canWrite }: { policy: OutboundPolicy; canWrite: 
                 id="outbound-allowed"
                 label={t("organization.outbound.allowed")}
                 hint={t("organization.outbound.entryHint")}
+                docs={
+                  <DocsLink
+                    to="field.outbound_policy"
+                    kind="learn_more"
+                    about={t("docs.fields.outboundPolicy")}
+                  />
+                }
                 addLabel={t("organization.outbound.addAllowed")}
                 placeholder="10.0.0.0/8"
                 value={field.value}

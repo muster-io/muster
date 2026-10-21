@@ -540,7 +540,7 @@ func TestCheckConnectionDraftAPI(t *testing.T) {
 	a = x.as(t, connectionsWriter, http.MethodPost, path, bridgeBody)
 	noToken(t, a)
 	decodeInto(t, a, &res)
-	if info, err := res.Info.Get(); a.status != http.StatusOK || err != nil || info.Messenger.Name != "Fake chat" {
+	if info, err := res.Info.Get(); a.status != http.StatusOK || err != nil || info.Messenger.Name != "Example chat" {
 		t.Errorf("bridge = %d %s", a.status, a.body)
 	}
 	if d := fc.drafts[3]; d.Type != connections.TypeBridge || d.BridgeBaseURL != "http://127.0.0.1:18094" ||
@@ -738,7 +738,7 @@ const pushSecretValue = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
 
 // bridgeInfoJSON is an info as a bridge sends it, with a member Muster does not know.
 const bridgeInfoJSON = `{"protocol_version":"1","bridge":{"name":"Stand-in","version":"0.1.0"},` +
-	`"messenger":{"name":"Fake chat"},"capabilities":{"buttons":{"max_per_message":8,"max_per_row":4,` +
+	`"messenger":{"name":"Example chat"},"capabilities":{"buttons":{"max_per_message":8,"max_per_row":4,` +
 	`"data_max_bytes":256,"styles":["primary","danger"]},"native_mentions":true,` +
 	`"delete":{"max_age_seconds":null}},"limits":{"max_body_length":4000,"edit_max_age_seconds":null},` +
 	`"user_lookup":"email","event_delivery":["poll","push"],"future_field":{"kept":true}}`
@@ -794,7 +794,7 @@ func TestBridgeConnectionAPI(t *testing.T) {
 	var b gen.BridgeConnection
 	decodeInto(t, a, &b)
 	info, err := b.Info.Get()
-	if a.status != http.StatusOK || err != nil || info.ProtocolVersion != "1" || info.Messenger.Name != "Fake chat" ||
+	if a.status != http.StatusOK || err != nil || info.ProtocolVersion != "1" || info.Messenger.Name != "Example chat" ||
 		!b.InfoReadAt.MustGet().Equal(read) || b.PushSecretStatus.Set || *b.Etag != `"4"` ||
 		b.BaseUrl != "https://bridge.example.org/prefix" {
 		t.Fatalf("get = %d %s", a.status, a.body)
@@ -819,7 +819,7 @@ func TestBridgeConnectionAPI(t *testing.T) {
 	var res gen.ConnectionCheckResult
 	decodeInto(t, a, &res)
 	if info, err := res.Info.Get(); a.status != http.StatusOK || !res.Ok || err != nil ||
-		info.Messenger.Name != "Fake chat" || len(res.Steps) != 2 || res.Steps[0].Name != "info" ||
+		info.Messenger.Name != "Example chat" || len(res.Steps) != 2 || res.Steps[0].Name != "info" ||
 		res.Steps[0].LatencyMs.MustGet() != 9 || *res.Steps[0].Via != "proxy" || res.Steps[1].Name != "event_delivery" ||
 		!res.Steps[1].Code.IsNull() || !res.Steps[1].LatencyMs.IsNull() || *res.Steps[1].Skipped {
 		t.Fatalf("check = %d %s", a.status, a.body)
@@ -972,7 +972,7 @@ func TestSlackConnectionAPI(t *testing.T) {
 	}
 	fc.err = nil
 
-	team, teamName, bot, botUser, app := "T0MUSTERDEVB", "Fake workspace B", "muster-dev-bot-b", "U0MUSTERBOTB",
+	team, teamName, bot, botUser, app := "T0MUSTERDEVB", "Example workspace B", "muster-dev-bot-b", "U0MUSTERBOTB",
 		"A0MUSTERDEVB"
 	fc.list = append(fc.list, connections.Connection{ID: 6, PublicID: "CNAAAAAAAAAAS1", Type: connections.TypeSlack,
 		Name: "checked", EventMode: connections.EventModeHTTP, BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0},

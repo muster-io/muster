@@ -89,7 +89,7 @@ test.beforeAll(async () => {
       "GET",
       "/api/v1/connections?type=telegram&limit=500",
     );
-    const connection = connections.items.find((c) => c.name === "Dev Telegram");
+    const connection = connections.items.find((c) => c.name === "Example Telegram");
     expect(connection, "the Telegram Connection of muster dev").toBeDefined();
     const telegram = await admin.call<{ destination: { id: string } }>(
       "POST",

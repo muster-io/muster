@@ -759,7 +759,7 @@ func TestAccountLinks(t *testing.T) {
 }
 
 // bridgeLinksEnv is the brd environment with the people and Audit log checks of linksEnv: accounts linked through the
-// demo Connection "Dev Bridge" of the fake bridge's first bot and through "Lab Bridge" of its second.
+// demo Connection "Example Bridge" of the fake bridge's first bot and through "Lab Bridge" of its second.
 type bridgeLinksEnv struct {
 	*linksEnv
 	b   *brd
@@ -880,9 +880,9 @@ func (e *bridgeLinksEnv) codeFor(p linker, handle, userID string) (string, strin
 }
 
 // TestBridgeAccountLinks is the Verification of S-076 against `muster dev` and the fake bridge, with two Bridge
-// Connections to it — "Dev Bridge" of its first bot and "Lab Bridge" of its second — and no link row inserted by hand:
-// the link methods and the lookup kind each Connection offers from its info (C-22.FR-15, AC-19); a token sent to the
-// bot links the sender's account with the name the bridge reported, and is answered in the direct chat (C-22.AC-18,
+// Connections to it — "Example Bridge" of its first bot and "Lab Bridge" of its second — and no link row inserted by
+// hand: the link methods and the lookup kind each Connection offers from its info (C-22.FR-15, AC-19); a token sent to
+// the bot links the sender's account with the name the bridge reported, and is answered in the direct chat (C-22.AC-18,
 // FR-13); the same token again, a token of the other Connection, an expired and an unknown token link nothing and get
 // the same answer, recorded with their reasons; each Connection needs its own link; the code by direct message with an unknown address, a person the bot cannot write to, five wrong codes, the right
 // code without a confirming message, and the limit for one account (C-22.AC-19); an account linked to another User
@@ -905,11 +905,12 @@ func TestBridgeAccountLinks(t *testing.T) {
 	b.configure(`{"user_lookup":"none","link_url_template":"` + h.Fakes.Bridge + `/bot?start={token}"}`)
 	e.check(b.conn)
 	e.check(e.lab)
-	if got := e.linkable(alice); got["Dev Bridge"] != "[token] <nil>" || got["Lab Bridge"] != "[token] <nil>" {
+	if got := e.linkable(alice); got["Example Bridge"] != "[token] <nil>" || got["Lab Bridge"] != "[token] <nil>" {
 		t.Errorf("linkable without a user lookup %v", got)
 	}
 
-	// C-22.AC-18, FR-13: a token sent to the bot of Dev Bridge links Alice's account with the name the bridge reported.
+	// C-22.AC-18, FR-13: a token sent to the bot of Example Bridge links Alice's account with the name the bridge
+	// reported.
 	tok := e.startBridge(alice, b.conn)
 	if a := e.sendToken(1, fakebridge.AliceID, tok); a.Text != "Linked to Muster user Alice A. (alice)" {
 		t.Errorf("the answer to the token %q", a.Text)
@@ -929,7 +930,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 	}
 	e.wantRejection("token_used", "bridge", fakebridge.BobID)
 
-	// A token of Lab Bridge sent to the bot of Dev Bridge links nothing; Lab Bridge needs a link of its own.
+	// A token of Lab Bridge sent to the bot of Example Bridge links nothing; Lab Bridge needs a link of its own.
 	tok = e.startBridge(alice, e.lab)
 	if a := e.sendToken(1, fakebridge.AliceID, tok); a.Text != textLinkInvalid {
 		t.Errorf("a token at the other Connection's bot: %q", a.Text)
@@ -939,7 +940,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 		t.Errorf("the token at its own bot: %q", a.Text)
 	}
 	if got := links(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)); !slices.Equal(
-		got, []string{"bridge Dev Bridge u-alice <nil>", "bridge Lab Bridge u-alice <nil>"}) {
+		got, []string{"bridge Example Bridge u-alice <nil>", "bridge Lab Bridge u-alice <nil>"}) {
 		t.Errorf("alice's links %v", got)
 	}
 	tok = e.startBridge(alice, e.lab)
@@ -1027,7 +1028,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 		e.secrets = append(e.secrets, m["token"].(string))
 	}
 
-	// C-22.AC-20, FR-16: a Destination of Dev Bridge that mentions Alice and Bob for new Alert Groups.
+	// C-22.AC-20, FR-16: a Destination of Example Bridge that mentions Alice and Bob for new Alert Groups.
 	mentions := map[string]any{}
 	for _, kind := range []string{"new_alert_group", "new_alerts", "reopen", "ack_timeout", "snooze_ended",
 		"rise_to_urgent"} {
@@ -1065,7 +1066,7 @@ func TestBridgeAccountLinks(t *testing.T) {
 }
 
 // slackLinksEnv is the slk environment with the people and Audit log checks of linksEnv: accounts linked through the
-// Connection "sl" of the fake Slack server's second app and through the demo Connection "Dev Slack" of its first.
+// Connection "sl" of the fake Slack server's second app and through the demo Connection "Example Slack" of its first.
 type slackLinksEnv struct {
 	*linksEnv
 	s   *slk
@@ -1291,7 +1292,7 @@ func TestSlackAccountLinks(t *testing.T) {
 		t.Errorf("the fourth request for bob's account: Retry-After %d", n)
 	}
 
-	// C-18.FR-4: a second link of dora through Dev Slack replaces her first.
+	// C-18.FR-4: a second link of dora through Example Slack replaces her first.
 	rid, code = e.slackCodeFor(dora, e.dev, "carol", fakeslack.AppA, fakeslack.UserCarol)
 	dora.session.json(http.MethodPost, "/api/v1/me/account-links/slack/confirmation", `{"request_id":"`+rid+
 		`","code":"`+code+`"}`, http.StatusCreated)

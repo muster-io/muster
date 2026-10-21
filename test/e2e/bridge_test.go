@@ -26,7 +26,7 @@ import (
 )
 
 // brd drives Bridge Destinations: the mm environment — an Admin's Personal access token, the Integration "lab" and
-// the fake Alertmanager — with the demo Bridge Connection "Dev Bridge" of the fake bridge, whose configuration is
+// the fake Alertmanager — with the demo Bridge Connection "Example Bridge" of the fake bridge, whose configuration is
 // restored when the test ends: replays on, the default capabilities, no edit window and no push target.
 type brd struct {
 	*mm
@@ -544,7 +544,7 @@ const (
 )
 
 // people creates the Responder bob and the Viewer vera and links their accounts u-bob and u-vera of the fake bridge
-// to them through Dev Bridge, directly in the database as the Verification of S-075 does; alice stays unlinked.
+// to them through Example Bridge, directly in the database as the Verification of S-075 does; alice stays unlinked.
 func (e *brd) people() {
 	e.t.Helper()
 	for _, p := range []struct{ login, role, external, link string }{{"bob", "responder", fakebridge.BobID,
@@ -658,8 +658,8 @@ func (e *brd) answer(id string) fakebridge.Answer {
 	return got[0]
 }
 
-// handled waits until Muster has handled the event id that Dev Bridge polls: its id is recorded and the stored cursor
-// is past it, which the poller stores only once it answered the event; an event without an answer has none then.
+// handled waits until Muster has handled the event id that Example Bridge polls: its id is recorded and the stored
+// cursor is past it, which the poller stores only once it answered the event; an event without an answer has none then.
 func (e *brd) handled(id string) {
 	e.t.Helper()
 	_, index := e.eventOf(id)
@@ -960,7 +960,7 @@ func signed(t *testing.T, url, id string, at int64, body, signature string) int 
 }
 
 // TestBridgePush is C-22.AC-14, the deleted Root message of C-22.AC-17 and C-22.AC-3 against `muster dev` and the fake
-// bridge, with Dev Bridge in push mode: a signed event is answered 204, and again 204 for the same webhook-id; a
+// bridge, with Example Bridge in push mode: a signed event is answered 204, and again 204 for the same webhook-id; a
 // timestamp 6 minutes old, a wrong signature, an unknown Connection and a Connection in poll mode are 401, a body that
 // is no event 400, each logged as bridge_event_rejected; the fake pushes a press, answered once even when it comes
 // again, bob's press acknowledges, and a deleted Root message is published again Quietly with the deletion notice; the

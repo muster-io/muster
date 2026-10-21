@@ -23,6 +23,7 @@ import type {
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
 import { unreachable } from "./destination-test-panel";
+import { DocsLink } from "./docs-link";
 
 type OutgoingHeartbeatErrorClass = NonNullable<NullableOutgoingHeartbeatErrorClass>;
 
@@ -355,14 +356,22 @@ export function SystemStatusSections({
       </Section>
       <Section title={t("systemStatus.heartbeat.title")}>
         <p className="text-sm wrap-anywhere" data-testid="system-status-heartbeat">
-          {heartbeat ??
-            (canSetUpHeartbeat ? (
-              <Link to="/admin/organization/outgoing-heartbeat" className={LINK}>
-                {t("systemStatus.heartbeat.suggestion")}
-              </Link>
-            ) : (
-              t("systemStatus.heartbeat.suggestion")
-            ))}
+          {heartbeat ?? (
+            <>
+              {canSetUpHeartbeat ? (
+                <Link to="/admin/organization/outgoing-heartbeat" className={LINK}>
+                  {t("systemStatus.heartbeat.suggestion")}
+                </Link>
+              ) : (
+                <span>{t("systemStatus.heartbeat.suggestion")}</span>
+              )}{" "}
+              <DocsLink
+                to="fix.outgoing_heartbeat"
+                kind="how_to_fix"
+                about={t("docs.fixes.outgoingHeartbeat")}
+              />
+            </>
+          )}
         </p>
         <HeartbeatFailureDetail
           result={status.outgoing_heartbeat}

@@ -32,6 +32,7 @@ import { UpdateOidcSettingsBody } from "../api/gen/zod/oidc/oidc.zod";
 import { AccessLayout } from "../components/access-nav";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { fieldLabel } from "../components/audit-diff";
+import { DocsLink, PageTitle } from "../components/docs-link";
 import {
   GroupMappingEditor,
   type MappingRow,
@@ -154,7 +155,16 @@ function validate(input: OidcSettingsInput, values: OidcValues): FieldErrors {
   return errors;
 }
 
-function WarningAlert({ children, testId }: { children: ReactNode; testId: string }) {
+function WarningAlert({
+  children,
+  fix,
+  testId,
+}: {
+  children: ReactNode;
+  /** The "How to fix" link after the text. */
+  fix?: ReactNode;
+  testId: string;
+}) {
   return (
     <div
       className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
@@ -164,40 +174,79 @@ function WarningAlert({ children, testId }: { children: ReactNode; testId: strin
         aria-hidden="true"
         className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
       />
-      <p>{children}</p>
+      <p>
+        <span>{children}</span>
+        {fix !== undefined && <> {fix}</>}
+      </p>
     </div>
   );
 }
 
-function warningText(t: TFunction, w: OidcWarning, date: (d: string) => string): string | null {
+/** The text of a warning and the guide that says how to fix it, if one does. */
+interface WarningShown {
+  text: string;
+  fix?: "fix.oidc_mapping" | "fix.oidc_secret";
+}
+
+function warningShown(
+  t: TFunction,
+  w: OidcWarning,
+  date: (d: string) => string,
+): WarningShown | null {
   switch (w.kind) {
     case "nobody_can_sign_in":
     case "groups_claim_missing":
-      return t("oidc.warnings.nobodyCanSignIn");
+      return { text: t("oidc.warnings.nobodyCanSignIn"), fix: "fix.oidc_mapping" };
     case "secret_expiring":
-      return w.expires_on ? t("oidc.warnings.secretExpiring", { date: date(w.expires_on) }) : null;
+      return w.expires_on
+        ? {
+            text: t("oidc.warnings.secretExpiring", { date: date(w.expires_on) }),
+            fix: "fix.oidc_secret",
+          }
+        : null;
     case "last_admin_kept":
+      // Its own text says what to do, in Muster: no guide (reference.md, Documentation links).
       return w.user && w.role
-        ? t("oidc.warnings.lastAdminKept", { user: w.user.name, role: roleLabel(t, w.role) })
+        ? {
+            text: t("oidc.warnings.lastAdminKept", {
+              user: w.user.name,
+              role: roleLabel(t, w.role),
+            }),
+          }
         : null;
     default:
       return null;
   }
 }
 
+function WarningFix({ to }: { to: "fix.oidc_mapping" | "fix.oidc_secret" }) {
+  const { t } = useTranslation();
+  return to === "fix.oidc_mapping" ? (
+    <DocsLink to={to} kind="how_to_fix" about={t("docs.fixes.oidcMapping")} />
+  ) : (
+    <DocsLink to={to} kind="how_to_fix" about={t("docs.fixes.oidcSecret")} />
+  );
+}
+
 /** The warnings of the settings, each text once: two kinds share "Nobody will be able to sign in through OIDC." */
 function Warnings({ warnings }: { warnings: readonly OidcWarning[] }) {
   const { t } = useTranslation();
   const { date } = useTimeFormat();
-  const texts = [
-    ...new Set(
-      warnings.map((w) => warningText(t, w, date)).filter((text): text is string => text !== null),
-    ),
-  ];
+  const shown = new Map<string, WarningShown>();
+  for (const w of warnings) {
+    const one = warningShown(t, w, date);
+    if (one !== null && !shown.has(one.text)) {
+      shown.set(one.text, one);
+    }
+  }
   return (
     <div role="status" aria-live="polite" className="flex flex-col gap-2 empty:hidden">
-      {texts.map((text) => (
-        <WarningAlert key={text} testId="oidc-warning">
+      {[...shown.values()].map(({ text, fix }) => (
+        <WarningAlert
+          key={text}
+          testId="oidc-warning"
+          fix={fix === undefined ? undefined : <WarningFix to={fix} />}
+        >
           {text}
         </WarningAlert>
       ))}
@@ -492,9 +541,16 @@ function OidcForm({ settings }: { settings: OidcSettings }) {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>
-                <h2>{t("oidc.roles.title")}</h2>
-              </CardTitle>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <CardTitle>
+                  <h2>{t("oidc.roles.title")}</h2>
+                </CardTitle>
+                <DocsLink
+                  to="field.oidc_groups"
+                  kind="learn_more"
+                  about={t("docs.fields.oidcGroups")}
+                />
+              </div>
               <CardDescription>{t("oidc.roles.hint")}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-5">
@@ -650,7 +706,7 @@ function OidcView() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("oidc.title")}</h1>
+        <PageTitle docs="page.oidc">{t("oidc.title")}</PageTitle>
         <p className="text-muted-foreground">{t("oidc.hint")}</p>
       </div>
       {settings === undefined ? (

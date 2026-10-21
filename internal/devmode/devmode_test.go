@@ -542,7 +542,7 @@ func TestIntegrationDemo(t *testing.T) {
 
 func TestOIDCDemo(t *testing.T) {
 	d := devmode.OIDCDemo()
-	if d.IssuerURL != "http://"+devmode.OIDCAddr || d.DisplayName != "Dev IdP" || d.AllowNetwork != "127.0.0.0/8" ||
+	if d.IssuerURL != "http://"+devmode.OIDCAddr || d.DisplayName != "Example SSO" || d.AllowNetwork != "127.0.0.0/8" ||
 		len(d.Mappings) != 2 || d.Mappings[0].Role != "admin" || d.Mappings[1].Group != "oncall" {
 		t.Errorf("OIDCDemo() = %+v", d)
 	}
@@ -681,21 +681,21 @@ func TestClock(t *testing.T) {
 	}
 }
 
-// TestConnectionDemo is C-01.FR-13: the demo Connection "Dev Mattermost" on the fake Mattermost server, with the
+// TestConnectionDemo is C-01.FR-13: the demo Connection "Example Mattermost" on the fake Mattermost server, with the
 // published bot token.
 func TestConnectionDemo(t *testing.T) {
 	d := devmode.ConnectionDemo()
-	if d.Name != "Dev Mattermost" || d.ServerURL != "http://127.0.0.1:18065" ||
+	if d.Name != "Example Mattermost" || d.ServerURL != "http://127.0.0.1:18065" ||
 		string(d.BotToken) != devmode.ConnectionBotToken || devmode.ConnectionBotToken == "" {
 		t.Errorf("ConnectionDemo() = %+v", d)
 	}
 }
 
-// TestBridgeDemo is C-01.FR-13: the demo Connection "Dev Bridge" on the fake bridge in poll mode, with the published
-// token of the fake's first bot.
+// TestBridgeDemo is C-01.FR-13: the demo Connection "Example Bridge" on the fake bridge in poll mode, with the
+// published token of the fake's first bot.
 func TestBridgeDemo(t *testing.T) {
 	d := devmode.BridgeDemo()
-	if d.Type != connections.TypeBridge || d.Name != "Dev Bridge" || d.BaseURL != "http://127.0.0.1:18094" ||
+	if d.Type != connections.TypeBridge || d.Name != "Example Bridge" || d.BaseURL != "http://127.0.0.1:18094" ||
 		string(d.BotToken) != "muster-dev-bridge-token" || devmode.BridgeConnectionBotToken != fakebridge.Token {
 		t.Errorf("BridgeDemo() = %+v", d)
 	}
@@ -718,11 +718,11 @@ func TestRunBusyBridgePort(t *testing.T) {
 	}
 }
 
-// TestSlackDemo is C-01.FR-13: the demo Connection "Dev Slack" on the fake Slack server's first app, with its
+// TestSlackDemo is C-01.FR-13: the demo Connection "Example Slack" on the fake Slack server's first app, with its
 // published bot token and app-level token; it has no address, Slack's being fixed.
 func TestSlackDemo(t *testing.T) {
 	d := devmode.SlackDemo()
-	if d.Type != connections.TypeSlack || d.Name != "Dev Slack" || d.ServerURL != "" || d.BaseURL != "" ||
+	if d.Type != connections.TypeSlack || d.Name != "Example Slack" || d.ServerURL != "" || d.BaseURL != "" ||
 		string(d.BotToken) != "xoxb-muster-dev-slack-token" || string(d.AppToken) != "xapp-muster-dev-slack-token" ||
 		devmode.SlackConnectionBotToken != fakeslack.BotToken || devmode.SlackConnectionAppToken != fakeslack.AppToken {
 		t.Errorf("SlackDemo() = %+v", d)

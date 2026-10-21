@@ -16,6 +16,7 @@ import {
 import type { ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { Locator } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import { getGetSystemStatusQueryKey } from "../api/gen/endpoints/system/system";
@@ -132,6 +133,19 @@ async function renderIn(queryClient: QueryClient, children: () => ReactNode) {
   );
 }
 
+/** The "How to fix" link of the missing outgoing heartbeat, to the guide of the running version in a new tab. */
+async function expectHowToFix(section: Locator) {
+  const fix = section.getByRole("link", {
+    name: "How to fix: No outgoing heartbeat (opens in a new tab)",
+  });
+  await expect.element(fix).toHaveTextContent("How to fix");
+  await expect.element(fix).toHaveAttribute("target", "_blank");
+  const href = new URL(fix.element().getAttribute("href") ?? "");
+  expect(href.origin).toBe("https://muster-io.github.io");
+  expect(href.pathname).toBe("/muster/latest/operations/outgoing-heartbeat/");
+  expect(href.hash).toBe("");
+}
+
 async function renderSections(status: SystemStatus, canSetUpHeartbeat = true) {
   const screen = await renderIn(newClient(), () => (
     <SystemStatusSections status={status} canSetUpHeartbeat={canSetUpHeartbeat} />
@@ -218,11 +232,27 @@ describe("the System status sections", () => {
       .toHaveTextContent("Not recovering");
     const link = screen.getByRole("link", { name: SUGGESTION });
     await expect.element(link).toHaveAttribute("href", "/admin/organization/outgoing-heartbeat");
+    await expectHowToFix(screen.getByTestId("system-status-heartbeat"));
     await screen.unmount();
 
+    // A reader who cannot change the settings gets the text and the guide, without the link to the settings.
     const reader = await renderSections(EMPTY, false);
     await expect.element(reader.getByText(SUGGESTION)).toBeVisible();
-    expect(reader.container.querySelectorAll("a")).toHaveLength(0);
+    await expect.element(reader.getByRole("link", { name: SUGGESTION })).not.toBeInTheDocument();
+    await expectHowToFix(reader.getByTestId("system-status-heartbeat"));
+    expect(reader.container.querySelectorAll("a")).toHaveLength(1);
+  });
+
+  test("link the missing outgoing heartbeat to its guide, in Russian too", async () => {
+    await i18n.changeLanguage("ru");
+    const screen = await renderSections(EMPTY);
+    await expect
+      .element(screen.getByText("Настройте исходящий heartbeat, чтобы остановку Muster заметили."))
+      .toBeVisible();
+    const fix = screen.getByTestId("system-status-heartbeat").getByRole("link", {
+      name: "Как исправить: Нет исходящего heartbeat (откроется в новой вкладке)",
+    });
+    await expect.element(fix).toHaveTextContent("Как исправить");
   });
 
   test("mark only the Leader and list the key ids of each replica", async () => {

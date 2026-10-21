@@ -24,7 +24,7 @@ import { LinkSlackDialog, slackLinkProblemText } from "./link-slack-dialog";
 const START = "/api/v1/me/account-links/slack";
 const CONFIRM = "/api/v1/me/account-links/slack/confirmation";
 const CONNECTIONS: LinkableConnection[] = [
-  { id: "CN0000000000SA", name: "Dev Slack", messenger: "slack" },
+  { id: "CN0000000000SA", name: "Example Slack", messenger: "slack" },
   { id: "CN0000000000SL", name: "ui", messenger: "slack" },
 ];
 

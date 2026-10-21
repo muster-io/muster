@@ -796,13 +796,13 @@ func (e *liveEnv) deleteConnection(t *testing.T) {
 
 // demo is C-01.FR-13: the demo Connection is created once, however often `muster dev` starts.
 func (e *liveEnv) demo(t *testing.T) {
-	d := connections.Demo{Name: "Dev Mattermost", ServerURL: e.fake.URL(), BotToken: botToken}
+	d := connections.Demo{Name: "Example Mattermost", ServerURL: e.fake.URL(), BotToken: botToken}
 	for range 2 {
 		if err := e.conns.EnsureDemo(t.Context(), d); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n := e.count(t, `SELECT count(*) FROM connections WHERE name = 'Dev Mattermost' AND deleted_at IS NULL`); n != 1 {
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE name = 'Example Mattermost' AND deleted_at IS NULL`); n != 1 {
 		t.Errorf("%d demo connections", n)
 	}
 }

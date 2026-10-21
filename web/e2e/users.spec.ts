@@ -133,7 +133,7 @@ test("resets TOTP, converts an OIDC user to local and issues a new setup link", 
   await nextIdpUser("u-web-olga", "olga", ["oncall"]);
   const olga = await browser.newPage();
   await olga.goto(`${APP}/sign-in`);
-  await olga.getByText("Sign in with Dev IdP").click();
+  await olga.getByText("Sign in with Example SSO").click();
   await expect(olga.getByTestId("user-menu-name")).toHaveText("olga");
   await olga.close();
   await admin.dispose();

@@ -146,7 +146,7 @@ test.beforeAll(async () => {
       "GET",
       "/api/v1/connections?type=mattermost&limit=500",
     );
-    const connection = connections.items.find((c) => c.name === "Dev Mattermost");
+    const connection = connections.items.find((c) => c.name === "Example Mattermost");
     expect(connection, "the Connection of muster dev").toBeDefined();
     const alerts = await admin.call<{ destination: { id: string } }>(
       "POST",

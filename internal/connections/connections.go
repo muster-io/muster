@@ -1236,7 +1236,7 @@ func (s *Service) learnBot(ctx context.Context, row dbgen.GetConnectionRow, bot 
 // Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server, or, with the type telegram, a
 // Telegram one to the fake Bot API in the long-polling mode, or, with the type bridge, a Bridge to the fake bridge
 // (BaseURL) in poll mode, or, with the type slack, a Slack Connection in socket mode with the fake Slack server's bot
-// token and app-level token (AppToken), such as "Dev Slack", whose requests the route of `muster dev` sends to the
+// token and app-level token (AppToken), such as "Example Slack", whose requests the route of `muster dev` sends to the
 // fake server.
 type Demo struct {
 	Type      string

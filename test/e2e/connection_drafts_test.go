@@ -309,7 +309,7 @@ func TestConnectionDrafts(t *testing.T) {
 			return `{"type":"telegram","connection_id":"` + id + `","bot_api_base_url":"` + base +
 				`","update_mode":"webhook"` + extra + `}`
 		}
-		// the requests of the dev fake that a check made, without those of the poller of "Dev Telegram"
+		// the requests of the dev fake that a check made, without those of the poller of "Example Telegram"
 		checked := func() []fakeserver.Request {
 			return slices.DeleteFunc(fakeRequests(t, h.Fakes.Telegram), func(q fakeserver.Request) bool {
 				return carries(q, devmode.TelegramConnectionBotToken)
@@ -483,7 +483,7 @@ func TestConnectionDrafts(t *testing.T) {
 		proxy := `,"proxy":{"enabled":true,"type":"http","address":"` + devmode.HTTPProxyAddr + `"}`
 		bot := `,"bot_token":"` + devmode.SlackSecondBotToken + `"`
 		app := `,"app_token":"` + devmode.SlackSecondAppToken + `"`
-		// authTests are the requests to auth.test since the fake was reset; "Dev Slack" may reconnect its socket
+		// authTests are the requests to auth.test since the fake was reset; "Example Slack" may reconnect its socket
 		// meanwhile, with apps.connections.open alone.
 		authTests := func() []fakeserver.Request {
 			return slices.DeleteFunc(fakeRequests(t, fs), func(q fakeserver.Request) bool {

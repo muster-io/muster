@@ -58,7 +58,7 @@ const (
 	// OIDCClientID and OIDCClientSecret are the client of the demo OIDC configuration; the fake IdP accepts any secret.
 	OIDCClientID     = "muster-dev"
 	OIDCClientSecret = "muster-dev-oidc-secret"
-	OIDCDisplayName  = "Dev IdP"
+	OIDCDisplayName  = "Example SSO"
 	// IngestURL is MUSTER_INGEST_URL in development mode: the ingest listener of `muster dev`.
 	IngestURL = "http://localhost:8081"
 	// IntegrationName is the demo Integration, IntegrationToken its published token and IntegrationReceiver the
@@ -191,27 +191,27 @@ func OIDCDemo() oidc.Demo {
 	}
 }
 
-// The demo Connection that `muster dev` ensures at start: "Dev Mattermost" on the fake Mattermost server, with a
+// The demo Connection that `muster dev` ensures at start: "Example Mattermost" on the fake Mattermost server, with a
 // published bot token that the fake accepts like any other.
 //
 //nolint:gosec // G101: a published development token, never used outside development mode
 const (
-	ConnectionName     = "Dev Mattermost"
+	ConnectionName     = "Example Mattermost"
 	ConnectionBotToken = "muster-dev-mattermost-token"
 )
 
-// ConnectionDemo is the demo Connection "Dev Mattermost", to the fake Mattermost server, without Destinations.
+// ConnectionDemo is the demo Connection "Example Mattermost", to the fake Mattermost server, without Destinations.
 func ConnectionDemo() connections.Demo {
 	return connections.Demo{Name: ConnectionName, ServerURL: "http://" + MattermostAddr,
 		BotToken: logging.Secret(ConnectionBotToken)}
 }
 
-// The demo Telegram Connection that `muster dev` ensures at start: "Dev Telegram" on the fake Bot API, in the
+// The demo Telegram Connection that `muster dev` ensures at start: "Example Telegram" on the fake Bot API, in the
 // long-polling mode, with a published bot token that the fake accepts like any other.
 //
 //nolint:gosec // G101: a published development token, never used outside development mode
 const (
-	TelegramConnectionName     = "Dev Telegram"
+	TelegramConnectionName     = "Example Telegram"
 	TelegramConnectionBotToken = "123456:dev-telegram-token"
 )
 
@@ -226,35 +226,35 @@ const (
 	SlackSecondAppToken      = fakeslack.SecondAppToken
 )
 
-// TelegramDemo is the demo Connection "Dev Telegram", to the fake Telegram server in the long-polling mode, without
+// TelegramDemo is the demo Connection "Example Telegram", to the fake Telegram server in the long-polling mode, without
 // Destinations.
 func TelegramDemo() connections.Demo {
 	return connections.Demo{Type: connections.TypeTelegram, Name: TelegramConnectionName,
 		BaseURL: "http://" + TelegramAddr, BotToken: logging.Secret(TelegramConnectionBotToken)}
 }
 
-// The demo Bridge Connection that `muster dev` ensures at start: "Dev Bridge" on the fake bridge, in poll mode, with
-// the published token of the fake's first bot.
+// The demo Bridge Connection that `muster dev` ensures at start: "Example Bridge" on the fake bridge, in poll mode,
+// with the published token of the fake's first bot.
 const (
-	BridgeConnectionName     = "Dev Bridge"
+	BridgeConnectionName     = "Example Bridge"
 	BridgeConnectionBotToken = fakebridge.Token
 )
 
-// BridgeDemo is the demo Connection "Dev Bridge", to the fake bridge in poll mode, without Destinations.
+// BridgeDemo is the demo Connection "Example Bridge", to the fake bridge in poll mode, without Destinations.
 func BridgeDemo() connections.Demo {
 	return connections.Demo{Type: connections.TypeBridge, Name: BridgeConnectionName, BaseURL: "http://" + BridgeAddr,
 		BotToken: logging.Secret(BridgeConnectionBotToken)}
 }
 
-// The demo Slack Connection that `muster dev` ensures at start: "Dev Slack" on the fake Slack server's first app, in
-// socket mode, with its published bot token and app-level token.
+// The demo Slack Connection that `muster dev` ensures at start: "Example Slack" on the fake Slack server's first app,
+// in socket mode, with its published bot token and app-level token.
 const (
-	SlackConnectionName     = "Dev Slack"
+	SlackConnectionName     = "Example Slack"
 	SlackConnectionBotToken = fakeslack.BotToken
 	SlackConnectionAppToken = fakeslack.AppToken
 )
 
-// SlackDemo is the demo Connection "Dev Slack", on the fake Slack server's first app in socket mode, without
+// SlackDemo is the demo Connection "Example Slack", on the fake Slack server's first app in socket mode, without
 // Destinations; SlackRoute sends its requests to the fake server.
 func SlackDemo() connections.Demo {
 	return connections.Demo{Type: connections.TypeSlack, Name: SlackConnectionName,

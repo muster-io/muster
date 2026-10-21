@@ -242,7 +242,12 @@ test("an alert reaches Telegram and is acknowledged from there", async ({ page }
   await expect(accounts.getByTestId("account-link-summary")).toHaveText(
     "Telegram · @oncall_admin · for all Telegram bots",
   );
-  await capture(page, DOCS, "08-telegram-linked", { locator: accounts });
+  // The Admin's sessions above the card, as many as the specs before signed in, would move it by a fraction of a pixel
+  // from run to run: they are hidden for the shot, as in the guide of account links.
+  await capture(page, DOCS, "08-telegram-linked", {
+    locator: accounts,
+    hide: cardOf(page.getByRole("heading", { name: "Sessions", exact: true })).locator("li"),
+  });
 
   // 6. A critical alert of the service checkout, as the Quick start's curl sends it; the list shows its Alert Group.
   await fam("PUT", `/groups/${AM_GROUP}/alerts/a1`, ALERT);

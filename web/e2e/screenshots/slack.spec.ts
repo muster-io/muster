@@ -75,7 +75,7 @@ test("creates a Slack Connection and a Destination", async ({ page }) => {
   await expect(page.getByRole("heading", { name: CONNECTION, level: 1 })).toBeVisible();
   await check.click();
   await expect(page.getByTestId("connection-bot")).toHaveText(
-    "Bot: muster-dev-bot-b · Workspace: Fake workspace B · App: A0MUSTERDEVB",
+    "Bot: muster-dev-bot-b · Workspace: Example workspace B · App: A0MUSTERDEVB",
   );
   await page.evaluate(() => window.scrollTo(0, 0));
   await capture(page, DOCS, "03-saved-connection", { waitFor: page.getByTestId("connection-bot") });

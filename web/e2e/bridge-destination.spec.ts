@@ -5,9 +5,9 @@
 // 2 of their story. The spec creates its own Bridge Connection "br" on the fake bridge's second bot and checks it. The
 // Admin picks "br" and the channel ch-nobot, which the bridge forbids: the save is refused with the bridge's text at
 // the channel field and nothing is saved; ch-alerts saves, and the page shows the channel's name "alerts" and the
-// messenger "Fake chat". The Mention settings offer only "Nobody" and chosen users. "Check" lists "Channel"; "Send test
-// message" shows the Bridge hint and passes; "Preview" shows the envelope as JSON. The Route editor's picker reads the
-// full label. A reader of Russian sees the form and the page at phone width. No page scrolls sideways at 360 px; no
+// messenger "Example chat". The Mention settings offer only "Nobody" and chosen users. "Check" lists "Channel"; "Send
+// test message" shows the Bridge hint and passes; "Preview" shows the envelope as JSON. The Route editor's picker reads
+// the full label. A reader of Russian sees the form and the page at phone width. No page scrolls sideways at 360 px; no
 // Content Security Policy violation. Everything the spec creates is deleted at the end.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
@@ -32,7 +32,7 @@ test.describe.configure({ mode: "serial" });
 const ROUTE = "bridge-dest";
 const CHANNEL_FORBIDDEN =
   "The bridge refused the channel: it does not exist, or the bot cannot use it. Details: The bot is not a member of this channel.";
-const LABEL = "alerts · Fake chat · via br · alerts";
+const LABEL = "alerts · Example chat · via br · alerts";
 const TEST_HINT =
   "Sends one test message, marked 🧪, through the bridge with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers that it is a test message.";
 
@@ -96,8 +96,8 @@ test("creates a Bridge Destination with a channel the bridge allows, and checks,
   await page.getByRole("link", { name: "Create destination" }).click();
   await page.getByRole("radio", { name: "Bridge", exact: true }).check();
   const fields = page.getByTestId("bridge-fields");
-  await expect(fields.getByRole("option", { name: "Dev Mattermost" })).toHaveCount(0);
-  await expect(fields.getByRole("option", { name: "Dev Telegram" })).toHaveCount(0);
+  await expect(fields.getByRole("option", { name: "Example Mattermost" })).toHaveCount(0);
+  await expect(fields.getByRole("option", { name: "Example Telegram" })).toHaveCount(0);
   await fields.getByLabel("Connection", { exact: true }).selectOption({ label: "br" });
   await expect(page.getByLabel("Requests")).toHaveValue("30");
   await expect(page.getByLabel("Period in seconds")).toHaveValue("60");
@@ -144,7 +144,7 @@ test("creates a Bridge Destination with a channel the bridge allows, and checks,
   await expect(page).toHaveURL(/\/destinations\/DS[0-9A-Z]+$/);
   destinationId = new URL(page.url()).pathname.split("/").pop() ?? "";
   await expect(page.getByRole("heading", { name: "alerts", level: 1 })).toBeVisible();
-  await expect(page.getByTestId("destination-type")).toHaveText("Fake chat");
+  await expect(page.getByTestId("destination-type")).toHaveText("Example chat");
   await expect(page.getByTestId("bridge-found")).toHaveText("Channel: alerts");
   await expect(page.getByTestId("bridge-channel-name")).toHaveText("alerts");
   await expect(
@@ -228,7 +228,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
 
   await page.goto(`/destinations/${destinationId}`);
   await expect(page.getByTestId("bridge-found")).toHaveText("Канал: alerts");
-  await expect(page.getByTestId("destination-type")).toHaveText("Fake chat");
+  await expect(page.getByTestId("destination-type")).toHaveText("Example chat");
   await page.getByRole("button", { name: "Проверить", exact: true }).click();
   await expect(page.getByTestId("destination-check-item")).toHaveText(["Канал: успешно"]);
   await expectNoHorizontalScroll(page);

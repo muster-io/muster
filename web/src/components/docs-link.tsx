@@ -89,6 +89,23 @@ const GUIDE_ABOUT = {
   "page.destination.bridge": (t) => t("docs.guides.destination.bridge"),
   "page.destination.webhook_events": (t) => t("docs.guides.destination.webhookEvents"),
   "page.destination.webhook_template": (t) => t("docs.guides.destination.webhookTemplate"),
+  "page.statistics": (t) => t("docs.guides.statistics"),
+  "page.profile": (t) => t("docs.guides.profile"),
+  "page.users": (t) => t("docs.guides.users"),
+  "page.service_accounts": (t) => t("docs.guides.serviceAccounts"),
+  "page.oidc": (t) => t("docs.guides.oidc"),
+  "page.organization.general": (t) => t("docs.guides.organization.general"),
+  "page.organization.severity_levels": (t) => t("docs.guides.organization.severityLevels"),
+  "page.organization.alert_handling": (t) => t("docs.guides.organization.alertHandling"),
+  "page.organization.security": (t) => t("docs.guides.organization.security"),
+  "page.organization.outbound_addresses": (t) => t("docs.guides.organization.outboundAddresses"),
+  "page.organization.retention": (t) => t("docs.guides.organization.retention"),
+  "page.organization.keyring": (t) => t("docs.guides.organization.keyring"),
+  "page.organization.outgoing_heartbeat": (t) => t("docs.guides.organization.outgoingHeartbeat"),
+  "page.lookup_tables": (t) => t("docs.guides.lookupTables"),
+  "page.link_rules": (t) => t("docs.guides.linkRules"),
+  "page.system_status": (t) => t("docs.guides.systemStatus"),
+  "page.audit_log": (t) => t("docs.guides.auditLog"),
 } satisfies Record<PageDocsKey, (t: TFunction) => string>;
 
 export interface PageTitleProps extends ComponentProps<"h1"> {

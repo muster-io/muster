@@ -471,7 +471,7 @@ func TestBridgeCode(t *testing.T) {
 		t.Errorf("locked %q: the User first, as a new request does", e.store.locks)
 	}
 	if err != nil || l.Messenger != MessengerBridge || l.ExternalID != "u-bob" || *l.Username != "bob@example.org" ||
-		*l.DisplayName != "Bob Brown" || l.ConnectionPublicID != brPID || l.ConnectionName != "Dev Bridge" ||
+		*l.DisplayName != "Bob Brown" || l.ConnectionPublicID != brPID || l.ConnectionName != "Example Bridge" ||
 		!strings.HasPrefix(l.PublicID, "AK") || len(e.br.sent) != 1 || len(e.br.sessions) != 1 {
 		t.Fatalf("Confirm = %+v, %v", l, err)
 	}

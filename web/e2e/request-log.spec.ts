@@ -2,17 +2,17 @@
 // Copyright The Muster Authors
 
 // The Request log against `muster dev`, its fake Mattermost server, fake webhook receiver and fake bridge: Verification
-// steps 1 to 5 of its story. An Alert Group of the Route "rl" is published to "alerts" through "Dev Mattermost", and a
-// person presses a button of its post in the fake server. Connections → "Dev Mattermost" → "Request log" lists the
-// createPost first, sent, with 201 and its latency; "Received" lists only presses, with the arrow named "Received", and
-// "2xx" keeps the createPost, each filter in the URL. The record shows the request body as indented JSON with its
-// "channel_id", Authorization as [redacted], the answer 201, the Destination and the Alert Group, and "Copy body" puts
-// the body on the clipboard. "Requests" of "alerts" on the Alert Group page lists the same createPost. A test message to
-// the outgoing webhook "rl-hook", whose endpoint answers 500, lists its event with 500 and the endpoint's body under
-// "Requests of this check" and in the Destination's own tab; the check of a new Bridge Connection before saving lists
-// its getInfo as "Check before saving". A reader of Russian reads the tab, a record and the Alert Group page at phone
-// width. At 360 px no page and no open dialog scrolls sideways, and the lists show the status and the latency without
-// scrolling their own box; no Content Security Policy violation.
+// steps 1 to 5 of its story. An Alert Group of the Route "rl" is published to "alerts" through "Example Mattermost",
+// and a person presses a button of its post in the fake server. Connections → "Example Mattermost" → "Request log"
+// lists the createPost first, sent, with 201 and its latency; "Received" lists only presses, with the arrow named
+// "Received", and "2xx" keeps the createPost, each filter in the URL. The record shows the request body as indented
+// JSON with its "channel_id", Authorization as [redacted], the answer 201, the Destination and the Alert Group, and
+// "Copy body" puts the body on the clipboard. "Requests" of "alerts" on the Alert Group page lists the same createPost.
+// A test message to the outgoing webhook "rl-hook", whose endpoint answers 500, lists its event with 500 and the
+// endpoint's body under "Requests of this check" and in the Destination's own tab; the check of a new Bridge Connection
+// before saving lists its getInfo as "Check before saving". A reader of Russian reads the tab, a record and the Alert
+// Group page at phone width. At 360 px no page and no open dialog scrolls sideways, and the lists show the status and
+// the latency without scrolling their own box; no Content Security Policy violation.
 
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 
@@ -40,7 +40,7 @@ test.describe.configure({ mode: "serial" });
 const FWH = "http://127.0.0.1:18093";
 const TEAM = "rl";
 const HOOK = "rl-hook";
-/** A person of the fake Mattermost server whom no spec before this one links on "Dev Mattermost". */
+/** A person of the fake Mattermost server whom no spec before this one links on "Example Mattermost". */
 const PRESSER = "u-dana";
 
 const NOBODY = { everyone: "none", user_ids: [], groups: [] };
@@ -182,7 +182,7 @@ test.beforeAll(async () => {
   const admin = await adminApi();
   try {
     await cleanUp(admin);
-    ids.connection = await connectionNamed(admin, "Dev Mattermost");
+    ids.connection = await connectionNamed(admin, "Example Mattermost");
     const alerts = await admin.call<{ destination: { id: string } }>(
       "POST",
       "/api/v1/destinations",
@@ -276,10 +276,11 @@ test("lists, filters and opens the requests of a Connection and of an Alert Grou
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAdmin(page);
 
-  // 1. Connections → "Dev Mattermost" → "Request log": the newest row is the createPost, sent, 201, with its latency.
+  // 1. Connections → "Example Mattermost" → "Request log": the newest row is the createPost, sent, 201, with its
+  // latency.
   await page.goto("/connections");
-  await page.getByRole("link", { name: "Dev Mattermost", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Dev Mattermost", level: 1 })).toBeVisible();
+  await page.getByRole("link", { name: "Example Mattermost", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Example Mattermost", level: 1 })).toBeVisible();
   await sections(page).getByRole("tab", { name: "Request log" }).click();
   await expect(page).toHaveURL(/[?&]tab=request-log(&|$)/);
   const table = page.getByRole("table", { name: "Request log" });
@@ -479,7 +480,7 @@ async function russianViewer(browser: Browser): Promise<void> {
   await page.getByLabel("Language").selectOption("ru");
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
 
-  // The tab «Журнал запросов» of "Dev Mattermost", sent and received requests, and a record.
+  // The tab «Журнал запросов» of "Example Mattermost", sent and received requests, and a record.
   await page.goto(`/connections/${ids.connection}`);
   await page
     .getByRole("tablist", { name: "Разделы страницы" })

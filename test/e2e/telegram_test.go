@@ -23,7 +23,7 @@ import (
 )
 
 // tgd drives Telegram Destinations: the mm environment — an Admin's Personal access token, the Integration "lab" and
-// the fake Alertmanager — with the demo Telegram Connection "Dev Telegram" of the fake Bot API.
+// the fake Alertmanager — with the demo Telegram Connection "Example Telegram" of the fake Bot API.
 type tgd struct {
 	*mm
 	ftg  string

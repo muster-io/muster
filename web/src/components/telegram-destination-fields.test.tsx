@@ -38,7 +38,7 @@ const NOT_ADMIN =
 const TG: TelegramConnection = {
   id: "CN0000000000TG",
   type: "telegram",
-  name: "Dev Telegram",
+  name: "Example Telegram",
   bot_api_base_url: "http://127.0.0.1:18081",
   update_mode: "long_polling",
   limiter: { limit: 15, per_seconds: 1 },
@@ -54,7 +54,7 @@ const TG: TelegramConnection = {
 const MM: MattermostConnection = {
   id: "CN0000000000MM",
   type: "mattermost",
-  name: "Dev Mattermost",
+  name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
@@ -191,9 +191,11 @@ describe("DestinationForm with the Telegram fields", () => {
       providers(<DestinationForm kind={TELEGRAM_KIND} submitLabel="Save" save={save} />),
     );
     // Only the Telegram Connections.
-    await expect.element(page.getByRole("option", { name: "Dev Telegram" })).toBeInTheDocument();
     await expect
-      .element(page.getByRole("option", { name: "Dev Mattermost" }))
+      .element(page.getByRole("option", { name: "Example Telegram" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("option", { name: "Example Mattermost" }))
       .not.toBeInTheDocument();
     await expect.element(page.getByLabelText("Team")).not.toBeInTheDocument();
     await expect
@@ -226,7 +228,7 @@ describe("DestinationForm with the Telegram fields", () => {
 
     await userEvent.selectOptions(
       page.getByLabelText("Connection", { exact: true }),
-      "Dev Telegram",
+      "Example Telegram",
     );
     await userEvent.fill(page.getByLabelText("Channel", { exact: true }), "@muster_alerts");
     await expect.element(page.getByLabelText("Name", { exact: true })).toHaveValue("muster_alerts");
@@ -252,7 +254,7 @@ describe("DestinationForm with the Telegram fields", () => {
     );
     await userEvent.selectOptions(
       page.getByLabelText("Connection", { exact: true }),
-      "Dev Telegram",
+      "Example Telegram",
     );
     await userEvent.fill(page.getByLabelText("Channel", { exact: true }), "@no_comments");
     await page.getByRole("button", { name: "Save" }).click();

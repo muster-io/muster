@@ -587,7 +587,7 @@ func TestSlackLinkReplaces(t *testing.T) {
 		t.Errorf("the replaced account = %v", err)
 	}
 	if _, err := e.s.Lookup(t.Context(), SpaceSlack(sl2ID), "U0ALICE"); err != nil {
-		t.Errorf("the link through Dev Slack = %v", err)
+		t.Errorf("the link through Example Slack = %v", err)
 	}
 }
 

@@ -706,7 +706,7 @@ func TestCheck(t *testing.T) {
 
 func TestSignInOptionsAndDemo(t *testing.T) {
 	e := newEnv(t)
-	demo := Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret", DisplayName: "Dev IdP",
+	demo := Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret", DisplayName: "Example SSO",
 		AllowNetwork: "127.0.0.0/8", Mappings: []GroupMapping{{Group: "oncall", Role: auth.RoleResponder}}}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), demo); err != nil {
@@ -717,7 +717,7 @@ func TestSignInOptionsAndDemo(t *testing.T) {
 		t.Errorf("demo audits %v, allowed %v", e.store.audited(ActionSettingsUpdated), e.store.allowed)
 	}
 	on, name, err := e.svc.SignInOptions(t.Context())
-	if err != nil || !on || name != "Dev IdP" {
+	if err != nil || !on || name != "Example SSO" {
 		t.Errorf("sign-in options = %v %q %v", on, name, err)
 	}
 	st, err := e.svc.Get(t.Context())

@@ -70,7 +70,7 @@ test("creates a Bridge Connection and a Destination", async ({ page }) => {
   await expect(page.getByRole("heading", { name: CONNECTION, level: 1 })).toBeVisible();
   await check.click();
   const info = page.getByTestId("bridge-info");
-  await expect(info.getByTestId("bridge-info-messenger")).toHaveText("Messenger: Fake chat");
+  await expect(info.getByTestId("bridge-info-messenger")).toHaveText("Messenger: Example chat");
   await scrollToTop(info);
   await capture(page, DOCS, "03-saved-connection", { locator: info });
 

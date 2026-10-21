@@ -106,7 +106,7 @@ func TestCheckSocket(t *testing.T) {
 	if err != nil || !res.OK() || names(res) != "token:ok scopes:ok app_token:ok" {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
-	want := Identity{TeamID: b.TeamID, TeamName: "Fake workspace B", TeamURL: b.TeamURL, BotID: b.BotID,
+	want := Identity{TeamID: b.TeamID, TeamName: "Example workspace B", TeamURL: b.TeamURL, BotID: b.BotID,
 		BotUserID: b.BotUserID, BotName: b.BotName, AppID: b.AppID}
 	if res.Identity == nil || *res.Identity != want {
 		t.Fatalf("identity %+v", res.Identity)
@@ -142,7 +142,7 @@ func TestCheckHTTPHasNoAppToken(t *testing.T) {
 	f := startFake(t)
 	res, err := RunCheck(t.Context(), fakeClient(t, f, false), direct, tick(), EventModeHTTP)
 	if err != nil || !res.OK() || names(res) != "token:ok scopes:ok" || res.Identity.AppID != "" ||
-		res.Identity.TeamName != "Fake workspace" || res.Identity.BotName != "muster-dev-bot" || len(f.Requests()) != 1 {
+		res.Identity.TeamName != "Example workspace" || res.Identity.BotName != "muster-dev-bot" || len(f.Requests()) != 1 {
 		t.Fatalf("check = %+v %+v, %v", res, res.Identity, err)
 	}
 }
