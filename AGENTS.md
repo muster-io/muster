@@ -179,7 +179,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 |---|---|---|
 | `make help` | list the targets | S-001 |
 | `make fmt` | gofmt and goimports through `golangci-lint fmt` and oxfmt on the SPA | S-001, S-002 |
-| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check, and the translations (i18next-cli) | S-001, S-002, S-014 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), the Go module lists in `.github/renovate.json5` against `go.mod` and the binary (`internal/tools/renovatecheck`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check, and the translations (i18next-cli) | S-001, S-002, S-014 |
 | `make lint-arch` | the architecture lints | S-001 |
 | `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`, and `make test-web`; the same with the race detector | S-001, S-014 |
 | `make test-web` | the SPA's component tests, Vitest in browser mode on Chromium | S-014 |
@@ -200,7 +200,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
 | `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`, then write `llms.txt`, `llms-full.txt` and the Markdown version of every page for AI agents into `site/`, with links into `DOCS_VERSION` (`latest` by default); the same pages, served on `localhost:8000`, without those outputs, which only `make docs` writes | S-057, S-091 |
-| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, on a broken link or anchor, and when `docs/llms.txt.tmpl` names a value, a page or an anchor that its source no longer has | S-057, S-058, S-059, S-091 |
+| `make docs-check` | `generate-check`, then `tablecheck`, then `docs`: fail on a stale generated page, on a table under `docs/` with inline code longer than 24 characters in a cell (lay it out as a definition list, or put `<!-- tablecheck: allow <reason> -->` before a table that must stay one), on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, on a broken link or anchor, and when `docs/llms.txt.tmpl` names a value, a page or an anchor that its source no longer has | S-057, S-058, S-059, S-091 |
 
 ### Development mode
 
@@ -267,6 +267,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 
 - Conventional commits on one line, `<type>(<scope>): <description>`, with `feat`, `fix`, `docs`, `build`, `ci`,
   `test`, `refactor`, `perf` or `chore`. Say what changed; no story or phase IDs. The story's Notes suggest a message.
+  `build` is only for a dependency that ships, listed under "Dependencies" in the changelog; build-system and tooling
+  work is `chore` or `ci`.
 - No AI attribution: no `Co-Authored-By` trailers for tools, no "Generated with" lines, in commits or pull requests.
 - Pull requests are squash-merged, so the title is the commit message, and release-please writes the changelog from it.
   Nothing is released before L1 is complete: never merge the release pull request. Each commit on `master` is

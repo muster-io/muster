@@ -87,9 +87,10 @@ issue: 3
   |---|---|---|
   | `image.repository`, `image.tag` | `ghcr.io/muster-io/muster`, the chart's `appVersion` | |
   | `replicas` | `1` | `2` is an option, together with `podDisruptionBudget.enabled` |
-  | `existingSecret` | required | the Secret with the master keys, the database password and the bootstrap Admin password; rendering fails without it ("the master keys are never generated: create a Secret and set existingSecret") |
+  | `existingSecret` | required | the Secret with the master keys, the database password or URL unless `database.existingSecret` names another Secret, and the bootstrap Admin password; rendering fails without it ("the master keys are never generated: create a Secret and set existingSecret") |
   | `masterKeysKey` | `secret-keys` | the Secret key with the master keys, mounted as a file and passed as `MUSTER_SECRET_KEYS_FILE` |
   | `database.host`, `.port`, `.name`, `.user`, `.sslmode`, `database.passwordKey` | — | plain values; the password is mounted from the Secret key and passed as `MUSTER_DATABASE_PASSWORD_FILE`; `database.urlKey` instead passes a whole `MUSTER_DATABASE_URL` from the Secret |
+  | `database.existingSecret` | empty: `existingSecret` | the Secret that holds `database.passwordKey` or `database.urlKey`, such as CloudNativePG's `<cluster>-app`; the password then mounts from a volume of its own at `/etc/muster/database/` |
   | `database.sessionHost`, `.sessionPort` | unset | the session connection for PgBouncer installations |
   | `publicURL`, `ingestURL` | unset, unset | `MUSTER_PUBLIC_URL`, `MUSTER_INGEST_URL`, set only when given; Muster requires `MUSTER_PUBLIC_URL` at startup, but rendering does not, so the chart renders with only `existingSecret` |
   | `bootstrapAdmin.email`, `bootstrapAdmin.passwordKey` | unset | `MUSTER_BOOTSTRAP_ADMIN_EMAIL`, `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE` |
@@ -98,7 +99,7 @@ issue: 3
 
   The app, ingest and internal Services always exist. The chart has no chart dependencies and no PostgreSQL (ADR-0006).
 - **Chart checks**: `make helm-check` runs `helm lint`, `helm template` with the default values plus an
-  `existingSecret`, and with `ci/all-options-values.yaml`, and validates the output with kubeconform (including the
+  `existingSecret`, and with every `ci/*-values.yaml`, and validates the output with kubeconform (including the
   Gateway API and ServiceMonitor schemas); CI runs it on every pull request.
 - **Compose example** (`deploy/compose/`): services `postgres` (PostgreSQL 17) and `muster` (the released image).
   PostgreSQL gets a container memory limit and its settings on the command line — starting values `mem_limit: 160m`,
