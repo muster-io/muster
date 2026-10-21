@@ -430,8 +430,10 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		w.business.Advance(time.Hour)
 		before = rowVersion(t)
 		w.signIn(t, ada, "")
-		if check(t) || check(t) {
-			t.Error("a check after the claim was seen warned")
+		for i := range 2 {
+			if check(t) {
+				t.Errorf("check %d after the claim was seen warned", i+1)
+			}
 		}
 		if rowVersion(t) != before {
 			t.Error("a sign-in and checks that change nothing wrote the row")
