@@ -1,0 +1,6529 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/reference/chart-values/">
+      
+      
+      
+        <link rel="prev" href="../environment/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Chart values - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/screenshots.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Chart values
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Quick start
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../first-alert/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  First alert in a messenger
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Install
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/helm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Install with Helm
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The database
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/versions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Requirements and tested versions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configure
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Configure
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/messages-and-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messages and templates
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/organization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Organization settings
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configure/api-tokens/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API tokens and automation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Integrations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Integrations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/grafana/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Grafana
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../messengers/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_7">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram-restricted-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/slack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Slack
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/proxies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Proxies
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/write-a-bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_8">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/recipes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Recipes
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../sign-in/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_9" id="__nav_9_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/oidc-keycloak/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/totp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  TOTP
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/closed-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Closed networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Concepts
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_10">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Concepts
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/alert-groups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alert Groups
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/routes-and-group-keys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Routes and Group keys
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/snapshot-semantics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Snapshot semantics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/loud-and-quiet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Loud and Quiet
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/statuses-and-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Statuses and commands
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/broken-destinations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Broken Destinations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_11">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Operations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/backup-and-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Backup and restore
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/upgrades/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Upgrades
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/key-rotation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Key rotation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/high-availability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  High availability
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Monitoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/outgoing-heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  The command line
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/request-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Request log
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11_9" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../operations/runbooks/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runbooks
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_11_9" id="__nav_11_9_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_11_9_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_11_9">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Runbooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDown/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDown
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNoLeader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNoLeader
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryFailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryFailing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDestinationBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDestinationBroken
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterHeartbeatLost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliverySlow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliverySlow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryQueueGrowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryQueueGrowing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestBacklog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestBacklog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestRejected/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterTemplateError/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterTemplateError
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterClockSkew/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterClockSkew
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterLoginFailures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterSnapshotTruncated/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterSnapshotTruncated
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterOIDCSecretExpiring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterOIDCSecretExpiring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_12" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_12" id="__nav_12_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_12_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_12">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>global</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagerepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.repository</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagetag" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.tag</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagepullpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.pullPolicy</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagepullsecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>imagePullSecrets</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nameoverride" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>nameOverride</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fullnameoverride" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>fullnameOverride</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replicas" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>replicas</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masterkeyskey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>masterKeysKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasehost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.host</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasename" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.name</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseuser" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.user</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesslmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sslmode</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseexistingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasepasswordkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.passwordKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseurlkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.urlKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesessionhost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sessionHost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesessionport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sessionPort</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publicurl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>publicURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingesturl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingestURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadmin" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadminemail" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin.email</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadminpasswordkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin.passwordKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extraenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>extraEnv</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>resources</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podsecuritycontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podSecurityContext</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#securitycontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>securityContext</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podAnnotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podlabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podLabels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nodeselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>nodeSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tolerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>tolerations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#affinity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>affinity</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#topologyspreadconstraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>topologySpreadConstraints</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#priorityclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>priorityClassName</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccount" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountcreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.create</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.name</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountautomountserviceaccounttoken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.automountServiceAccountToken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceapptype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceappport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingesttype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingestport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternaltype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternalport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternalannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingress" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.className</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httproute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteparentrefs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.parentRefs</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httproutelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorinterval" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.interval</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorscrapetimeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.scrapeTimeout</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorlabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networkpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>networkPolicy</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networkpolicyenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>networkPolicy.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudget" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudgetenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudgetmaxunavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget.maxUnavailable</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrunbookbaseurl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.runbookBaseURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingjobselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.jobSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusrule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusruleenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusrulelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmrule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmruleenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmrulelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdownenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdownfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleader" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleaderenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleaderfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbroken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbrokenenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbrokenfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlostenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlostfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.seconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingsize" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.size</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklog" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogbacklog" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.backlog</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogdelayseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.delaySeconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedunauthorized" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.unauthorized</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskew" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.seconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresfailures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.failures</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailureswindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmapenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmaplabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmapannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardinstanceselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.instanceSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardfolder" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.folder</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardallowcrossnamespaceimport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.allowCrossNamespaceImport</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bridge-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bridge protocol
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>global</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagerepository" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.repository</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagetag" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.tag</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagepullpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.pullPolicy</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imagepullsecrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>imagePullSecrets</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nameoverride" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>nameOverride</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fullnameoverride" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>fullnameOverride</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replicas" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>replicas</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#masterkeyskey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>masterKeysKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasehost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.host</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasename" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.name</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseuser" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.user</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesslmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sslmode</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseexistingsecret" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.existingSecret</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasepasswordkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.passwordKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databaseurlkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.urlKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesessionhost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sessionHost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#databasesessionport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>database.sessionPort</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publicurl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>publicURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingesturl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingestURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadmin" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadminemail" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin.email</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bootstrapadminpasswordkey" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bootstrapAdmin.passwordKey</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extraenv" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>extraEnv</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>resources</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podsecuritycontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podSecurityContext</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#securitycontext" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>securityContext</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podAnnotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#podlabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podLabels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nodeselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>nodeSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tolerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>tolerations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#affinity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>affinity</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#topologyspreadconstraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>topologySpreadConstraints</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#priorityclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>priorityClassName</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccount" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountcreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.create</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.name</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceaccountautomountserviceaccounttoken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceAccount.automountServiceAccountToken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceapptype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceappport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingesttype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingestport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.ingest.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternaltype" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.type</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternalport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.port</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#serviceinternalannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>service.internal.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingress" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.className</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httproute" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteparentrefs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.parentRefs</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httproutelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.app</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorinterval" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.interval</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorscrapetimeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.scrapeTimeout</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#servicemonitorlabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>serviceMonitor.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networkpolicy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>networkPolicy</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#networkpolicyenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>networkPolicy.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudget" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudgetenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#poddisruptionbudgetmaxunavailable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>podDisruptionBudget.maxUnavailable</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrunbookbaseurl" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.runbookBaseURL</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingjobselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.jobSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusrule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusruleenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingprometheusrulelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.prometheusRule.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmrule" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmruleenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingvmrulelabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.vmRule.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdownenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdownfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDown.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleader" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleaderenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusternoleaderfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterNoLeader.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryfailingwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryFailing.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbroken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbrokenenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdestinationbrokenfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDestinationBroken.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlostenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterheartbeatlostfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterHeartbeatLost.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.seconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryslowwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliverySlow.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingsize" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.size</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterdeliveryqueuegrowingwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterDeliveryQueueGrowing.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklog" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogbacklog" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.backlog</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogdelayseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.delaySeconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestbacklogwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestBacklog.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedunauthorized" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.unauthorized</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestrejectedwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestRejected.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmustertemplateerrorwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterTemplateError.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskew" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterclockskewseconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterClockSkew.seconds</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailuresfailures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.failures</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterloginfailureswindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterLoginFailures.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmapenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmaplabels" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.labels</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardconfigmapannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.configMap.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardinstanceselector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.instanceSelector</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardfolder" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.folder</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dashboardgrafanadashboardallowcrossnamespaceimport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>dashboard.grafanaDashboard.allowCrossNamespaceImport</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<!-- Code generated by internal/tools/refgen from deploy/helm/muster/values.schema.json and values.yaml. DO NOT EDIT. -->
+
+<h1 id="chart-values">Chart values<a class="headerlink" href="#chart-values" title="Permanent link">&para;</a></h1>
+<p>The values of the Helm chart <code>deploy/helm/muster</code>. The types and the descriptions come from its
+<code>values.schema.json</code>, which rejects a value it does not list, and the defaults from its <code>values.yaml</code>. Set
+<code>existingSecret</code>: the chart never generates the master keys, and rendering fails without it.</p>
+<h3 id="global"><code>global</code><a class="headerlink" href="#global" title="Permanent link">&para;</a></h3>
+<p>object · no default</p>
+<p>Helm's global values, shared with subcharts; Muster reads none of them.</p>
+<h3 id="image"><code>image</code><a class="headerlink" href="#image" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The container image of Muster.</p>
+<h3 id="imagerepository"><code>image.repository</code><a class="headerlink" href="#imagerepository" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>ghcr.io/muster-io/muster</code></p>
+<p>The image repository.</p>
+<h3 id="imagetag"><code>image.tag</code><a class="headerlink" href="#imagetag" title="Permanent link">&para;</a></h3>
+<p>string or null · default: <code>""</code></p>
+<p>The image tag; empty uses the appVersion of the chart.</p>
+<h3 id="imagepullpolicy"><code>image.pullPolicy</code><a class="headerlink" href="#imagepullpolicy" title="Permanent link">&para;</a></h3>
+<p>string (<code>Always</code>, <code>Never</code>, <code>IfNotPresent</code>) · default: <code>IfNotPresent</code></p>
+<p>The pull policy of the image.</p>
+<h3 id="imagepullsecrets"><code>imagePullSecrets</code><a class="headerlink" href="#imagepullsecrets" title="Permanent link">&para;</a></h3>
+<p>array · default: <code>[]</code></p>
+<p>The Secrets for pulling the image from a private registry, as in a pod spec.</p>
+<h3 id="nameoverride"><code>nameOverride</code><a class="headerlink" href="#nameoverride" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>Replaces the chart name in the names of the resources.</p>
+<h3 id="fullnameoverride"><code>fullnameOverride</code><a class="headerlink" href="#fullnameoverride" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>Replaces the whole name of the resources.</p>
+<h3 id="replicas"><code>replicas</code><a class="headerlink" href="#replicas" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>1</code></p>
+<p>The number of Muster replicas; one of them is the Leader at a time.</p>
+<h3 id="existingsecret"><code>existingSecret</code><a class="headerlink" href="#existingsecret" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The Secret that holds the master keys and, under the keys named below, the password of the bootstrap Admin and the database password or URL unless database.existingSecret names another Secret. Required: the chart never generates the master keys.</p>
+<h3 id="masterkeyskey"><code>masterKeysKey</code><a class="headerlink" href="#masterkeyskey" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>secret-keys</code></p>
+<p>The key of existingSecret that holds the master keys, one per line (MUSTER_SECRET_KEYS_FILE).</p>
+<h3 id="database"><code>database</code><a class="headerlink" href="#database" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The database connection.</p>
+<h3 id="databasehost"><code>database.host</code><a class="headerlink" href="#databasehost" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The database host (MUSTER_DATABASE_HOST); ignored when urlKey is set.</p>
+<h3 id="databaseport"><code>database.port</code><a class="headerlink" href="#databaseport" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>5432</code></p>
+<p>The database port (MUSTER_DATABASE_PORT); ignored when urlKey is set.</p>
+<h3 id="databasename"><code>database.name</code><a class="headerlink" href="#databasename" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>muster</code></p>
+<p>The database name (MUSTER_DATABASE_NAME); ignored when urlKey is set.</p>
+<h3 id="databaseuser"><code>database.user</code><a class="headerlink" href="#databaseuser" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>muster</code></p>
+<p>The database user (MUSTER_DATABASE_USER); ignored when urlKey is set.</p>
+<h3 id="databasesslmode"><code>database.sslmode</code><a class="headerlink" href="#databasesslmode" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.</p>
+<h3 id="databaseexistingsecret"><code>database.existingSecret</code><a class="headerlink" href="#databaseexistingsecret" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The Secret that holds the database password or URL under passwordKey or urlKey, such as the app Secret that CloudNativePG generates; empty uses existingSecret.</p>
+<h3 id="databasepasswordkey"><code>database.passwordKey</code><a class="headerlink" href="#databasepasswordkey" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>database-password</code></p>
+<p>The key that holds the database password (MUSTER_DATABASE_PASSWORD_FILE), in database.existingSecret or, when that is empty, in existingSecret; ignored when urlKey is set.</p>
+<h3 id="databaseurlkey"><code>database.urlKey</code><a class="headerlink" href="#databaseurlkey" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The key that holds the whole connection as a URL (MUSTER_DATABASE_URL), in database.existingSecret or, when that is empty, in existingSecret; used instead of the fields above.</p>
+<h3 id="databasesessionhost"><code>database.sessionHost</code><a class="headerlink" href="#databasesessionhost" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The host of the session connection, for a pooler in transaction mode (MUSTER_DATABASE_SESSION_HOST).</p>
+<h3 id="databasesessionport"><code>database.sessionPort</code><a class="headerlink" href="#databasesessionport" title="Permanent link">&para;</a></h3>
+<p>integer or null · default: <code>null</code></p>
+<p>The port of the session connection (MUSTER_DATABASE_SESSION_PORT); null uses the port of the main connection.</p>
+<h3 id="publicurl"><code>publicURL</code><a class="headerlink" href="#publicurl" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The address of Muster for people and messengers (MUSTER_PUBLIC_URL).</p>
+<h3 id="ingesturl"><code>ingestURL</code><a class="headerlink" href="#ingesturl" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The address Alertmanager sends its notifications to (MUSTER_INGEST_URL); empty uses publicURL.</p>
+<h3 id="bootstrapadmin"><code>bootstrapAdmin</code><a class="headerlink" href="#bootstrapadmin" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The bootstrap Admin, created at start while the Organization has no Admin.</p>
+<h3 id="bootstrapadminemail"><code>bootstrapAdmin.email</code><a class="headerlink" href="#bootstrapadminemail" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The email, also the login, of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_EMAIL).</p>
+<h3 id="bootstrapadminpasswordkey"><code>bootstrapAdmin.passwordKey</code><a class="headerlink" href="#bootstrapadminpasswordkey" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The key of existingSecret that holds the password of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE).</p>
+<h3 id="extraenv"><code>extraEnv</code><a class="headerlink" href="#extraenv" title="Permanent link">&para;</a></h3>
+<p>array · default: <code>[]</code></p>
+<p>Extra environment variables of the Muster containers, as in a container spec.</p>
+<h3 id="resources"><code>resources</code><a class="headerlink" href="#resources" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>The resource requests and limits of the Muster containers.</p>
+<h3 id="podsecuritycontext"><code>podSecurityContext</code><a class="headerlink" href="#podsecuritycontext" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}</code></p>
+<p>The security context of the pods.</p>
+<h3 id="securitycontext"><code>securityContext</code><a class="headerlink" href="#securitycontext" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}</code></p>
+<p>The security context of the Muster containers.</p>
+<h3 id="podannotations"><code>podAnnotations</code><a class="headerlink" href="#podannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the pods.</p>
+<h3 id="podlabels"><code>podLabels</code><a class="headerlink" href="#podlabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra labels of the pods.</p>
+<h3 id="nodeselector"><code>nodeSelector</code><a class="headerlink" href="#nodeselector" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>The node selector of the pods.</p>
+<h3 id="tolerations"><code>tolerations</code><a class="headerlink" href="#tolerations" title="Permanent link">&para;</a></h3>
+<p>array · default: <code>[]</code></p>
+<p>The tolerations of the pods.</p>
+<h3 id="affinity"><code>affinity</code><a class="headerlink" href="#affinity" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>The affinity of the pods.</p>
+<h3 id="topologyspreadconstraints"><code>topologySpreadConstraints</code><a class="headerlink" href="#topologyspreadconstraints" title="Permanent link">&para;</a></h3>
+<p>array · default: <code>[]</code></p>
+<p>The topology spread constraints of the pods.</p>
+<h3 id="priorityclassname"><code>priorityClassName</code><a class="headerlink" href="#priorityclassname" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The priority class of the pods; empty sets none.</p>
+<h3 id="serviceaccount"><code>serviceAccount</code><a class="headerlink" href="#serviceaccount" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The service account of the pods.</p>
+<h3 id="serviceaccountcreate"><code>serviceAccount.create</code><a class="headerlink" href="#serviceaccountcreate" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Creates the service account.</p>
+<h3 id="serviceaccountname"><code>serviceAccount.name</code><a class="headerlink" href="#serviceaccountname" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The name of the service account; empty uses the full name of the release when the chart creates it, and default otherwise.</p>
+<h3 id="serviceaccountannotations"><code>serviceAccount.annotations</code><a class="headerlink" href="#serviceaccountannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the service account.</p>
+<h3 id="serviceaccountautomountserviceaccounttoken"><code>serviceAccount.automountServiceAccountToken</code><a class="headerlink" href="#serviceaccountautomountserviceaccounttoken" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Mounts the token of the service account into the pods; Muster does not call the Kubernetes API.</p>
+<h3 id="service"><code>service</code><a class="headerlink" href="#service" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Services of the three listeners.</p>
+<h3 id="serviceapp"><code>service.app</code><a class="headerlink" href="#serviceapp" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Service of the app listener: the UI and the API.</p>
+<h3 id="serviceapptype"><code>service.app.type</code><a class="headerlink" href="#serviceapptype" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>ClusterIP</code></p>
+<p>The type of the Service.</p>
+<h3 id="serviceappport"><code>service.app.port</code><a class="headerlink" href="#serviceappport" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>8080</code></p>
+<p>The port of the Service, also the container port and the listen port (MUSTER_LISTEN_APP).</p>
+<h3 id="serviceappannotations"><code>service.app.annotations</code><a class="headerlink" href="#serviceappannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the Service.</p>
+<h3 id="serviceingest"><code>service.ingest</code><a class="headerlink" href="#serviceingest" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Service of the ingest listener: ingestion, Heartbeats and messenger callbacks.</p>
+<h3 id="serviceingesttype"><code>service.ingest.type</code><a class="headerlink" href="#serviceingesttype" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>ClusterIP</code></p>
+<p>The type of the Service.</p>
+<h3 id="serviceingestport"><code>service.ingest.port</code><a class="headerlink" href="#serviceingestport" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>8081</code></p>
+<p>The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INGEST).</p>
+<h3 id="serviceingestannotations"><code>service.ingest.annotations</code><a class="headerlink" href="#serviceingestannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the Service.</p>
+<h3 id="serviceinternal"><code>service.internal</code><a class="headerlink" href="#serviceinternal" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Service of the internal listener: the health checks and /metrics.</p>
+<h3 id="serviceinternaltype"><code>service.internal.type</code><a class="headerlink" href="#serviceinternaltype" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>ClusterIP</code></p>
+<p>The type of the Service.</p>
+<h3 id="serviceinternalport"><code>service.internal.port</code><a class="headerlink" href="#serviceinternalport" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>8082</code></p>
+<p>The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INTERNAL).</p>
+<h3 id="serviceinternalannotations"><code>service.internal.annotations</code><a class="headerlink" href="#serviceinternalannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the Service.</p>
+<h3 id="ingress"><code>ingress</code><a class="headerlink" href="#ingress" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Ingresses of the app and ingest listeners; the internal listener is never exposed.</p>
+<h3 id="ingressenabled"><code>ingress.enabled</code><a class="headerlink" href="#ingressenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the Ingresses.</p>
+<h3 id="ingressclassname"><code>ingress.className</code><a class="headerlink" href="#ingressclassname" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The class of the Ingresses; empty uses the cluster's default.</p>
+<h3 id="ingressannotations"><code>ingress.annotations</code><a class="headerlink" href="#ingressannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the Ingresses.</p>
+<h3 id="ingressapp"><code>ingress.app</code><a class="headerlink" href="#ingressapp" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"hosts":[],"tls":[]}</code></p>
+<p>The hosts and tls of the Ingress of the app listener, as in an Ingress spec.</p>
+<h3 id="ingressingest"><code>ingress.ingest</code><a class="headerlink" href="#ingressingest" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"hosts":[],"tls":[]}</code></p>
+<p>The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.</p>
+<h3 id="httproute"><code>httpRoute</code><a class="headerlink" href="#httproute" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed.</p>
+<h3 id="httprouteenabled"><code>httpRoute.enabled</code><a class="headerlink" href="#httprouteenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the HTTPRoutes.</p>
+<h3 id="httprouteparentrefs"><code>httpRoute.parentRefs</code><a class="headerlink" href="#httprouteparentrefs" title="Permanent link">&para;</a></h3>
+<p>array · default: <code>[]</code></p>
+<p>The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec.</p>
+<h3 id="httprouteannotations"><code>httpRoute.annotations</code><a class="headerlink" href="#httprouteannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra annotations of the HTTPRoutes.</p>
+<h3 id="httproutelabels"><code>httpRoute.labels</code><a class="headerlink" href="#httproutelabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra labels of the HTTPRoutes.</p>
+<h3 id="httprouteapp"><code>httpRoute.app</code><a class="headerlink" href="#httprouteapp" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"hostnames":[]}</code></p>
+<p>The hostnames of the HTTPRoute of the app listener.</p>
+<h3 id="httprouteingest"><code>httpRoute.ingest</code><a class="headerlink" href="#httprouteingest" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"hostnames":[]}</code></p>
+<p>The hostnames of the HTTPRoute of the ingest listener.</p>
+<h3 id="servicemonitor"><code>serviceMonitor</code><a class="headerlink" href="#servicemonitor" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener.</p>
+<h3 id="servicemonitorenabled"><code>serviceMonitor.enabled</code><a class="headerlink" href="#servicemonitorenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the ServiceMonitor.</p>
+<h3 id="servicemonitorinterval"><code>serviceMonitor.interval</code><a class="headerlink" href="#servicemonitorinterval" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>30s</code></p>
+<p>The scrape interval.</p>
+<h3 id="servicemonitorscrapetimeout"><code>serviceMonitor.scrapeTimeout</code><a class="headerlink" href="#servicemonitorscrapetimeout" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>10s</code></p>
+<p>The scrape timeout.</p>
+<h3 id="servicemonitorlabels"><code>serviceMonitor.labels</code><a class="headerlink" href="#servicemonitorlabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra labels of the ServiceMonitor, such as the one the Prometheus selects.</p>
+<h3 id="networkpolicy"><code>networkPolicy</code><a class="headerlink" href="#networkpolicy" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A NetworkPolicy of the pods.</p>
+<h3 id="networkpolicyenabled"><code>networkPolicy.enabled</code><a class="headerlink" href="#networkpolicyenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates a NetworkPolicy that allows incoming traffic to the three listener ports only.</p>
+<h3 id="poddisruptionbudget"><code>podDisruptionBudget</code><a class="headerlink" href="#poddisruptionbudget" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A PodDisruptionBudget of the pods.</p>
+<h3 id="poddisruptionbudgetenabled"><code>podDisruptionBudget.enabled</code><a class="headerlink" href="#poddisruptionbudgetenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the PodDisruptionBudget.</p>
+<h3 id="poddisruptionbudgetmaxunavailable"><code>podDisruptionBudget.maxUnavailable</code><a class="headerlink" href="#poddisruptionbudgetmaxunavailable" title="Permanent link">&para;</a></h3>
+<p>integer or string · default: <code>1</code></p>
+<p>The number or percentage of pods that may be unavailable at a time.</p>
+<h3 id="alerting"><code>alerting</code><a class="headerlink" href="#alerting" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The chart's alert rules about Muster itself, for the Prometheus Operator and the VictoriaMetrics Operator; send the critical ones through an Alertmanager route that bypasses Muster.</p>
+<h3 id="alertingrunbookbaseurl"><code>alerting.runbookBaseURL</code><a class="headerlink" href="#alertingrunbookbaseurl" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>https://muster-io.github.io/muster</code></p>
+<p>The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for any version that is not a release X.Y.Z), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.</p>
+<h3 id="alertingjobselector"><code>alerting.jobSelector</code><a class="headerlink" href="#alertingjobselector" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The label matchers that select Muster's series, part of every series selector of every rule, such as job="muster"; empty selects the job named after the chart, or after nameOverride when it is set, which is the job the ServiceMonitor scrapes into.</p>
+<h3 id="alertingprometheusrule"><code>alerting.prometheusRule</code><a class="headerlink" href="#alertingprometheusrule" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Prometheus Operator PrometheusRule with the rules.</p>
+<h3 id="alertingprometheusruleenabled"><code>alerting.prometheusRule.enabled</code><a class="headerlink" href="#alertingprometheusruleenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the PrometheusRule.</p>
+<h3 id="alertingprometheusrulelabels"><code>alerting.prometheusRule.labels</code><a class="headerlink" href="#alertingprometheusrulelabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra labels of the PrometheusRule, such as the one the Prometheus selects rules by.</p>
+<h3 id="alertingvmrule"><code>alerting.vmRule</code><a class="headerlink" href="#alertingvmrule" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A VictoriaMetrics Operator VMRule with the same rules.</p>
+<h3 id="alertingvmruleenabled"><code>alerting.vmRule.enabled</code><a class="headerlink" href="#alertingvmruleenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the VMRule.</p>
+<h3 id="alertingvmrulelabels"><code>alerting.vmRule.labels</code><a class="headerlink" href="#alertingvmrulelabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Extra labels of the VMRule, such as the one the VMAlert selects rules by.</p>
+<h3 id="alertingrules"><code>alerting.rules</code><a class="headerlink" href="#alertingrules" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>Each rule: whether it is rendered, how long its condition holds before it fires (for) and its thresholds and windows.</p>
+<h3 id="alertingrulesmusterdown"><code>alerting.rules.MusterDown</code><a class="headerlink" href="#alertingrulesmusterdown" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A scrape target of Muster is down (critical).</p>
+<h3 id="alertingrulesmusterdownenabled"><code>alerting.rules.MusterDown.enabled</code><a class="headerlink" href="#alertingrulesmusterdownenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterdownfor"><code>alerting.rules.MusterDown.for</code><a class="headerlink" href="#alertingrulesmusterdownfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>2m</code></p>
+<p>How long the target is down before the rule fires.</p>
+<h3 id="alertingrulesmusternoleader"><code>alerting.rules.MusterNoLeader</code><a class="headerlink" href="#alertingrulesmusternoleader" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>No replica is the Leader (critical).</p>
+<h3 id="alertingrulesmusternoleaderenabled"><code>alerting.rules.MusterNoLeader.enabled</code><a class="headerlink" href="#alertingrulesmusternoleaderenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusternoleaderfor"><code>alerting.rules.MusterNoLeader.for</code><a class="headerlink" href="#alertingrulesmusternoleaderfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>2m</code></p>
+<p>How long no replica leads before the rule fires.</p>
+<h3 id="alertingrulesmusterdeliveryfailing"><code>alerting.rules.MusterDeliveryFailing</code><a class="headerlink" href="#alertingrulesmusterdeliveryfailing" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Destination has queued deliveries and no successful delivery (critical).</p>
+<h3 id="alertingrulesmusterdeliveryfailingenabled"><code>alerting.rules.MusterDeliveryFailing.enabled</code><a class="headerlink" href="#alertingrulesmusterdeliveryfailingenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterdeliveryfailingfor"><code>alerting.rules.MusterDeliveryFailing.for</code><a class="headerlink" href="#alertingrulesmusterdeliveryfailingfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>5m</code></p>
+<p>How long the condition holds before the rule fires.</p>
+<h3 id="alertingrulesmusterdeliveryfailingwindow"><code>alerting.rules.MusterDeliveryFailing.window</code><a class="headerlink" href="#alertingrulesmusterdeliveryfailingwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>10m</code></p>
+<p>How far back a successful delivery counts.</p>
+<h3 id="alertingrulesmusterdestinationbroken"><code>alerting.rules.MusterDestinationBroken</code><a class="headerlink" href="#alertingrulesmusterdestinationbroken" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Destination is Broken (critical).</p>
+<h3 id="alertingrulesmusterdestinationbrokenenabled"><code>alerting.rules.MusterDestinationBroken.enabled</code><a class="headerlink" href="#alertingrulesmusterdestinationbrokenenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterdestinationbrokenfor"><code>alerting.rules.MusterDestinationBroken.for</code><a class="headerlink" href="#alertingrulesmusterdestinationbrokenfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>5m</code></p>
+<p>How long the Destination is Broken before the rule fires.</p>
+<h3 id="alertingrulesmusterheartbeatlost"><code>alerting.rules.MusterHeartbeatLost</code><a class="headerlink" href="#alertingrulesmusterheartbeatlost" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>An Integration is Heartbeat lost (critical).</p>
+<h3 id="alertingrulesmusterheartbeatlostenabled"><code>alerting.rules.MusterHeartbeatLost.enabled</code><a class="headerlink" href="#alertingrulesmusterheartbeatlostenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterheartbeatlostfor"><code>alerting.rules.MusterHeartbeatLost.for</code><a class="headerlink" href="#alertingrulesmusterheartbeatlostfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>1m</code></p>
+<p>How long the Integration is Heartbeat lost before the rule fires.</p>
+<h3 id="alertingrulesmusterdeliveryslow"><code>alerting.rules.MusterDeliverySlow</code><a class="headerlink" href="#alertingrulesmusterdeliveryslow" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The 95th percentile of delivery latency is above its objective (warning).</p>
+<h3 id="alertingrulesmusterdeliveryslowenabled"><code>alerting.rules.MusterDeliverySlow.enabled</code><a class="headerlink" href="#alertingrulesmusterdeliveryslowenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterdeliveryslowfor"><code>alerting.rules.MusterDeliverySlow.for</code><a class="headerlink" href="#alertingrulesmusterdeliveryslowfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>How long delivery is slow before the rule fires.</p>
+<h3 id="alertingrulesmusterdeliveryslowseconds"><code>alerting.rules.MusterDeliverySlow.seconds</code><a class="headerlink" href="#alertingrulesmusterdeliveryslowseconds" title="Permanent link">&para;</a></h3>
+<p>number · default: <code>5</code></p>
+<p>The latency objective in seconds.</p>
+<h3 id="alertingrulesmusterdeliveryslowwindow"><code>alerting.rules.MusterDeliverySlow.window</code><a class="headerlink" href="#alertingrulesmusterdeliveryslowwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>The window of the latency percentile.</p>
+<h3 id="alertingrulesmusterdeliveryqueuegrowing"><code>alerting.rules.MusterDeliveryQueueGrowing</code><a class="headerlink" href="#alertingrulesmusterdeliveryqueuegrowing" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A delivery queue is large and keeps growing (warning).</p>
+<h3 id="alertingrulesmusterdeliveryqueuegrowingenabled"><code>alerting.rules.MusterDeliveryQueueGrowing.enabled</code><a class="headerlink" href="#alertingrulesmusterdeliveryqueuegrowingenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterdeliveryqueuegrowingfor"><code>alerting.rules.MusterDeliveryQueueGrowing.for</code><a class="headerlink" href="#alertingrulesmusterdeliveryqueuegrowingfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>How long the queue keeps growing before the rule fires.</p>
+<h3 id="alertingrulesmusterdeliveryqueuegrowingsize"><code>alerting.rules.MusterDeliveryQueueGrowing.size</code><a class="headerlink" href="#alertingrulesmusterdeliveryqueuegrowingsize" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>100</code></p>
+<p>The number of waiting deliveries above which a queue counts as large.</p>
+<h3 id="alertingrulesmusterdeliveryqueuegrowingwindow"><code>alerting.rules.MusterDeliveryQueueGrowing.window</code><a class="headerlink" href="#alertingrulesmusterdeliveryqueuegrowingwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>The window over which the queue's growth is measured.</p>
+<h3 id="alertingrulesmusteringestbacklog"><code>alerting.rules.MusterIngestBacklog</code><a class="headerlink" href="#alertingrulesmusteringestbacklog" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>Processing falls behind ingestion (warning).</p>
+<h3 id="alertingrulesmusteringestbacklogenabled"><code>alerting.rules.MusterIngestBacklog.enabled</code><a class="headerlink" href="#alertingrulesmusteringestbacklogenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusteringestbacklogfor"><code>alerting.rules.MusterIngestBacklog.for</code><a class="headerlink" href="#alertingrulesmusteringestbacklogfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>5m</code></p>
+<p>How long processing falls behind before the rule fires.</p>
+<h3 id="alertingrulesmusteringestbacklogbacklog"><code>alerting.rules.MusterIngestBacklog.backlog</code><a class="headerlink" href="#alertingrulesmusteringestbacklogbacklog" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>1000</code></p>
+<p>The number of waiting Stored Snapshots above which the rule fires.</p>
+<h3 id="alertingrulesmusteringestbacklogdelayseconds"><code>alerting.rules.MusterIngestBacklog.delaySeconds</code><a class="headerlink" href="#alertingrulesmusteringestbacklogdelayseconds" title="Permanent link">&para;</a></h3>
+<p>number · default: <code>60</code></p>
+<p>The 95th percentile of the processing delay, in seconds, above which the rule fires.</p>
+<h3 id="alertingrulesmusteringestbacklogwindow"><code>alerting.rules.MusterIngestBacklog.window</code><a class="headerlink" href="#alertingrulesmusteringestbacklogwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>5m</code></p>
+<p>The window of the processing delay percentile.</p>
+<h3 id="alertingrulesmusteringestrejected"><code>alerting.rules.MusterIngestRejected</code><a class="headerlink" href="#alertingrulesmusteringestrejected" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>Oversized or unauthorized ingestion requests arrived (warning).</p>
+<h3 id="alertingrulesmusteringestrejectedenabled"><code>alerting.rules.MusterIngestRejected.enabled</code><a class="headerlink" href="#alertingrulesmusteringestrejectedenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusteringestrejectedfor"><code>alerting.rules.MusterIngestRejected.for</code><a class="headerlink" href="#alertingrulesmusteringestrejectedfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>0m</code></p>
+<p>How long the condition holds before the rule fires.</p>
+<h3 id="alertingrulesmusteringestrejectedunauthorized"><code>alerting.rules.MusterIngestRejected.unauthorized</code><a class="headerlink" href="#alertingrulesmusteringestrejectedunauthorized" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>10</code></p>
+<p>The number of unauthorized requests of an Integration within the window above which the rule fires; any oversized request fires it.</p>
+<h3 id="alertingrulesmusteringestrejectedwindow"><code>alerting.rules.MusterIngestRejected.window</code><a class="headerlink" href="#alertingrulesmusteringestrejectedwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>The window in which rejected requests count.</p>
+<h3 id="alertingrulesmustertemplateerror"><code>alerting.rules.MusterTemplateError</code><a class="headerlink" href="#alertingrulesmustertemplateerror" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>Templates failed to render (warning).</p>
+<h3 id="alertingrulesmustertemplateerrorenabled"><code>alerting.rules.MusterTemplateError.enabled</code><a class="headerlink" href="#alertingrulesmustertemplateerrorenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmustertemplateerrorfor"><code>alerting.rules.MusterTemplateError.for</code><a class="headerlink" href="#alertingrulesmustertemplateerrorfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>0m</code></p>
+<p>How long the condition holds before the rule fires.</p>
+<h3 id="alertingrulesmustertemplateerrorwindow"><code>alerting.rules.MusterTemplateError.window</code><a class="headerlink" href="#alertingrulesmustertemplateerrorwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>The window in which template errors count.</p>
+<h3 id="alertingrulesmusterclockskew"><code>alerting.rules.MusterClockSkew</code><a class="headerlink" href="#alertingrulesmusterclockskew" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A replica's clock is off (warning).</p>
+<h3 id="alertingrulesmusterclockskewenabled"><code>alerting.rules.MusterClockSkew.enabled</code><a class="headerlink" href="#alertingrulesmusterclockskewenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterclockskewfor"><code>alerting.rules.MusterClockSkew.for</code><a class="headerlink" href="#alertingrulesmusterclockskewfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>5m</code></p>
+<p>How long the clock is off before the rule fires.</p>
+<h3 id="alertingrulesmusterclockskewseconds"><code>alerting.rules.MusterClockSkew.seconds</code><a class="headerlink" href="#alertingrulesmusterclockskewseconds" title="Permanent link">&para;</a></h3>
+<p>number · default: <code>2</code></p>
+<p>The clock skew against the database, in seconds, above which the rule fires.</p>
+<h3 id="alertingrulesmusterloginfailures"><code>alerting.rules.MusterLoginFailures</code><a class="headerlink" href="#alertingrulesmusterloginfailures" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A burst of failed sign-ins (warning).</p>
+<h3 id="alertingrulesmusterloginfailuresenabled"><code>alerting.rules.MusterLoginFailures.enabled</code><a class="headerlink" href="#alertingrulesmusterloginfailuresenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterloginfailuresfor"><code>alerting.rules.MusterLoginFailures.for</code><a class="headerlink" href="#alertingrulesmusterloginfailuresfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>0m</code></p>
+<p>How long the condition holds before the rule fires.</p>
+<h3 id="alertingrulesmusterloginfailuresfailures"><code>alerting.rules.MusterLoginFailures.failures</code><a class="headerlink" href="#alertingrulesmusterloginfailuresfailures" title="Permanent link">&para;</a></h3>
+<p>integer · default: <code>20</code></p>
+<p>The number of failed sign-ins of one method within the window above which the rule fires.</p>
+<h3 id="alertingrulesmusterloginfailureswindow"><code>alerting.rules.MusterLoginFailures.window</code><a class="headerlink" href="#alertingrulesmusterloginfailureswindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>10m</code></p>
+<p>The window in which failed sign-ins count.</p>
+<h3 id="dashboard"><code>dashboard</code><a class="headerlink" href="#dashboard" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>The "Muster" Grafana dashboard.</p>
+<h3 id="dashboardconfigmap"><code>dashboard.configMap</code><a class="headerlink" href="#dashboardconfigmap" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A ConfigMap with the dashboard for the Grafana sidecar, under the key muster.json.</p>
+<h3 id="dashboardconfigmapenabled"><code>dashboard.configMap.enabled</code><a class="headerlink" href="#dashboardconfigmapenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the ConfigMap.</p>
+<h3 id="dashboardconfigmaplabels"><code>dashboard.configMap.labels</code><a class="headerlink" href="#dashboardconfigmaplabels" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"grafana_dashboard":"1"}</code></p>
+<p>Labels of the ConfigMap besides the chart's; the Grafana sidecar finds dashboards by grafana_dashboard: "1" by default.</p>
+<h3 id="dashboardconfigmapannotations"><code>dashboard.configMap.annotations</code><a class="headerlink" href="#dashboardconfigmapannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Annotations of the ConfigMap, such as the sidecar's folder annotation.</p>
+<h3 id="dashboardgrafanadashboard"><code>dashboard.grafanaDashboard</code><a class="headerlink" href="#dashboardgrafanadashboard" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Grafana Operator GrafanaDashboard that imports the dashboard from the ConfigMap; it needs dashboard.configMap.enabled.</p>
+<h3 id="dashboardgrafanadashboardenabled"><code>dashboard.grafanaDashboard.enabled</code><a class="headerlink" href="#dashboardgrafanadashboardenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Creates the GrafanaDashboard; rendering fails without dashboard.configMap.enabled.</p>
+<h3 id="dashboardgrafanadashboardinstanceselector"><code>dashboard.grafanaDashboard.instanceSelector</code><a class="headerlink" href="#dashboardgrafanadashboardinstanceselector" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{"matchLabels":{"dashboards":"grafana"}}</code></p>
+<p>The label selector of the Grafana instances that import the dashboard, as in a GrafanaDashboard spec.</p>
+<h3 id="dashboardgrafanadashboardfolder"><code>dashboard.grafanaDashboard.folder</code><a class="headerlink" href="#dashboardgrafanadashboardfolder" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>""</code></p>
+<p>The Grafana folder of the dashboard; empty leaves it to the operator.</p>
+<h3 id="dashboardgrafanadashboardallowcrossnamespaceimport"><code>dashboard.grafanaDashboard.allowCrossNamespaceImport</code><a class="headerlink" href="#dashboardgrafanadashboardallowcrossnamespaceimport" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>false</code></p>
+<p>Lets Grafana instances in other namespaces import the dashboard.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+  
+  
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+
+  </body>
+</html>

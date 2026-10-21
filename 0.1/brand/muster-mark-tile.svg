@@ -1,0 +1,4 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright The Muster Authors -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#3B3F9E"/><g stroke="#fff" stroke-width="7" stroke-linecap="round" fill="none"><path d="M13 16 28 24"/><path d="M12 32H28"/><path d="M13 48 28 40"/></g><circle cx="43" cy="32" r="10" fill="#F5A524"/></svg>
+
