@@ -142,10 +142,12 @@ type Sockets struct {
 	HelloTimeout, BackoffBase, BackoffCap, Every time.Duration
 
 	// after arms a timer on the real clock and returns its channel and its stop; jitter spreads a back-off;
-	// openTimeout replaces openTimeout when it is set. Tests replace them.
+	// openTimeout replaces openTimeout when it is set; readerEnded is called once a socket's reader no longer counts
+	// as held. Tests replace them.
 	after       func(d time.Duration) (<-chan time.Time, func())
 	jitter      func(d time.Duration) time.Duration
 	openTimeout time.Duration
+	readerEnded func()
 
 	wakeOnce sync.Once
 	wake     chan struct{}
@@ -326,6 +328,17 @@ func (sc *socket) signal(reason string) {
 	}
 }
 
+// helloed reports whether the first hello came: a select that found it ready together with a reason or the hello
+// timeout may have taken the other.
+func (sc *socket) helloed() bool {
+	select {
+	case <-sc.hello:
+		return true
+	default:
+		return false
+	}
+}
+
 // unread tells the holder again reason, which it read too early, ahead of anything told since.
 func (sc *socket) unread(reason string) {
 	sc.mu.Lock()
@@ -466,15 +479,16 @@ func (h *holder) connect(ctx context.Context) (*socket, socketFailure) {
 	case <-sc.hello:
 		return sc, socketFailure{}
 	case reason := <-sc.stop:
-		select {
-		case <-sc.hello: // the reader tells the hello first; a holder that looks late sees both and takes the hello
-			sc.unread(reason)
+		if sc.helloed() {
+			sc.unread(reason) // the run loop takes it again, as it takes any reason of a socket held
 			return sc, socketFailure{}
-		default:
 		}
 		h.closeNow(sc)
 		return nil, failureOf(reason, sc)
 	case <-timer:
+		if sc.helloed() {
+			return sc, socketFailure{}
+		}
 		h.closeNow(sc)
 		return nil, socketFailure{reason: reasonHelloTimeout}
 	case <-ctx.Done():
@@ -638,6 +652,9 @@ type frame struct {
 func (h *holder) read(sc *socket) {
 	defer func() {
 		h.held.Add(-1)
+		if h.s.readerEnded != nil {
+			h.s.readerEnded()
+		}
 		close(sc.ended)
 	}()
 	first := true
