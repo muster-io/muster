@@ -6458,7 +6458,10 @@ type ServiceAccountTokenList struct {
 // Session defines model for Session.
 type Session struct {
 	// CsrfToken Send as `X-CSRF-Token` on every mutating request made with the session cookie.
-	CsrfToken     string    `json:"csrf_token"`
+	CsrfToken string `json:"csrf_token"`
+
+	// DocsVersion The version segment of the documentation site the web UI links to (C-21.FR-11), derived from the version of the running build by the rule of the `runbook_url` of Internal alerts (C-19.FR-9) — the `major.minor` of a release `X.Y.Z`, or `latest` for any other version (a development build, a snapshot image, a pre-release).
+	DocsVersion   string    `json:"docs_version"`
 	ExpiresAt     time.Time `json:"expires_at"`
 	IdleExpiresAt time.Time `json:"idle_expires_at"`
 

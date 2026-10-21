@@ -477,9 +477,14 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
+// TestRunbookVersion covers C-19.FR-9 and C-21.AC-7: only a release X.Y.Z gives its major.minor.
 func TestRunbookVersion(t *testing.T) {
-	for v, want := range map[string]string{"0.0.0-dev": "latest", "": "latest", "garbage": "latest", "1.4.0": "1.4",
-		"v2.10.3": "2.10", "1.4.0-rc.1": "1.4", "3.0.1+meta": "3.0", "0.1.0": "0.1"} {
+	for v, want := range map[string]string{
+		"0.1.0": "0.1", "0.1.7": "0.1", "1.12.3": "1.12", "v1.2.3": "1.2", "v2.10.3": "2.10",
+		"0.0.0-dev": "latest", "0.1.1-SNAPSHOT-abc1234": "latest", "0.2.0-rc.1": "latest", "0.1.0+meta": "latest",
+		"main": "latest", "": "latest", "garbage": "latest", "1.4": "latest", "1.4.0.1": "latest", "V1.2.3": "latest",
+		"1.2.3-": "latest", "release-1.2.3": "latest",
+	} {
 		if got := RunbookVersion(v); got != want {
 			t.Errorf("RunbookVersion(%q) = %q, want %q", v, got, want)
 		}

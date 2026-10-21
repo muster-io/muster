@@ -109,6 +109,7 @@ const SESSION: SessionRead = {
     csrf_token: "csrf",
     expires_at: "2026-10-21T09:00:00Z",
     idle_expires_at: "2026-10-21T09:00:00Z",
+    docs_version: "latest",
     method: "local",
     permissions: [],
   },

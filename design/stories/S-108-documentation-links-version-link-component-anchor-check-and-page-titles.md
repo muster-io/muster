@@ -47,6 +47,36 @@ files_touched:
   - web/src/routes/destinations.index.tsx
   - web/src/routes/destinations.new.tsx
   - web/src/routes/destinations.$destinationId.tsx
+  - web/src/components/access-nav.test.tsx
+  - web/src/components/account-links-table.test.tsx
+  - web/src/components/alert-group-deliveries.test.tsx
+  - web/src/components/app-shell.test.tsx
+  - web/src/components/bridge-connection-fields.test.tsx
+  - web/src/components/bridge-destination-fields.test.tsx
+  - web/src/components/bulk-actions-bar.test.tsx
+  - web/src/components/command-buttons.test.tsx
+  - web/src/components/connection-form.test.tsx
+  - web/src/components/destination-form.test.tsx
+  - web/src/components/destination-preview-panel.test.tsx
+  - web/src/components/destination-secrets.test.tsx
+  - web/src/components/destination-test-panel.test.tsx
+  - web/src/components/link-bridge-dialog.test.tsx
+  - web/src/components/link-mattermost-dialog.test.tsx
+  - web/src/components/link-slack-dialog.test.tsx
+  - web/src/components/link-telegram-dialog.test.tsx
+  - web/src/components/live-indicator.test.tsx
+  - web/src/components/lookup-table-editor.test.tsx
+  - web/src/components/request-log.test.tsx
+  - web/src/components/request-record.test.tsx
+  - web/src/components/route-destinations.test.tsx
+  - web/src/components/slack-connection-fields.test.tsx
+  - web/src/components/slack-destination-fields.test.tsx
+  - web/src/components/snooze-dialog.test.tsx
+  - web/src/components/system-status-sections.test.tsx
+  - web/src/components/telegram-connection-fields.test.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
+  - web/src/components/timeline.test.tsx
+  - web/src/components/webhook-destination-fields.test.tsx
 acceptance:
   - "[C-21.FR-11, C-21.AC-7, C-19.FR-9] `Session` — the answer of `getCurrentSession`, `createSession` and `submitSessionTotp` — carries `docs_version`, computed from the binary's version by `internalalerts.RunbookVersion`: `0.1.0` and `0.1.7` give `0.1`, `1.12.3` gives `1.12`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234`, `0.2.0-rc.1`, `0.1.0+meta` and `main` give `latest` (`TestRunbookVersion`, `sessions_test.go`); the `runbook_url` of Internal alerts and the chart helper `muster.runbookVersion` follow the same rule (`chartcheck_test.go`), and a sign-in with `curl` on a binary built with `VERSION=0.1.0` shows `\"docs_version\":\"0.1\"`."
   - "[C-21.FR-11] `web/src/lib/docs.ts` builds every documentation URL from the build constant `https://muster-io.github.io/muster`, the session's `docs_version` (`latest` until the session has been read) and an entry of `docs-links.json` — `concepts/alert-groups.md` becomes `…/latest/concepts/alert-groups/`, `messengers/index.md#what-each-destination-type-can-do` becomes `…/latest/messengers/#what-each-destination-type-can-do` (`docs.test.ts`); no other file of `web/src` outside the generated client and tests names the site's address."
@@ -186,6 +216,11 @@ None.
 - The story has a small backend part — one field and the shared rule — in the same pull request, because the field is
   useless without the links and the links are wrong without the field; S-087 set the precedent.
 - With 40 files the story is at the edge of the size signal; the links next to fields and problems are S-109 and S-110.
+  The required `docs_version` also makes the TypeScript type check fail on every component test that builds a
+  `Session` for the query cache, so those 30 tests gain the line `docs_version: "latest"` and are listed in
+  `files_touched` too; they change nothing else, so the story is not split for them.
+- An outgoing webhook Destination in the mode `both` links to `page.destination.webhook_template`: the templates page
+  describes that mode.
 
 ## Coverage
 

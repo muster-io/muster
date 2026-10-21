@@ -20,6 +20,7 @@ import {
 } from "../api/gen/endpoints/integrations/integrations";
 import type { Integration } from "../api/gen/model";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { IntegrationForm } from "../components/integration-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
@@ -97,7 +98,9 @@ function EditIntegration({ integrationId }: { integrationId: string }) {
           <ArrowLeftIcon aria-hidden="true" />
           <span className="truncate">{integration?.name ?? t("integrations.page.title")}</span>
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("integrations.edit.title")}</h1>
+        <PageTitle docs="page.integrations" about={t("integrations.edit.title")}>
+          {t("integrations.edit.title")}
+        </PageTitle>
       </div>
       {integration === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

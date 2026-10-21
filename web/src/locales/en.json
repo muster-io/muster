@@ -1160,6 +1160,15 @@
     "title": "Test and preview",
     "unsaved": "The test uses the saved settings: save your changes first."
   },
+  "docs": {
+    "alertGroup": "Alert Group",
+    "guide": "Guide",
+    "guideAbout": "Guide: {{about}} (opens in a new tab)",
+    "howToFix": "How to fix",
+    "howToFixAbout": "How to fix: {{about}} (opens in a new tab)",
+    "learnMore": "Learn more",
+    "learnMoreAbout": "Learn more: {{about}} (opens in a new tab)"
+  },
   "duration": {
     "between": "{{start}} – {{end}}",
     "days": "{{value}} d",

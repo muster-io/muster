@@ -5,9 +5,9 @@
 // Route and the Integrations linked, start and duration, "🔁 Reopened ×N" and, once resolved, who resolved it or the
 // system's reason; the Owner, the end of a Snooze ("No end" too) and who set it (C-10.FR-13), a deleted user named
 // "(deactivated)"; the badge "Unclaimed" (C-17.FR-3) and the next ack timeout notice or Reminder from next_notice, in
-// the user's time zone with the time left on hover (C-17.FR-9). Status and urgency are words, never only a colour. The
-// title and summary come from alert labels and annotations, so they show as text only. The list shares the status, the
-// Urgent mark and the badge "Unclaimed".
+// the user's time zone with the time left on hover (C-17.FR-9); the Guide link beside the title (C-21.FR-11). Status
+// and urgency are words, never only a colour. The title and summary come from alert labels and annotations, so they
+// show as text only. The list shares the status, the Urgent mark and the badge "Unclaimed".
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -25,6 +25,7 @@ import type {
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
+import { PageTitle } from "./docs-link";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { DateTime, Duration, formatElapsed, useNow } from "./relative-time";
 import { cn } from "./ui/utils";
@@ -250,12 +251,13 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
             </span>
           )}
         </div>
-        <h1
-          className="text-2xl font-semibold tracking-tight wrap-anywhere"
+        <PageTitle
+          docs="page.alert_group"
+          about={t("docs.alertGroup")}
           data-testid="alert-group-title"
         >
           {group.title}
-        </h1>
+        </PageTitle>
         {group.summary && (
           <p className="text-muted-foreground wrap-anywhere" data-testid="alert-group-summary">
             {group.summary}

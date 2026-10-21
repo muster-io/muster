@@ -24,6 +24,7 @@ import { RequirePermission } from "../components/app-shell";
 import { BRIDGE_KIND } from "../components/bridge-destination-fields";
 import { DestinationForm } from "../components/destination-form";
 import { destinationTypeName } from "../components/destination-health";
+import { PageTitle } from "../components/docs-link";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { SigningSecretDialog } from "../components/signing-secret-dialog";
 import { SLACK_KIND } from "../components/slack-destination-fields";
@@ -74,7 +75,9 @@ function NewDestination() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("destinations.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("destinations.create.title")}</h1>
+        <PageTitle docs="page.destinations" about={t("destinations.create.title")}>
+          {t("destinations.create.title")}
+        </PageTitle>
       </div>
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-sm font-medium">{t("destinations.create.type")}</legend>

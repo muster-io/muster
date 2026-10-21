@@ -90,8 +90,8 @@ const internalAlertsIntro = "# Internal alerts\n\n" +
 	"`route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and\n" +
 	"the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every\n" +
 	"Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
-	"`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The\n" +
-	"capability is the one that raises it.\n"
+	"`major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,\n" +
+	"joined by `/`. The capability is the one that raises it.\n"
 
 // entryHeading starts the heading of an entry of a page, whose anchor the heading's text gives.
 const entryHeading = "### "

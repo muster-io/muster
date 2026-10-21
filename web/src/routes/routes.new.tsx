@@ -18,6 +18,7 @@ import {
 } from "../api/gen/endpoints/routes/routes";
 import type { RouteInput, RouteProfile } from "../api/gen/model";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { ProfilePicker, profileName } from "../components/profile-picker";
 import { RouteForm } from "../components/route-form";
 import { Button, buttonVariants } from "../components/ui/button";
@@ -53,7 +54,9 @@ function NewRoute() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("routes.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("routes.create.title")}</h1>
+        <PageTitle docs="page.routes" about={t("routes.create.title")}>
+          {t("routes.create.title")}
+        </PageTitle>
       </div>
       {profile === undefined ? (
         <ProfilePicker onPick={setProfile} autoFocus={changed} />

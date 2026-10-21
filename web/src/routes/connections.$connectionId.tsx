@@ -34,6 +34,7 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { BridgeInfoPanel } from "../components/bridge-connection-fields";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
+import { PageTitle } from "../components/docs-link";
 import {
   ConnectionDeleteDialog,
   ConnectionForm,
@@ -47,6 +48,7 @@ import { type RequestLogSearch, requestLogSearchSchema } from "../components/req
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
+import { connectionDocs } from "../lib/docs";
 
 export const Route = createFileRoute("/connections/$connectionId")({
   validateSearch: requestLogSearchSchema,
@@ -213,9 +215,12 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
+            <PageTitle
+              docs={connection === undefined ? "page.connections" : connectionDocs(connection.type)}
+              about={t("connections.edit.title")}
+            >
               {connection?.name ?? t("connections.edit.title")}
-            </h1>
+            </PageTitle>
             {connection?.type === "slack" && <SlackConnectionInfo connection={connection} />}
             {connection !== undefined &&
               connection.type !== "bridge" &&

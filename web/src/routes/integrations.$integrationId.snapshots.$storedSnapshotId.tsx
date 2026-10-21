@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { useGetStoredSnapshot } from "../api/gen/endpoints/integrations/integrations";
 import type { StoredSnapshot } from "../api/gen/model";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { CopyBlock } from "../components/integration-token-dialog";
 import { formatBytes, snapshotStateText } from "../components/stored-snapshots";
 import { Button, buttonVariants } from "../components/ui/button";
@@ -254,7 +255,9 @@ function StoredSnapshotView({
             {snapshot?.integration.name ?? t("integrations.page.title")}
           </span>
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("snapshots.viewer.title")}</h1>
+        <PageTitle docs="page.stored_snapshot" about={t("snapshots.viewer.title")}>
+          {t("snapshots.viewer.title")}
+        </PageTitle>
         {snapshot !== undefined && (
           <p className="text-muted-foreground" data-testid="snapshot-received">
             {t("snapshots.viewer.received", { time: dateTime(snapshot.received_at) })}
