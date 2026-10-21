@@ -357,7 +357,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		if ws := check(t); !missing(ws) {
 			t.Fatalf("before any sign-in: %+v", ws)
 		}
-		if got := state(t); got != "seen=false missing=true version=1" {
+		if got := state(t); got != "seen=f missing=t version=1" {
 			t.Errorf("before any sign-in: %s", got)
 		}
 
@@ -365,13 +365,13 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 			""); out.Session == nil {
 			t.Fatalf("sign-in = %+v", out)
 		}
-		if got := state(t); got != "seen=true missing=false version=1" {
+		if got := state(t); got != "seen=t missing=f version=1" {
 			t.Errorf("after a sign-in with the claim: %s", got)
 		}
 		if ws := check(t); missing(ws) {
 			t.Errorf("a check after the claim was seen: %+v", ws)
 		}
-		if got := state(t); got != "seen=true missing=false version=1" {
+		if got := state(t); got != "seen=t missing=f version=1" {
 			t.Errorf("after the check: %s", got)
 		}
 
@@ -386,7 +386,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 				UnmatchedRole: oidc.UnmatchedViewer, SyncRole: st.SyncRole}); err != nil {
 			t.Fatal(err)
 		}
-		if got := state(t); got != "seen=false missing=false version=2" {
+		if got := state(t); got != "seen=f missing=f version=2" {
 			t.Errorf("after another groups claim: %s", got)
 		}
 		if ws := check(t); !missing(ws) {
@@ -401,7 +401,7 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 			t.Errorf("a check with the claim seen: %+v", ws)
 		}
 		w.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
-		if got := state(t); got != "seen=false missing=true version=2" {
+		if got := state(t); got != "seen=f missing=t version=2" {
 			t.Errorf("after a sign-in without the claim: %s", got)
 		}
 		if ws := check(t); !missing(ws) {
