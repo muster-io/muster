@@ -31,6 +31,12 @@ files_touched:
   - internal/bridge/client_test.go
   - internal/connections/connections.go
   - internal/connections/connections_test.go
+  - internal/connections/telegram.go
+  - internal/connections/telegram_test.go
+  - internal/connections/bridge.go
+  - internal/connections/bridge_test.go
+  - internal/connections/draft.go
+  - internal/connections/draft_test.go
   - internal/runtime/runtime.go
   - internal/doctor/doctor.go
   - internal/doctor/doctor_test.go
@@ -47,7 +53,7 @@ files_touched:
   - mkdocs.yml
 acceptance:
   - "[C-21.FR-10, C-21.AC-6] `make docs-screenshots` runs only on Linux with Docker, inside the official Playwright image `mcr.microsoft.com/playwright` at the version of `@playwright/test` in `web/package.json`, pinned by digest; anywhere else it refuses with a message that names that environment and the VM muster-lab, and the screenshot configuration refuses to run outside `make docs-screenshots`. In that image it runs the Playwright suite under `web/e2e/screenshots/` with `web/playwright.screenshots.config.ts` — a 1280 × 800 viewport at device scale 1, `en-US`, the light colour scheme, animations and the caret off — on a fresh `muster dev` with the fake servers."
-  - "[C-21.FR-10, C-21.AC-6] Only when every spec passed does `make docs-screenshots` move the screenshots it took under `bin/docs-screenshots/images/` to `docs/assets/screenshots/<page path>/<NN>-<name>.png`: a run of every spec replaces the whole directory, `make docs-screenshots GUIDES=telegram` replaces only the page directories that run wrote, and a failed run changes no image; the specs that advance the development clock (`*.clock.spec.ts`) run after the others, each on a fresh `muster dev` of its own; `make e2e` and CI never run the suite (`web/playwright.config.ts` ignores `screenshots/**`), and the nightly workflow's job `docs-screenshots` runs it without committing anything."
+  - "[C-21.FR-10, C-21.AC-6] Only when every spec passed does `make docs-screenshots` move the screenshots it took under `bin/docs-screenshots/images/` to `docs/assets/screenshots/<page path>/<NN>-<name>.png`: a run of every spec replaces the whole directory, `make docs-screenshots GUIDES=telegram` replaces only the page directories that run wrote, and a failed run changes no image; the specs that advance the development clock (`*.clock.spec.ts`) run after the others, each on a fresh `muster dev` of its own; `make e2e` and the CI of pull requests never run the suite (`web/playwright.config.ts` ignores `screenshots/**`); only the nightly workflow's job `docs-screenshots` runs it, without committing anything."
   - "[C-21.FR-10, C-21.AC-6] Under `muster dev` a Telegram Connection with the default Bot API address `https://api.telegram.org`, a Mattermost Connection on `https://chat.example.org` and a Bridge Connection on `https://bridge.example.org` reach the fake servers when their token is one of the fakes' published tokens, as a Slack Connection does through `SlackRoute`; any other token goes to the address the Connection names; outside `muster dev` nothing is routed; and a routed request still passes the outbound address policy, which refuses it with `blocked` once the loopback network is removed from the allowed networks (`devmode_test.go`, the clients' and `connections_test.go`'s tests, `doctor_test.go`)."
   - "[C-21.FR-10, C-21.AC-6] `make docs-check` runs `internal/tools/imagecheck` over `docs/`: it fails, naming the page, the line and the image, for an image reference (Markdown or `<img>`) whose file does not exist, for a PNG under `docs/assets/screenshots/` that no page references, for an image without alternative text, and for an image whose source is another site (`http:`, `https:` or `//`); it passes on the committed site (`imagecheck_test.go` covers each failure)."
   - "[C-21.FR-9, C-21.AC-5] The page \"First alert in a messenger\" (`docs/first-alert.md`), in the navigation after Quick start and linked from Quick start's Next steps and the home page, leads through seven numbered steps — create an Integration and its token, create a Telegram Connection with its check, add a Destination with its check and a test message, add a Route that sends to it, link the Admin's Telegram account, send a test alert, acknowledge the Alert Group from Telegram — each with the screenshot of the screen it describes and a link to the page that explains it in full; no screenshot shows a loopback address, a fake server's address or the warning about a bot token over `http`."
@@ -82,7 +88,8 @@ issue: 335
 ## Contracts
 
 - **Make**: `make docs-screenshots` (new; `## Take the documentation screenshots on muster dev in the Playwright image
-  (Linux with Docker; run by hand, never in CI)`), with the prerequisites of `make demo` (`dev-db build`).
+  (Linux with Docker; run by hand; the nightly job runs it without committing)`), with the prerequisites of
+  `make demo` but `web-browsers` (`dev-db build`), since the image brings its own browsers.
   - **Environment**: the system fonts that the SPA uses differ between machines, so the target runs only where the
     fonts are the same: on Linux with Docker, inside `PLAYWRIGHT_IMAGE`, `mcr.microsoft.com/playwright:v<version>-noble`
     pinned by digest, where `<version>` is that of `@playwright/test` in `web/package.json` — the target fails when
@@ -107,8 +114,10 @@ issue: 335
   SHA.
 - **Playwright**: `web/playwright.screenshots.config.ts` extends `playwright.config.ts` as the demo's does, with
   `testDir: "e2e/screenshots"`, `testIgnore: []`, output under `bin/docs-screenshots`, the viewport 1280 × 800,
-  `deviceScaleFactor: 1`, `colorScheme: "light"`, `locale: "en-US"`, no trace, no video; `web/playwright.config.ts`
-  ignores `screenshots/**` as it ignores `demo.spec.ts`; `web/tsconfig.json` includes the new configuration.
+  `deviceScaleFactor: 1`, `colorScheme: "light"`, `locale: "en-US"`, no trace, no video, and a `globalTimeout` of 45
+  minutes in place of the 15 of `make e2e`, since one run takes every spec but the clock specs;
+  `web/playwright.config.ts` ignores `screenshots/**` as it ignores `demo.spec.ts`; `web/tsconfig.json` includes the new
+  configuration.
 - **Capture helper** (`web/e2e/screenshots/capture.ts`): `capture(page, docsPage, name, options)` writes
   `bin/docs-screenshots/images/<docsPage>/<name>.png`, where `docsPage` is the page's source path without `.md`
   (`messengers/telegram`) and `name` is `NN-<slug>` in the order the page shows them. It waits for the text the step
@@ -118,8 +127,8 @@ issue: 335
   whole viewport or of one element (`options.locator`); and can outline the element the step asks the reader to use
   (`options.highlight`, a 2 px outline in the brand indigo, removed after the shot). Nothing it draws stays on the
   page.
-- **Routes of `muster dev`** (`internal/devmode`), beside `SlackRoute` and in the same form — a function of the
-  Connection's address and its token that answers the fake server's address or nothing:
+- **Routes of `muster dev`** (`internal/devmode`), beside `SlackRoute`, which matches on the bot token alone; these
+  match on the Connection's address and its token, and answer the fake server's address or nothing:
   - `TelegramRoute`: the Bot API base URL `https://api.telegram.org`, the default, with one of the fake Telegram
     server's published bot tokens, goes to the fake Telegram server;
   - `MattermostRoute`: the server URL `https://chat.example.org` with one of the fake Mattermost server's published
@@ -128,8 +137,10 @@ issue: 335
     the fake bridge.
   Any other address or token is not routed, so a real token always goes where its Connection points. The clients
   (`internal/telegram`, `internal/mattermost`, `internal/bridge`) take the route in their settings as the Slack client
-  does, `internal/connections` passes it to every client it builds (checks, the check before saving, delivery,
-  polling), `internal/runtime` sets it only under `muster dev`, and `muster doctor` uses it under development as it
+  does, `internal/connections` passes it to every client it builds (the checks and polling of `telegram.go`
+  (`telegramSettings`), the client of `bridge.go`, delivery, and the check before saving in `draft.go`, where a draft
+  is routed only when the token it sends is a published one, typed or stored, by the same care as `slackDraftRoute`),
+  `internal/runtime` sets it only under `muster dev`, and `muster doctor` uses it under development as it
   uses `SlackRoute`. A routed request is an ordinary request to the fake's loopback address: it goes through
   `internal/outbound`, the outbound address policy checks it after name resolution — the development database allows
   `127.0.0.0/8` (`LoopbackNetwork`), and without it the request is `blocked` — and the Request log records it as
@@ -261,11 +272,12 @@ None.
 - The routes follow `SlackRoute` (D426): published tokens only, so the routes cannot send a real token to a fake, and
   nothing outside `muster dev` is routed.
 - `llms.txt.tmpl` quotes `docs/messengers/bridge.md` and `docs/messengers/slack.md` at length; a quote that the new
-  steps break makes `make docs-check` fail and is fixed in the page, not in the template.
+  steps change is updated in the template in the same pull request, as S-107 does, so that `make docs-check` passes.
 - The screenshots show the UI before the documentation links of S-108 to S-110; S-110 takes them all again once every
   link is in place.
-- With 38 files the story stays under the size signal; the routes of `muster dev` belong here because no screenshot
-  of a Connection can be taken without them.
+- With 44 files the story is above the size signal. The routes of `muster dev` stay in it, as D426 decided, because
+  no screenshot of a Connection can be taken without them; they could be split off into a backend story before
+  S-106 if the implementation shows the story too large.
 
 ## Coverage
 

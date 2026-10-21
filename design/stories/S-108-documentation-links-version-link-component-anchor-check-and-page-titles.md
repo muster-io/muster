@@ -17,6 +17,7 @@ files_touched:
   - deploy/helm/muster/templates/_helpers.tpl
   - deploy/helm/muster/values.schema.json
   - internal/tools/refgen/main.go
+  - internal/tools/refgen/refgen_test.go
   - internal/tools/chartcheck/chartcheck_test.go
   - internal/tools/docslinkcheck/main.go
   - internal/tools/docslinkcheck/docslinkcheck_test.go
@@ -175,15 +176,16 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link page titles to the documentation of the running version`.
-- The documentation version is carried by the session (D426): the SPA already reads the session on every page, while
-  the public API specification, which also carries the version in `info.version`, is about 15,000 lines to fetch for
-  one field; and the version segment (`X.Y` or `latest`) is derived on the server, where the build is known, by the
-  same function as the `runbook_url`. The address of the site stays a build constant (D419). A
-  closed network without access to the site sees links that do not open; Muster has no setting for a mirror.
+- The documentation version is carried by the session (D426): the SPA already reads the session on every page; the
+  served API specification, about 15,000 lines, is no source for it, since its `info.version` is the API document's
+  version, not the build's, and cannot tell a snapshot from a release; and the version segment (`X.Y` or `latest`) is
+  derived on the server, where the build is known, by the same function as the `runbook_url`. The address of the site
+  stays a build constant (D419). A closed network without access to the site sees links that do not open; Muster has no
+  setting for a mirror.
 - The rule changes what a snapshot image's Internal alerts link to; a release is unaffected.
 - The story has a small backend part — one field and the shared rule — in the same pull request, because the field is
   useless without the links and the links are wrong without the field; S-087 set the precedent.
-- With 39 files the story stays under the size signal; the links next to fields and problems are S-109 and S-110.
+- With 40 files the story is at the edge of the size signal; the links next to fields and problems are S-109 and S-110.
 
 ## Coverage
 

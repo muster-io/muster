@@ -109,6 +109,8 @@ Playwright against `muster dev` at 1280 and 360 px, signed in as the Admin:
 5. Russian: «Руководство», «Подробнее», «Как исправить» on the same places.
 6. At 360 px the Organization pages, Access → Users and Statistics have `document.documentElement.scrollWidth <= 360`.
 
+On the VM muster-lab, where `make docs-screenshots` runs (S-106):
+
 ```sh
 jq -r 'keys[]' web/src/lib/docs-links.json | wc -l      # the number of keys of reference.md's table
 make docs-screenshots                                    # every spec passes; the images now show the links

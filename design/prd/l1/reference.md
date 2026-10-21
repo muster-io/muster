@@ -154,8 +154,9 @@ Where the web UI links to the documentation site (C-21.FR-11). Each link is an e
 with a trailing `/` (`concepts/alert-groups/`). The texts are "Guide" next to a page title, "Learn more" next to a
 field and "How to fix" next to a problem — «Руководство», «Подробнее» and «Как исправить» in Russian — each with an
 accessible name that adds what it is about ("Guide: Routes") and says that it opens in a new tab. A section that a
-story adds is named by the heading that story gives it; a story that renames a heading updates its row. The pages
-before sign-in, and empty states, have no link.
+story adds is named by the heading that story gives it; a story that renames a heading updates its row. Links
+appear only in an active, full session (C-21.FR-11): the sign-in and password setup pages, the TOTP prompt and TOTP
+enrolment of a limited session, the page about a missing Permission, and empty states have none.
 
 ### Next to page titles
 

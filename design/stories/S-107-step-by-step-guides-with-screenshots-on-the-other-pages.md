@@ -84,7 +84,8 @@ issue: 336
   - `alert-groups.clock.spec.ts`: `concepts/alert-groups`, `concepts/statuses-and-commands`, with a few Alert Groups in
     each status made through the fake Alertmanager and Commands, and the development clock advanced for the
     Statistics; as a `*.clock.spec.ts` it runs last, on a `muster dev` of its own, after turning the demo Heartbeat off
-    (S-106).
+    (S-106). It creates a Personal access token for its API calls before the first advance and signs in again after
+    each advance, since an advance past `auth.session_idle_timeout` ends the session.
   - `capture.ts` and `support.ts` gain only what these specs share.
 - **Independence**: each spec follows S-106's rules, so `GUIDES=<spec>` takes the same images as a full run. Numbers
   and ids are read from what the spec created. What each spec saves beyond the objects it creates and removes, and
@@ -156,7 +157,8 @@ for pa in concepts/routes-and-group-keys:create-a-route configure/messages-and-t
   grep -q "id=\"${pa#*:}\"" "site/${pa%%:*}/index.html" || { echo "missing: $pa"; exit 1; }
 done
 # one spec alone writes the same file names as in the full run:
-make docs-screenshots GUIDES=organization && git status --short docs/assets/screenshots/configure   # modified only, no added or deleted file
+make docs-screenshots GUIDES=organization && git status --short docs/assets/screenshots/configure \
+  docs/assets/screenshots/operations   # modified only, no added or deleted file
 make docs-serve &   # open each page above at http://localhost:8000/ and check that its images load and match its steps
 ```
 

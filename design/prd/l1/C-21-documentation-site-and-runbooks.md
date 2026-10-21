@@ -31,7 +31,7 @@ explains it.
 - **C-21.FR-1** The documentation source is `docs/`; the site is generated with Zensical (or, if it is not ready for the
   first release, Material for MkDocs with the same configuration) and published at `muster-io.github.io/muster`. Each
   minor release has a frozen build; corrections for the current minor are published from `master` as documentation-only
-  releases; older minors are not changed; development builds are `latest`.
+  releases; older minors are not changed; development builds and pre-releases are `latest` (FR-11).
 - **C-21.FR-2** The site has at least these sections: Quick start (docker-compose); Install (Helm values, existing
   Secret, the database as a URL or as fields, external PostgreSQL with a CloudNativePG `Cluster` example and notes for
   managed PostgreSQL, ingress and Gateway API, the two public addresses, the session connection for PgBouncer);
@@ -86,7 +86,8 @@ explains it.
 - **C-21.FR-10** Screenshots are made by a program, not by hand. A Playwright suite walks each guide on `muster dev`
   with demo data and the fake servers, in English, in a 1280 px wide viewport and the light colour scheme, and saves
   each screenshot under `docs/assets/screenshots/<page>/`; `make docs-screenshots` runs it by hand, like `make demo`,
-  and the images are committed. CI does not take them again, because fonts and times make that flaky; `make docs-check`
+  and the images are committed. No CI run commits them, because times make that flaky: the CI of pull requests
+  never runs the suite, and a nightly job runs it only to show that it still passes; `make docs-check`
   fails, naming the page and the image, when a page references an image that does not exist, when an image of
   `docs/assets/screenshots/` is referenced by no page, when an image has no alternative text, or when a page loads an
   image from another site.
@@ -109,7 +110,7 @@ explains it.
 
 ## UI
 
-The documentation site, and the links to it from every page of the web UI after sign-in (FR-11).
+The documentation site, and the links to it from every page of an active, full session of the web UI (FR-11).
 
 ## API surface
 
@@ -132,9 +133,10 @@ The API reference of the site is rendered from the same OpenAPI document that th
   its Timeline naming the Transport Telegram; every step of the tutorial has the screenshot that run took.
 - **C-21.AC-6** `make docs-screenshots` writes every image the guides reference, in a 1280 px wide viewport and none
   wider, of the English UI in the light colour scheme, and changes no image when one of its specs fails; `make e2e` and
-  CI never run it; and `make docs-check` fails, naming the page and the image, for an image a page references that does
-  not exist, for an image under `docs/assets/screenshots/` no page references, for an image without alternative text,
-  and for an image loaded from another site.
+  the CI of pull requests never run it, and the nightly job runs it without committing; and `make docs-check` fails,
+  naming the page and the image, for an image a page references that does not exist, for an image under
+  `docs/assets/screenshots/` no page references, for an image without alternative text, and for an image loaded from
+  another site.
 - **C-21.AC-7** The documentation version follows the release rule: `0.1.0` and `0.1.7` link under `/muster/0.1/`,
   `1.12.3` under `/muster/1.12/`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234` and `0.2.0-rc.1` under `/muster/latest/`;
   the `runbook_url` of an Internal alert raised by the same binary names the same segment.
