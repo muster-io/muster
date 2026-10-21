@@ -171,7 +171,7 @@ A **Link rule** turns an Alert Group, or each value of a label, into a link. Its
 2. Fill in the fields above. The **Preview** under the URL template shows the link that the rule makes for the
    **Sample** you choose, a built-in example or a recent Alert Group.
 
-    ![The form of a new Link rule: the name Dashboard, the Matcher cluster =~ .+, the scope Alert Group, the URL template with lookup and its preview link](../assets/screenshots/configure/messages-and-templates/05-new-link-rule.png){ .screenshot }
+    ![The form of a new Link rule: the name Dashboard, no Matchers, the scope Alert Group, the URL template with lookup and its preview link](../assets/screenshots/configure/messages-and-templates/05-new-link-rule.png){ .screenshot }
 
 3. Select **Create**. The list of Link rules shows the rule beside the built-in **Explore**.
 
@@ -185,12 +185,9 @@ Example: a dashboard per cluster.
 
 1. Create the Lookup table `dashboards` with the column `url` and one row for each cluster: the key `prod-eu`, the
    value `https://grafana.example.org/d/abc123/prod-eu`.
-2. Create the Link rule `Dashboard` with the Matcher `cluster=~".+"`, scope **Alert Group**, and the URL template
-   `{{ lookup "dashboards" .Labels.cluster "url" }}`. The Matcher keeps the rule to Alert Groups whose Alerts share a
-   `cluster`. A label the Alert Group lacks is no value at all, not an empty key, and `lookup` fails on it: saving
-   dry-runs the URL template against the up to 20 most recent Stored Snapshots of the Organization that the rule's
-   Matchers match (`template.dry_run_sample`), and without the Matcher it fails with a template error when one of them
-   has no common `cluster` label.
+2. Create the Link rule `Dashboard`, scope **Alert Group**, with the URL template
+   `{{ lookup "dashboards" .Labels.cluster "url" }}`. An Alert Group without a common `cluster` looks up an empty key
+   and gets no link: a missing label is [empty text](#the-template-language).
 3. The preview of the rule shows the link for a sample. Alert Groups with `cluster="prod-eu"` now carry **Dashboard**.
 
 A rule with the scope **Each value of label** and the label `pod` can build one log link per pod:

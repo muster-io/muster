@@ -226,11 +226,6 @@ test("creates a Route, edits its message, and adds a Lookup table and a Link rul
   await organizationNav(page, "Link rules").click();
   await page.getByRole("link", { name: "Create rule" }).click();
   await page.getByRole("textbox", { name: "Name" }).fill(RULE);
-  // The Matcher keeps the rule to Alert Groups that have a cluster, for which the template has a key to look up.
-  await page.getByRole("button", { name: "Add matcher" }).click();
-  await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("cluster");
-  await page.getByRole("combobox", { name: "Operator of matcher 1" }).selectOption("=~");
-  await page.getByRole("textbox", { name: "Value of matcher 1" }).fill(".+");
   await expect(page.getByRole("radio", { name: "Alert Group" })).toBeChecked();
   await page
     .getByRole("textbox", { name: "URL template" })

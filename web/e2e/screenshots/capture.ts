@@ -115,6 +115,30 @@ export async function capture(
   if (options.locator !== undefined) {
     await expect(options.locator).toBeVisible();
   }
+  // An open dialog is drawn the same way in every run: its finished entrance animations end, which leaves it in its
+  // final state without a compositing layer of its own, and its backdrop blurs nothing, whose edges, showing at the
+  // dialog's rounded corners, Chromium does not draw the same from run to run. The blur comes back after the shot.
+  await page.evaluate(() => {
+    const dialogs = [
+      ...document.querySelectorAll('[data-slot="dialog-content"], [data-slot="dialog-overlay"]'),
+    ];
+    for (const a of document.getAnimations()) {
+      const target = a.effect instanceof KeyframeEffect ? a.effect.target : null;
+      if (
+        a.playState === "finished" &&
+        target !== null &&
+        dialogs.some((d) => d.contains(target))
+      ) {
+        a.cancel();
+      }
+    }
+    for (const el of document.querySelectorAll('[data-slot="dialog-overlay"]')) {
+      if (el instanceof HTMLElement) {
+        el.dataset.captureBackdrop = el.style.backdropFilter;
+        el.style.backdropFilter = "none";
+      }
+    }
+  });
   // Hidden for the shot alone, before the layout settles; put back in the finally below. A failure in between fails
   // the spec anyway.
   await options.hide?.evaluateAll((els) => {
@@ -234,6 +258,17 @@ export async function capture(
     for (const frame of [page.mainFrame(), ...frames]) {
       await frame.evaluate(restore).catch(() => undefined);
     }
+    await page
+      .locator("[data-capture-backdrop]")
+      .evaluateAll((els) => {
+        for (const el of els) {
+          if (el instanceof HTMLElement) {
+            el.style.backdropFilter = el.dataset.captureBackdrop ?? "";
+            delete el.dataset.captureBackdrop;
+          }
+        }
+      })
+      .catch(() => undefined);
     await page
       .locator("[data-capture-display]")
       .evaluateAll((els) => {
