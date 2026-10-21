@@ -154,18 +154,20 @@ issue: 257
   `spec`, `licenses`, `build` and `conformance`, and the job `ci` that passes only when all of them did. Tools are
   pinned in `uv.lock` and the workflows, and uv itself in the workflows, all updated by Renovate.
 - **Releases** (`release-please.yml`, `release-please-config.json`, `.release-please-manifest.json`): release-please
-  with the release type `python`, `bump-minor-pre-major`, `include-component-in-tag: false` and the manifest at `0.0.0`,
-  run with the GitHub App's token; it updates the version in `pyproject.toml` and `__init__.py`, and through
-  `extra-files` the project's own version in `uv.lock`, without which the release pull request fails the
-  `uv lock --check` of `make lint`. When it creates a
+  with the release type `python`, `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` (D399),
+  `changelog-sections` that list `build` under "Dependencies" and hide `docs`, `chore`, `ci`, `test`, `refactor` and
+  `style` (D394), `include-component-in-tag: false` and the manifest at `0.0.0`, run with the GitHub App's token; it
+  updates the version in `pyproject.toml` and `__init__.py`, and through `extra-files` the project's own version in
+  `uv.lock`, without which the release pull request fails the `uv lock --check` of `make lint`. When it creates a
   release, a job builds the sdist and the wheel, and a second job in the GitHub environment `pypi`, with
   `id-token: write` and nothing else, publishes them with `pypa/gh-action-pypi-publish` by trusted publishing, with
-  attestations.
-  Versions stay `0.x` until Muster's first release, then `1.0.0` for protocol version 1 (ADR-0017). The first release
-  pull request stays open until L1 is complete (D366).
+  attestations. Versions stay `0.x` until Muster 1.0, and every library release speaks the protocol versions Muster
+  supports at that time, today protocol version 1 (ADR-0017). The first release pull request stays open until L1 is
+  complete (D366).
 - **Renovate, CodeQL, Scorecard** (`.github/renovate.json5`, `codeql.yml`, `scorecard.yml`): as in S-083, with
-  Renovate's managers for `pyproject.toml`, `uv.lock`, `.python-version` and the workflows, and CodeQL for Python and
-  Actions.
+  Renovate's managers for `pyproject.toml`, `uv.lock`, `.python-version` and the workflows, `build` for the `pep621`
+  `project.dependencies` and `project.optional-dependencies` and `chore` for the other updates and lock-file updates
+  (D394), and CodeQL for Python and Actions.
 
 ## Steps
 

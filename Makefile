@@ -161,8 +161,9 @@ fmt: $(GOLANGCI_LINT) $(WEB_DEPS) ## Format Go code (gofmt, goimports) and the S
 
 # lint:i18n fails when the translation files and the keys of the code differ, or a key lacks a text in English or
 # Russian (Russian plural forms included).
-lint: $(GOLANGCI_LINT) $(WEB_DEPS) ## Check licence headers, Go code, the spec (Redocly), the SPA (tsc, oxlint, oxfmt) and translations
+lint: $(GOLANGCI_LINT) $(WEB_DEPS) ## Check licence headers, the Go module lists of Renovate, Go code, the spec (Redocly), the SPA (tsc, oxlint, oxfmt) and translations
 	$(GO) run ./internal/tools/licensecheck
+	$(GO) run ./internal/tools/renovatecheck
 	$(GOLANGCI_LINT) run ./...
 	$(PNPM) --dir web run lint:spec
 	$(PNPM) --dir web run typecheck

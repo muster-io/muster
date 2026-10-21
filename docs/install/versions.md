@@ -1,7 +1,8 @@
 # Requirements and tested versions
 
-What Muster needs, which versions it was checked against, and how to verify that a release you download is the one the
-project built. "Tested" means different things for different rows, so each row says which.
+What Muster needs, which versions it was checked against, how its own versions are numbered, and how to verify that a
+release you download is the one the project built. "Tested" means different things for different rows, so each row says
+which.
 
 - **CI** means an automated job that runs on the project's pull requests or nightly, and fails the build.
 - **Development stand** means a person ran the behaviour against a real server of that version and recorded what it did,
@@ -59,6 +60,18 @@ Telegram
 
 The web UI
 :   Its component tests and its end-to-end tests run in Chromium in **CI**. Other browsers are not tested.
+
+## Version numbers
+
+Muster's versions are `0.N.x`, and 1.0 is a long way off.
+
+- **`0.N` is layer N of the [roadmap](https://github.com/muster-io/muster#roadmap).** L1, Alert Groups in messengers,
+  is released as `0.1.x`; L2 will be `0.2.x`, L3 `0.3.x`, and so on. Layer N+1 starts with the release `0.(N+1).0`,
+  which the maintainers set with release-please's `release-as`.
+- **`0.N.x` releases bring fixes and small changes**, and nothing that breaks an installation: settings, the API under
+  `/api/v1` and the database keep working without a change on your side.
+- **Breaking changes come only with the next layer's minor version**, and its release notes say what to change before
+  you upgrade. See [Upgrades](../operations/upgrades.md) for how to upgrade.
 
 ## Image tags
 

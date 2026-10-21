@@ -49,7 +49,8 @@ Names in the form `area.setting` and `MUSTER_*` refer to rows of [defaults.md](d
     parsed here and used by C-03.FR-22.
 
   Any secret can come from a `*_FILE` variable. An invalid value stops startup with an error naming the variable;
-  nothing falls back silently. `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are ignored.
+  nothing falls back silently. `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are ignored, and so are every libpq variable
+  (`PG*`) and the password file `~/.pgpass`: libpq settings are parameters of `MUSTER_DATABASE_URL`.
 - **C-02.FR-2** `MUSTER_PUBLIC_URL` is required and is used for links to people (messages, profile, OIDC redirect).
   `MUSTER_INGEST_URL` is used for machines (Mattermost button callbacks, Alertmanager receiver snippets, Heartbeat
   URLs, the Telegram webhook) and defaults to `MUSTER_PUBLIC_URL`. Neither is derived from an ingress.
