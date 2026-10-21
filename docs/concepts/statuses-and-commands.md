@@ -201,6 +201,8 @@ that time zone with the preset. Admins set the start of the working day and the 
 General. In the profile, a hint under the time zone says that presets pressed in messengers end in that time zone, and
 in the Organization's while the profile follows the browser.
 
+![The Snooze dialog with Until tomorrow 09:00 chosen: each preset with the end it would set, after the durations 1 h, 4 h and 24 h](../assets/screenshots/concepts/statuses-and-commands/01-snooze-presets.png){ .screenshot }
+
 #### In messengers
 
 On a Route with Snooze durations, the Root message of a firing or an acknowledged Alert Group offers both presets as
@@ -224,6 +226,35 @@ A **Responder** or an **Admin** may acknowledge, resolve, snooze and add Notes. 
 the command is refused. A **Service account** may run the commands its Role allows, except Acknowledge and Still on it,
 because an Owner is always a User. A Personal access token acts as its User, with at most that User's Permissions. Every
 command is recorded in the Audit log with its actor and the Transport.
+
+## Commands in the web UI
+
+The page of an Alert Group offers the commands its status allows, and the list offers them for several Alert Groups at
+once ([Bulk commands](#commands)).
+
+1. Open the Alert Group from **Alert Groups**. Its command buttons are at the top: **Acknowledge**, **Resolve** and
+   **Snooze** for a firing one.
+
+    ![A firing Alert Group with the buttons Acknowledge, Resolve and Snooze](../assets/screenshots/concepts/statuses-and-commands/02-command-buttons.png){ .screenshot }
+
+2. To add a Note, type it under **Add a note**, further down the page, and select **Add note**. It appears in the
+   Timeline with you as its author.
+
+    ![The Note box with a Note typed, and Add note](../assets/screenshots/concepts/statuses-and-commands/03-note-box.png){ .screenshot }
+
+3. **Snooze** opens its dialog: the Route's Snooze durations, the [Snooze presets](#snooze-presets), **Until** a date
+   and time of your choosing, or **No end**, which asks you to confirm with **I understand**. Select **Snooze**.
+
+    ![The Snooze dialog with No end chosen and its warning that the Alert Group stays snoozed until someone unsnoozes it](../assets/screenshots/concepts/statuses-and-commands/04-snooze-dialog.png){ .screenshot }
+
+4. **Resolve** opens a dialog with an optional Note, recorded with the resolve.
+
+    ![The dialog Resolve with the Note Renewed by cert-manager.](../assets/screenshots/concepts/statuses-and-commands/05-resolve-dialog.png){ .screenshot }
+
+5. After **Acknowledge**, the page names you as the Owner and offers **Unacknowledge**, **Resolve** and **Snooze**.
+   Another user sees **Take over from {Owner}** instead of **Acknowledge**.
+
+    ![An acknowledged Alert Group with its Owner admin and the buttons Unacknowledge, Resolve and Snooze](../assets/screenshots/concepts/statuses-and-commands/06-acknowledged.png){ .screenshot }
 
 ## Where a command comes from
 

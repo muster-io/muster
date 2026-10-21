@@ -90,6 +90,11 @@ export async function notify(
   options: Record<string, unknown>,
 ): Promise<void> {
   await fam("POST", `/groups/${group}/notify`, options);
+  await processed(integrationId);
+}
+
+/** Waits until Muster processed every Snapshot of the Integration integrationId that it stored. */
+export async function processed(integrationId: string): Promise<void> {
   const admin = await adminApi();
   try {
     await expect
@@ -289,6 +294,17 @@ export async function removeSlackConnection(admin: Api, name = "ui"): Promise<vo
   await removeConnectionNamed(admin, name);
 }
 
+/** Calls the control API of the fake Mattermost server and returns its answer, null for none. */
+export async function fmm<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${FMM}${path}`, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  expect(res.ok, `${method} ${path}: ${res.status} ${text}`).toBe(true);
+  return parse<T>(text === "" ? "null" : text);
+}
+
 /** Calls the control API of the fake Telegram server and returns its answer, null for none. */
 export async function ftg<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${FTG}${path}`, {
@@ -308,6 +324,22 @@ export async function removeIntegration(admin: Api, name: string): Promise<void>
   );
   for (const i of page.items.filter((x) => x.name === name)) {
     await admin.call("DELETE", `/api/v1/integrations/${i.id}`);
+  }
+}
+
+/**
+ * Deletes every item named name of the collection path, such as /api/v1/destinations, whatever an earlier run left;
+ * query is added to the read of the list, such as ?limit=50.
+ */
+export async function removeNamed(
+  admin: Api,
+  path: string,
+  name: string,
+  query = "",
+): Promise<void> {
+  const page = await admin.call<{ items: NamedConnection[] }>("GET", `${path}${query}`);
+  for (const item of page.items.filter((x) => x.name === name)) {
+    await admin.call("DELETE", `${path}/${item.id}`);
   }
 }
 
