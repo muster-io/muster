@@ -16,6 +16,7 @@ import {
 import type { Integration } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { HeartbeatBadge } from "../components/heartbeat-badge";
 import { BuiltinBadge, connectionModeLabel } from "../components/integration-form";
 import { WarningMark } from "../components/integration-warnings";
@@ -108,7 +109,7 @@ function IntegrationsPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{t("integrations.title")}</h1>
+            <PageTitle docs="page.integrations">{t("integrations.title")}</PageTitle>
             <p className="text-muted-foreground">{t("integrations.hint")}</p>
           </div>
           {canWrite && (

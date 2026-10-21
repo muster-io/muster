@@ -378,7 +378,7 @@
       "additionalProperties": false,
       "properties": {
         "runbookBaseURL": {
-          "description": "The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.",
+          "description": "The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for any version that is not a release X.Y.Z), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.",
           "type": "string",
           "pattern": "^https?://\\S+$"
         },

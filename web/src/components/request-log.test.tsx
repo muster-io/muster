@@ -122,6 +122,7 @@ async function renderIn(node: ReactNode) {
       csrf_token: "csrf",
       expires_at: "2026-10-19T09:00:00Z",
       idle_expires_at: "2026-10-19T09:00:00Z",
+      docs_version: "latest",
       method: "local",
       permissions: ["connections:read", "destinations:read", "alert-groups:read"],
     },

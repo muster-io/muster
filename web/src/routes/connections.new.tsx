@@ -19,6 +19,7 @@ import {
 } from "../api/gen/endpoints/connections/connections";
 import { RequirePermission } from "../components/app-shell";
 import { ConnectionCheck } from "../components/connection-check";
+import { PageTitle } from "../components/docs-link";
 import {
   ConnectionForm,
   type ConnectionType,
@@ -57,7 +58,7 @@ function NewConnection() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("connections.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("connections.create.title")}</h1>
+        <PageTitle docs="page.connections">{t("connections.create.title")}</PageTitle>
       </div>
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-sm font-medium">{t("connections.create.type")}</legend>

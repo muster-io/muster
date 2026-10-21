@@ -349,6 +349,7 @@ async function renderTimeline(permissions: Permission[] = []) {
             csrf_token: "csrf",
             expires_at: "2026-10-07T19:00:00Z",
             idle_expires_at: "2026-10-07T19:00:00Z",
+            docs_version: "latest",
             method: "local",
             permissions,
           },

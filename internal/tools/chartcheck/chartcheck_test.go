@@ -6,19 +6,26 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"text/template"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/muster-io/muster/internal/internalalerts"
 )
 
 const (
 	repoReference = "../../../design/prd/l1/reference.md"
 	repoDashboard = "../../../deploy/helm/muster/files/dashboard.json"
 	repoTests     = "../../../deploy/helm/muster/tests/rules"
+	repoHelpers   = "../../../deploy/helm/muster/templates/_helpers.tpl"
+	repoVersions  = "../../internalalerts/testdata/runbook_versions.json"
 	testBaseURL   = "https://docs.example.org/muster/"
 	dashboardCM   = "m-muster-dashboard"
 	successPrefix = "chart rules and dashboard match reference.md and the metric catalogue: 12 rules, "
@@ -237,7 +244,9 @@ func TestRunPasses(t *testing.T) {
 		change           func(f *fixture)
 	}{
 		"development build": {version: "0.0.0-dev", segment: "latest"},
-		"release candidate": {version: "v1.4.0-rc.1", segment: "1.4"},
+		"release candidate": {version: "v1.4.0-rc.1", segment: "latest"},
+		"snapshot":          {version: "0.1.1-SNAPSHOT-abc1234", segment: "latest"},
+		"release with a v":  {version: "v1.4.2", segment: "1.4"},
 		"release":           {version: "2.10.3", segment: "2.10"},
 		"collapsed row": {version: "0.0.0-dev", segment: "latest", change: func(f *fixture) {
 			panels := f.panels()
@@ -553,8 +562,10 @@ func TestRunReportsProblems(t *testing.T) {
 
 func TestRunbookVersionOfTheAppVersion(t *testing.T) {
 	tests := map[string]struct{ version, segment, want string }{
-		"latest on a release":        {"v1.4.0-rc.1", "latest", "1.4"},
-		"major.minor on a dev build": {"0.0.0-dev", "0.0", "latest"},
+		"latest on a release":         {"v1.4.2", "latest", "1.4"},
+		"major.minor on a dev build":  {"0.0.0-dev", "0.0", "latest"},
+		"major.minor on a snapshot":   {"0.1.1-SNAPSHOT-abc1234", "0.1", "latest"},
+		"major.minor on a prerelease": {"v1.4.0-rc.1", "1.4", "latest"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -766,5 +777,74 @@ func TestRunErrors(t *testing.T) {
 				t.Errorf("run = %d, want %d: %s%s", code, tc.code, stdout, stderr)
 			}
 		})
+	}
+}
+
+// runbookVersions is the table of versions of internalalerts.TestRunbookVersion (C-19.FR-9, C-21.AC-7), read from
+// its testdata so that the binary and the chart are tested on the same versions.
+func runbookVersions(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(repoVersions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var versions map[string]string
+	if err := json.Unmarshal(data, &versions); err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) == 0 {
+		t.Fatalf("%s holds no version", repoVersions)
+	}
+	return versions
+}
+
+// TestRunbookVersionsAgree checks that chartcheck's expectation, internalalerts.RunbookVersion, takes the table.
+func TestRunbookVersionsAgree(t *testing.T) {
+	for v, want := range runbookVersions(t) {
+		if got := internalalerts.RunbookVersion(v); got != want {
+			t.Errorf("internalalerts.RunbookVersion(%q) = %q, want %q", v, got, want)
+		}
+	}
+}
+
+// TestRunbookVersionHelper executes the chart helper muster.runbookVersion, with the functions of Helm it calls
+// defined as Helm defines them, on the table of internalalerts.TestRunbookVersion; make helm-check renders the chart
+// itself with Helm for a development and a release appVersion.
+func TestRunbookVersionHelper(t *testing.T) {
+	data, err := os.ReadFile(repoHelpers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	start := strings.Index(src, `{{- define "muster.runbookVersion" -}}`)
+	if start < 0 {
+		t.Fatal("no muster.runbookVersion in _helpers.tpl")
+	}
+	end := strings.Index(src[start:], "{{/*")
+	if end < 0 {
+		end = len(src) - start
+	}
+	funcs := template.FuncMap{
+		"toString": func(v any) string { return fmt.Sprint(v) },
+		"regexMatch": func(re, s string) bool {
+			return regexp.MustCompile(re).MatchString(s)
+		},
+		"regexReplaceAll": func(re, s, repl string) string {
+			return regexp.MustCompile(re).ReplaceAllString(s, repl)
+		},
+	}
+	tpl, err := template.New("helpers").Funcs(funcs).Parse(src[start : start+end])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for v, want := range runbookVersions(t) {
+		var out bytes.Buffer
+		if err := tpl.ExecuteTemplate(&out, "muster.runbookVersion",
+			map[string]any{"Chart": map[string]any{"AppVersion": v}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(out.String()); got != want {
+			t.Errorf("muster.runbookVersion of %q = %q, want %q", v, got, want)
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -111,6 +112,36 @@ func TestCurrentSession(t *testing.T) {
 	if a := x.call(t, http.MethodDelete, "/api/v1/sessions/current", "", "Cookie", "viewer-cookie",
 		auth.CSRFHeader, "csrf-viewer-cookie"); a.status != http.StatusInternalServerError {
 		t.Errorf("a failed sign-out = %d", a.status)
+	}
+}
+
+// TestSessionDocsVersion is C-21.FR-11 and C-21.AC-7: every Session, the answer of createSession, getCurrentSession
+// and submitSessionTotp, carries the version segment of the documentation site, the major.minor of a release build
+// and latest for any other version.
+func TestSessionDocsVersion(t *testing.T) {
+	old := buildinfo.Version
+	t.Cleanup(func() { buildinfo.Version = old })
+	for version, want := range map[string]string{"0.1.0": "0.1", "0.1.7": "0.1", "1.12.3": "1.12",
+		"0.0.0-dev": "latest", "0.1.1-SNAPSHOT-abc1234": "latest", "0.2.0-rc.1": "latest"} {
+		buildinfo.Version = version
+		x := newTestAPI(t)
+		x.sessions.signIn = func(auth.SignInRequest) (auth.Session, error) {
+			return x.sessions.sessions["admin-cookie"], nil
+		}
+		x.sessions.submit = func(sess auth.Session, _ auth.Proof) (auth.Session, error) {
+			sess.State = auth.StateActive
+			return sess, nil
+		}
+		created := x.call(t, http.MethodPost, "/api/v1/sessions", `{"login":"a","password":"b"}`)
+		current := x.call(t, http.MethodGet, "/api/v1/sessions/current", "", "Cookie", "viewer-cookie")
+		submitted := x.mutate(t, "limited-cookie", http.MethodPost, "/api/v1/sessions/current/totp",
+			`{"totp_code":"123456"}`)
+		if created.status != http.StatusCreated || created.json(t)["docs_version"] != want ||
+			current.status != http.StatusOK || current.json(t)["docs_version"] != want ||
+			submitted.status != http.StatusOK || submitted.json(t)["docs_version"] != want {
+			t.Errorf("%s: created = %d %s, current = %d %s, submitted = %d %s, want docs_version %s", version,
+				created.status, created.body, current.status, current.body, submitted.status, submitted.body, want)
+		}
 	}
 }
 

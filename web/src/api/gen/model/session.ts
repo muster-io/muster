@@ -17,4 +17,9 @@ export interface Session {
   method: SessionMethod;
   /** Empty while the session is limited (`totp_required`, `totp_enrolment_required`). */
   permissions: Permission[];
+  /**
+     * The version segment of the documentation site the web UI links to (C-21.FR-11), derived from the version of the running build by the rule of the `runbook_url` of Internal alerts (C-19.FR-9) — the `major.minor` of a release `X.Y.Z`, or `latest` for any other version (a development build, a snapshot image, a pre-release).
+     * @pattern ^(latest|[0-9]+\.[0-9]+)$
+     */
+  docs_version: string;
 }

@@ -17,6 +17,7 @@ import { useGetIntegration } from "../api/gen/endpoints/integrations/integration
 import type { Integration } from "../api/gen/model";
 import { AlertmanagerRoutes } from "../components/alertmanager-routes";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { IntegrationAlerts } from "../components/integration-alerts";
 import { type AlertSearch, alertSearchSchema } from "../components/integration-alerts-search";
 import { IntegrationDeleteDialog } from "../components/integration-delete-dialog";
@@ -162,9 +163,9 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words">
+            <PageTitle docs="page.integrations">
               {integration?.name ?? t("integrations.page.title")}
-            </h1>
+            </PageTitle>
             {integration?.builtin === true && <BuiltinBadge />}
             {integration?.builtin === false && (
               <HeartbeatBadge state={integration.heartbeat.state} labelled />

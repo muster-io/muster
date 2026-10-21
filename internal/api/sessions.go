@@ -11,6 +11,8 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/buildinfo"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
 )
@@ -234,7 +236,8 @@ func (s *Server) DeleteCurrentSession(ctx context.Context, _ gen.DeleteCurrentSe
 	return signedOut{}, nil
 }
 
-// sessionOf is the API form of a session, with its user, CSRF token and Permissions.
+// sessionOf is the API form of a session, with its user, CSRF token and Permissions, and the version segment of the
+// documentation site the web UI links to, by the rule of the runbook_url of Internal alerts (C-21.FR-11).
 func (s *Server) sessionOf(ctx context.Context, sess auth.Session) (gen.Session, error) {
 	u, err := s.self(ctx, sess.User.ID)
 	if err != nil {
@@ -248,6 +251,7 @@ func (s *Server) sessionOf(ctx context.Context, sess auth.Session) (gen.Session,
 		User: userOf(u), State: gen.SessionState(sess.State), CsrfToken: token, ExpiresAt: sess.ExpiresAt.UTC(),
 		IdleExpiresAt: sess.IdleExpiresAt.UTC(), Method: gen.SessionMethod(sess.Method),
 		Permissions: permissionsOf(s.sessions.Permissions(sess)),
+		DocsVersion: internalalerts.RunbookVersion(buildinfo.Version),
 	}, nil
 }
 

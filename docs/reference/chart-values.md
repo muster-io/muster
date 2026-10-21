@@ -490,7 +490,7 @@ The chart's alert rules about Muster itself, for the Prometheus Operator and the
 
 string · default: `https://muster-io.github.io/muster`
 
-The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.
+The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for any version that is not a release X.Y.Z), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.
 
 ### `alerting.jobSelector`
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -477,9 +478,18 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
+// TestRunbookVersion covers C-19.FR-9 and C-21.AC-7: only a release X.Y.Z gives its major.minor. The table of
+// versions is testdata/runbook_versions.json, which the test of the chart helper muster.runbookVersion reads too.
 func TestRunbookVersion(t *testing.T) {
-	for v, want := range map[string]string{"0.0.0-dev": "latest", "": "latest", "garbage": "latest", "1.4.0": "1.4",
-		"v2.10.3": "2.10", "1.4.0-rc.1": "1.4", "3.0.1+meta": "3.0", "0.1.0": "0.1"} {
+	data, err := os.ReadFile("testdata/runbook_versions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var versions map[string]string
+	if err := json.Unmarshal(data, &versions); err != nil {
+		t.Fatal(err)
+	}
+	for v, want := range versions {
 		if got := RunbookVersion(v); got != want {
 			t.Errorf("RunbookVersion(%q) = %q, want %q", v, got, want)
 		}

@@ -45,6 +45,7 @@ raised it, and the chart rules link to the same pages:
 ```
 
 `MUSTER_RUNBOOK_BASE_URL` is `https://muster-io.github.io/muster` by default, the published site; point it at your own
-copy of the site where people cannot reach the public one. `<version>` is the `major.minor` of the binary, such as
-`1.2`, or `latest` for a development build. For example, `MusterOIDCSecretExpiring` of a development build links to
+copy of the site where people cannot reach the public one. `<version>` is the `major.minor` of a release, such as `1.2`
+for `1.2.3`, or `latest` for any version that is not a release `X.Y.Z`: a development build, the `sha-…` and `edge`
+images and pre-releases. For example, `MusterOIDCSecretExpiring` of a development build links to
 `https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring/`.

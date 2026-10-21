@@ -1200,6 +1200,37 @@
     "title": "Тест и предпросмотр",
     "unsaved": "Тест использует сохранённые настройки: сначала сохраните изменения."
   },
+  "docs": {
+    "guide": "Руководство",
+    "guideAbout": "Руководство: {{about}} (откроется в новой вкладке)",
+    "guides": {
+      "alertGroup": "Статусы и команды групп алертов",
+      "alertGroups": "Группы алертов",
+      "connection": {
+        "bridge": "Подключение через мост",
+        "mattermost": "Подключение Mattermost",
+        "slack": "Подключение Slack",
+        "telegram": "Подключение Telegram"
+      },
+      "connections": "Подключения",
+      "destination": {
+        "bridge": "Место доставки через мост",
+        "mattermost": "Место доставки Mattermost",
+        "slack": "Место доставки Slack",
+        "telegram": "Место доставки Telegram",
+        "webhookEvents": "События исходящего вебхука",
+        "webhookTemplate": "Шаблоны исходящего вебхука"
+      },
+      "destinations": "Места доставки",
+      "integrations": "Интеграции",
+      "routes": "Маршруты",
+      "storedSnapshots": "Сохранённые снимки"
+    },
+    "howToFix": "Как исправить",
+    "howToFixAbout": "Как исправить: {{about}} (откроется в новой вкладке)",
+    "learnMore": "Подробнее",
+    "learnMoreAbout": "Подробнее: {{about}} (откроется в новой вкладке)"
+  },
   "duration": {
     "between": "{{start}} – {{end}}",
     "days": "{{value}} д",
