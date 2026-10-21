@@ -25,23 +25,12 @@ helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
   --namespace muster --create-namespace -f values.yaml
 ```
 
+`<version>` is a Muster release without the `v`, such as `0.1.0` for the release `v0.1.0`. The chart's `appVersion` is
+the release's tag, and `image.tag` defaults to it, so each chart runs the image of its own release.
+
 The release signs the chart with cosign, keyless, as it signs the image; [Verify a release](versions.md#verify-a-release)
 shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
 with its changes and the image it runs, pinned by digest: [Muster on Artifact Hub](https://artifacthub.io/packages/search?repo=muster).
-
-!!! note "Before the first release"
-    Nothing is released yet, so the registry holds no chart. Install it from a clone of the repository instead, with the
-    development image of `master`:
-
-    ```sh
-    git clone https://github.com/muster-io/muster && cd muster
-    helm install muster deploy/helm/muster --namespace muster --create-namespace \
-      -f values.yaml --set image.tag=edge
-    ```
-
-    The chart in the repository has the version `0.0.0`, and its `image.tag` defaults to `appVersion`, which names no
-    existing image. A release sets the chart's version to its tag without the `v`, such as `1.2.3`, and `appVersion` to
-    the tag itself, such as `v1.2.3`.
 
 ## Create the Secret
 

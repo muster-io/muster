@@ -13,12 +13,6 @@ flowchart LR
 
 ## Start Muster
 
-!!! note "Before the first release"
-    Until Muster's first release, the tag in the download command below does not exist yet. Download from `master`
-    instead: replace the tag in the URL, the part that starts with `v`, with `master`. Then, after you write `.env`,
-    append the development image to it with `echo MUSTER_IMAGE=ghcr.io/muster-io/muster:edge >> .env`: `edge` is the
-    image built from the newest commit on `master`.
-
 Download the compose example into a new directory:
 
 <!-- quickstart -->
