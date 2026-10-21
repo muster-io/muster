@@ -56,7 +56,10 @@ var (
 	trailerRe = regexp.MustCompile(`(?:\s*\(\[(?:#[0-9]+|[0-9a-f]{7,40})\]\([^)\s]+\)\)|` +
 		`,?\s+closes\s+\[#[0-9]+\]\([^)\s]+\)|\s+\[#[0-9]+\]\([^)\s]+\))+\s*$`)
 	commitRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
-	cveRe    = regexp.MustCompile(`\bCVE-[0-9]{4}-[0-9]{4,}\b`)
+	// A security change: Renovate's "[security]" suffix, kept as it is or escaped, or an advisory identifier (CVE,
+	// GitHub's GHSA, the Go vulnerability database's GO-YYYY-NNNN).
+	securityRe = regexp.MustCompile(`(?i)\\?\[security\\?\]|\bCVE-[0-9]{4}-[0-9]{4,}\b|` +
+		`\bGHSA(?:-[0-9a-z]{4}){3}\b|\bGO-[0-9]{4}-[0-9]{4,}\b`)
 )
 
 func main() {
@@ -246,9 +249,10 @@ type entry struct {
 	text, kind, prefix string
 }
 
-// parseChangelog reads the entries of the section of one version. Every other non-blank line that is not a heading
-// continues the entry above it, such as the text of a breaking change. A feature or fix that is also listed as a
-// breaking change with the same text is kept once, as the breaking change.
+// parseChangelog reads the entries of the section of one version, which ends at the heading of the next version.
+// A "### " line is the heading of a section; every other non-blank line that is not a new list item continues the entry
+// above it, such as the text of a breaking change, even when it starts with #. A feature or fix that is also listed as
+// a breaking change with the same text is kept once, as the breaking change, with its links.
 func parseChangelog(data []byte, version string) (changes []change, found bool) {
 	var (
 		in      bool
@@ -260,11 +264,11 @@ func parseChangelog(data []byte, version string) (changes []change, found bool) 
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		if m := versionHeadingRe.FindStringSubmatch(line); m != nil || strings.HasPrefix(line, "## ") {
+		if m := versionHeadingRe.FindStringSubmatch(line); m != nil {
 			if in {
 				break
 			}
-			if m != nil && m[1] == version {
+			if m[1] == version {
 				in, found = true, true
 				kind = kindChanged
 			}
@@ -274,8 +278,8 @@ func parseChangelog(data []byte, version string) (changes []change, found bool) 
 			continue
 		}
 		switch {
-		case strings.HasPrefix(line, "#"):
-			kind, prefix = sectionKind(strings.TrimLeft(line, "# "))
+		case strings.HasPrefix(line, "### "):
+			kind, prefix = sectionKind(strings.TrimPrefix(line, "### "))
 			entries = append(entries, entry{}) // ends the entry above, so the next lines do not continue it
 		case kind == kindSkip:
 		case entryRe.MatchString(line):
@@ -284,24 +288,38 @@ func parseChangelog(data []byte, version string) (changes []change, found bool) 
 			entries[len(entries)-1].text += " " + strings.TrimSpace(line)
 		}
 	}
-	breaking := map[string]bool{}
+	breaking := map[string]int{}
 	for _, e := range entries {
-		if c, ok := parseEntry(e); ok {
-			changes = append(changes, c)
-			if e.prefix != "" {
-				breaking[strings.TrimPrefix(c.Description, e.prefix)] = true
-			}
+		c, ok := parseEntry(e)
+		if !ok {
+			continue
 		}
+		if e.prefix != "" {
+			breaking[strings.TrimPrefix(c.Description, e.prefix)] = len(changes)
+		}
+		changes = append(changes, c)
 	}
-	changes = slices.DeleteFunc(changes, func(c change) bool {
-		return !strings.HasPrefix(c.Description, breakingPrefix) && breaking[c.Description]
-	})
+	var dropped []int
+	for i, c := range changes {
+		b, ok := breaking[c.Description]
+		if !ok || strings.HasPrefix(c.Description, breakingPrefix) {
+			continue
+		}
+		changes[b].Links = append(changes[b].Links, c.Links...)
+		if c.Kind == kindSecurity {
+			changes[b].Kind = kindSecurity
+		}
+		dropped = append(dropped, i)
+	}
+	for _, i := range slices.Backward(dropped) {
+		changes = slices.Delete(changes, i, i+1)
+	}
 	return changes, found
 }
 
 // parseEntry turns "**scope:** text ([#1](url)) ([abc1234](url))" into "scope: text" with links to #1 and abc1234. A
-// link in the text stays as its text and becomes a link too. A security scope or a CVE identifier makes it a security
-// change.
+// link in the text stays as its text and becomes a link too. A security scope (security, or security/... as some
+// projects name it), a "[security]" suffix or an advisory identifier makes it a security change.
 func parseEntry(e entry) (change, bool) {
 	text := e.text
 	trailer := ""
@@ -329,7 +347,7 @@ func parseEntry(e entry) (change, bool) {
 		return change{}, false
 	}
 	kind := e.kind
-	if strings.EqualFold(scope, "security") || cveRe.MatchString(text) {
+	if s := strings.ToLower(scope); s == "security" || strings.HasPrefix(s, "security/") || securityRe.MatchString(text) {
 		kind = kindSecurity
 	}
 	if scope != "" {

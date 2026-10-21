@@ -201,22 +201,92 @@ func TestParseChangelogOwnTrailingLink(t *testing.T) {
 	}
 }
 
+// release-please lists a feat! commit twice: under BREAKING CHANGES without links, and under Features with them.
 func TestParseChangelogBreakingFeatureOnce(t *testing.T) {
 	text := `## [1.0.0](x) (2026-12-01)
 
 ### ⚠ BREAKING CHANGES
 
-* **api:** drop the v0 endpoints ([#9](u)) ([abcdef0](c))
+* **api:** drop the v0 endpoints
 
 ### Features
 
-* **api:** drop the v0 endpoints ([#9](u)) ([abcdef0](c))
-* **api:** add the v1 endpoints ([#8](u))
+* **api:** add the v1 endpoints ([#8](` + repoURL + `/issues/8)) ([1111111](` + repoURL + `/commit/1111111))
+* **api:** drop the v0 endpoints ([#9](` + repoURL + `/issues/9)) ([abcdef0](` + repoURL + `/commit/abcdef0))
 `
 	changes, _ := parseChangelog([]byte(text), "1.0.0")
-	if len(changes) != 2 || changes[0].Description != "Breaking: api: drop the v0 endpoints" ||
-		changes[1].Description != "api: add the v1 endpoints" {
-		t.Errorf("got %+v", changes)
+	want := []change{
+		{Kind: kindChanged, Description: "Breaking: api: drop the v0 endpoints",
+			Links: []link{link1("#9", "/issues/9"), link1("Commit abcdef0", "/commit/abcdef0")}},
+		{Kind: kindAdded, Description: "api: add the v1 endpoints",
+			Links: []link{link1("#8", "/issues/8"), link1("Commit 1111111", "/commit/1111111")}},
+	}
+	if !reflect.DeepEqual(changes, want) {
+		t.Errorf("got %+v\nwant %+v", changes, want)
+	}
+}
+
+// The release-please shape of Renovate's security updates and of fixes that name an advisory.
+func TestParseChangelogSecurity(t *testing.T) {
+	text := `## [1.0.1](x) (2026-12-01)
+
+### Bug Fixes
+
+* **ingest:** reject oversized bodies, GHSA-abcd-2345-wxyz ([#11](` + repoURL + `/issues/11))
+* **auth:** fix GO-2026-4321 in the session check ([#12](` + repoURL + `/issues/12))
+* **web:** fix the layout ([#13](` + repoURL + `/issues/13))
+
+### Dependencies
+
+* **deps:** update module golang.org/x/net to v0.47.0 [security] ([#350](` + repoURL + `/issues/350)) ([abc1234](` + repoURL + `/commit/abc1234def))
+* **deps:** update module golang.org/x/text to v0.39.0 \[SECURITY\] ([#351](` + repoURL + `/issues/351))
+* **deps:** update module github.com/jackc/pgx/v5 to v5.9.0 ([#352](` + repoURL + `/issues/352))
+`
+	changes, _ := parseChangelog([]byte(text), "1.0.1")
+	kinds := make([]string, 0, len(changes))
+	for _, c := range changes {
+		kinds = append(kinds, c.Kind)
+	}
+	want := []string{kindSecurity, kindSecurity, kindFixed, kindSecurity, kindSecurity, kindChanged}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Errorf("kinds %v, want %v: %+v", kinds, want, changes)
+	}
+	if got := changes[3]; got.Description != "deps: update module golang.org/x/net to v0.47.0 [security]" ||
+		!reflect.DeepEqual(got.Links, []link{link1("#350", "/issues/350"), link1("Commit abc1234", "/commit/abc1234def")}) {
+		t.Errorf("the [security] entry: %+v", got)
+	}
+
+	s := newSetup(t, text)
+	_, _, _, chart, _ := s.run(t, "v1.0.1")
+	if chart["annotations"].(map[string]any)[annotationSecurity] != "true" {
+		t.Errorf("containsSecurityUpdates is not true: %#v", chart["annotations"])
+	}
+}
+
+// Lines inside an entry that start with # are its text: a "## " line of a breaking-change footer does not end the
+// section, and "#123 …" is not a heading.
+func TestParseChangelogHashLinesInEntries(t *testing.T) {
+	text := `## [1.0.0](x) (2026-12-01)
+
+### ⚠ BREAKING CHANGES
+
+* **api:** the v0 endpoints are gone
+## Migration
+use the v1 endpoints
+#123 tracks the removal
+
+### Features
+
+* a feature
+`
+	changes, _ := parseChangelog([]byte(text), "1.0.0")
+	want := []change{
+		{Kind: kindChanged, Description: "Breaking: api: the v0 endpoints are gone ## Migration use the v1 endpoints " +
+			"#123 tracks the removal"},
+		{Kind: kindAdded, Description: "a feature"},
+	}
+	if !reflect.DeepEqual(changes, want) {
+		t.Errorf("got %+v\nwant %+v", changes, want)
 	}
 }
 

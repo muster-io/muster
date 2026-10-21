@@ -113,8 +113,12 @@ jobs:
           cosign sign --yes "ghcr.io/muster-io/charts/muster@$digest"
       # Artifact Hub reads the repository metadata, which makes the repository a verified publisher, from the tag
       # artifacthub.io; oras uses the registry login of docker/login-action. A failure here does not hold the release
-      # back: the chart is already pushed and signed, and the push is idempotent, so repeating it (a re-run of the job,
-      # or the oras command below by hand) fixes it.
+      # back: the chart is already pushed and signed. Repeat the push by hand, never by re-running this job, which
+      # would rebuild and move the release's images and replace its chart. The push is idempotent; after
+      # `oras login ghcr.io`, from deploy/helm:
+      #   oras push ghcr.io/muster-io/charts/muster:artifacthub.io
+      #     --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml
+      #     artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
       - name: push the Artifact Hub metadata
         continue-on-error: true
         run: |
@@ -129,7 +133,10 @@ jobs:
           "$oras" push ghcr.io/muster-io/charts/muster:artifacthub.io \
             --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
             "$metadata:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml" || {
-            echo "::error file=deploy/helm/$metadata::pushing the Artifact Hub metadata failed; repeat the push"
+            echo "::error file=deploy/helm/$metadata::pushing the Artifact Hub metadata failed; do not re-run the job:" \
+              "after oras login ghcr.io, run from deploy/helm: oras push ghcr.io/muster-io/charts/muster:artifacthub.io" \
+              "--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml" \
+              "$metadata:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml"
             exit 1
           }
       - name: publish the release
