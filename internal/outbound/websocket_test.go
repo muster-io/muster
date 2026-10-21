@@ -6,7 +6,9 @@ package outbound
 import (
 	"bufio"
 	"context"
+	"crypto/sha1" //nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
@@ -85,7 +87,7 @@ func (ws *wsServer) seen() (agents, from []string) {
 }
 
 // echo checks that conn carries a message there and back, then closes it.
-func echo(t *testing.T, conn *websocket.Conn) {
+func echo(t *testing.T, conn *WebSocket) {
 	t.Helper()
 	defer func() { _ = conn.CloseNow() }()
 	if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"envelope_id":"e1"}`)); err != nil {
@@ -310,6 +312,66 @@ func TestDialWebSocketConnectForEveryScheme(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestWebSocketCut: Cut ends at once a Close whose peer does not answer, directly and through a proxy by CONNECT;
+// CloseNow alone would wait for the library's own five seconds.
+func TestWebSocketCut(t *testing.T) {
+	for _, viaProxy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "through a proxy"}[viaProxy], func(t *testing.T) {
+			closing, quit := make(chan struct{}), make(chan struct{})
+			t.Cleanup(func() { close(quit) })
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				//nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
+				accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+				conn, rw, err := http.NewResponseController(w).Hijack()
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" +
+					"Connection: Upgrade\r\nSec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(accept[:]) +
+					"\r\n\r\n")
+				if rw.Flush() != nil {
+					return
+				}
+				if head, err := rw.Peek(1); err == nil && head[0]&0x0f == 0x8 { // the close frame, never answered
+					close(closing)
+				}
+				<-quit
+			}))
+			t.Cleanup(srv.Close)
+			cfg := Config{}
+			if viaProxy {
+				cfg.Proxy = &Proxy{Type: ProxyHTTP, Address: startRecordingProxy(t, nil, "", false).Addr()}
+			}
+			c, _ := newTestClient(t, cfg)
+			conn, err := DialWebSocket(t.Context(), c, strings.Replace(srv.URL, "http", "ws", 1)+"/link/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closed := make(chan time.Time, 1)
+			go func() {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				closed <- time.Now()
+			}()
+			select {
+			case <-closing:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the close frame did not arrive")
+			}
+			cut := time.Now()
+			conn.Cut()
+			select {
+			case at := <-closed:
+				if d := at.Sub(cut); d >= 4*time.Second {
+					t.Fatalf("Close returned %s after the cut", d)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("Close did not return")
+			}
+		})
 	}
 }
 

@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/coder/websocket"
 
@@ -34,14 +36,15 @@ var errNotWebSocketURL = errors.New("websocket: the address is not an absolute w
 // recorded in the Request log. Every failure is an *Error whose text shows the address with its query as [redacted],
 // with c's secrets and the query's values replaced. ctx bounds only the handshake: reading, writing, pinging and
 // closing the connection, and its read limit, are the caller's.
-func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.Header) (*websocket.Conn, error) {
+func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.Header) (*WebSocket, error) {
 	u, err := webSocketTarget(rawURL)
 	if err != nil {
 		c.observe(OutcomeFatal, 0)
 		return nil, &Error{Outcome: OutcomeFatal, msg: err.Error()}
 	}
 	red := newRedactor(append(slices.Clone(c.secrets), webSocketSecrets(u)...))
-	hc, err := c.webSocketClient(u)
+	ws := &WebSocket{}
+	hc, err := c.webSocketClient(u, ws)
 	if err != nil {
 		c.observe(OutcomeFatal, 0)
 		return nil, &Error{Outcome: OutcomeFatal, msg: red.redact("websocket: " + err.Error())}
@@ -57,11 +60,46 @@ func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.He
 	}
 	if err == nil {
 		c.observe(OutcomeOK, elapsed)
-		return conn, nil
+		ws.Conn = conn
+		return ws, nil
 	}
 	e := c.webSocketError(ctx, red, u, resp, err)
 	c.observe(e.Outcome, elapsed)
 	return nil, e
+}
+
+// WebSocket is an open WebSocket connection with its network connection, which Cut closes at once.
+type WebSocket struct {
+	*websocket.Conn
+
+	mu  sync.Mutex
+	net net.Conn
+}
+
+// dialled keeps the network connection the handshake was made on: with keep-alives disabled and no redirect, there is
+// one.
+func (w *WebSocket) dialled(dial func(ctx context.Context, network, address string) (net.Conn, error)) func(
+	ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		nc, err := dial(ctx, network, address)
+		if err == nil {
+			w.mu.Lock()
+			w.net = nc
+			w.mu.Unlock()
+		}
+		return nc, err
+	}
+}
+
+// Cut closes the network connection at once. Unlike Conn.CloseNow, which waits for a Close already under way, it also
+// ends a Close whose peer does not answer, which otherwise waits for the answer up to the library's own five seconds.
+func (w *WebSocket) Cut() {
+	w.mu.Lock()
+	nc := w.net
+	w.mu.Unlock()
+	if nc != nil {
+		_ = nc.Close() // the connection's own close closes it again
+	}
 }
 
 // webSocketTarget parses an absolute ws or wss URL with a host and without user information or a fragment.
@@ -108,8 +146,8 @@ func webSocketDisplay(red redactor, u *url.URL) string {
 // webSocketClient is the HTTP client of one handshake to u: a transport of its own that keeps no connection, with c's
 // dialer, TLS configuration and timeouts. An HTTP or HTTPS proxy is reached through connectDial instead of the
 // transport's Proxy, which would send a ws target in absolute form; a SOCKS5 proxy goes through the transport, as for
-// every request.
-func (c *Client) webSocketClient(u *url.URL) (*http.Client, error) {
+// every request. ws keeps the network connection it dials.
+func (c *Client) webSocketClient(u *url.URL, ws *WebSocket) (*http.Client, error) {
 	d := &dialer{policy: c.cfg.Policy, resolver: c.resolver, timeout: c.cfg.ConnectTimeout, proxy: c.cfg.Proxy != nil}
 	tlsConfig := c.transports.transport().TLSClientConfig.Clone()
 	// The upgrade needs HTTP/1.1.
@@ -137,6 +175,7 @@ func (c *Client) webSocketClient(u *url.URL) (*http.Client, error) {
 			tr.DialContext = c.connectDial(pu, d, tlsConfig, u.Scheme)
 		}
 	}
+	tr.DialContext = ws.dialled(tr.DialContext)
 	return &http.Client{
 		Transport:     tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
