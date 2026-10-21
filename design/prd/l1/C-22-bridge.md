@@ -259,18 +259,19 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   outbound request. Bridges add no Internal alert: their Destinations raise `MusterDestinationBroken`.
 - **C-22.FR-25** Two bridge libraries, each in a repository of its own under the MIT licence and without a CLA, do the
   protocol's part of a bridge (ADR-0017): `muster-bridge-go` (the Go module `github.com/muster-io/muster-bridge-go`,
-  package `bridge`) and `muster-bridge-python` (the PyPI package `muster-bridge`, module `muster_bridge`, for Python 3.11
-  or newer, asynchronous, an ASGI application). A bridge author writes the calls to their messenger — posting, editing,
-  replying in a Thread, checking a channel and answering a person, and where the messenger offers them finding a
-  person, sending a direct message and deleting — and reports presses, Thread messages, deleted messages and direct
+  package `bridge`) and `muster-bridge-python` (the PyPI package `muster-bridge`, module `muster_bridge`, for Python
+  3.11 or newer, asynchronous, an ASGI application). A bridge author writes the calls to their messenger — posting,
+  editing, replying in a Thread, checking a channel and answering a person, and where the messenger offers them finding
+  a person, sending a direct message and deleting — and reports presses, Thread messages, deleted messages and direct
   messages to the library. The library serves every operation of `api/bridge.yaml` with its validation and limits,
   checks the token of each bot, keeps idempotency keys per token and replays their results, builds `info` from the
   features and limits it is given, answers problems with their classes, queues events for `pollEvents` and pushes them
-  signed, with retries, and turns a direct message that carries an Account link token into an `account_link` event.
-  Each library keeps a copy of `api/bridge.yaml`, generates its types from it and fails its CI when the copy differs
-  from the one on Muster's `master`; its CI runs `muster bridge check` from Muster's development image against a bridge
-  built on it. The libraries stay `0.x` until Muster 1.0, and every `0.x` release speaks protocol version 1; a Go
-  release is a tag, a Python release is published to PyPI.
+  signed, with retries, and turns a direct message that carries an Account link token into an `account_link` event. Each
+  library keeps a copy of `api/bridge.yaml`, generates its types from it and fails its CI when the copy differs from the
+  one on Muster's `master`; its CI runs `muster bridge check` from Muster's development image against a bridge built on
+  it. The libraries stay `0.x` until Muster 1.0, and every library release speaks the protocol versions Muster supports
+  at that time, today protocol version 1; a breaking change of the protocol is a new protocol version, not a new major
+  version of a library; a Go release is a tag, a Python release is published to PyPI.
 
 ## UI
 

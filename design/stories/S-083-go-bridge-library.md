@@ -237,7 +237,7 @@ issue: 256
   `include-component-in-tag: false` and the manifest at `0.0.0`, run with the GitHub App's token as in Muster's
   repository, so that its tag starts workflows; a release is the tag `vX.Y.Z`, and the workflow then asks
   `proxy.golang.org` for the new version so that `go get` finds it at once. Versions stay `0.x` until Muster 1.0, and
-  every `0.x` release speaks protocol version 1 (ADR-0017).
+  every library release speaks the protocol versions Muster supports at that time, today protocol version 1 (ADR-0017).
 - **Renovate, CodeQL, Scorecard** (`.github/renovate.json5`, `codeql.yml`, `scorecard.yml`): the policy of Muster's
   `.github/renovate.json5` — `config:best-practices`, pinned versions and digests, weekly grouped updates that merge
   themselves on green checks, majors through the Dependency Dashboard, the regex manager for the Makefile's tool

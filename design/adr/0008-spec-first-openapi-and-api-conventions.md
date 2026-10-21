@@ -7,6 +7,9 @@
   the stable problem codes are catalogued in `x-problem-codes`; naming rules for actions, enum values and units;
   operations on the caller's own account accept the web session only; a `public_id` has a fixed format — a type prefix
   of one or two letters and 12 random Crockford base32 characters — and is case-insensitive on input
+- Amended: 2026-10-21 — versions during 0.x (journal D399): `0.N` is layer N, `0.N.x` releases carry fixes and small
+  changes, and a breaking change of the API comes only with a new minor version, whose release notes say what to
+  change; `info.version` is Muster's version, set by the release pull request (journal D394)
 
 ## Context
 
@@ -45,8 +48,9 @@ part of that story's contract. Generated code is checked in, and CI verifies it 
 
 **Conventions.**
 
-- **Versioning.** Path prefix `/api/v1`. During 0.x breaking changes are allowed; from 1.0, `/api/v1` is stable, and a
-  removal is announced one minor release in advance.
+- **Versioning.** Path prefix `/api/v1`. During 0.x a breaking change comes only with a new minor version, that is with
+  the next layer, and its release notes say what to change; the maintainer reviews the oasdiff report of each pull
+  request for that. From 1.0, `/api/v1` is stable, and a removal is announced one minor release in advance.
 - **Resources and identifiers.** Resources are plural kebab-case nouns (`/alert-groups`). URLs use the opaque
   `public_id`, never internal ids or `#N`. A `public_id` is a type prefix of one or two letters, distinct per type,
   followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits),

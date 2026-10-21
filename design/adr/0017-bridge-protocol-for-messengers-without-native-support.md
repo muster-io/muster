@@ -19,9 +19,10 @@
   same request may go to the base URL typed with it, the stored token still only to the saved base URL, and a changed
   base URL without a typed token gets a dry probe, `GET <base>/v1/info` without the token, that passes on `401` with a
   problem
-- Amended: 2026-10-21 — library versions (journal D395): the libraries stay `0.x` until Muster 1.0 instead of moving
-  to `1.x` with Muster's first release; every `0.x` release speaks protocol version 1, and a breaking change of the
-  protocol would be a new protocol version, not a new major version of a library
+- Amended: 2026-10-21 — library versions (journal D395): the libraries stay `0.x` until Muster 1.0 instead of moving to
+  `1.x` with Muster's first release; every library release speaks the protocol versions Muster supports at that time,
+  today protocol version 1, and a breaking change of the protocol is a new protocol version, not a new major version of
+  a library
 
 ## Context
 
@@ -229,11 +230,12 @@ image, `ghcr.io/muster-io/muster:edge`, against a bridge built on it, so a libra
 it at once. In the other direction, Muster's end-to-end tests run a released image of the example bridge, pinned by
 digest and updated by Renovate, so a change of Muster that breaks a released library fails Muster's CI.
 
-**Versions.** The libraries stay `0.x` until Muster 1.0, and every `0.x` release speaks protocol version 1; a breaking
-change of the protocol would be a new protocol version, under a new major path, not a new major version of a library.
-Releases come from release-please, as Muster's do: a Go release is a tag, which the Go module proxy serves; a Python
-release is published to PyPI by its workflow through trusted publishing, without a stored token. Renovate, CodeQL,
-OpenSSF Scorecard and Actions pinned by commit SHA are set up as in Muster's repository.
+**Versions.** The libraries stay `0.x` until Muster 1.0, and every library release speaks the protocol versions Muster
+supports at that time, today protocol version 1; a breaking change of the protocol is a new protocol version, under a
+new major path, not a new major version of a library. Releases come from release-please, as Muster's do: a Go release is
+a tag, which the Go module proxy serves; a Python release is published to PyPI by its workflow through trusted
+publishing, without a stored token. Renovate, CodeQL, OpenSSF Scorecard and Actions pinned by commit SHA are set up as
+in Muster's repository.
 
 **Settled with the maintainer** (journal D322): the specification is MIT like the example; one `answerEvent` call
 answers presses, Text commands and Account link requests; the Russian Text command words and `unsnooze` are those of

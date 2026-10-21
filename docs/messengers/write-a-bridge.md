@@ -90,10 +90,10 @@ The Go module is `github.com/muster-io/muster-bridge-go`, and its package is `br
 go get github.com/muster-io/muster-bridge-go
 ```
 
-The libraries are released when Muster's first release is, and `go get` without a version takes the latest commit of
-the module's `master` branch until then. Each release is a tag `vX.Y.Z`. Versions stay `0.x` until Muster 1.0, and every
-`0.x` release speaks protocol version 1; a breaking protocol change would be a new protocol version, not a new major
-version of a library.
+The libraries are released when Muster's first release is, and `go get` without a version takes the latest commit of the
+module's `master` branch until then. Each release is a tag `vX.Y.Z`. Versions stay `0.x` until Muster 1.0, and every
+library release speaks the protocol versions Muster supports at that time, today protocol version 1; a breaking protocol
+change is a new protocol version, not a new major version of a library.
 
 **1. Implement `bridge.Messenger`.** It has five methods, each given the name of the bot whose token Muster sent:
 `PostMessage`, `EditMessage`, `ReplyInThread`, `CheckChannel` and `AnswerEvent`. The sketch below is for Parley, a
@@ -352,7 +352,7 @@ pip install muster-bridge
 
 The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
 `pip install muster-bridge` finds nothing: install it from a clone of its repository with `pip install .`. Its versions
-stay `0.x` until Muster 1.0, and every `0.x` release speaks protocol version 1, as the Go library's do.
+stay `0.x` until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.
 
 ```sh
 git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
