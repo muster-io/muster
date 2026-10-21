@@ -43,7 +43,7 @@ export function docsUrl(key: DocsKey, version: string = DOCS_LATEST): string {
 }
 
 /** The guide of a Connection's page: the page of its messenger. */
-export function connectionDocs(type: ConnectionType): DocsKey {
+export function connectionDocs(type: ConnectionType): `page.connection.${ConnectionType}` {
   return `page.connection.${type}`;
 }
 
@@ -53,7 +53,7 @@ export function connectionDocs(type: ConnectionType): DocsKey {
  */
 export function destinationDocs(
   destination: Pick<Destination, "type"> & Partial<Pick<WebhookDestination, "mode">>,
-): DocsKey {
+): Extract<DocsKey, `page.destination.${string}`> {
   if (destination.type === "webhook") {
     return destination.mode === "events"
       ? "page.destination.webhook_events"

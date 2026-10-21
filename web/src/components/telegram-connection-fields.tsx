@@ -3,13 +3,15 @@
 
 // The fields of a Telegram Connection in the type slot of the Connection form (C-14.FR-1, FR-10): the Bot API base URL
 // with the hint about self-hosted Bot API servers, the warning of an http address, and the update mode with what each
-// mode needs. The bot token, the proxy and the limiter are the form's own.
+// mode needs. The bot token, the proxy and the limiter are the form's own. The hint of the base URL and the update mode
+// have "Learn more", and the warning of an http address "How to fix".
 
 import type { TFunction } from "i18next";
 import { TriangleAlertIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { TelegramConnectionWarningsItem, TelegramUpdateMode } from "../api/gen/model";
+import { DocsLink } from "./docs-link";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -124,16 +126,16 @@ export function TelegramConnectionFields({
           aria-describedby={baseDescribedBy}
           onChange={(e) => onBaseUrlChange(e.target.value)}
         />
-        <p
-          id={`${baseId}-hint`}
-          className="text-sm text-muted-foreground"
-          data-testid="telegram-base-url-hint"
-        >
-          {t("connections.telegram.baseUrlHint")}
+        <p className="text-sm text-muted-foreground" data-testid="telegram-base-url-hint">
+          <span id={`${baseId}-hint`}>{t("connections.telegram.baseUrlHint")}</span>{" "}
+          <DocsLink
+            to="field.telegram_base_url"
+            kind="learn_more"
+            about={t("docs.fields.telegramBaseUrl")}
+          />
         </p>
         {httpWarning && (
           <div
-            id={`${baseId}-warning`}
             className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
             data-testid="telegram-http-warning"
           >
@@ -141,7 +143,14 @@ export function TelegramConnectionFields({
               aria-hidden="true"
               className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
             />
-            <p className="min-w-0 wrap-anywhere">{t("connections.telegram.httpWarning")}</p>
+            <p className="min-w-0 wrap-anywhere">
+              <span id={`${baseId}-warning`}>{t("connections.telegram.httpWarning")}</span>{" "}
+              <DocsLink
+                to="fix.telegram_base_url"
+                kind="how_to_fix"
+                about={t("docs.fixes.telegramHttp")}
+              />
+            </p>
           </div>
         )}
         {errors.baseUrl !== undefined && (
@@ -151,7 +160,14 @@ export function TelegramConnectionFields({
         )}
       </div>
       <div className="flex max-w-md min-w-0 flex-col gap-2">
-        <Label htmlFor={modeId}>{t("connections.fields.updateMode")}</Label>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <Label htmlFor={modeId}>{t("connections.fields.updateMode")}</Label>
+          <DocsLink
+            to="field.telegram_mode"
+            kind="learn_more"
+            about={t("docs.fields.telegramMode")}
+          />
+        </div>
         <NativeSelect
           id={modeId}
           className="w-full"

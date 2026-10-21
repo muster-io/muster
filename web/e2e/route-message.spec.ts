@@ -210,7 +210,7 @@ test("shows a Route whose template keeps failing in the editor and the Routes li
   await expect(row.getByTestId("route-template-error")).toHaveText("Template error");
   await row.getByRole("link", { name: "msg-pods", exact: true }).click();
   await expect(page.getByTestId("template-error-banner")).toHaveText(
-    /^Template error since \d{2}:\d{2}: map has no entry for key "pod"\. Messages use the fallback template\.$/,
+    /^Template error since \d{2}:\d{2}: map has no entry for key "pod"\. Messages use the fallback template\. How to fix$/,
   );
   await shot(page, "route-template-error");
   expect(csp).toEqual([]);

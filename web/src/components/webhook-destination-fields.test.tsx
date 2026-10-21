@@ -490,7 +490,19 @@ describe("DestinationForm with the outgoing webhook fields", () => {
     );
     const value = page.getByLabelText("Value of header 1");
     await expect.element(value).toHaveAccessibleDescription(LITERAL);
-    await expect.element(page.getByTestId("literal-credential")).toHaveTextContent(LITERAL);
+    await expect
+      .element(page.getByTestId("literal-credential"))
+      .toHaveTextContent(`${LITERAL} How to fix`);
+    await expect
+      .element(
+        page
+          .getByTestId("literal-credential")
+          .getByRole("link", { name: "How to fix: Credentials in a request (opens in a new tab)" }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/outgoing-webhooks/events/#secrets",
+      );
     // Only the Authorization header is warned of; X-Team holds no credential.
     expect(page.getByTestId("literal-credential").elements()).toHaveLength(1);
     await userEvent.fill(value, "Bearer {{ .Secrets.token }}");
@@ -544,7 +556,7 @@ describe("DestinationForm with the outgoing webhook fields", () => {
     await expect
       .element(page.getByTestId("literal-credential"))
       .toHaveTextContent(
-        "Храните учётные данные в секретах: это значение видят все, кто может читать места доставки.",
+        "Храните учётные данные в секретах: это значение видят все, кто может читать места доставки. Как исправить",
       );
     await page.getByRole("tab", { name: "Шаблон" }).click();
     await expect.element(builder("Ответ в треде")).toBeVisible();

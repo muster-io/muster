@@ -568,7 +568,17 @@ describe("the page of a Slack Connection", () => {
     await expect
       .element(page.getByTestId("slack-shared-app"))
       .toHaveTextContent(
-        "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.",
+        "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation. How to fix",
+      );
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "How to fix: Another program uses this Slack app (opens in a new tab)",
+        }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/messengers/slack/#one-slack-app-per-connection",
       );
     await screen.unmount();
     await render(providers(<SlackSharedAppWarning connection={SLACK} />));

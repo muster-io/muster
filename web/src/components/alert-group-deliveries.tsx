@@ -12,6 +12,8 @@
 // nothing polls. A Destination shows its name; its full label (D309) is the name's tooltip and accessible description,
 // and a Destination the Destinations list does not show keeps its name alone. With destinations:read each row has
 // "Requests" (C-23.FR-6, AC-1): what was sent to the Destination for this Alert Group and what came back, in a dialog.
+// "Not delivered" and "Waiting: {Destination} is Broken" end with "How to fix", to the recovery of a Broken
+// Destination.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -25,6 +27,7 @@ import { problemText } from "../lib/api";
 import { useCan } from "./app-shell";
 import { HealthBadge } from "./destination-health";
 import { useDestinationLabels } from "./destination-label";
+import { DocsLink } from "./docs-link";
 import { RequestLogButton } from "./request-log";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -171,6 +174,12 @@ function Row({
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <State delivery={delivery} />
+        {delivery.state === "not_delivered" && (
+          <DocsLink to="fix.broken" kind="how_to_fix" about={t("docs.fixes.notDelivered")} />
+        )}
+        {delivery.state === "waiting_for_broken_destination" && (
+          <DocsLink to="fix.broken" kind="how_to_fix" about={t("docs.fixes.broken")} />
+        )}
         {delivery.thread_not_attached && (
           <Mark testId="delivery-thread-not-attached">{t("deliveries.threadNotAttached")}</Mark>
         )}

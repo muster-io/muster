@@ -158,7 +158,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   const callback = (await page.getByTestId("connection-callback-url").textContent()) ?? "";
   expect(callback.endsWith(`/${connectionId}`)).toBe(true);
   await expect(page.getByTestId("connection-callback-hint")).toHaveText(
-    `Mattermost calls ${callback} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it.`,
+    `Mattermost calls ${callback} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it. Learn more`,
   );
 
   // 2. "Check connection" → "Connected as muster-dev-bot", "direct", a latency in ms, and — the fake's bot is not a
@@ -170,7 +170,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   await expect(page.getByTestId("connection-check-step")).toHaveText(
     /^Token: ok · \d+ ms · direct$/,
   );
-  await expect(page.getByTestId("connection-check-warning")).toHaveText(WARNING);
+  await expect(page.getByTestId("connection-check-warning")).toHaveText(`${WARNING} How to fix`);
   await expect(page.getByTestId("connection-bot")).toHaveText("Bot: muster-dev-bot");
   await shot(page, "connection-check-warning");
   // With the system admin role the bot may make ephemeral posts: no hint.
@@ -183,7 +183,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   await shot(page, "connection-check-admin");
   await botSystemAdmin(false);
   await page.getByRole("button", { name: "Check connection" }).click();
-  await expect(page.getByTestId("connection-check-warning")).toHaveText(WARNING);
+  await expect(page.getByTestId("connection-check-warning")).toHaveText(`${WARNING} How to fix`);
 
   // 3. The Destination "alerts" on ch-alerts of "mm", through the API → "Delete" is refused.
   const admin = await adminApi();
@@ -259,7 +259,7 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
   await expectNoHorizontalScroll(page);
   await page.goto(`/connections/${connectionId}`);
   await page.getByRole("button", { name: "Check connection" }).click();
-  await expect(page.getByTestId("connection-check-warning")).toHaveText(WARNING);
+  await expect(page.getByTestId("connection-check-warning")).toHaveText(`${WARNING} How to fix`);
   await expectNoHorizontalScroll(page);
   await shot(page, "connection-360");
   expect(csp).toEqual([]);
@@ -301,7 +301,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByRole("link", { name: "mm", exact: true }).click();
   const callback = (await page.getByTestId("connection-callback-url").textContent()) ?? "";
   await expect(page.getByTestId("connection-callback-hint")).toHaveText(
-    `Mattermost обращается к ${callback}, когда кто-то нажимает кнопку. Если этот адрес внутренний, добавьте его хост в AllowedUntrustedInternalConnections в настройках сервера Mattermost, иначе нажатия завершатся ошибкой «Action integration error». Проверить это можно тестовым сообщением в место доставки.`,
+    `Mattermost обращается к ${callback}, когда кто-то нажимает кнопку. Если этот адрес внутренний, добавьте его хост в AllowedUntrustedInternalConnections в настройках сервера Mattermost, иначе нажатия завершатся ошибкой «Action integration error». Проверить это можно тестовым сообщением в место доставки. Подробнее`,
   );
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText(
@@ -310,7 +310,9 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByTestId("connection-check-step")).toHaveText(
     /^Токен: успешно · \d+ мс · напрямую$/,
   );
-  await expect(page.getByTestId("connection-check-warning")).toHaveText(WARNING_RU);
+  await expect(page.getByTestId("connection-check-warning")).toHaveText(
+    `${WARNING_RU} Как исправить`,
+  );
   await expectNoHorizontalScroll(page);
   // The long callback address wraps inside the hint instead of running out of its card.
   for (const id of ["connection-callback-hint", "connection-check-warning"]) {

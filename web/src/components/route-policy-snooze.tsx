@@ -3,7 +3,7 @@
 
 // The Snooze durations section of the Route editor (C-10.FR-6, C-08.FR-1): the quick durations that the Snooze dialog
 // and the messengers offer, as a list with add and remove, sent as policy.snooze_durations_seconds. A new Route starts
-// with the durations of its profile.
+// with the durations of its profile. "Learn more" sits beside the title.
 
 import type { TFunction } from "i18next";
 import { XIcon } from "lucide-react";
@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 
 import { fieldErrorText } from "../lib/api";
 import { snoozeDurationLabel } from "../lib/commands";
+import { DocsLink } from "./docs-link";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -80,8 +81,15 @@ export function RoutePolicySnooze({
           ? undefined
           : fieldErrorText(t, error);
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3" data-testid="route-snooze">
-      <legend className="mb-2 text-base font-semibold">{t("routes.snooze.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="route-snooze"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.snooze.title")}</span>
+        <DocsLink to="field.snooze" kind="learn_more" about={t("docs.fields.snooze")} />
+      </legend>
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">
         {t("routes.snooze.hint")}
       </p>

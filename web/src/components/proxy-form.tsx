@@ -3,12 +3,14 @@
 
 // The shared proxy form (C-03.FR-19, C-02.FR-22): use a proxy or not, its type, address, username and a write-only
 // password. The OIDC settings are its first user; Connections, outgoing webhooks and the outgoing heartbeat reuse it.
-// It is a controlled part of the page's form: the page keeps ProxyValues and sends proxyInput(values).
+// It is a controlled part of the page's form: the page keeps ProxyValues and sends proxyInput(values). "Learn more"
+// beside its title shows wherever it is used.
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ProxyConfig, ProxyConfigInput, ProxyType, SecretStatus } from "../api/gen/model";
+import { DocsLink } from "./docs-link";
 import { KEEP_SECRET, type SecretChange, SecretField, secretPayload } from "./secret-field";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -131,8 +133,15 @@ export function ProxyForm({
       </p>
     );
   return (
-    <fieldset className="flex min-w-0 flex-col gap-4" disabled={disabled}>
-      <legend className="mb-3 text-base font-semibold">{t("proxy.title")}</legend>
+    <fieldset
+      className="flex min-w-0 flex-col gap-4"
+      disabled={disabled}
+      aria-labelledby={id("title")}
+    >
+      <legend className="mb-3 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={id("title")}>{t("proxy.title")}</span>
+        <DocsLink to="field.proxy" kind="learn_more" about={t("docs.fields.proxy")} />
+      </legend>
       <CheckField
         id={id("enabled")}
         label={t("proxy.enabled")}

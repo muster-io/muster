@@ -6,7 +6,8 @@
 // the notice is used from the ack timeout's story on) — each "Built-in" (null) or "Custom" (a string). "Custom" starts
 // from the source of the built-in template in the Route's language, which previewTemplate returns for an empty
 // template. Under each editor its preview renders against the chosen sample, refreshed as the text changes, and the
-// editor marks the errors of the preview or of a refused save at their line and column.
+// editor marks the errors of the preview or of a refused save at their line and column. "Learn more" beside the
+// section's title opens the template language.
 
 import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -17,6 +18,7 @@ import { previewTemplate } from "../api/gen/endpoints/templates/templates";
 import type { Language, ProblemError, RoutePolicy, RouteTemplates } from "../api/gen/model";
 import { fieldErrorText, problemText } from "../lib/api";
 import { useCan } from "./app-shell";
+import { DocsLink } from "./docs-link";
 import { DEFAULT_SAMPLE, type Sample, SamplePicker } from "./sample-picker";
 import { TemplateEditor, templateName } from "./template-editor";
 import {
@@ -254,8 +256,15 @@ export function RoutePolicyMessage({
   const { t } = useTranslation();
   const languages: Language[] = ["en", "ru"];
   return (
-    <fieldset className="flex min-w-0 flex-col gap-4" data-testid="route-message">
-      <legend className="mb-2 text-base font-semibold">{t("routes.message.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-4"
+      data-testid="route-message"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.message.title")}</span>
+        <DocsLink to="field.template" kind="learn_more" about={t("docs.fields.template")} />
+      </legend>
       <div className="flex flex-col gap-2">
         {readOnly ? (
           <>

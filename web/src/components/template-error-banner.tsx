@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The banner of a Route whose template keeps failing (C-12.FR-6; reference.md, banners): "Template error since HH:MM:
-// {error}." with "Messages use the fallback template." — or "Requests are not sent." for an outgoing webhook — the
-// time in the user's time zone and the error as untrusted text.
+// The banner of a Route or a Destination whose template keeps failing (C-12.FR-6, C-15.FR-5; reference.md, banners):
+// "Template error since HH:MM: {error}." with "Messages use the fallback template." — or "Requests are not sent." for an
+// outgoing webhook, whose failed request is not sent — the time in the user's time zone and the error as untrusted text,
+// and "How to fix" to the runbook of the template error.
 
 import { TriangleAlertIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { TemplateErrorState } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
+import { DocsLink } from "./docs-link";
 
 export function TemplateErrorBanner({ state }: { state: TemplateErrorState }) {
   const { t } = useTranslation();
@@ -25,7 +27,8 @@ export function TemplateErrorBanner({ state }: { state: TemplateErrorState }) {
         {t("routes.templateError.since", { time: time(state.since), error: state.error })}{" "}
         {state.fallback === "not_sent"
           ? t("routes.templateError.notSent")
-          : t("routes.templateError.fallback")}
+          : t("routes.templateError.fallback")}{" "}
+        <DocsLink to="fix.template_error" kind="how_to_fix" about={t("docs.fixes.templateError")} />
       </p>
     </div>
   );

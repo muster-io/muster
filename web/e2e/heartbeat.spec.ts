@@ -133,7 +133,7 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   const badge = page.getByTestId("heartbeat-badge");
   const banner = page.getByTestId("heartbeat-banner");
   await expect(badge).toHaveText("Heartbeat: Not configured");
-  await expect(banner).toHaveText(NOT_CONFIGURED);
+  await expect(banner).toHaveText(`${NOT_CONFIGURED} How to fix`);
   await shot(page, "heartbeat-not-configured");
   const integrationId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
@@ -164,7 +164,7 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   await shot(page, "heartbeat-form-edit");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(badge).toHaveText("Heartbeat: Waiting");
-  await expect(banner).toHaveText(WAITING);
+  await expect(banner).toHaveText(`${WAITING} How to fix`);
   await shot(page, "heartbeat-waiting");
   expect(await heartbeatOf(integrationId)).toMatchObject({ enabled: true, timeout_seconds: 600 });
 
@@ -208,7 +208,7 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   await advance(360);
   await expect(badge).toHaveText("Heartbeat: Lost");
   await expect(banner).toHaveText(
-    `No contact with Alertmanager since ${shownSince(lastSignal, "en-US")}. Nothing is resolved as Stale until contact returns.`,
+    `No contact with Alertmanager since ${shownSince(lastSignal, "en-US")}. Nothing is resolved as Stale until contact returns. How to fix`,
   );
   await shot(page, "heartbeat-lost");
   await page.goto("/integrations");
@@ -246,7 +246,7 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   await viewerPage.goto(`/integrations/${integrationId}`);
   await expect(viewerPage.getByTestId("heartbeat-badge")).toHaveText("Heartbeat: Нет связи");
   await expect(viewerPage.getByTestId("heartbeat-banner")).toHaveText(
-    `Связи с Alertmanager нет с ${shownSince(lastSignal, "ru")}. Пока она не восстановится, ничего не закрывается как устаревшее.`,
+    `Связи с Alertmanager нет с ${shownSince(lastSignal, "ru")}. Пока она не восстановится, ничего не закрывается как устаревшее. Как исправить`,
   );
   for (const name of ["Изменить", "Удалить", "Создать токен"]) {
     await expect(

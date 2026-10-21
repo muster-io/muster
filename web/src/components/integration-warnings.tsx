@@ -4,7 +4,7 @@
 // The warnings of an Integration (C-06.FR-18): the truncation and long-interval warnings as banners on the Integration
 // page, and as a mark in the Integrations list with the same texts on hover and in the row's details. The Heartbeat
 // kinds (C-07.FR-5) are a banner of their own at the top of the Integration page; in the list the Heartbeat badge
-// stands for them, so the mark leaves them out.
+// stands for them, so the mark leaves them out. On the Integration page each banner ends with "How to fix".
 
 import type { TFunction } from "i18next";
 import { HeartCrackIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import type { IntegrationWarning } from "../api/gen/model";
 import { dayIn, formatDuration, formatTime, useTimeFormat } from "../lib/time";
+import { DocsLink } from "./docs-link";
 
 /** processing.stale_after_factor: an Alert resolves by absence after this many learned repeat intervals. */
 export const STALE_AFTER_FACTOR = 3;
@@ -104,7 +105,12 @@ export function HeartbeatBanner({ warnings }: { warnings: readonly IntegrationWa
             ? t("heartbeat.banner.lost", {
                 time: lostSinceText(warning.since, timeZone, i18n.resolvedLanguage ?? "en"),
               })
-            : t("heartbeat.banner.lostNoTime")}
+            : t("heartbeat.banner.lostNoTime")}{" "}
+          <DocsLink
+            to="fix.heartbeat_lost"
+            kind="how_to_fix"
+            about={t("docs.fixes.heartbeatLost")}
+          />
         </span>
       </p>
     );
@@ -130,7 +136,12 @@ export function HeartbeatBanner({ warnings }: { warnings: readonly IntegrationWa
           }
         />
         <span className="min-w-0">
-          {waiting ? t("heartbeat.banner.waiting") : t("heartbeat.banner.notConfigured")}
+          {waiting ? t("heartbeat.banner.waiting") : t("heartbeat.banner.notConfigured")}{" "}
+          <DocsLink
+            to="fix.heartbeat"
+            kind="how_to_fix"
+            about={waiting ? t("docs.fixes.heartbeatWaiting") : t("docs.fixes.heartbeatOff")}
+          />
         </span>
       </p>
     );
@@ -147,10 +158,32 @@ function texts(t: TFunction, warnings: readonly IntegrationWarning[]): string[] 
   return warnings.map((w) => warningText(t, w)).filter((text) => text !== null);
 }
 
+/** The "How to fix" of a warning banner: a truncated Snapshot or a long repeat interval. */
+function WarningFix({ kind }: { kind: IntegrationWarning["kind"] }) {
+  const { t } = useTranslation();
+  switch (kind) {
+    case "snapshot_truncated":
+      return <DocsLink to="fix.truncated" kind="how_to_fix" about={t("docs.fixes.truncated")} />;
+    case "long_repeat_interval":
+      return (
+        <DocsLink
+          to="fix.repeat_interval"
+          kind="how_to_fix"
+          about={t("docs.fixes.repeatInterval")}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
 /** The warnings of an Integration as banners; nothing when it has none. */
 export function IntegrationWarnings({ warnings }: { warnings: readonly IntegrationWarning[] }) {
   const { t } = useTranslation();
-  const shown = texts(t, warnings);
+  const shown = warnings.flatMap((w) => {
+    const text = warningText(t, w);
+    return text === null ? [] : [{ kind: w.kind, text }];
+  });
   if (shown.length === 0) {
     return null;
   }
@@ -160,7 +193,7 @@ export function IntegrationWarnings({ warnings }: { warnings: readonly Integrati
       aria-label={t("integrationWarnings.label")}
       data-testid="integration-warnings"
     >
-      {shown.map((text) => (
+      {shown.map(({ kind, text }) => (
         <li
           key={text}
           className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm break-words text-foreground"
@@ -170,7 +203,9 @@ export function IntegrationWarnings({ warnings }: { warnings: readonly Integrati
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
           />
-          <span className="min-w-0">{text}</span>
+          <span className="min-w-0">
+            {text} <WarningFix kind={kind} />
+          </span>
         </li>
       ))}
     </ul>

@@ -3,7 +3,7 @@
 
 // The Lifecycle section of the Route editor (C-09.FR-4, FR-5, FR-9; C-08.FR-1): the Reopen window and the Grace period
 // in minutes, and whether a rise to Urgent removes the acknowledgement. A new Route starts with the values of its
-// profile; the API keeps them in seconds.
+// profile; the API keeps them in seconds. "Learn more" sits beside the title.
 
 import type { TFunction } from "i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { RoutePolicy } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import { formatDuration } from "../lib/time";
+import { DocsLink } from "./docs-link";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
@@ -125,8 +126,15 @@ export function RoutePolicyLifecycle({
 }) {
   const { t } = useTranslation();
   return (
-    <fieldset className="flex min-w-0 flex-col gap-4" data-testid="route-lifecycle">
-      <legend className="mb-2 text-base font-semibold">{t("routes.lifecycle.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-4"
+      data-testid="route-lifecycle"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.lifecycle.title")}</span>
+        <DocsLink to="field.lifecycle" kind="learn_more" about={t("docs.fields.lifecycle")} />
+      </legend>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <MinutesField
           id={`${id}-reopen-window`}

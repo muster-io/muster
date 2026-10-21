@@ -4,7 +4,8 @@
 // Creating an Integration token (C-05.FR-2, FR-5, C-07.FR-6): the dialog takes an optional name, then shows the value,
 // the Alertmanager configuration that contains it and, with the Heartbeat on, the Heartbeat configuration once, each
 // with a copy button; with the Heartbeat off it says how to get the latter. They live only in this dialog's state: the
-// request's result keeps none, closing the dialog drops them, and the token list never shows a value.
+// request's result keeps none, closing the dialog drops them, and the token list never shows a value. The Alertmanager
+// configuration has "Learn more" beside its label.
 
 import { useMutation } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, TriangleAlertIcon } from "lucide-react";
@@ -13,6 +14,7 @@ import { useTranslation } from "react-i18next";
 
 import type { IntegrationTokenCreated } from "../api/gen/model";
 import { fieldErrorText, isApiError, problemText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 import { COPIED_MS, copyField } from "./setup-link-dialog";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -64,6 +66,7 @@ export function CopyBlock({
   text,
   children,
   actions,
+  docs,
   wrap = true,
   testId,
   className,
@@ -73,6 +76,8 @@ export function CopyBlock({
   text: string;
   children?: ReactNode;
   actions?: ReactNode;
+  /** A "Learn more" link beside the label. */
+  docs?: ReactNode;
   /** Long lines wrap; without it they scroll inside the block, which keeps the indentation of YAML readable. */
   wrap?: boolean;
   testId?: string;
@@ -83,8 +88,11 @@ export function CopyBlock({
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span id={`${id}-label`} className="text-sm font-medium">
-          {label}
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span id={`${id}-label`} className="text-sm font-medium">
+            {label}
+          </span>
+          {docs}
         </span>
         <div className="flex flex-wrap items-center gap-2">
           {actions}
@@ -151,6 +159,13 @@ function CreatedToken({ value, snippet, heartbeat }: Omit<Created, "name">) {
         id="integration-token-snippet"
         label={t("integrations.tokens.created.snippet")}
         text={snippet}
+        docs={
+          <DocsLink
+            to="field.integration_snippet"
+            kind="learn_more"
+            about={t("docs.fields.integrationSnippet")}
+          />
+        }
         testId="integration-token-snippet"
         wrap={false}
         className="max-h-72"

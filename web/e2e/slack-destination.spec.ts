@@ -341,7 +341,7 @@ test("names the Transport Slack, and Check ends a Broken Slack Destination at on
     await expect(page.getByTestId("broken-banner")).toBeVisible();
     await page.getByRole("button", { name: "Check", exact: true }).click();
     await expect(page.getByTestId("destination-check-item")).toHaveText(
-      `Channel: failed ${INVITE}`,
+      `Channel: failed ${INVITE} How to fix`,
     );
 
     // The bot is back: "Check" ends the Broken state at once.

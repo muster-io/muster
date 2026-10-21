@@ -6,7 +6,8 @@
 // callback address with its hint, which a new Connection gets once it is saved; polling with a stored push secret says
 // that saving removes it, as the server does. The limiter proposal offers half of the rate the bridge declares, never
 // by itself; the panel of what the bridge offers shows the info the last check read. The token, the proxy and the
-// limiter are the form's own. What the bridge sends is untrusted text, shown as text only.
+// limiter are the form's own. What the bridge sends is untrusted text, shown as text only. The event delivery mode has
+// "Learn more" beside its title.
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -21,6 +22,7 @@ import type {
 } from "../api/gen/model";
 import { formatDuration, useTimeFormat } from "../lib/time";
 import { unreachable } from "./destination-test-panel";
+import { DocsLink } from "./docs-link";
 import { CopyBlock } from "./integration-token-dialog";
 import { type LimiterValues, limiterValues } from "./limiter-field";
 import { type SecretChange, SecretField } from "./secret-field";
@@ -163,10 +165,16 @@ export function BridgeConnectionFields({
       <fieldset
         className="flex min-w-0 flex-col gap-2"
         disabled={disabled}
+        aria-labelledby={`${modeId}-title`}
         aria-describedby={errors.eventDelivery === undefined ? undefined : `${modeId}-error`}
       >
-        <legend className="mb-2 text-sm leading-none font-medium">
-          {t("connections.bridge.eventDelivery")}
+        <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm leading-none font-medium">
+          <span id={`${modeId}-title`}>{t("connections.bridge.eventDelivery")}</span>
+          <DocsLink
+            to="field.bridge_events"
+            kind="learn_more"
+            about={t("docs.fields.bridgeEvents")}
+          />
         </legend>
         {EVENT_DELIVERIES.map((mode) => (
           <div key={mode} className="flex min-w-0 items-start gap-2">

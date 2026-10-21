@@ -295,7 +295,7 @@ test("shows the Broken banner on the list and on the Route, and Check makes it h
   await signInAdmin(page);
   await nav(page, "Destinations").click();
   await expect(page.getByTestId("broken-destinations").getByTestId("broken-banner")).toHaveText(
-    `alerts: ${text}`,
+    `alerts: ${text} How to fix`,
   );
   const row = page
     .getByRole("row")

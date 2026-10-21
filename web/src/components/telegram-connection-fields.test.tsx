@@ -245,13 +245,27 @@ function Fields({
 describe("TelegramConnectionFields", () => {
   test("shows the hint under the base URL, and the http warning only for http", async () => {
     const screen = await render(providers(<Fields baseUrl="https://api.telegram.org" />));
-    await expect.element(page.getByTestId("telegram-base-url-hint")).toHaveTextContent(HINT);
+    await expect
+      .element(page.getByTestId("telegram-base-url-hint"))
+      .toHaveTextContent(`${HINT} Learn more`);
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Learn more: Telegram in restricted networks (opens in a new tab)",
+        }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks/",
+      );
     await expect
       .element(page.getByLabelText("Bot API base URL"))
       .toHaveAttribute("aria-describedby", "t-bot-api-base-url-hint");
     await expect.element(page.getByTestId("telegram-http-warning")).not.toBeInTheDocument();
     await screen.rerender(providers(<Fields baseUrl="http://127.0.0.1:18081" />));
-    await expect.element(page.getByTestId("telegram-http-warning")).toHaveTextContent(HTTP_WARNING);
+    await expect
+      .element(page.getByTestId("telegram-http-warning"))
+      .toHaveTextContent(`${HTTP_WARNING} How to fix`);
     await expect
       .element(page.getByLabelText("Bot API base URL"))
       .toHaveAttribute("aria-describedby", "t-bot-api-base-url-hint t-bot-api-base-url-warning");
@@ -300,12 +314,12 @@ describe("TelegramConnectionFields", () => {
     await expect
       .element(page.getByTestId("telegram-base-url-hint"))
       .toHaveTextContent(
-        "Собственный сервер Bot API держит бота только на этом сервере. Не обращайтесь к api.telegram.org с этим токеном ни из какого другого места: даже getMe возвращает бота в облако Telegram, и нажатия кнопок и комментарии начинают пропадать без всякой ошибки.",
+        "Собственный сервер Bot API держит бота только на этом сервере. Не обращайтесь к api.telegram.org с этим токеном ни из какого другого места: даже getMe возвращает бота в облако Telegram, и нажатия кнопок и комментарии начинают пропадать без всякой ошибки. Подробнее",
       );
     await expect
       .element(page.getByTestId("telegram-http-warning"))
       .toHaveTextContent(
-        "По http токен бота передаётся открытым текстом. Используйте https, если только этот путь не проходит по частной сети или туннелю.",
+        "По http токен бота передаётся открытым текстом. Используйте https, если только этот путь не проходит по частной сети или туннелю. Как исправить",
       );
     await expect.element(page.getByLabelText("Режим получения обновлений")).toHaveValue("webhook");
     await expect.element(page.getByRole("option", { name: "Вебхук" })).toBeInTheDocument();
@@ -336,7 +350,9 @@ describe("ConnectionForm of a Telegram Connection", () => {
     await page.getByRole("button", { name: "Set a value" }).click();
     await userEvent.fill(page.getByLabelText("Bot token"), "777010:ui-token");
     await userEvent.fill(page.getByLabelText("Bot API base URL"), "http://127.0.0.1:18081");
-    await expect.element(page.getByTestId("telegram-http-warning")).toHaveTextContent(HTTP_WARNING);
+    await expect
+      .element(page.getByTestId("telegram-http-warning"))
+      .toHaveTextContent(`${HTTP_WARNING} How to fix`);
     await userEvent.selectOptions(page.getByLabelText("Update mode"), "webhook");
     await page.getByRole("button", { name: "Save" }).click();
     expect(save).toHaveBeenCalledWith({
@@ -555,7 +571,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(stepTexts)
       .toEqual([
-        "Dry probe without the token: failed 2 ms · directWrong path prefix: the server answered 404.",
+        "Dry probe without the token: failed 2 ms · directWrong path prefix: the server answered 404. How to fix",
         "getMe: Skipped: an earlier step failed",
         "getWebhookInfo: Skipped: an earlier step failed",
       ]);
@@ -627,7 +643,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(stepTexts)
       .toEqual([
-        "Dry probe without the token: failed 1 ms · directThe connection failed.Details: dial tcp 127.0.0.1:1: connect: connection refused",
+        "Dry probe without the token: failed 1 ms · directThe connection failed. How to fixDetails: dial tcp 127.0.0.1:1: connect: connection refused",
         "getMe: Skipped: an earlier step failed",
         "getWebhookInfo: Skipped: an earlier step failed",
       ]);
@@ -723,7 +739,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(() => stepTexts()[0])
       .toBe(
-        "Пробный запрос без токена: ошибка 2 мс · напрямуюНеверный префикс пути: сервер ответил 404.",
+        "Пробный запрос без токена: ошибка 2 мс · напрямуюНеверный префикс пути: сервер ответил 404. Как исправить",
       );
     expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
   });

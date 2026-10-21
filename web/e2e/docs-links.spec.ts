@@ -88,7 +88,7 @@ function guide(page: Page, about: string) {
   return page.getByRole("link", { name: `Guide: ${about} (opens in a new tab)`, exact: true });
 }
 
-/** The page shows its title with exactly one documentation link, the Guide to target beside it. */
+/** The page shows its title with exactly one Guide link, to target, beside it. */
 async function expectGuide(
   page: Page,
   title: string | RegExp,
@@ -104,7 +104,8 @@ async function expectGuide(
   const rel = (await link.getAttribute("rel")) ?? "";
   expect(rel.split(" ")).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
   await expect(page.getByTestId("page-title").filter({ has: heading })).toContainText("Guide");
-  await expect(siteLinks(page)).toHaveCount(1);
+  // One Guide; the fields and problems of a page add their own "Learn more" and "How to fix".
+  await expect(page.getByRole("link", { name: /^Guide: / })).toHaveCount(1);
 }
 
 test.beforeAll(async () => {

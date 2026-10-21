@@ -237,7 +237,7 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   await page.getByRole("button", { name: "Check", exact: true }).click();
   await expect(page.getByTestId("destination-check-summary")).toHaveText("Check failed");
   await expect(page.getByTestId("destination-check-item").nth(3)).toHaveText(
-    `Bot rights in the discussion group: failed ${NOT_ADMIN_CODE}Details: ${NOT_ADMIN}`,
+    `Bot rights in the discussion group: failed ${NOT_ADMIN_CODE} How to fixDetails: ${NOT_ADMIN}`,
   );
   await botInGroup(true);
   await page.getByRole("button", { name: "Check", exact: true }).click();

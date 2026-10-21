@@ -6,7 +6,7 @@
 // last change and its reference, never a value. "Add secret" takes a name and a value, "Replace" a new value, and
 // "Remove" asks first; the value field starts empty, is never filled from the server, and is emptied after saving.
 // Changes send the ETag of the list as If-Match; one refused because the Destination changed meanwhile (412) offers to
-// read the list again. Without destinations:write the section lists the names only.
+// read the list again. Without destinations:write the section lists the names only. The title has "Learn more".
 
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -26,6 +26,7 @@ import type { DestinationSecretList } from "../api/gen/model";
 import { apiFetchTagged, fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
+import { DocsLink } from "./docs-link";
 import { reference } from "./header-editor";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -407,8 +408,13 @@ export function DestinationSecrets({ destinationId }: { destinationId: string })
   return (
     <Card data-testid="destination-secrets">
       <CardHeader>
-        <CardTitle>
+        <CardTitle className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2>{t("destinations.secrets.title")}</h2>
+          <DocsLink
+            to="field.webhook_secrets"
+            kind="learn_more"
+            about={t("docs.fields.webhookSecrets")}
+          />
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

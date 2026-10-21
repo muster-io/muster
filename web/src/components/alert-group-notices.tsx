@@ -3,7 +3,8 @@
 
 // The notices of the Alert Group page (C-09.FR-5, FR-7, FR-14, FR-16): the texts of reference.md for an Unclaimed Alert
 // Group (C-17.FR-3), Alerts still firing after a manual resolve, a Replacement, details removed by retention, and an
-// Alert Group firing again after a manual resolve of another one, linked to it through a search by its number.
+// Alert Group firing again after a manual resolve of another one, linked to it through a search by its number. The
+// Replacement notice ends with "How to fix", to the Instance labels that cause it.
 
 import { Link } from "@tanstack/react-router";
 import { InfoIcon, TriangleAlertIcon } from "lucide-react";
@@ -11,22 +12,29 @@ import type { ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import type { AlertGroupNotice } from "../api/gen/model";
+import { DocsLink } from "./docs-link";
 import { Alert, AlertDescription } from "./ui/alert";
 
 function Notice({
   tone,
   kind,
+  fix,
   children,
 }: {
   tone: "warning" | "info";
   kind: string;
+  /** The "How to fix" link at the end of the notice's line, if it has one. */
+  fix?: ReactNode;
   children: ReactNode;
 }) {
   const Icon = tone === "warning" ? TriangleAlertIcon : InfoIcon;
   return (
     <Alert role="note" data-testid={`notice-${kind}`}>
       <Icon aria-hidden="true" />
-      <AlertDescription className="wrap-anywhere text-foreground">{children}</AlertDescription>
+      <AlertDescription className="wrap-anywhere text-foreground">
+        {children}
+        {fix !== undefined && <> {fix}</>}
+      </AlertDescription>
     </Alert>
   );
 }
@@ -106,6 +114,15 @@ export function AlertGroupNotices({
           key={n.kind}
           kind={n.kind}
           tone={n.kind === "details_removed" || n.kind === "replacement" ? "info" : "warning"}
+          fix={
+            n.kind === "replacement" ? (
+              <DocsLink
+                to="fix.replacement"
+                kind="how_to_fix"
+                about={t("docs.fixes.replacement")}
+              />
+            ) : undefined
+          }
         >
           <NoticeText notice={n} />
         </Notice>
