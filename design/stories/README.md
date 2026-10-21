@@ -110,7 +110,9 @@ the generated files there — each library's models and lock file — are never 
 oapi-codegen strict server), `internal/bridge/gen/` (the models of the Bridge protocol, from S-073), `pkg/apiclient/`
 (the Go client), `web/src/api/gen/` (the orval client), `web/src/routeTree.gen.ts` (the route tree), the reference
 pages under `docs/reference/`, and lock files (`go.sum`, `web/pnpm-lock.yaml`). CI fails when any of them is not
-current.
+current. The images that `make demo` and `make docs-screenshots` make — `docs/assets/demo.gif` and the screenshots
+under `docs/assets/screenshots/` — are generated and checked in too, and never listed; CI does not make them again, and
+`make docs-check` fails on a screenshot that a page references but does not exist, or that no page references.
 
 ## 3. Sizing and slicing
 
@@ -130,8 +132,9 @@ current.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
   check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
-  S-091, then the pre-release stories S-092 to S-096, and last the Slack stories S-097 to S-105. The architecture lints
-  of ADR-0016 exist from the first story that contains code.
+  S-091, then the pre-release stories S-092 to S-096, then the Slack stories S-097 to S-105, and last the guides with
+  screenshots and the documentation links of the web UI, S-106 to S-110. The architecture lints of ADR-0016 exist from
+  the first story that contains code.
 
 ## 4. Shared contracts
 
@@ -252,7 +255,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Bridge | C-22, C-23, S-087 of C-13, and S-060 and S-091 of C-21 | S-073 – S-081, S-083 – S-090, S-060, S-091 | 19 |
 | Pre-release | S-092 – S-094 of C-10, S-095 of C-09, S-096 of C-06 | S-092 – S-096 | 5 |
 | Slack | C-24 | S-097 – S-105 | 9 |
-| **L1** | 24 | | **105** |
+| Guides | S-106 – S-110 of C-21 | S-106 – S-110 | 5 |
+| **L1** | 24 | | **110** |
 
 ### Foundation
 
@@ -399,6 +403,16 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-103](S-103-slack-connection-and-destination-pages-check-before-saving-and-profile-links.md) | C-24 | Slack Connection and Destination pages, the check before saving, and Slack in the profile (FE) | fe | S-102, S-105, S-070 |
 | [S-104](S-104-connect-slack-documentation-with-the-app-manifests.md) | C-24 | Connect Slack on the documentation site, with the app manifests, and Slack on the Messengers page | docs | S-103 |
 
+### Guides
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-106](S-106-documentation-screenshots-tutorial-and-messenger-guides.md) | C-21 | Screenshots for the documentation, the image check, the tutorial "First alert in a messenger" and step-by-step sections on the messenger pages | docs | S-104 |
+| [S-107](S-107-step-by-step-guides-with-screenshots-on-the-other-pages.md) | C-21 | Step-by-step sections with screenshots on the pages of Integrations, Routes, templates, Account links, access, Outgoing webhooks, the Organization and Alert Groups | docs | S-106 |
+| [S-108](S-108-documentation-links-version-link-component-anchor-check-and-page-titles.md) | C-21 | Documentation links in the web UI: the documentation version, the link component, the check of linked anchors, and links next to the titles of the Alert Group, Integration, Route, Connection and Destination pages (FE) | fe | S-106 |
+| [S-109](S-109-learn-more-and-how-to-fix-links-on-integration-route-connection-and-destination-pages.md) | C-21 | "Learn more" links next to complex fields and "How to fix" links next to checks, warnings and Broken states on the Integration, Route, Connection, Destination and Alert Group pages (FE) | fe | S-108 |
+| [S-110](S-110-documentation-links-on-statistics-profile-access-and-organization-pages.md) | C-21 | Documentation links on the Statistics, profile, Access and Organization pages: page titles, fields and problems (FE) | fe | S-109, S-107 |
+
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
 rules exist. S-061 was split from S-039 after the review of the contracts: S-039 keeps Connections, Destinations, the
@@ -508,6 +522,21 @@ of a Slack Connection (S-105), split from the pages by the review of these contr
 one; the pages (S-103); and the page "Connect Slack" (S-104). S-105 keeps its place before S-103 although its ID is
 larger. S-097 touches 43 files, at the edge of the size signal, because the type, the client and the fake server are
 each needed for the live check of the others.
+
+S-106 to S-110 were added before the release of 0.1.0, when the maintainer decided that the documentation site gets
+step-by-step guides with screenshots of the English UI and that the web UI links each page, complex field and problem
+to the documentation of the version it runs (D417 to D422; C-21.FR-9 to FR-12). The screenshots are taken by a
+Playwright suite on `muster dev`, by hand like the README demo, and `make docs-check` keeps the pages' references and the
+images in step. S-106 builds the suite, the image check, the tutorial "First alert in a messenger" and the messenger
+pages; S-107 the sections of every other page. The links were planned as one story, S-108, and split into three when
+their contracts were written, because placing them touches about 100 files: S-108 the documentation version that the
+server gives the session, the link component, the check of every linked anchor against the built site and the links
+next to the titles of the main pages; S-109 the links of the fields and problems of those pages; S-110 those of the
+Statistics, profile, Access and Organization pages. They come last, as a phase of their own, because they document and
+link pages of every earlier phase. S-108 needs only S-106, whose sections its links open, and may be built beside
+S-107; S-109 links only to sections that exist after S-106, and S-110 needs S-107's sections and follows S-109, since
+both change the list of links and the translations. S-110 ends by taking every screenshot again, so that the guides
+show the links.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
