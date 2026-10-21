@@ -84,15 +84,11 @@ The images are `ghcr.io/muster-io/muster` and the tags are:
 
 ## Verify a release
 
-!!! note "Before the first release"
-    No release exists yet, so there is nothing to verify, and the commands below have not been run against a real
-    release. The development images, `edge` and `sha-…`, are **not signed** and carry no SBOM attestation: the workflow
-    that builds them skips signing. Use these commands from the first release on, with its tag.
-
-A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image
-and the Helm chart with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so
-a valid signature proves that the image or the chart was built by that workflow on that tag. Install cosign v3 or newer
-(the release signs with v3.1.3, in the new signature format), then verify the image:
+A release is built by the workflow `release.yml` of the repository, on a tag `vX.Y.Z`. It signs the container image and
+the Helm chart with [cosign](https://docs.sigstore.dev/cosign/), keyless, with the identity of that workflow run, so a
+valid signature proves that the image or the chart was built by that workflow on that tag. The development images,
+`edge` and `sha-…`, are **not signed** and carry no SBOM attestation: the workflow that builds them skips signing.
+Install cosign v3 or newer (the release signs with v3.1.3, in the new signature format), then verify the image:
 
 ```sh
 VERSION=vX.Y.Z

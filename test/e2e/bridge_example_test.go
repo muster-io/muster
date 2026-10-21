@@ -26,10 +26,10 @@ import (
 	"github.com/muster-io/muster/internal/devmode"
 )
 
-// exampleImage is the example bridge of muster-bridge-go (ADR-0017), pinned by digest. The libraries are released when
-// L1 is complete; until then the tests run the edge image, whose digest Renovate keeps current.
+// exampleImage is the example bridge of muster-bridge-go (ADR-0017): the image of a library release, pinned by digest.
+// Renovate moves the version and the digest together when the library releases.
 // renovate: datasource=docker depName=ghcr.io/muster-io/muster-example-bridge
-const exampleImage = "ghcr.io/muster-io/muster-example-bridge:edge@sha256:98117fa080dcea6e739f457ebab3e2f1bd6ba0ae5ba4a8d53404c2b5f145e1ad"
+const exampleImage = "ghcr.io/muster-io/muster-example-bridge:v0.1.0@sha256:70a84be3673676435b75c7d1e3b9a6a10c7350318fe3c33962b7fb2d0872114e"
 
 const (
 	exampleListen = "127.0.0.1:18095"

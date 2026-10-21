@@ -90,10 +90,9 @@ The Go module is `github.com/muster-io/muster-bridge-go`, and its package is `br
 go get github.com/muster-io/muster-bridge-go
 ```
 
-The libraries are released when Muster's first release is, and `go get` without a version takes the latest commit of the
-module's `master` branch until then. Each release is a tag `vX.Y.Z`. Versions stay `0.x` until Muster 1.0, and every
-library release speaks the protocol versions Muster supports at that time, today protocol version 1; a breaking protocol
-change is a new protocol version, not a new major version of a library.
+Each release of a library is a tag `vX.Y.Z`, and `go get` without a version takes the newest release. Versions stay
+`0.x` until Muster 1.0, and every library release speaks the protocol versions Muster supports at that time, today
+protocol version 1; a breaking protocol change is a new protocol version, not a new major version of a library.
 
 **1. Implement `bridge.Messenger`.** It has five methods, each given the name of the bot whose token Muster sent:
 `PostMessage`, `EditMessage`, `ReplyInThread`, `CheckChannel` and `AnswerEvent`. The sketch below is for Parley, a
@@ -310,11 +309,11 @@ curl -s -H 'Authorization: Bearer example-token' 127.0.0.1:18095/v1/info \
   | jq -c '{protocol_version, user_lookup}'                                 # {"protocol_version":"1","user_lookup":"login"}
 ```
 
-Then run `muster bridge check` against it, here from Muster's development image, which reaches the host's loopback
-with `--network host` on Linux only:
+Then run `muster bridge check` against it, here from Muster's image, which reaches the host's loopback with
+`--network host` on Linux only:
 
 ```sh
-docker run --rm --network host -v /tmp/bt:/token:ro ghcr.io/muster-io/muster:edge bridge check \
+docker run --rm --network host -v /tmp/bt:/token:ro ghcr.io/muster-io/muster:latest bridge check \
   http://127.0.0.1:18095 --token-file /token --channel alerts --forbidden-channel nobot --handle alice \
   --no-interactive
 ```
@@ -347,18 +346,11 @@ newer and depends only on Starlette, httpx and pydantic 2. Like the Go library, 
 `muster-bridge-python`, under the MIT licence and without a CLA.
 
 ```sh
+python3 -m venv .venv && . .venv/bin/activate
 pip install muster-bridge
 ```
 
-The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
-`pip install muster-bridge` finds nothing: install it from a clone of its repository with `pip install .`. Its versions
-stay `0.x` until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.
-
-```sh
-git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
-python3 -m venv .venv && . .venv/bin/activate
-pip install .
-```
+Its versions stay `0.x` until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.
 
 The library serves the protocol as an ASGI application, `BridgeApp`, and calls your code with `async` methods on the
 event loop that serves the bridge. Call your messenger with an asynchronous client, or move a blocking call off the
@@ -590,10 +582,11 @@ processes over one store, run each bot in one process only.
 **8. Check it.** Run `muster bridge check` against your bridge (see [Test your bridge](#test-your-bridge)).
 
 The library's repository has a complete bridge in one file, `examples/memory_bridge.py`: its messenger lives in memory
-and writes every message the bot posts to the log. In the clone, with the library installed as above, install uvicorn
-beside it and run the example with a token, the one a Bridge Connection in Muster would hold:
+and writes every message the bot posts to the log. With the library installed as above, clone the repository, install
+uvicorn beside the library and run the example with a token, the one a Bridge Connection in Muster would hold:
 
 ```sh
+git clone https://github.com/muster-io/muster-bridge-python && cd muster-bridge-python
 pip install uvicorn
 printf example-token > /tmp/bt
 python examples/memory_bridge.py --token-file /tmp/bt
@@ -615,11 +608,11 @@ that runs in memory, with a web page: channels, Threads, buttons, direct chats b
 found by login. It offers every feature of the protocol, one by one switchable, and both event delivery modes. Use it
 to try Muster without a real messenger, and as a reference for your own bridge.
 
-Its image is `ghcr.io/muster-io/muster-example-bridge`. Until the libraries' first release, use the tag `edge`, which
-follows the `master` branch of the library's repository; releases will be tagged `vX.Y.Z`.
+Its image is `ghcr.io/muster-io/muster-example-bridge`, tagged `vX.Y.Z` with each release of the Go library; `edge`
+follows the `master` branch of the library's repository.
 
 ```sh
-docker run --rm -p 8095:8095 -e BRIDGE_TOKEN=example-token ghcr.io/muster-io/muster-example-bridge:edge
+docker run --rm -p 8095:8095 -e BRIDGE_TOKEN=example-token ghcr.io/muster-io/muster-example-bridge:v0.1.0
 ```
 
 The page is then at `http://127.0.0.1:8095/`, and the protocol under `/v1/` on the same port. `BRIDGE_FEATURES` limits
@@ -661,7 +654,7 @@ name and nothing on the host's loopback is involved.
     cat >compose.override.yaml <<'EOF'
     services:
       example-bridge:
-        image: ghcr.io/muster-io/muster-example-bridge:edge
+        image: ghcr.io/muster-io/muster-example-bridge:v0.1.0
         environment:
           BRIDGE_TOKEN: ${EXAMPLE_BRIDGE_TOKEN}
         ports:
@@ -1756,10 +1749,10 @@ prints `PUSH <url> <secret>` (or `PUSH <url>` with `--push-secret-file`): point 
 that secret. Before it waits, up to five minutes, for a press, it prints `WAIT press: …, message_id <id>`; press a
 button of that message in your messenger, or play the person in a script.
 
-The check runs from the `muster` binary, or from the development image:
+The check runs from the `muster` binary, or from Muster's image:
 
 ```sh
-docker run --rm --network host -v "$PWD/token:/token:ro" ghcr.io/muster-io/muster:edge bridge check \
+docker run --rm --network host -v "$PWD/token:/token:ro" ghcr.io/muster-io/muster:latest bridge check \
   http://127.0.0.1:18095 --token-file /token --channel alerts --forbidden-channel nobot --handle alice \
   --no-interactive
 ```
