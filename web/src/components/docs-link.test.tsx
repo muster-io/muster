@@ -16,6 +16,7 @@ import { render } from "vitest-browser-react";
 import type { Session } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { DOCS_SITE } from "../lib/docs";
 // The title and its link are laid out by their classes, as in the application.
 // oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for its side effect
 import "../styles.css";
@@ -133,11 +134,15 @@ describe("DocsLink", () => {
     performance.clearResourceTimings();
     await renderIn(<DocsLink to="page.routes" kind="guide" about="Routes" />, session("latest"));
     await expect.element(page.getByRole("link")).toBeVisible();
+    const site = new URL(DOCS_SITE);
     const fromSite = performance
       .getEntriesByType("resource")
-      .filter((e) => e.name.startsWith("https://muster-io.github.io"));
+      .filter((e) => new URL(e.name).origin === site.origin);
     expect(fromSite).toEqual([]);
-    expect(document.querySelector("link[href*='muster-io.github.io']")).toBeNull();
+    const linked = Array.from(document.querySelectorAll<HTMLLinkElement>("link[href]")).filter(
+      (l) => new URL(l.href, document.baseURI).origin === site.origin,
+    );
+    expect(linked).toEqual([]);
   });
 });
 

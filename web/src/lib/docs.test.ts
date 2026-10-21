@@ -74,7 +74,10 @@ describe("docsUrl", () => {
       expect(target, key).toMatch(/^[a-z0-9-]+(\/[a-z0-9-]+)*\.md(#[a-z0-9-]+)?$/);
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the keys of the JSON are its DocsKeys
       const url = docsUrl(key as DocsKey);
-      expect(url.startsWith(`${DOCS_SITE}/latest/`), url).toBe(true);
+      const parsed = new URL(url);
+      const site = new URL(DOCS_SITE);
+      expect(parsed.origin, url).toBe(site.origin);
+      expect(parsed.pathname.startsWith(`${site.pathname}/latest/`), url).toBe(true);
       expect(url, key).not.toContain(".md");
     }
   });
