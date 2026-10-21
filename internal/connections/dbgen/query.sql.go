@@ -1328,6 +1328,31 @@ func (q *Queries) RecordSocketHello(ctx context.Context, arg RecordSocketHelloPa
 	return result.RowsAffected(), nil
 }
 
+const renameConnection = `-- name: RenameConnection :exec
+UPDATE connections
+SET name = $1, updated_at = $2::timestamptz, version = version + 1
+WHERE org_id = $3 AND id = $4 AND deleted_at IS NULL
+`
+
+type RenameConnectionParams struct {
+	Name  string
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// RenameConnection gives a Connection a new name and changes nothing else: `muster dev` renames its demo Connection
+// of an earlier version, kept in a development database, to the current name.
+func (q *Queries) RenameConnection(ctx context.Context, arg RenameConnectionParams) error {
+	_, err := q.db.Exec(ctx, renameConnection,
+		arg.Name,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
 const setBotIdentity = `-- name: SetBotIdentity :exec
 UPDATE connections
 SET bot_user_id = $1, bot_username = $2

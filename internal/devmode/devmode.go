@@ -59,6 +59,9 @@ const (
 	OIDCClientID     = "muster-dev"
 	OIDCClientSecret = "muster-dev-oidc-secret"
 	OIDCDisplayName  = "Example SSO"
+	// OIDCDisplayNameWas is the display name that earlier versions gave the demo OIDC configuration, which a
+	// development database may still hold; the start renames it.
+	OIDCDisplayNameWas = "Dev IdP"
 	// IngestURL is MUSTER_INGEST_URL in development mode: the ingest listener of `muster dev`.
 	IngestURL = "http://localhost:8081"
 	// IntegrationName is the demo Integration, IntegrationToken its published token and IntegrationReceiver the
@@ -186,7 +189,7 @@ func FakeAddresses() Addresses {
 func OIDCDemo() oidc.Demo {
 	return oidc.Demo{
 		IssuerURL: "http://" + OIDCAddr, ClientID: OIDCClientID, ClientSecret: OIDCClientSecret,
-		DisplayName: OIDCDisplayName, AllowNetwork: LoopbackNetwork,
+		DisplayName: OIDCDisplayName, DisplayNameWas: OIDCDisplayNameWas, AllowNetwork: LoopbackNetwork,
 		Mappings: []oidc.GroupMapping{{Group: "muster-admins", Role: "admin"}, {Group: "oncall", Role: "responder"}},
 	}
 }
@@ -202,7 +205,7 @@ const (
 
 // ConnectionDemo is the demo Connection "Example Mattermost", to the fake Mattermost server, without Destinations.
 func ConnectionDemo() connections.Demo {
-	return connections.Demo{Name: ConnectionName, ServerURL: "http://" + MattermostAddr,
+	return connections.Demo{Name: ConnectionName, Was: "Dev Mattermost", ServerURL: "http://" + MattermostAddr,
 		BotToken: logging.Secret(ConnectionBotToken)}
 }
 
@@ -229,7 +232,7 @@ const (
 // TelegramDemo is the demo Connection "Example Telegram", to the fake Telegram server in the long-polling mode, without
 // Destinations.
 func TelegramDemo() connections.Demo {
-	return connections.Demo{Type: connections.TypeTelegram, Name: TelegramConnectionName,
+	return connections.Demo{Type: connections.TypeTelegram, Name: TelegramConnectionName, Was: "Dev Telegram",
 		BaseURL: "http://" + TelegramAddr, BotToken: logging.Secret(TelegramConnectionBotToken)}
 }
 
@@ -242,8 +245,8 @@ const (
 
 // BridgeDemo is the demo Connection "Example Bridge", to the fake bridge in poll mode, without Destinations.
 func BridgeDemo() connections.Demo {
-	return connections.Demo{Type: connections.TypeBridge, Name: BridgeConnectionName, BaseURL: "http://" + BridgeAddr,
-		BotToken: logging.Secret(BridgeConnectionBotToken)}
+	return connections.Demo{Type: connections.TypeBridge, Name: BridgeConnectionName, Was: "Dev Bridge",
+		BaseURL: "http://" + BridgeAddr, BotToken: logging.Secret(BridgeConnectionBotToken)}
 }
 
 // The demo Slack Connection that `muster dev` ensures at start: "Example Slack" on the fake Slack server's first app,
@@ -257,7 +260,7 @@ const (
 // SlackDemo is the demo Connection "Example Slack", on the fake Slack server's first app in socket mode, without
 // Destinations; SlackRoute sends its requests to the fake server.
 func SlackDemo() connections.Demo {
-	return connections.Demo{Type: connections.TypeSlack, Name: SlackConnectionName,
+	return connections.Demo{Type: connections.TypeSlack, Name: SlackConnectionName, Was: "Dev Slack",
 		BotToken: logging.Secret(SlackConnectionBotToken), AppToken: logging.Secret(SlackConnectionAppToken)}
 }
 

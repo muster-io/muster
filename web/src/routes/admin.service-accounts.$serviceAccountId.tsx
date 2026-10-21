@@ -63,11 +63,23 @@ function useStoreAccount() {
   };
 }
 
-function Details({ account }: { account: ServiceAccount }) {
+/**
+ * The details of the account. A reader who cannot change the Role finds "Learn more" about the Permissions it gives
+ * beside it here, as the Role card, which only a writer sees, has it.
+ */
+function Details({ account, canWrite }: { account: ServiceAccount; canWrite: boolean }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
+  const role = canWrite ? (
+    roleLabel(t, account.role)
+  ) : (
+    <span className="flex flex-wrap items-baseline gap-x-2">
+      <span>{roleLabel(t, account.role)}</span>
+      <DocsLink to="field.permissions" kind="learn_more" about={t("docs.fields.permissions")} />
+    </span>
+  );
   const rows: [string, ReactNode, string][] = [
-    [t("serviceAccounts.fields.role"), roleLabel(t, account.role), "role"],
+    [t("serviceAccounts.fields.role"), role, "role"],
     [t("serviceAccounts.fields.status"), statusLabel(t, account.status), "status"],
     [t("serviceAccounts.fields.tokens"), String(account.token_count), "tokens"],
     [t("serviceAccounts.fields.created"), dateTime(account.created_at), "created"],
@@ -404,7 +416,7 @@ function ServiceAccountView({ serviceAccountId }: { serviceAccountId: string }) 
         </p>
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Details account={account} />
+          <Details account={account} canWrite={canWrite} />
           {canWrite && <RoleCard key={account.id} account={account} />}
           {canWrite && <ActionsCard account={account} />}
           <TokensCard account={account} canWrite={canWrite} />

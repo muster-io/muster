@@ -503,26 +503,19 @@ test("Keyring follows the activation of a key without a reload", async ({ page }
   await expect(row(other.id).getByTestId("keyring-key-state")).toHaveText("Active", {
     timeout: 30_000,
   });
-  // A removable key says so in its own sentence, with "How to fix" beside it to the key rotation guide.
+  // The removable key's sentence is matched on its own element, apart from its "How to fix" link, which
+  // keyring-status.test.tsx checks.
   const state = row(first.id).getByTestId("keyring-key-state");
-  const removable = state.getByText(
-    `Key ${first.id} is no longer used and can be removed from MUSTER_SECRET_KEYS.`,
-    { exact: true },
-  );
-  await expect(state.getByText("Still needed", { exact: true }).or(removable)).toBeVisible();
-  if (await removable.isVisible()) {
-    const fix = state.getByRole("link", {
-      name: "How to fix: Removing an unused master key (opens in a new tab)",
-      exact: true,
-    });
-    await expect(fix).toHaveText("How to fix");
-    const href = new URL((await fix.getAttribute("href")) ?? "");
-    expect(href.origin).toBe("https://muster-io.github.io");
-    expect(href.pathname).toBe("/muster/latest/operations/key-rotation/");
-    expect(href.hash).toBe("");
-  } else {
-    await expect(state.getByRole("link")).toHaveCount(0);
-  }
+  await expect(
+    state
+      .getByText("Still needed", { exact: true })
+      .or(
+        state.getByText(
+          `Key ${first.id} is no longer used and can be removed from MUSTER_SECRET_KEYS.`,
+          { exact: true },
+        ),
+      ),
+  ).toBeVisible();
   await shot(page, "organization-keyring-activated");
   expect(csp).toEqual([]);
 });

@@ -319,6 +319,43 @@ test("Learn more beside the fields of the admin forms", async ({ page }) => {
   await expect(page.getByRole("group", { name: "Rows", exact: true })).toBeVisible();
 });
 
+/** The "Learn more" about the Permissions a Service account's Role gives. */
+function permissionsLink(scope: Page | Locator): Locator {
+  return docsLink(scope, "Learn more", "Service account Permissions");
+}
+
+test("a Service account's Permissions have one Learn more, beside the Role a reader cannot change too", async ({
+  page,
+}) => {
+  await signInAdmin(page);
+  await page.goto(`/admin/service-accounts/${ids.serviceAccount}`);
+  await expect(page.getByRole("heading", { name: "Role", level: 2 })).toBeVisible();
+  await expect(page.getByTestId("sa-role")).toHaveText("Viewer");
+  await expect(permissionsLink(page)).toHaveCount(1);
+
+  // No Role has service-accounts:read without service-accounts:write, so the session is narrowed in the browser: the
+  // Role card goes, and the link shows beside the Role in the details.
+  await page.route("**/api/v1/sessions/current", async (route) => {
+    const response = await route.fetch();
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "permissions" in body) {
+      const permissions = Array.isArray(body.permissions) ? body.permissions : [];
+      body.permissions = permissions.filter((p) => p !== "service-accounts:write");
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  await expect(page.getByTestId("sa-role")).toContainText("Viewer");
+  await expect(page.getByRole("heading", { name: "Role", level: 2 })).toHaveCount(0);
+  await expect(permissionsLink(page)).toHaveCount(1);
+  await expectTarget(
+    permissionsLink(page.getByTestId("sa-role")),
+    "configure/api-tokens/",
+    "#two-kinds-of-token",
+  );
+  await page.unroute("**/api/v1/sessions/current");
+});
+
 /** The fields of the OIDC settings this spec changes, as read. */
 const OIDC_FIELDS = ["group_mappings", "unmatched_role", "client_secret_expires_on"] as const;
 

@@ -9,6 +9,7 @@ covers: [C-21.FR-11, C-21.AC-8, C-21.FR-9]
 files_touched:
   - AGENTS.md
   - CONTRIBUTING.md
+  - design/prd/l1/reference.md
   - docs/messengers/write-a-bridge.md
   - internal/accountlinks/accountlinks_test.go
   - internal/accountlinks/bridge_test.go
@@ -23,6 +24,7 @@ files_touched:
   - internal/connections/connections_test.go
   - internal/connections/draft_test.go
   - internal/connections/live_test.go
+  - internal/connections/query.sql
   - internal/connections/slack_test.go
   - internal/connections/telegram_test.go
   - internal/devmode/devmode.go
@@ -34,6 +36,8 @@ files_touched:
   - internal/fakes/fakeslack/fakeslack.go
   - internal/fakes/fakeslack/fakeslack_test.go
   - internal/oidc/oidc_integration_test.go
+  - internal/oidc/query.sql
+  - internal/oidc/settings.go
   - internal/oidc/settings_test.go
   - internal/runtime/runtime_test.go
   - internal/slack/check_test.go
@@ -60,6 +64,7 @@ files_touched:
   - web/e2e/profile.spec.ts
   - web/e2e/request-log.spec.ts
   - web/e2e/screenshots/bridge.spec.ts
+  - web/e2e/screenshots/capture.ts
   - web/e2e/screenshots/first-alert.spec.ts
   - web/e2e/screenshots/slack.spec.ts
   - web/e2e/several-connections.spec.ts
@@ -90,6 +95,7 @@ files_touched:
   - web/src/components/organization-form.tsx
   - web/src/components/organization-nav.tsx
   - web/src/components/route-destinations.test.tsx
+  - web/src/components/section-nav.tsx
   - web/src/components/slack-connection-fields.test.tsx
   - web/src/components/slack-destination-fields.test.tsx
   - web/src/components/system-status-sections.test.tsx
@@ -142,8 +148,11 @@ issue: 339
   workspace" and "Example workspace B", "Example SSO", and "Example Mattermost", "Example Telegram", "Example Bridge"
   and "Example Slack", with every test, spec and page that names them (`AGENTS.md`, `CONTRIBUTING.md`,
   `docs/messengers/write-a-bridge.md`); the published development tokens, ids, ports and behaviour stay as they are.
-  `muster dev` ensures its demo Connections by name, so a development database that already holds the old ones keeps
-  them beside the new ones; a fresh database, as the end-to-end runs and the screenshots use, has only the new ones.
+  `muster dev` ensures its demo Connections by name; at start it renames a demo Connection that a development database
+  of an earlier version keeps under its earlier name (with its id and tokens) and the demo OIDC settings still named
+  "Dev IdP", each recorded in the Audit log as done by the system, so no database ends with both.
+- The address of a session in the screenshots (`::1` or `127.0.0.1` of the run) shows as `203.0.113.24`, a rule of
+  `capture.ts`.
 
 **OUT**
 
@@ -162,7 +171,8 @@ issue: 339
   Organization's sub-navigation its key, which `organization-form.tsx` reads for the pages it draws, so the seven pages
   that use it change no route file; the Security and Outbound addresses pages hold the fields that get "Learn more" in
   their own route files. A Service account has the Permissions of its Role, so its "Learn more" sits beside the Role
-  on its page (`permission-picker.tsx` draws only the Permissions of a Personal access token and is not touched).
+  on its page: in the Role card for a user who may change it, otherwise beside the Role in its details, one link
+  either way (`permission-picker.tsx` draws only the Permissions of a Personal access token and is not touched).
   "Learn more" and "How to fix" as in S-109; the banners of `notice-banners.tsx` show "How to fix" only to Admins, who
   see those banners. The Keyring's two notices are its sentence of a key that can be removed and its "Missing on
   {replicas}" of a key, which keeps the key from being activated (the refusal "Replicas {names} do not hold key {id}
@@ -172,8 +182,10 @@ issue: 339
   notice that this spec does not bring about — "No replica is leading", the recovery after downtime, the Keyring's
   notices, which need the leader gone, a downtime, a key rotation or a replica without a key — is shown by the
   component's test with its link instead (`notice-banners.test.tsx`, new, and `keyring-status.test.tsx`).
-  `organization-settings.spec.ts`, which activates a second key on `muster dev`, also checks the link beside the
-  sentence of a key that can be removed once the key gets there.
+  `organization-settings.spec.ts` activates a second key on `muster dev` and asserts the sentence of a key that can be
+  removed on its own element, without its link, as the key may still be needed when the spec looks.
+- **Demo renames**: `connections.Demo.Was` and `oidc.Demo.DisplayNameWas` name the earlier names; the queries
+  `RenameConnection` and `RenameDemoSettings` rename in place and raise the version.
 
 ## Steps
 
@@ -216,10 +228,12 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link the organization, access and profile pages to the documentation`.
-- The story touches 109 hand-written files: 36 for the links (components, routes, texts, the list, their tests and
-  specs, and the two specs the links or the screenshots needed fixed) and 73 for the neutral names, each a mechanical
-  change of a name in a test, a spec or a page. It stays one pull request because the names must change before the
-  screenshots are taken again, and this story owns that re-shoot.
+- The story touches 115 hand-written files: 39 for the links and the screenshots (components, routes, texts, the list,
+  reference.md's wording, their tests and specs, the two specs the links or the screenshots needed fixed, and the
+  session address rule of `capture.ts`) and 76 for the neutral names (73 mechanical changes of a name in a test, a
+  spec or a page, and the rename of the earlier demo data in `connections`, `oidc` and their queries). It stays one
+  pull request because the names must change before the screenshots are taken again, and this story owns that
+  re-shoot.
 - It completes C-21.FR-11 and C-21.AC-8: after it every place of the table shows its link.
 
 ## Coverage

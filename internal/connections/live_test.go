@@ -162,6 +162,7 @@ func TestLive(t *testing.T) {
 		t.Run("crud", e.crud)
 		t.Run("deleteConnection", e.deleteConnection)
 		t.Run("demo", e.demo)
+		t.Run("demoRename", e.demoRename)
 		t.Run("telegram", e.telegram)
 		t.Run("telegramDestinations", e.telegramDestinations)
 		t.Run("bridge_event_claim", e.bridgeEventClaim)
@@ -792,6 +793,53 @@ func (e *liveEnv) deleteConnection(t *testing.T) {
 	}
 	t.Logf("deleted connection %s: delivery %d not_delivered (%q), no request to the server", c.PublicID, deliveryID,
 		lastError)
+}
+
+// demoRename: a development database of an earlier version keeps a demo Connection under its earlier name; the start
+// renames it in place, with its id and bot token, once, and records the rename; with both names present, nothing
+// changes.
+func (e *liveEnv) demoRename(t *testing.T) {
+	ensure := func(d connections.Demo) {
+		t.Helper()
+		if err := e.conns.EnsureDemo(t.Context(), d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ensure(connections.Demo{Name: "Dev Rename", ServerURL: e.fake.URL(), BotToken: botToken})
+	var id int64
+	var publicID string
+	var token []byte
+	if err := e.d.Pool.QueryRow(t.Context(), `SELECT id, public_id, bot_token_ciphertext FROM connections
+		WHERE org_id = $1 AND name = 'Dev Rename' AND deleted_at IS NULL`, e.orgID).Scan(&id, &publicID,
+		&token); err != nil {
+		t.Fatal(err)
+	}
+	d := connections.Demo{Name: "Example Rename", Was: "Dev Rename", ServerURL: e.fake.URL(), BotToken: botToken}
+	ensure(d)
+	ensure(d)
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE org_id = $1 AND name IN ('Dev Rename', 'Example Rename')
+		AND deleted_at IS NULL`, e.orgID); n != 1 {
+		t.Fatalf("%d demo connections", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE org_id = $1 AND id = $2 AND public_id = $3
+		AND name = 'Example Rename' AND bot_token_ciphertext = $4 AND version = 2`, e.orgID, id, publicID,
+		token); n != 1 {
+		t.Error("the renamed connection lost its id, its token or its version")
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_log WHERE org_id = $1 AND action = 'connection.updated'
+		AND resource_public_id = $2 AND actor_kind = 'system' AND details @> '{"development_demo": true}'
+		AND diff @> '[{"pointer": "/name", "before": "Dev Rename", "after": "Example Rename"}]'`, e.orgID,
+		publicID); n != 1 {
+		t.Errorf("%d audit entries of the rename", n)
+	}
+
+	ensure(connections.Demo{Name: "Dev Both", ServerURL: e.fake.URL(), BotToken: botToken})
+	ensure(connections.Demo{Name: "Example Both", ServerURL: e.fake.URL(), BotToken: botToken})
+	ensure(connections.Demo{Name: "Example Both", Was: "Dev Both", ServerURL: e.fake.URL(), BotToken: botToken})
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE org_id = $1 AND name IN ('Dev Both', 'Example Both')
+		AND deleted_at IS NULL AND version = 1`, e.orgID); n != 2 {
+		t.Errorf("with both names, %d connections unchanged", n)
+	}
 }
 
 // demo is C-01.FR-13: the demo Connection is created once, however often `muster dev` starts.

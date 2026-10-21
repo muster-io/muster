@@ -105,9 +105,9 @@ with a development default takes it unless the variable is set, even empty, and 
 command with the same defaults. The database default also yields to any field of the main connection
 (`MUSTER_DATABASE_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`, `_PASSWORD_FILE`, `_SSLMODE`), and the master key and
 the Admin password to their `_FILE` variables. `docker compose -f deploy/dev/docker-compose.yml down -v` removes the
-development database with its data. The demo Connections were named "Dev Mattermost", "Dev Telegram", "Dev Bridge"
-and "Dev Slack" before, and `muster dev` ensures them by name, so a development database from before keeps the old
-ones, polling with the same published tokens next to the new ones: recreate it with that command, then `make dev-db`.
+development database with its data. A development database of an earlier version keeps the demo Connections under
+their earlier names ("Dev Mattermost", "Dev Telegram", "Dev Bridge", "Dev Slack") and the OIDC demo as "Dev IdP";
+`muster dev` renames them at start.
 
 The screenshots of the documentation, under `docs/assets/screenshots/`, are taken by `make docs-screenshots`: the
 Playwright suite `web/e2e/screenshots/` walks the guides on a `muster dev` of its own, inside the Playwright image that

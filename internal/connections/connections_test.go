@@ -260,6 +260,19 @@ func (s *memStore) InsertConnection(_ context.Context, a dbgen.InsertConnectionP
 	return s.next, nil
 }
 
+func (s *memStore) RenameConnection(_ context.Context, a dbgen.RenameConnectionParams) error {
+	if err := s.fail["RenameConnection"]; err != nil {
+		return err
+	}
+	if err := s.taken(a.Name, a.ID); err != nil {
+		return err
+	}
+	r := &s.rows[a.ID].row
+	r.Name = a.Name
+	r.Version++
+	return nil
+}
+
 func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionParams) error {
 	if err := s.fail["UpdateConnection"]; err != nil {
 		return err
@@ -1506,6 +1519,76 @@ func TestEnsureDemo(t *testing.T) {
 	if err := other.svc.EnsureDemo(t.Context(), connections.Demo{Name: "x", ServerURL: "ftp://x",
 		BotToken: botToken}); fieldError(err) == nil {
 		t.Errorf("an invalid demo = %v", err)
+	}
+}
+
+// TestEnsureDemoRenamesEarlierName: a development database of an earlier version keeps its demo Connection under the
+// earlier name; the start renames it, with its id and bot token, and records that as done by the system, once. A
+// Connection with the current name stays as it is; one of another type with the earlier name is left alone, and
+// nothing is created.
+func TestEnsureDemoRenamesEarlierName(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.EnsureDemo(t.Context(), connections.Demo{Name: "Dev Mattermost", ServerURL: e.fake.URL(),
+		BotToken: botToken}); err != nil {
+		t.Fatal(err)
+	}
+	old := e.store.rows[1].row
+	d := connections.Demo{Name: "Example Mattermost", Was: "Dev Mattermost", ServerURL: e.fake.URL(),
+		BotToken: botToken}
+	for range 2 {
+		if err := e.svc.EnsureDemo(t.Context(), d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := e.store.rows[1].row
+	if len(e.store.rows) != 1 || c.Name != "Example Mattermost" || c.PublicID != old.PublicID ||
+		!bytes.Equal(c.BotTokenCiphertext, old.BotTokenCiphertext) || c.Version != old.Version+1 {
+		t.Fatalf("%d rows, renamed %+v", len(e.store.rows), c)
+	}
+	if len(e.store.audit) != 2 || e.store.audit[1].Action != connections.ActionUpdated ||
+		e.store.audit[1].ActorKind != "system" || !bytes.Contains(e.store.audit[1].Details,
+		[]byte(`"development_demo":true`)) || !bytes.Contains(e.store.audit[1].Diff,
+		[]byte(`{"pointer":"/name","before":"Dev Mattermost","after":"Example Mattermost"}`)) {
+		t.Errorf("audit %d, %s %s", len(e.store.audit), e.store.audit[len(e.store.audit)-1].Details,
+			e.store.audit[len(e.store.audit)-1].Diff)
+	}
+
+	// Both names: nothing changes.
+	both := newEnv(t)
+	for _, name := range []string{"Dev Mattermost", "Example Mattermost"} {
+		if err := both.svc.EnsureDemo(t.Context(), connections.Demo{Name: name, ServerURL: both.fake.URL(),
+			BotToken: botToken}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := both.svc.EnsureDemo(t.Context(), d); err != nil || len(both.store.rows) != 2 ||
+		both.store.rows[1].row.Name != "Dev Mattermost" || len(both.store.audit) != 2 {
+		t.Errorf("both names: %v, %d rows, %d audit entries", err, len(both.store.rows), len(both.store.audit))
+	}
+
+	// The earlier name on a Connection of another type: left alone, nothing created.
+	other := newEnv(t)
+	if err := other.svc.EnsureDemo(t.Context(), connections.Demo{Type: connections.TypeTelegram,
+		Name: "Dev Mattermost", BaseURL: "http://127.0.0.1:18081", BotToken: "123:x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.svc.EnsureDemo(t.Context(), d); err != nil || len(other.store.rows) != 1 ||
+		other.store.rows[1].row.Name != "Dev Mattermost" || len(other.store.audit) != 1 {
+		t.Errorf("another type: %v, %d rows", err, len(other.store.rows))
+	}
+
+	// A failed rename changes nothing.
+	failing := newEnv(t)
+	if err := failing.svc.EnsureDemo(t.Context(), connections.Demo{Name: "Dev Mattermost",
+		ServerURL: failing.fake.URL(), BotToken: botToken}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"GetConnection", "RenameConnection", "InsertAuditEntry", "Notify"} {
+		failing.store.fail[q] = errors.New("down")
+		if err := failing.svc.EnsureDemo(t.Context(), d); err == nil || failing.store.rows[1].row.Name != "Dev Mattermost" {
+			t.Errorf("%s failed = %v", q, err)
+		}
+		delete(failing.store.fail, q)
 	}
 }
 

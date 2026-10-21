@@ -9,7 +9,13 @@ import { useTranslation } from "react-i18next";
 
 import type { Permission } from "../api/gen/model";
 import type { PageDocsKey } from "./docs-link";
-import { type SectionEntry, SectionLayout, SectionNav, firstAllowedPage } from "./section-nav";
+import {
+  type SectionEntry,
+  SectionLayout,
+  SectionNav,
+  allowedEntries,
+  firstAllowedPage,
+} from "./section-nav";
 
 /** The labels of the sub-entries, under organization.nav. */
 export type OrganizationNavLabel =
@@ -118,7 +124,7 @@ export function organizationDocs(pathname: string): PageDocsKey | undefined {
 
 /** The sub-entries whose Permission the session holds. */
 export function organizationEntries(permissions: readonly Permission[]): OrganizationEntry[] {
-  return ORGANIZATION_NAVIGATION.filter((e) => permissions.includes(e.permission));
+  return allowedEntries(ORGANIZATION_NAVIGATION, permissions);
 }
 
 /** The first sub-entry the session can open, where /admin/organization leads; undefined when there is none. */

@@ -681,6 +681,17 @@ func TestClock(t *testing.T) {
 	}
 }
 
+// TestDemoEarlierNames: each demo keeps the name an earlier version gave it, which the start renames in a development
+// database that still holds it.
+func TestDemoEarlierNames(t *testing.T) {
+	got := []string{devmode.ConnectionDemo().Was, devmode.TelegramDemo().Was, devmode.BridgeDemo().Was,
+		devmode.SlackDemo().Was, devmode.OIDCDemo().DisplayNameWas}
+	want := []string{"Dev Mattermost", "Dev Telegram", "Dev Bridge", "Dev Slack", "Dev IdP"}
+	if !slices.Equal(got, want) {
+		t.Errorf("earlier names = %v", got)
+	}
+}
+
 // TestConnectionDemo is C-01.FR-13: the demo Connection "Example Mattermost" on the fake Mattermost server, with the
 // published bot token.
 func TestConnectionDemo(t *testing.T) {
