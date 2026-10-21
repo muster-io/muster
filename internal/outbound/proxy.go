@@ -117,12 +117,11 @@ func (c *Client) checkProxiedTarget(ctx context.Context, scheme, host string) er
 }
 
 // connectDial is the DialContext of a WebSocket transport through the client's HTTP or HTTPS proxy: it checks the
-// target (checkProxiedTarget, with scheme), dials the proxy through d, which checks the proxy's address, speaks TLS to
-// an HTTPS proxy, and opens a CONNECT tunnel to address whatever the target's scheme, so that no request in absolute
-// form carries the upgrade (ADR-0015). The TLS handshake with the proxy and the CONNECT are each bounded by the
-// connect timeout.
-func (c *Client) connectDial(proxyURL *url.URL, d *dialer, tlsConfig *tls.Config,
-	scheme string) func(ctx context.Context, network, address string) (net.Conn, error) {
+// target (checkProxiedTarget, with scheme), dials the proxy through dial, the dialer's, which checks the proxy's
+// address, speaks TLS to an HTTPS proxy, and opens a CONNECT tunnel to address whatever the target's scheme, so that
+// no request in absolute form carries the upgrade (ADR-0015). The TLS handshake with the proxy and the CONNECT are
+// each bounded by the connect timeout.
+func (c *Client) connectDial(proxyURL *url.URL, dial dialFunc, tlsConfig *tls.Config, scheme string) dialFunc {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, _, err := net.SplitHostPort(address)
 		if err != nil {
@@ -131,7 +130,7 @@ func (c *Client) connectDial(proxyURL *url.URL, d *dialer, tlsConfig *tls.Config
 		if err := c.checkProxiedTarget(ctx, scheme, host); err != nil {
 			return nil, err
 		}
-		conn, err := d.DialContext(ctx, network, proxyURL.Host)
+		conn, err := dial(ctx, network, proxyURL.Host)
 		if err != nil {
 			return nil, err
 		}

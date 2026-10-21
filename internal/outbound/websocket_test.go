@@ -6,7 +6,9 @@ package outbound
 import (
 	"bufio"
 	"context"
+	"crypto/sha1" //nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
@@ -85,7 +87,7 @@ func (ws *wsServer) seen() (agents, from []string) {
 }
 
 // echo checks that conn carries a message there and back, then closes it.
-func echo(t *testing.T, conn *websocket.Conn) {
+func echo(t *testing.T, conn *WebSocket) {
 	t.Helper()
 	defer func() { _ = conn.CloseNow() }()
 	if err := conn.Write(t.Context(), websocket.MessageText, []byte(`{"envelope_id":"e1"}`)); err != nil {
@@ -310,6 +312,97 @@ func TestDialWebSocketConnectForEveryScheme(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestWebSocketCut: Cut closes the TCP connection beneath any TLS, which ends at once a Close whose peer does not
+// answer — ws and wss, directly, through an HTTP or HTTPS proxy by CONNECT, and through a SOCKS5 proxy; CloseNow
+// alone would wait for the library's own five seconds. Cut on a WebSocket DialWebSocket did not build does nothing.
+func TestWebSocketCut(t *testing.T) {
+	(&WebSocket{}).Cut()
+	cert := testCert(t)
+	tlsConfig := &tls.Config{Certificates: cert.TLS.Certificates, MinVersion: tls.VersionTLS12}
+	for _, tc := range []struct {
+		name   string
+		secure bool
+		proxy  func(t *testing.T) *Proxy
+	}{
+		{name: "ws direct"},
+		{name: "wss direct", secure: true},
+		{name: "ws through http", proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxyHTTP, Address: startRecordingProxy(t, nil, "", false).Addr()}
+		}},
+		{name: "wss through https", secure: true, proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxyHTTPS, Address: startRecordingProxy(t, tlsConfig, "", false).Addr()}
+		}},
+		{name: "wss through socks5", secure: true, proxy: func(t *testing.T) *Proxy {
+			return &Proxy{Type: ProxySOCKS5, Address: startProxy(t, fakeproxy.SOCKS5, fakeproxy.Options{}).Addr()}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			closing, quit := make(chan struct{}), make(chan struct{})
+			t.Cleanup(func() { close(quit) })
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				//nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
+				accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+				conn, rw, err := http.NewResponseController(w).Hijack()
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" +
+					"Connection: Upgrade\r\nSec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(accept[:]) +
+					"\r\n\r\n")
+				if rw.Flush() != nil {
+					return
+				}
+				if head, err := rw.Peek(1); err == nil && head[0]&0x0f == 0x8 { // the close frame, never answered
+					close(closing)
+				}
+				<-quit
+			})
+			srv := httptest.NewUnstartedServer(h)
+			if tc.secure {
+				srv.TLS = &tls.Config{Certificates: cert.TLS.Certificates, MinVersion: tls.VersionTLS12}
+				srv.StartTLS()
+			} else {
+				srv.Start()
+			}
+			t.Cleanup(srv.Close)
+			cfg := Config{}
+			if tc.proxy != nil {
+				cfg.Proxy = tc.proxy(t)
+			}
+			c, _ := newTestClient(t, cfg)
+			trust(c, cert.Certificate())
+			conn, err := DialWebSocket(t.Context(), c, strings.Replace(srv.URL, "http", "ws", 1)+"/link/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := conn.net.(*net.TCPConn); !ok {
+				t.Fatalf("kept %T, want the TCP connection", conn.net)
+			}
+			closed := make(chan time.Time, 1)
+			go func() {
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+				closed <- time.Now()
+			}()
+			select {
+			case <-closing:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the close frame did not arrive")
+			}
+			cut := time.Now()
+			conn.Cut()
+			select {
+			case at := <-closed:
+				if d := at.Sub(cut); d >= 4*time.Second {
+					t.Fatalf("Close returned %s after the cut", d)
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("Close did not return")
+			}
+		})
 	}
 }
 

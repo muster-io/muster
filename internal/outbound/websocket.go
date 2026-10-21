@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/coder/websocket"
 
@@ -34,14 +36,15 @@ var errNotWebSocketURL = errors.New("websocket: the address is not an absolute w
 // recorded in the Request log. Every failure is an *Error whose text shows the address with its query as [redacted],
 // with c's secrets and the query's values replaced. ctx bounds only the handshake: reading, writing, pinging and
 // closing the connection, and its read limit, are the caller's.
-func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.Header) (*websocket.Conn, error) {
+func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.Header) (*WebSocket, error) {
 	u, err := webSocketTarget(rawURL)
 	if err != nil {
 		c.observe(OutcomeFatal, 0)
 		return nil, &Error{Outcome: OutcomeFatal, msg: err.Error()}
 	}
 	red := newRedactor(append(slices.Clone(c.secrets), webSocketSecrets(u)...))
-	hc, err := c.webSocketClient(u)
+	ws := &WebSocket{}
+	hc, err := c.webSocketClient(u, ws)
 	if err != nil {
 		c.observe(OutcomeFatal, 0)
 		return nil, &Error{Outcome: OutcomeFatal, msg: red.redact("websocket: " + err.Error())}
@@ -57,11 +60,51 @@ func DialWebSocket(ctx context.Context, c *Client, rawURL string, header http.He
 	}
 	if err == nil {
 		c.observe(OutcomeOK, elapsed)
-		return conn, nil
+		ws.Conn = conn
+		return ws, nil
 	}
 	e := c.webSocketError(ctx, red, u, resp, err)
 	c.observe(e.Outcome, elapsed)
 	return nil, e
+}
+
+// dialFunc dials a connection, as http.Transport.DialContext does.
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// WebSocket is an open WebSocket connection with the TCP connection it was dialled on, which Cut closes at once. Only
+// DialWebSocket builds one that Cut can close; Cut on any other does nothing.
+type WebSocket struct {
+	*websocket.Conn
+
+	mu  sync.Mutex
+	net net.Conn
+}
+
+// dialled keeps the TCP connection dial makes: the handshake's transport keeps no connection and follows no redirect,
+// so dial runs once, to the target or to the proxy, and returns plain TCP beneath any TLS.
+func (w *WebSocket) dialled(dial dialFunc) dialFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		nc, err := dial(ctx, network, address)
+		if err == nil {
+			w.mu.Lock()
+			w.net = nc
+			w.mu.Unlock()
+		}
+		return nc, err
+	}
+}
+
+// Cut closes the TCP connection at once, without a word to the peer, not even TLS's close_notify. Unlike
+// Conn.CloseNow, which waits for a Close already under way, it also ends a Close whose peer does not answer, which
+// otherwise waits for the answer up to the library's own five seconds. It frees nothing else: the caller still calls
+// Close or CloseNow.
+func (w *WebSocket) Cut() {
+	w.mu.Lock()
+	nc := w.net
+	w.mu.Unlock()
+	if nc != nil {
+		_ = nc.Close() // the connection's own close closes it again
+	}
 }
 
 // webSocketTarget parses an absolute ws or wss URL with a host and without user information or a fragment.
@@ -108,14 +151,15 @@ func webSocketDisplay(red redactor, u *url.URL) string {
 // webSocketClient is the HTTP client of one handshake to u: a transport of its own that keeps no connection, with c's
 // dialer, TLS configuration and timeouts. An HTTP or HTTPS proxy is reached through connectDial instead of the
 // transport's Proxy, which would send a ws target in absolute form; a SOCKS5 proxy goes through the transport, as for
-// every request.
-func (c *Client) webSocketClient(u *url.URL) (*http.Client, error) {
+// every request. ws keeps the TCP connection the dialer makes, to the target or to the proxy, beneath any TLS.
+func (c *Client) webSocketClient(u *url.URL, ws *WebSocket) (*http.Client, error) {
 	d := &dialer{policy: c.cfg.Policy, resolver: c.resolver, timeout: c.cfg.ConnectTimeout, proxy: c.cfg.Proxy != nil}
+	dial := ws.dialled(d.DialContext)
 	tlsConfig := c.transports.transport().TLSClientConfig.Clone()
 	// The upgrade needs HTTP/1.1.
 	tlsConfig.NextProtos = nil
 	tr := &http.Transport{
-		DialContext:            d.DialContext,
+		DialContext:            dial,
 		TLSClientConfig:        tlsConfig,
 		TLSHandshakeTimeout:    c.cfg.ConnectTimeout,
 		DisableKeepAlives:      true,
@@ -134,7 +178,7 @@ func (c *Client) webSocketClient(u *url.URL) (*http.Client, error) {
 				return pu, nil
 			}
 		} else {
-			tr.DialContext = c.connectDial(pu, d, tlsConfig, u.Scheme)
+			tr.DialContext = c.connectDial(pu, dial, tlsConfig, u.Scheme)
 		}
 	}
 	return &http.Client{

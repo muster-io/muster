@@ -21,6 +21,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/requestlog"
 )
 
@@ -303,7 +304,7 @@ type socketFailure struct {
 // first hello came, at since on the real clock, and was counted, and once the first disconnect reason, or "" when it
 // ended.
 type socket struct {
-	conn    *websocket.Conn
+	conn    *outbound.WebSocket
 	url     string
 	secrets []string
 	since   time.Time
@@ -578,9 +579,12 @@ func recordURL(address string) string {
 	return u.Scheme + "://" + u.Host + u.EscapedPath()
 }
 
-// closeNow closes the broken socket sc at once, cancelling its reads, and waits for its reader and pinger.
+// closeNow closes the broken socket sc at once, cancelling its reads, and waits for its reader and pinger. It cuts the
+// network connection first: CloseNow alone waits for a closure under way, which waits for Slack's answer up to the
+// library's own five seconds when it, and not the reader, was reading.
 func (h *holder) closeNow(sc *socket) {
 	sc.cancel()
+	sc.conn.Cut()
 	_ = sc.conn.CloseNow() // closed already when its reader or pinger closed it
 	<-sc.ended
 	<-sc.pinged

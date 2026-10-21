@@ -30,8 +30,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/coder/websocket"
-
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/logging"
@@ -851,7 +849,7 @@ func (c *Client) OpenSocket(ctx context.Context) (logging.Secret, Result) {
 // DialSocket opens the Socket Mode connection at address through outbound.DialWebSocket in the background class, with
 // the Connection's proxy, and lets it read messages of up to MaxRequestBytes. An address socketTarget does not accept
 // is not dialled. Its error never shows the address's query, nor the client's secrets.
-func (c *Client) DialSocket(ctx context.Context, address logging.Secret) (*websocket.Conn, error) {
+func (c *Client) DialSocket(ctx context.Context, address logging.Secret) (*outbound.WebSocket, error) {
 	target, ok := c.socketTarget(string(address))
 	if !ok {
 		return nil, errSocketAddress

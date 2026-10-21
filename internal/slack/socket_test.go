@@ -5,11 +5,15 @@ package slack
 
 import (
 	"context"
+	"crypto/sha1" //nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime/pprof"
 	"slices"
 	"strings"
 	"sync"
@@ -334,7 +338,7 @@ func (e *socketEnv) stop(t *testing.T) error {
 		case <-time.After(20 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("Run did not return")
+			t.Fatalf("Run did not return:\n%s", goroutines())
 			return nil
 		}
 		e.timers.fireArmed(closeGrace)
@@ -349,9 +353,16 @@ func (e *socketEnv) ended(t *testing.T, d time.Duration) error {
 		e.cancel = nil
 		return err
 	case <-time.After(d):
-		t.Fatalf("Run did not return within %s", d)
+		t.Fatalf("Run did not return within %s:\n%s", d, goroutines())
 		return nil
 	}
+}
+
+// goroutines is the stack of every goroutine, which shows where a run that did not return waits.
+func goroutines() string {
+	var b strings.Builder
+	_ = pprof.Lookup("goroutine").WriteTo(&b, 2)
+	return b.String()
 }
 
 // lines waits until the log has n lines of event, and returns them.
@@ -1245,6 +1256,81 @@ func TestSocketClosesWithClosure(t *testing.T) {
 	}
 	if n := len(e.log.lines(t, "slack_socket_failed")) + len(q.log.lines(t, "slack_socket_failed")); n != 0 {
 		t.Fatalf("%d failures", n)
+	}
+}
+
+// TestSocketCutWhileClosing covers C-24.FR-9 and ADR-0007: a socket let go while its reader is busy with an envelope,
+// so that the closure, not the reader, waits for Slack's answer, is still closed at once when closeGrace passes
+// without one; the WebSocket library alone would wait five seconds for it.
+func TestSocketCutWhileClosing(t *testing.T) {
+	closing := make(chan struct{})
+	srv := startSocketStandIn(t, "0123456789abcdef0123456789abcdef", unanswered(closing,
+		[]byte(`{"type":"hello","num_connections":1}`),
+		[]byte(`{"envelope_id":"e1","type":"interactive","payload":{"type":"block_actions"}}`)))
+	e := newSocketEnv(t)
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	e.presses.onGo = func(handedPress) {
+		entered <- struct{}{}
+		<-release
+	}
+	e.source.set(socketConn(4, newClient(t, e.network(t), settings(srv.URL+"/api/"))))
+	e.start(t)
+	wait := func(ch <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
+	}
+	wait(entered, "the press was not handed over")
+	e.cancel()
+	wait(closing, "the closure was not sent")
+	e.timers.fire(t, closeGrace)
+	close(release)
+	start := time.Now()
+	if err := e.ended(t, 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d >= 4*time.Second {
+		t.Fatalf("Run returned %s after the cut", d)
+	}
+}
+
+// unanswered is a /link/ that accepts the socket by hand, sends frames of under 126 bytes, reads what comes back
+// without answering it, closes seen once a close frame comes, and holds the socket until the test ends.
+func unanswered(seen chan<- struct{}, frames ...[]byte) func(w http.ResponseWriter, r *http.Request,
+	quit <-chan struct{}) {
+	return func(w http.ResponseWriter, r *http.Request, quit <-chan struct{}) {
+		//nolint:gosec // RFC 6455 derives Sec-WebSocket-Accept with SHA-1
+		accept := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		conn, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: " + base64.StdEncoding.EncodeToString(accept[:]) + "\r\n\r\n")
+		for _, f := range frames {
+			_, _ = rw.Write(append([]byte{0x81, byte(len(f))}, f...)) //nolint:gosec // frames are under 126 bytes
+		}
+		if rw.Flush() != nil {
+			return
+		}
+		for {
+			head := make([]byte, 2)
+			if _, err := io.ReadFull(rw, head); err != nil {
+				return
+			}
+			if _, err := io.ReadFull(rw, make([]byte, 4+int(head[1]&0x7f))); err != nil { // the mask and the payload
+				return
+			}
+			if head[0]&0x0f == 0x8 {
+				close(seen)
+				break
+			}
+		}
+		<-quit
 	}
 }
 
