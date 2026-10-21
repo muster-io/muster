@@ -73,6 +73,13 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 - **Breaking changes come only with the next layer's minor version**, and its release notes say what to change before
   you upgrade. See [Upgrades](../operations/upgrades.md) for how to upgrade.
 
+## Upgrade notes
+
+0.1.1
+:   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
+    are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back
+    to 0.1.0 needs the database backup taken before the upgrade, as [Upgrades](../operations/upgrades.md) describes.
+
 ## Image tags
 
 The images are `ghcr.io/muster-io/muster` and the tags are:

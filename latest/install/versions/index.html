@@ -481,6 +481,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Upgrade notes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image-tags" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2789,6 +2800,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upgrade-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Upgrade notes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image-tags" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2893,6 +2915,13 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 <li><strong>Breaking changes come only with the next layer's minor version</strong>, and its release notes say what to change before
   you upgrade. See <a href="../../operations/upgrades/">Upgrades</a> for how to upgrade.</li>
 </ul>
+<h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
+<dl>
+<dt>0.1.1</dt>
+<dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
+are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back
+to 0.1.0 needs the database backup taken before the upgrade, as <a href="../../operations/upgrades/">Upgrades</a> describes.</dd>
+</dl>
 <h2 id="image-tags">Image tags<a class="headerlink" href="#image-tags" title="Permanent link">&para;</a></h2>
 <p>The images are <code>ghcr.io/muster-io/muster</code> and the tags are:</p>
 <ul>
