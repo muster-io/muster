@@ -4,8 +4,8 @@ title: "Documentation links on the Statistics, profile, Access and Organization 
 capability: C-21
 kind: fe
 layer: L1
-depends_on: [S-109]
-covers: [C-21.FR-11, C-21.AC-8]
+depends_on: [S-109, S-107]
+covers: [C-21.FR-11, C-21.AC-8, C-21.FR-9]
 files_touched:
   - web/src/lib/docs-links.json
   - web/src/locales/en.json
@@ -37,9 +37,12 @@ files_touched:
   - web/src/components/notice-banners.tsx
   - web/src/components/system-status-sections.tsx
   - web/src/components/keyring-status.tsx
+  - web/src/components/keyring-status.test.tsx
+  - web/src/components/notice-banners.test.tsx
 acceptance:
   - "[C-21.FR-11, C-21.AC-8] The pages of the rows of reference.md's \"Next to page titles\" marked S-110 — Statistics, Profile, Access → Users, a User, Service accounts, a Service account and OIDC, and every page of Organization's sub-navigation (General, Severity levels, Alert handling, Security, Outbound addresses, Retention, Keyring, Outgoing heartbeat, Lookup tables and a Lookup table, Link rules and a Link rule, System status, Audit log) — show the Guide link to the row's target; the pages that `organization-form.tsx` draws take their key from their entry of `organization-nav.tsx`."
-  - "[C-21.FR-11, C-21.AC-8] \"Learn more\" shows beside OIDC's group mapping and proxy, the Security page's TOTP policy, a Service account's Permissions, a Link rule's template, a Lookup table's rows and the allowed networks of Outbound addresses; \"How to fix\" beside the banners \"No replica is leading\" and \"Muster is recovering after downtime\", the OIDC warnings that nobody can sign in and that the client secret expires, the System status's missing outgoing heartbeat and the Keyring's two notices — each to the row's target of reference.md."
+  - "[C-21.FR-11, C-21.AC-8] \"Learn more\" shows beside OIDC's group mapping, the Security page's TOTP policy, a Service account's Permissions, a Link rule's template, a Lookup table's rows and the allowed networks of Outbound addresses; \"How to fix\" beside the banners \"No replica is leading\" and \"Muster is recovering after downtime\", the OIDC warnings that nobody can sign in and that the client secret expires, the System status's missing outgoing heartbeat and the Keyring's two notices — each to the row's target of reference.md."
+  - "[C-21.FR-9] With every link in place, `make docs-screenshots` takes every image of the guides again and the pull request commits them, so that the guides show the links of S-108 to S-110; `make docs-check` passes."
   - "[C-21.AC-8] Every place of reference.md's Documentation links now shows its link: `docs-links.json` holds every key of the table and `make docs-check` passes; the links read in Russian as in English; and the Organization, Access and Statistics pages keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links-admin.spec.ts`)."
 verify: "make ci e2e docs-check"
 operator_attention: false
@@ -65,6 +68,9 @@ issue: null
 - **The list**: `docs-links.json` gains the keys of reference.md's
   [Documentation links](../prd/l1/reference.md#documentation-links) marked S-110; afterwards it holds every key of the
   table, and the pull request lists the table's keys against the file's.
+- **Screenshots**: the last step runs `make docs-screenshots` of S-106 and commits the images it changes; they are
+  generated files and not listed. A spec that the new links break (a locator that now matches the link too) is fixed
+  in the same pull request and added to `files_touched`.
 - **Placement**: the pages with their own `h1` use `PageTitle` of S-108; `organization-nav.tsx` gives each entry of the
   Organization's sub-navigation its key, which `organization-form.tsx` reads for the pages it draws, so the seven
   pages that use it change no route file; the Security page's form is its own route file. "Learn more" and "How to
@@ -72,8 +78,8 @@ issue: null
 - **Texts**: those of S-108, with accessible names in both languages.
 - **End-to-end** (`web/e2e/docs-links-admin.spec.ts`): the placement of the acceptance on `muster dev`. A banner or
   notice that `muster dev` cannot bring about within a spec — "No replica is leading", the recovery after downtime, the
-  Keyring's notices — is shown by the component's test with its link instead, and that test file is added to
-  `files_touched` in the pull request.
+  Keyring's notices — is shown by the component's test with its link instead (`notice-banners.test.tsx`, new, and
+  `keyring-status.test.tsx`).
 
 ## Steps
 
@@ -82,6 +88,7 @@ issue: null
 3. Place "Learn more" and "How to fix" in the admin forms, the System status, the Keyring and the banners. Check:
    `make test-web`.
 4. Write the end-to-end spec. Check: `make e2e-web`, then Verification.
+5. Take the screenshots again. Check: `make docs-screenshots`, then `make docs-check`.
 
 ## Verification
 
@@ -102,6 +109,7 @@ Playwright against `muster dev` at 1280 and 360 px, signed in as the Admin:
 
 ```sh
 jq -r 'keys[]' web/src/lib/docs-links.json | wc -l      # the number of keys of reference.md's table
+make docs-screenshots                                    # every spec passes; the images now show the links
 make docs-check                                          # passes
 ```
 
@@ -112,7 +120,7 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link the organization, access and profile pages to the documentation`.
-- With 30 files the story stays under the size signal.
+- With 32 files the story stays under the size signal.
 - It completes C-21.FR-11 and C-21.AC-8: after it every place of the table shows its link.
 
 ## Coverage
@@ -121,3 +129,4 @@ None.
 |---|---|---|
 | C-21.FR-11 | partial | these pages; S-108 and S-109 cover the rest, and this story completes the requirement |
 | C-21.AC-8 | partial | these places; S-108 and S-109 cover the rest, and this story completes the statement |
+| C-21.FR-9 | partial | the screenshots taken again with the links; S-106 and S-107 wrote the guides |

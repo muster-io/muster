@@ -410,8 +410,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-106](S-106-documentation-screenshots-tutorial-and-messenger-guides.md) | C-21 | Screenshots for the documentation, the image check, the tutorial "First alert in a messenger" and step-by-step sections on the messenger pages | docs | S-104 |
 | [S-107](S-107-step-by-step-guides-with-screenshots-on-the-other-pages.md) | C-21 | Step-by-step sections with screenshots on the pages of Integrations, Routes, templates, Account links, access, Outgoing webhooks, the Organization and Alert Groups | docs | S-106 |
 | [S-108](S-108-documentation-links-version-link-component-anchor-check-and-page-titles.md) | C-21 | Documentation links in the web UI: the documentation version, the link component, the check of linked anchors, and links next to the titles of the Alert Group, Integration, Route, Connection and Destination pages (FE) | fe | S-106 |
-| [S-109](S-109-learn-more-and-how-to-fix-links-on-integration-route-connection-and-destination-pages.md) | C-21 | "Learn more" links next to complex fields and "How to fix" links next to checks, warnings and Broken states on the Integration, Route, Connection, Destination and Alert Group pages (FE) | fe | S-108, S-107 |
-| [S-110](S-110-documentation-links-on-statistics-profile-access-and-organization-pages.md) | C-21 | Documentation links on the Statistics, profile, Access and Organization pages: page titles, fields and problems (FE) | fe | S-109 |
+| [S-109](S-109-learn-more-and-how-to-fix-links-on-integration-route-connection-and-destination-pages.md) | C-21 | "Learn more" links next to complex fields and "How to fix" links next to checks, warnings and Broken states on the Integration, Route, Connection, Destination and Alert Group pages (FE) | fe | S-108 |
+| [S-110](S-110-documentation-links-on-statistics-profile-access-and-organization-pages.md) | C-21 | Documentation links on the Statistics, profile, Access and Organization pages: page titles, fields and problems (FE) | fe | S-109, S-107 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -534,7 +534,9 @@ server gives the session, the link component, the check of every linked anchor a
 next to the titles of the main pages; S-109 the links of the fields and problems of those pages; S-110 those of the
 Statistics, profile, Access and Organization pages. They come last, as a phase of their own, because they document and
 link pages of every earlier phase. S-108 needs only S-106, whose sections its links open, and may be built beside
-S-107; S-109 needs S-107's sections, and S-110 follows S-109, since both change the list of links and the translations.
+S-107; S-109 links only to sections that exist after S-106, and S-110 needs S-107's sections and follows S-109, since
+both change the list of links and the translations. S-110 ends by taking every screenshot again, so that the guides
+show the links.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

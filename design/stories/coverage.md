@@ -739,7 +739,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-21.FR-5 | S-057 (part), S-058 (part), S-060 (part) | complete |  |
 | C-21.FR-7 | S-058 | complete |  |
 | C-21.FR-8 | S-091 | complete |  |
-| C-21.FR-9 | S-106 (part), S-107 (part) | complete | the tutorial and the messenger pages S-106, the other pages S-107 |
+| C-21.FR-9 | S-106 (part), S-107 (part), S-110 (part) | complete | the tutorial and the messenger pages S-106, the other pages S-107, every screenshot taken again with the links S-110 |
 | C-21.FR-10 | S-106 | complete |  |
 | C-21.FR-11 | S-108 (part), S-109 (part), S-110 (part) | complete | the version, the component and the main page titles S-108; fields and problems S-109; the admin pages S-110 |
 | C-21.FR-12 | S-108 | complete |  |

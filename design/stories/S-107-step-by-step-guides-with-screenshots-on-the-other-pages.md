@@ -38,7 +38,7 @@ acceptance:
   - "[C-21.FR-9] Routes and messages: Routes and Group keys gains the section \"Create a Route\" — Routes → New, the Matcher builder, the Group key with its preview, the Destinations, the policy and the saved Route — and Messages and templates the sections \"Edit a Route's message\" (the template editor with its preview), \"Add a Lookup table\" and \"Add a Link rule\" under Links."
   - "[C-21.FR-9] Access: Sign-in gains \"Add a User\" (Access → Users → New, the Role, the setup link) and \"Your profile\" (name, time zone, language, password, sessions); the Keycloak walkthrough shows Muster's OIDC page in \"4. Configure Muster\"; TOTP shows enrolment and the policy; API tokens shows \"Create a Personal access token\" and \"Create a Service account\"; Link your messenger accounts shows each of its four ways to link and unlinking."
   - "[C-21.FR-9] Outgoing webhooks: the events page shows \"Create the Destination\", its Secrets and the Signing secret's regeneration; the templates page shows \"Create the Destination\" in template mode with its request builder."
-  - "[C-21.FR-9] Organization and operations: Organization settings shows each of its pages in its section and gains \"Audit log\" (the list, a filter and an entry's diff); Monitoring gains \"System status\"; the Request log page shows \"Where to find it\"; Alert Groups gains \"In the web UI\" (the list with its filters, an Alert Group page with its Timeline) and \"Statistics\"; Statuses and commands shows the command buttons and the Snooze dialog in \"In the web UI\"."
+  - "[C-21.FR-9] Organization and operations: Organization settings shows each of its pages in its section and gains \"Audit log\" (the list, a filter and an entry's diff); Monitoring gains \"System status\"; the Request log page shows \"Where to find it\"; Alert Groups gains \"In the web UI\" (the list with its filters, an Alert Group page with its Timeline) and \"Statistics\"; Statuses and commands gains \"Commands in the web UI\" (the command buttons, the Note box and the Snooze dialog) and screenshots of the Snooze presets in their \"In the web UI\"."
   - "[C-21.FR-9, C-21.AC-6] Every image of these pages is written by `make docs-screenshots` from the seven new specs, which pass on a fresh `muster dev`; every screenshot is of the English UI with alternative text; the headings these sections give are the anchors of reference.md's Documentation links; and `make docs-check` passes."
 verify: "make docs-check"
 operator_attention: false
@@ -78,12 +78,15 @@ issue: null
   - `organization.spec.ts`: `configure/organization`, `operations/monitoring`, `operations/request-log`.
   - `alert-groups.spec.ts`: `concepts/alert-groups`, `concepts/statuses-and-commands`, with a few Alert Groups in each
     status made through the fake Alertmanager and Commands, and the development clock advanced for the Statistics.
-  - `capture.ts` and `support.ts` gain only what these specs share.
+  - `capture.ts` and `support.ts` gain only what these specs share; each spec follows S-106's rules of independence,
+    so `GUIDES=<spec>` takes the same images as a full run.
 - **New sections**, whose headings are anchors of [Documentation links](../prd/l1/reference.md#documentation-links):
   "Create a Route" (`concepts/routes-and-group-keys.md`), "Edit a Route's message", "Add a Lookup table" and "Add a
   Link rule" (`configure/messages-and-templates.md`, the last two under Links), "Add a User" and "Your profile"
   (`sign-in/index.md`), "Audit log" (`configure/organization.md`), "System status" (`operations/monitoring.md`), "In
-  the web UI" and "Statistics" (`concepts/alert-groups.md`).
+  the web UI" and "Statistics" (`concepts/alert-groups.md`), "Commands in the web UI"
+  (`concepts/statuses-and-commands.md`, after "Commands" and its subsections, since "In the web UI" there is a
+  subsection of "Snooze presets").
 - **Existing sections that gain steps and screenshots**, headings unchanged: "Create a token and paste the snippet"
   and "Static labels" (Alertmanager), "Create the Integration and a token" (Grafana), "Turn it on" and "When the
   Heartbeat is lost" (Heartbeat), "Matchers", "Group keys" and "Preview before you save" (Routes), "Link Telegram",
@@ -91,7 +94,8 @@ issue: null
   (Keycloak), "Enrol" and "The policy" (TOTP), "Create a Personal access token" and "Create a Service account" (API
   tokens), "Create the Destination", "Secrets" and "Regenerate and retire the Signing secret" (events), "Create the
   Destination" (templates), "General", "Severity levels", "Alert handling", "Security", "Outbound addresses" and
-  "Retention" (Organization), "Where to find it" (Request log), "In the web UI" (Statuses and commands).
+  "Retention" (Organization), "Where to find it" (Request log), "In the web UI" under "Snooze presets" (Statuses and
+  commands).
 - **Form**: numbered steps; each step names the screen and the UI's texts as the UI writes them, then shows the
   screenshot with the class `screenshot` and alternative text; the concepts already explained on the page stay where
   they are, and the steps link to them instead of repeating them.
@@ -117,7 +121,7 @@ for p in integrations/alertmanager integrations/grafana integrations/heartbeat c
   printf '%s %s\n' "$p" "$(grep -c '{ .screenshot }' docs/$p.md)"   # every page: 1 or more
 done
 for a in create-a-route edit-a-routes-message add-a-lookup-table add-a-link-rule add-a-user your-profile audit-log \
-  system-status in-the-web-ui statistics; do
+  system-status in-the-web-ui statistics commands-in-the-web-ui; do
   grep -rl "id=\"$a\"" site --include=index.html | head -n1      # each anchor exists on its page
 done
 make docs-serve &   # open each page above at http://localhost:8000/ and check that its images load and match its steps
@@ -129,13 +133,13 @@ None.
 
 ## Notes
 
-- Suggested commit: `docs: add step-by-step guides with screenshots to the integration, route, access and organization pages`.
+- Suggested commit: `docs: add step-by-step guides with screenshots to the integration, route, access and organization
+  pages`.
 - With 26 files the story stays under the size signal; the pages share the specs' data, so splitting them would set
   up the same Alert Groups and Connections twice.
 - Statistics needs Alert Groups spread over time: the spec advances the development clock between them instead of
-  waiting, and the screenshot shows whatever times that gives.
-- The pages before sign-in are not shown in the guides beyond the sign-in form and the TOTP prompt, which `access.spec.ts`
-  takes before signing in.
+  waiting, and the screenshot shows whatever times that gives. - The pages before sign-in are not shown in the guides
+  beyond the sign-in form and the TOTP prompt, which `access.spec.ts` takes before signing in.
 
 ## Coverage
 

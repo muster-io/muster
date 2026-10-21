@@ -8,8 +8,10 @@ depends_on: [S-106]
 covers: [C-21.FR-11, C-21.FR-12, C-21.AC-7, C-21.AC-8, C-21.AC-9, C-19.FR-9]
 files_touched:
   - api/openapi.yaml
-  - internal/api/profile.go
+  - internal/api/sessions.go
   - internal/api/sessions_test.go
+  - docs/operations/runbooks/index.md
+  - AGENTS.md
   - internal/internalalerts/raise.go
   - internal/internalalerts/internalalerts_test.go
   - deploy/helm/muster/templates/_helpers.tpl
@@ -27,6 +29,7 @@ files_touched:
   - web/e2e/docs-links.spec.ts
   - web/src/routes/alert-groups.index.tsx
   - web/src/components/alert-group-header.tsx
+  - web/src/components/alert-group-header.test.tsx
   - web/src/routes/integrations.index.tsx
   - web/src/routes/integrations.new.tsx
   - web/src/routes/integrations.$integrationId.index.tsx
@@ -42,11 +45,11 @@ files_touched:
   - web/src/routes/destinations.new.tsx
   - web/src/routes/destinations.$destinationId.tsx
 acceptance:
-  - "[C-21.FR-11, C-21.AC-7, C-19.FR-9] `getMe` returns `docs_version`, computed from the binary's version by `internalalerts.RunbookVersion`: `0.1.0` and `0.1.7` give `0.1`, `1.12.3` gives `1.12`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234`, `0.2.0-rc.1`, `0.1.0+meta` and `main` give `latest` (`TestRunbookVersion`, `sessions_test.go`); the `runbook_url` of Internal alerts and the chart helper `muster.runbookVersion` follow the same rule (`chartcheck_test.go`), and `curl` of `getMe` on a binary built with `VERSION=0.1.0` shows `\"docs_version\":\"0.1\"`."
-  - "[C-21.FR-11] `web/src/lib/docs.ts` builds every documentation URL from the build constant `https://muster-io.github.io/muster`, the session's `docs_version` (`latest` until `getMe` has answered) and an entry of `docs-links.json` — `concepts/alert-groups.md` becomes `…/latest/concepts/alert-groups/`, `messengers/index.md#what-each-destination-type-can-do` becomes `…/latest/messengers/#what-each-destination-type-can-do` (`docs.test.ts`); no other file of `web/src` outside the generated client and tests names the site's address."
+  - "[C-21.FR-11, C-21.AC-7, C-19.FR-9] `Session` — the answer of `getCurrentSession`, `createSession` and `submitSessionTotp` — carries `docs_version`, computed from the binary's version by `internalalerts.RunbookVersion`: `0.1.0` and `0.1.7` give `0.1`, `1.12.3` gives `1.12`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234`, `0.2.0-rc.1`, `0.1.0+meta` and `main` give `latest` (`TestRunbookVersion`, `sessions_test.go`); the `runbook_url` of Internal alerts and the chart helper `muster.runbookVersion` follow the same rule (`chartcheck_test.go`), and a sign-in with `curl` on a binary built with `VERSION=0.1.0` shows `\"docs_version\":\"0.1\"`."
+  - "[C-21.FR-11] `web/src/lib/docs.ts` builds every documentation URL from the build constant `https://muster-io.github.io/muster`, the session's `docs_version` (`latest` until the session has been read) and an entry of `docs-links.json` — `concepts/alert-groups.md` becomes `…/latest/concepts/alert-groups/`, `messengers/index.md#what-each-destination-type-can-do` becomes `…/latest/messengers/#what-each-destination-type-can-do` (`docs.test.ts`); no other file of `web/src` outside the generated client and tests names the site's address."
   - "[C-21.FR-11, C-21.AC-8] `DocsLink` renders a link with an icon and the text \"Guide\", \"Learn more\" or \"How to fix\", an accessible name that adds what it is about and \"(opens in a new tab)\", `target=\"_blank\"` and `rel=\"noopener noreferrer\"`; `PageTitle` renders the page's `h1` with its Guide link beside it, wrapping under the title at 360 px; the browser loads nothing from the site until the link is followed (`docs-link.test.tsx`)."
   - "[C-21.FR-11, C-21.AC-8] The pages of the rows of reference.md's \"Next to page titles\" marked S-108 — Alert Groups, an Alert Group, Integrations and an Integration with its new, edit and Stored Snapshot pages, Routes, Connections and Destinations with their new and detail pages — show the Guide link to the row's target, a Connection or Destination page the one of its type or mode; the sign-in, password setup and TOTP pages show none; no empty state shows one; the links read «Руководство» with the language switched to Russian; and these pages keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links.spec.ts`)."
-  - "[C-21.FR-12, C-21.AC-9] `make docs` runs `internal/tools/docslinkcheck` after the build: it reads `web/src/lib/docs-links.json` and fails, naming the key and the target, when the built site has no page for an entry or the page has no element with the entry's anchor as its `id`; `docslinkcheck_test.go` covers a missing page, a missing anchor and a passing list, and removing a linked heading from a page makes `make docs-check` fail naming its key."
+  - "[C-21.FR-12, C-21.AC-9] `make docs` runs `internal/tools/docslinkcheck` after the build: it reads `web/src/lib/docs-links.json` and fails, naming the key and the target, when the built site has no page for an entry or the page has no element with the entry's anchor as its `id`; `docslinkcheck_test.go` covers a missing page, a missing anchor and a passing list, and an entry of `docs-links.json` changed to an anchor the page lacks makes `make docs-check` fail naming its key; a removed heading that the UI links to fails the build, naming the key or, when a page of the site links to the heading too, that page (the strict build checks it first)."
 verify: "make ci e2e docs-check"
 operator_attention: false
 issue: null
@@ -58,8 +61,8 @@ issue: null
 
 **IN**
 
-- The documentation version: `docs_version` in `getMe`, and the release rule shared with the `runbook_url` of Internal
-  alerts and the chart's rules.
+- The documentation version: `docs_version` in the session, and the release rule shared with the `runbook_url` of
+  Internal alerts and the chart's rules.
 - The link module with the site's address as a build constant, the list of linked pages and anchors, the components
   `DocsLink` and `PageTitle`, and their texts in English and Russian.
 - The check of the list against the built site in `make docs`.
@@ -73,19 +76,22 @@ issue: null
 
 ## Contracts
 
-- **API**: `Me` gains the required `docs_version` (string, pattern `^(latest|[0-9]+\.[0-9]+)$`, described as the version
-  segment of the documentation site the web UI links to, C-21.FR-11); `getMe` fills it from `buildinfo.Version`. Spec
-  first, then `make generate`.
+- **API**: `Session` gains the required `docs_version` (string, pattern `^(latest|[0-9]+\.[0-9]+)$`, described as the
+  version segment of the documentation site the web UI links to, C-21.FR-11); `sessionOf` in `internal/api/sessions.go`
+  fills it from `buildinfo.Version` for every operation that answers a `Session`. The SPA already reads the session on
+  every navigation (`useSession`, `SESSION_QUERY_KEY` in `web/src/lib/api.ts`), so the version needs no request of its
+  own. Spec first, then `make generate`.
 - **The rule** (`internalalerts.RunbookVersion`): a version `X.Y.Z`, with an optional leading `v` and nothing after
   it, gives `X.Y`; anything else gives `latest` — the development version `0.0.0-dev`, the snapshot versions
   `X.Y.Z-SNAPSHOT-<commit>` of the `sha-…` and `edge` images, pre-releases and build metadata. Until now the function
   and the chart helper `muster.runbookVersion` (`deploy/helm/muster/templates/_helpers.tpl`) gave `X.Y` for any suffix
   but `-dev`, so a snapshot image linked its runbooks to a minor whose documentation may not exist yet; both change
-  to this rule, which C-19.FR-9 already states, and their tests take the same table of versions.
+  to this rule, which C-19.FR-9 now states, and their tests take the same table of versions.
 - **Link module** (`web/src/lib/docs.ts`): the constant `DOCS_SITE = "https://muster-io.github.io/muster"`, the only
-  place of the SPA that names it; `docsVersion()` from the cached `getMe` answer; `docsUrl(key)` for a key of
-  `docs-links.json`, typed from the JSON's keys so that an unknown key does not compile. A target `<path>.md#<anchor>`
-  becomes `<site>/<version>/<path>/#<anchor>`, an `index.md` its directory, the anchor kept as written.
+  place of the SPA that names it; `docsVersion()` from the cached session (`latest` before it is read); `docsUrl(key)`
+  for a key of `docs-links.json`, typed from the JSON's keys so that an unknown key does not compile. A target
+  `<path>.md#<anchor>` becomes `<site>/<version>/<path>/#<anchor>`, an `index.md` its directory, the anchor kept as
+  written.
 - **The list** (`web/src/lib/docs-links.json`): one object from key to target, sorted by key, holding the keys of
   reference.md's [Documentation links](../prd/l1/reference.md#documentation-links) that this story places
   (`page.alert_groups`, `page.alert_group`, `page.integrations`, `page.stored_snapshot`, `page.routes`,
@@ -102,40 +108,46 @@ issue: null
   «Подробнее», `docs.howToFix` "How to fix" / «Как исправить», and the accessible names `docs.guideAbout` "Guide:
   {about} (opens in a new tab)" and the like, in both languages.
 - **Anchor check** (`internal/tools/docslinkcheck`, Go, no dependencies): `-links web/src/lib/docs-links.json -site
-  site`; for each entry, the page `site/<path>/index.html` (or `site/<dir>/index.html` for an `index.md`) exists and, for
-  an anchor, holds an element with `id="<anchor>"`; it prints the number of entries checked. `make docs` runs it after
-  `zensical build`, so `make docs-check` and the docs workflow run it too.
-- **End-to-end** (`web/e2e/docs-links.spec.ts`): the placement, texts and widths of the acceptance against `muster dev`.
+  site`; for each entry, the page `site/<path>/index.html` (or `site/<dir>/index.html` for an `index.md`) exists and,
+  for an anchor, holds an element with `id="<anchor>"`; it prints the number of entries checked. `make docs` runs it
+  after `zensical build`, so `make docs-check` and the docs workflow run it too.
+- **End-to-end** (`web/e2e/docs-links.spec.ts`): the placement, texts and widths of the acceptance against `muster dev`;
+  the site's address is answered by `context.route`, so the spec needs no network and checks that no `Referer` arrives.
+- **AGENTS.md**: the row of `make docs-check` names the check of linked anchors.
 
 ## Steps
 
 1. Change the rule with its table of versions in Go and in the chart helper; add `docs_version` to the spec and
-   `getMe`. Check: `go test ./internal/internalalerts ./internal/tools/chartcheck ./internal/api`, `make helm-check`.
+   the session; `docs/operations/runbooks/index.md` says that `<version>` is `latest` for any version that is not a
+   release. Check: `go test ./internal/internalalerts ./internal/tools/chartcheck ./internal/api`, `make helm-check`.
 2. Write the link module, the list and the components with their texts. Check: `make lint`, `make test-web`.
 3. Write `docslinkcheck` with its tests and run it from `make docs`. Check: `make docs-check`.
 4. Place `PageTitle` on the pages and write the end-to-end spec. Check: `make e2e-web`, then Verification.
 
 ## Verification
 
-Against `muster dev` (version `0.0.0-dev`), with a Personal access token `$T` of the Admin:
+Against `muster dev` (version `0.0.0-dev`):
 
 ```sh
-curl -s -H "Authorization: Bearer $T" localhost:8080/api/v1/me | jq -r .docs_version          # latest
+signin='{"login":"admin@example.org","password":"muster-dev-password"}'
+curl -s -H 'Content-Type: application/json' -d "$signin" localhost:8080/api/v1/sessions | jq -r .docs_version   # latest
 # stop make dev, then start a binary built as a release on the same development database:
 make build VERSION=0.1.0 && ./bin/muster dev &
-curl -s -H "Authorization: Bearer $T" localhost:8080/api/v1/me | jq -r .docs_version          # 0.1
-git grep -n 'muster-io.github.io/muster' web/src -- ':!web/src/api/gen' ':!*.test.ts' ':!*.test.tsx'   # web/src/lib/docs.ts only
+curl -s -H 'Content-Type: application/json' -d "$signin" localhost:8080/api/v1/sessions | jq -r .docs_version   # 0.1
+git grep -n 'muster-io.github.io/muster' -- web/src ':!web/src/api/gen' ':!*.test.ts' ':!*.test.tsx'   # web/src/lib/docs.ts only
 make docs-check                                                                              # passes; docslinkcheck prints its count
-sed -i.bak 's/^## Add a Destination$/## Destinations/' docs/messengers/telegram.md && make docs-check
-                     # fails: page.destination.telegram: messengers/telegram.md#add-a-destination: no element with this id
-mv docs/messengers/telegram.md.bak docs/messengers/telegram.md
+cp web/src/lib/docs-links.json /tmp/docs-links.json
+jq '."page.routes" = "concepts/routes-and-group-keys.md#no-such-section"' /tmp/docs-links.json >web/src/lib/docs-links.json
+make docs-check      # fails: page.routes: concepts/routes-and-group-keys.md#no-such-section: no element with this id
+cp /tmp/docs-links.json web/src/lib/docs-links.json
 ```
 
 Playwright at 1280 and 360 px, signed in as the Admin:
 
 1. Routes: "Guide" beside the title "Routes", with the accessible name "Guide: Routes (opens in a new tab)", `href`
    `https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys/`, `target="_blank"`, `rel` with
-   `noopener` and `noreferrer`; following it opens a new page at that address.
+   `noopener` and `noreferrer`; following it opens a new page at that address, which the spec answers itself
+   (`context.route` on the site's address, so the run needs no network) and which receives no `Referer` header.
 2. Connections → the demo Telegram Connection: the link goes to `…/latest/messengers/telegram/`; Destinations → a
    Slack Destination: to `…/latest/messengers/slack/#invite-the-bot-and-create-destinations`; an outgoing webhook
    Destination in template mode: to `…/latest/outgoing-webhooks/templates/`.
@@ -143,8 +155,8 @@ Playwright at 1280 and 360 px, signed in as the Admin:
    their link; the sign-in page, signed out, shows no link to the site.
 4. Profile → Language → Russian: the link beside «Маршруты» reads «Руководство».
 5. At 360 px the Routes, Connection and Destination pages and the Alert Group page have
-   `document.documentElement.scrollWidth <= 360`.
-6. With the release build of the commands above, the Routes page links to `…/muster/0.1/concepts/routes-and-group-keys/`.
+   `document.documentElement.scrollWidth <= 360`. 6. With the release build of the commands above, the Routes page links
+   to `…/muster/0.1/concepts/routes-and-group-keys/`.
 
 ## Open questions
 
@@ -159,7 +171,7 @@ None.
 - The rule changes what a snapshot image's Internal alerts link to; a release is unaffected.
 - The story has a small backend part — one field and the shared rule — in the same pull request, because the field is
   useless without the links and the links are wrong without the field; S-087 set the precedent.
-- With 34 files the story stays under the size signal; the links next to fields and problems are S-109 and S-110.
+- With 37 files the story stays under the size signal; the links next to fields and problems are S-109 and S-110.
 
 ## Coverage
 

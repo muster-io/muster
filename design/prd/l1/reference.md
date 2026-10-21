@@ -200,13 +200,13 @@ before sign-in, and empty states, have no link.
 | Integration, Static labels | `field.static_labels` | `integrations/alertmanager.md#static-labels` | S-109 |
 | Integration token, the snippet | `field.integration_snippet` | `integrations/alertmanager.md#create-a-token-and-paste-the-snippet` | S-109 |
 | Integration, Heartbeat | `field.heartbeat` | `integrations/heartbeat.md#turn-it-on` | S-109 |
-| Connection, proxy | `field.proxy` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
+| Connection and OIDC, proxy | `field.proxy` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
 | Mattermost Connection, the callback address | `field.mattermost_callback` | `messengers/mattermost.md#let-button-presses-reach-muster` | S-109 |
 | Telegram Connection, long polling or webhook · Bot API base URL | `field.telegram_mode` · `field.telegram_base_url` | `messengers/telegram.md#long-polling-or-webhook` · `messengers/telegram-restricted-networks.md` | S-109 |
-| Slack Connection, event mode · tokens · the app manifest | `field.slack_event_mode` · `field.slack_tokens` · `field.slack_manifest` | `messengers/slack.md#socket-mode-or-http` · `#install-the-app-and-create-the-tokens` · `#create-the-app-from-a-manifest` | S-109 |
+| Slack Connection, event mode · tokens · the hint "Create the Slack app from the manifest first, then install it and copy its tokens." above the token fields | `field.slack_event_mode` · `field.slack_tokens` · `field.slack_manifest` | `messengers/slack.md#socket-mode-or-http` · `#install-the-app-and-create-the-tokens` · `#create-the-app-from-a-manifest` | S-109 |
 | Bridge Connection, event delivery | `field.bridge_events` | `messengers/bridge.md#create-the-connection` | S-109 |
 | Outgoing webhook Destination, templates · extraction rules · Secrets · Signing secret | `field.webhook_templates` · `field.webhook_extraction` · `field.webhook_secrets` · `field.webhook_signing_secret` | `outgoing-webhooks/templates.md#what-the-templates-read` · `outgoing-webhooks/templates.md#extraction-rules-and-response` · `outgoing-webhooks/events.md#secrets` · `outgoing-webhooks/events.md#verify-the-signature` | S-109 |
-| OIDC, group mapping · proxy | `field.oidc_groups` · `field.proxy` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` · `messengers/proxies.md#where-you-set-a-proxy` | S-110 |
+| OIDC, group mapping | `field.oidc_groups` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` | S-110 |
 | Security, TOTP policy | `field.totp_policy` | `sign-in/totp.md#the-policy` | S-110 |
 | Service account, Permissions | `field.permissions` | `configure/api-tokens.md#two-kinds-of-token` | S-110 |
 | Link rule, its template · Lookup table, its rows | `field.link_rule` · `field.lookup_table` | `configure/messages-and-templates.md#links` | S-110 |
@@ -216,7 +216,7 @@ before sign-in, and empty states, have no link.
 
 | Where, problem | Key | Target | Story |
 |---|---|---|---|
-| Connection check, `token_invalid` | `fix.token.<type>` | `messengers/mattermost.md#create-the-bot-account` · `messengers/telegram.md#create-the-bot` · `messengers/slack.md#install-the-app-and-create-the-tokens` · `messengers/bridge.md#create-the-connection` | S-109 |
+| Connection and Destination checks, `token_invalid` | `fix.token.<type>` | `messengers/mattermost.md#create-the-bot-account` · `messengers/telegram.md#create-the-bot` · `messengers/slack.md#install-the-app-and-create-the-tokens` · `messengers/bridge.md#create-the-connection` | S-109 |
 | Connection and Destination checks, `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused` | `fix.network` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
 | Connection and Destination checks, `blocked` | `fix.blocked` | `messengers/proxies.md#what-the-outbound-address-policy-checks` | S-109 |
 | Telegram Connection check, `not_bot_api`, `wrong_path_prefix`; the base URL uses `http` | `fix.telegram_base_url` | `messengers/telegram-restricted-networks.md` | S-109 |
@@ -243,6 +243,10 @@ before sign-in, and empty states, have no link.
 | OIDC settings, nobody can sign in · the client secret expires | `fix.oidc_mapping` · `fix.oidc_secret` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` · `operations/runbooks/MusterOIDCSecretExpiring.md` | S-110 |
 | System status, outgoing heartbeat not set | `fix.outgoing_heartbeat` | `operations/outgoing-heartbeat.md` | S-110 |
 | Keyring, a key no longer needed · activation refused | `fix.keyring` | `operations/key-rotation.md` | S-110 |
+
+The codes of the checks without a link: `request_failed`, whose `message` names an error no page can foresee, and
+`webhook_set`, a step that passed. A new code of `NullableConnectionCheckCode`, `NullableDestinationCheckCode` or the
+check's `warnings` gets a row here, or joins this list, in the story that adds it.
 
 ## Roles and Permissions
 

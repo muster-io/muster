@@ -84,11 +84,12 @@ explains it.
   tokens and Service accounts, Outgoing webhooks, the Organization settings with the System status and the Audit log,
   and the Alert Group list, page and Statistics. Every screenshot is of the English UI and has alternative text.
 - **C-21.FR-10** Screenshots are made by a program, not by hand. A Playwright suite walks each guide on `muster dev`
-  with demo data and the fake servers, in English, 1280 px wide and in the light colour scheme, and saves each
-  screenshot under `docs/assets/screenshots/<page>/`; `make docs-screenshots` runs it by hand, like `make demo`, and the
-  images are committed. CI does not take them again, because fonts and times make that flaky; `make docs-check` fails,
-  naming the page and the image, when a page references an image that does not exist, when an image of
-  `docs/assets/screenshots/` is referenced by no page, or when an image has no alternative text.
+  with demo data and the fake servers, in English, in a 1280 px wide viewport and the light colour scheme, and saves
+  each screenshot under `docs/assets/screenshots/<page>/`; `make docs-screenshots` runs it by hand, like `make demo`,
+  and the images are committed. CI does not take them again, because fonts and times make that flaky; `make docs-check`
+  fails, naming the page and the image, when a page references an image that does not exist, when an image of
+  `docs/assets/screenshots/` is referenced by no page, when an image has no alternative text, or when a page loads an
+  image from another site.
 - **C-21.FR-11** Links from the web UI. The web UI links to the documentation of the version it runs: a release
   `X.Y.Z` links under `https://muster-io.github.io/muster/X.Y/`, any other version — a development build (`0.0.0-dev`,
   the `sha-…` and `edge` images, whose versions end in `-SNAPSHOT-<commit>`) or a pre-release — under
@@ -112,8 +113,8 @@ The documentation site, and the links to it from every page of the web UI after 
 ## API surface
 
 The API reference of the site is rendered from the same OpenAPI document that the binary serves at
-`/api/v1/openapi.yaml` (C-03.FR-23). `getMe` returns `docs_version`, the version segment of the documentation the web
-UI links to (FR-11).
+`/api/v1/openapi.yaml` (C-03.FR-23). `Session`, the answer of `getCurrentSession`, `createSession` and
+`submitSessionTotp`, carries `docs_version`, the version segment of the documentation the web UI links to (FR-11).
 
 ## Acceptance
 
@@ -128,10 +129,11 @@ UI links to (FR-11).
 - **C-21.AC-5** On a fresh `muster dev`, the Playwright suite of the tutorial follows its steps in order through the
   UI, with the fake Alertmanager and the fake Telegram server, and ends with the Alert Group acknowledged by the Admin,
   its Timeline naming the Transport Telegram; every step of the tutorial has the screenshot that run took.
-- **C-21.AC-6** `make docs-screenshots` writes every image the guides reference, 1280 px wide, of the English UI in the
-  light colour scheme; `make e2e` and CI never run it; and `make docs-check` fails, naming the page and the image, for
-  an image a page references that does not exist, for an image under `docs/assets/screenshots/` no page references,
-  and for an image without alternative text.
+- **C-21.AC-6** `make docs-screenshots` writes every image the guides reference, in a 1280 px wide viewport and none
+  wider, of the English UI in the light colour scheme, and changes no image when one of its specs fails; `make e2e` and
+  CI never run it; and `make docs-check` fails, naming the page and the image, for an image a page references that does
+  not exist, for an image under `docs/assets/screenshots/` no page references, for an image without alternative text,
+  and for an image loaded from another site.
 - **C-21.AC-7** The documentation version follows the release rule: `0.1.0` and `0.1.7` link under `/muster/0.1/`,
   `1.12.3` under `/muster/1.12/`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234` and `0.2.0-rc.1` under `/muster/latest/`;
   the `runbook_url` of an Internal alert raised by the same binary names the same segment.
@@ -139,8 +141,9 @@ UI links to (FR-11).
   [Documentation links](reference.md#documentation-links) shows its link, which opens the named page and section in a
   new tab without a `Referer`; no empty state has one; the sign-in pages have none; the texts of the links exist in
   English and Russian; and the pages with links keep no horizontal scrollbar at 360 px wide.
-- **C-21.AC-9** Removing from the site a heading that the web UI links to, or changing a link of the UI to an anchor
-  the site does not have, makes `make docs-check` fail, naming the entry of the list and the page.
+- **C-21.AC-9** Changing a link of the UI to an anchor the site does not have makes `make docs-check` fail, naming the
+  entry of the list and the page; removing from the site a heading that the web UI links to makes it fail too, naming
+  the entry or, when a page of the site also links to that heading, the linking page.
 
 ## Related ADRs
 
