@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Helpers of the end-to-end specs: the API as the development Admin, the database of the run, the fake IdP, the fake
-// bridge and the fake Slack server of `muster dev`, TOTP codes and the layout checks.
+// Helpers of the end-to-end specs and of the documentation screenshots: the API as the development Admin, the database
+// of the run, the fake IdP, the fake bridge and the fake Slack and Telegram servers of `muster dev`, the realistic
+// addresses its routes send to the fakes, the removal of what a spec created, TOTP codes and the layout checks.
 
 import { createHmac } from "node:crypto";
 
@@ -36,6 +37,14 @@ export const FSL = `${SLACK_URL}/_fake`;
 /** The published tokens of the fake Slack server's second app, b, for which `muster dev` creates no Connection. */
 export const SLACK_SECOND_BOT_TOKEN = "xoxb-muster-dev-slack-token-b";
 export const SLACK_SECOND_APP_TOKEN = "xapp-muster-dev-slack-token-b";
+/**
+ * The realistic addresses that `muster dev` routes to its fake servers for their published tokens (internal/devmode):
+ * the default Bot API base URL, a Mattermost server and a bridge, which the documentation screenshots show instead of a
+ * fake server's loopback address.
+ */
+export const TELEGRAM_BOT_API = "https://api.telegram.org";
+export const CHAT_URL = "https://chat.example.org";
+export const BRIDGE_EXAMPLE_URL = "https://bridge.example.org";
 /** The ingestion endpoint that the fake Alertmanager's receivers send to. */
 export const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 const CLOCK = "http://localhost:8082/_dev/clock";
@@ -277,6 +286,53 @@ export async function removeBridgeConnection(admin: Api, name = "br"): Promise<v
 
 /** Deletes every Slack Connection named name, after the Destinations that use it, whatever an earlier run left. */
 export async function removeSlackConnection(admin: Api, name = "ui"): Promise<void> {
+  await removeConnectionNamed(admin, name);
+}
+
+/** Calls the control API of the fake Telegram server and returns its answer, null for none. */
+export async function ftg<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${FTG}${path}`, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  expect(res.ok, `${method} ${path}: ${res.status} ${text}`).toBe(true);
+  return parse<T>(text === "" ? "null" : text);
+}
+
+/** Deletes every Integration named name, whatever an earlier run left. */
+export async function removeIntegration(admin: Api, name: string): Promise<void> {
+  const page = await admin.call<{ items: NamedConnection[] }>(
+    "GET",
+    "/api/v1/integrations?limit=500",
+  );
+  for (const i of page.items.filter((x) => x.name === name)) {
+    await admin.call("DELETE", `/api/v1/integrations/${i.id}`);
+  }
+}
+
+/** Deletes every Route named name, after moving its open Alert Groups to the Default route, as deleteRoute does. */
+export async function removeRoute(admin: Api, name: string): Promise<void> {
+  const page = await admin.call<{ items: NamedConnection[] }>("GET", "/api/v1/routes");
+  for (const r of page.items.filter((x) => x.name === name)) {
+    await admin.call("POST", `/api/v1/routes/${r.id}/move-open-alert-groups`);
+    await admin.call("DELETE", `/api/v1/routes/${r.id}`);
+  }
+}
+
+/** Deletes the Account links of the signed-in user of admin in one messenger, such as telegram. */
+export async function removeAccountLinks(admin: Api, messenger: string): Promise<void> {
+  const page = await admin.call<{ items: { id: string; messenger: string }[] }>(
+    "GET",
+    "/api/v1/me/account-links",
+  );
+  for (const l of page.items.filter((x) => x.messenger === messenger)) {
+    await admin.call("DELETE", `/api/v1/me/account-links/${l.id}`);
+  }
+}
+
+/** Deletes every Connection named name, after the Destinations that use it, whatever an earlier run left. */
+export async function removeConnection(admin: Api, name: string): Promise<void> {
   await removeConnectionNamed(admin, name);
 }
 

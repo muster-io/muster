@@ -285,6 +285,58 @@ jobs:
           docker compose -f deploy/compose/docker-compose.yml down -v || true
           docker compose -f deploy/dev/docker-compose.yml down -v || true
 
+  # The documentation screenshots (make docs-screenshots), which proves only that the suite under web/e2e/screenshots/
+  # still runs: a story that breaks a screenshot spec is noticed the next night, without blocking a pull request. It
+  # commits nothing; the images it took and the test output are an artifact, and the step summary lists the images
+  # that differ from the committed ones, which differ in times and latencies from run to run.
+  docs-screenshots:
+    name: docs-screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: pull Docker Hub images through the mirror
+        run: ./scripts/ci/docker-hub-mirror.sh
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - id: screenshots
+        run: make docs-screenshots
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: docs-screenshots
+          path: bin/docs-screenshots/
+          retention-days: 14
+      - name: write the job summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.screenshots.outcome }}
+        run: |
+          set -euo pipefail
+          changed=$(git status --short docs/assets/screenshots)
+          # shellcheck disable=SC2016 # the backticks are the Markdown code fence
+          {
+            printf '## Documentation screenshots\n\n'
+            if [ "$OUTCOME" != success ]; then
+              printf 'The run failed (%s); no image was replaced. The test output is in the artifact.\n' "$OUTCOME"
+            elif [ -n "$changed" ]; then
+              printf 'Images that differ from the committed ones (not committed):\n\n```\n%s\n```\n' "$changed"
+            else
+              printf 'No image differs from the committed ones.\n'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
   # Quick start (docs/quick-start.md) as a new user follows it, on a fresh runner with only Docker: its commands run in an
   # empty directory, then /health/ready must answer 200 and the bootstrap Admin sign in. The master leg runs the edge
   # image with the compose example of master; the release leg runs the page exactly as written, which downloads the

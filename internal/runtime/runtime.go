@@ -985,9 +985,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}}
 	// Under muster dev a Slack Connection of the fake Slack server's published tokens calls the fake server instead of
-	// Slack (C-01.FR-13); outside it every Slack request goes to Slack.
+	// Slack (C-01.FR-13), and a Telegram, Mattermost or Bridge Connection on the realistic address of its route with a
+	// fake's published token calls that fake (C-21.FR-10); outside it every request goes where its Connection points.
 	if p.opts.Development {
 		connsCfg.SlackRoute = devmode.SlackRoute
+		connsCfg.TelegramRoute, connsCfg.MattermostRoute = devmode.TelegramRoute, devmode.MattermostRoute
+		connsCfg.BridgeRoute = devmode.BridgeRoute
 	}
 	conns := connections.New(connsCfg)
 	p.connections, p.interactive, p.roles = conns, interactive, roles

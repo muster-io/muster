@@ -23,6 +23,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/connections/dbgen"
@@ -39,6 +40,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 const (
@@ -1641,5 +1643,96 @@ func TestCallbackConnection(t *testing.T) {
 	e.store.rows[c.ID].deleted = true
 	if _, err := e.svc.Connection(ctx, c.PublicID); !errors.Is(err, mattermost.ErrNoConnection) {
 		t.Errorf("a deleted connection = %v", err)
+	}
+}
+
+// devRoutes are the routes of muster dev that a routed service takes, nil for none.
+type devRoutes struct {
+	tg telegram.Route
+	mm mattermost.Route
+	br bridge.Route
+}
+
+// routedService is a Service over the store, keyring and interactive path of e with the routes r, an outbound address
+// policy that allows the networks allowed, and a resolver that resolves no name, so that a request that is not routed
+// never leaves the machine and its host is recorded.
+func routedService(t *testing.T, e *env, r devRoutes, allowed ...string) (*connections.Service, *noDNS) {
+	t.Helper()
+	logger := logging.New(e.log, logging.LevelInfo)
+	policy, err := outbound.ParsePolicy("standard", allowed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dns := &noDNS{}
+	clocks := clock.Clocks{Business: e.business, Real: &ticking{at: t0, step: 7 * time.Millisecond}}
+	return connections.New(connections.Config{OrgID: 1, Store: e.store, Keyring: e.keys,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,
+		Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+			Resolver: dns},
+		Interactive: e.path, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081", Path: "/"}, Log: logger,
+		TelegramRoute: r.tg, MattermostRoute: r.mm, BridgeRoute: r.br}), dns
+}
+
+// TestMattermostDevRoute is the Mattermost route of muster dev (C-21.FR-10): a Connection on https://chat.example.org
+// whose token the route publishes reaches the fake server through the client that its check and delivery share;
+// another token goes to the address the Connection names, as does every token without the route; and a routed request
+// still passes the outbound address policy, which blocks it without the loopback network.
+func TestMattermostDevRoute(t *testing.T) {
+	e := newEnv(t)
+	const server = "https://chat.example.org"
+	routed, err := e.svc.Create(t.Context(), by, input("chat", server))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := input("chat-other", server)
+	in.BotToken = keyring.Replace(otherToken)
+	other, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := devRoutes{mm: func(serverURL string, token logging.Secret) string {
+		if serverURL == server && token == botToken {
+			return e.fake.URL()
+		}
+		return ""
+	}}
+	svc, dns := routedService(t, e, route, "127.0.0.0/8")
+	res, err := svc.Check(t.Context(), routed.PublicID, nil)
+	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername {
+		t.Fatalf("routed check = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); len(hosts) != 0 {
+		t.Fatalf("a routed check resolved %v", hosts)
+	}
+	n := len(e.fake.Requests())
+	if n == 0 {
+		t.Fatal("the fake got no request")
+	}
+
+	res, err = svc.Check(t.Context(), other.PublicID, nil)
+	if err != nil || res.OK || res.Steps[0].Code != delivery.CodeDNSFailed {
+		t.Fatalf("unrouted check = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); !slices.Equal(hosts, []string{"chat.example.org"}) {
+		t.Fatalf("the unrouted check resolved %v", hosts)
+	}
+	unrouted, dns := routedService(t, e, devRoutes{}, "127.0.0.0/8")
+	if res, err := unrouted.Check(t.Context(), routed.PublicID, nil); err != nil || res.OK {
+		t.Fatalf("check outside muster dev = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); !slices.Equal(hosts, []string{"chat.example.org"}) {
+		t.Fatalf("the check outside muster dev resolved %v", hosts)
+	}
+	if got := len(e.fake.Requests()); got != n {
+		t.Fatalf("unrouted requests reached the fake: %d, want %d", got, n)
+	}
+
+	blocked, _ := routedService(t, e, route)
+	res, err = blocked.Check(t.Context(), routed.PublicID, nil)
+	if err != nil || res.OK || res.Steps[0].Code != delivery.CodeBlocked {
+		t.Fatalf("routed check without loopback = %+v, %v", res, err)
+	}
+	if got := len(e.fake.Requests()); got != n {
+		t.Fatalf("a blocked request reached the fake: %d, want %d", got, n)
 	}
 }

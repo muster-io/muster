@@ -198,9 +198,10 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make quickstart-check` | run the commands of Quick start in an empty directory with Docker, wait for `/health/ready` and sign in as the bootstrap Admin; `MUSTER_IMAGE` and `QUICKSTART_REF` replace the image and the Git ref of the download | S-060 |
 | `make load-test` | the load test against `muster dev` | S-004 |
 | `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
+| `make docs-screenshots` | take the documentation screenshots: the Playwright suite `web/e2e/screenshots/` on `muster dev`, only on Linux with Docker, in the Playwright image pinned by digest; only when every spec passed, the images replace those of their pages under `docs/assets/screenshots/` (`GUIDES=telegram` runs one spec); run by hand and committed by hand, never in the CI of pull requests; the nightly job runs it without committing | S-106 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
 | `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`, then write `llms.txt`, `llms-full.txt` and the Markdown version of every page for AI agents into `site/`, with links into `DOCS_VERSION` (`latest` by default); the same pages, served on `localhost:8000`, without those outputs, which only `make docs` writes | S-057, S-091 |
-| `make docs-check` | `generate-check`, then `tablecheck`, then `docs`: fail on a stale generated page, on a table under `docs/` with inline code longer than 24 characters in a cell (lay it out as a definition list, or put `<!-- tablecheck: allow <reason> -->` before a table that must stay one), on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, on a broken link or anchor, and when `docs/llms.txt.tmpl` names a value, a page or an anchor that its source no longer has | S-057, S-058, S-059, S-091 |
+| `make docs-check` | `generate-check`, then `tablecheck` and `imagecheck`, then `docs`: fail on a stale generated page, on a table under `docs/` with inline code longer than 24 characters in a cell (lay it out as a definition list, or put `<!-- tablecheck: allow <reason> -->` before a table that must stay one), on an image that does not exist, has no alternative text or comes from another site, on a screenshot under `docs/assets/screenshots/` that no page references, on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, on a broken link or anchor, and when `docs/llms.txt.tmpl` names a value, a page or an anchor that its source no longer has | S-057, S-058, S-059, S-091, S-106 |
 
 ### Development mode
 
@@ -242,7 +243,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   run the race detector.
 - Generated code (`internal/*/dbgen/`, `internal/api/gen/`, `internal/bridge/gen/`, `pkg/apiclient/`,
   `web/src/api/gen/`, `web/src/routeTree.gen.ts`, `docs/reference/`, lock files) is checked in and current: change the
-  input, run `make generate`, commit the output.
+  input, run `make generate`, commit the output. So are the documentation screenshots, `docs/assets/screenshots/`, the
+  output of `make docs-screenshots`.
 - Shipped artifacts (binary, image, SPA bundle, chart) depend only on MIT, MIT-0, BSD-2-Clause, BSD-3-Clause,
   Apache-2.0, ISC, 0BSD, Unlicense, CC0-1.0 or unmodified MPL-2.0 code; anything else needs an ADR first. Build tooling
   may use any OSI-approved licence. A pull request that adds a dependency states its licence, latest release date and

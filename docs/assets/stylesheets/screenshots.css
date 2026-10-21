@@ -1,0 +1,16 @@
+/*
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright The Muster Authors
+
+  The screenshots of the guides, taken by make docs-screenshots and marked { .screenshot } on the pages: a thin border
+  that sets the light image apart from the page in both colour schemes, and never wider than the text.
+*/
+
+.md-typeset img.screenshot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.8em 0;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+}

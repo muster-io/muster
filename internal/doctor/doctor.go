@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/connections"
@@ -37,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/slack"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // Status is the outcome of one check.
@@ -115,11 +117,21 @@ type Options struct {
 	// development mode.
 	Development bool
 
-	// open, real, each and slackRoute are replaced by tests; slackRoute is, under development, devmode.SlackRoute.
+	// open, real, each, slackRoute and routes are replaced by tests; under development slackRoute is
+	// devmode.SlackRoute and routes are the other routes of devmode.
 	open       Opener
 	real       clock.Clock
 	each       time.Duration
 	slackRoute slack.Route
+	routes     *routes
+}
+
+// routes are where the doctor sends the requests of a Telegram, Mattermost or Bridge Connection instead of its address;
+// nil sends them to the address.
+type routes struct {
+	telegram   telegram.Route
+	mattermost mattermost.Route
+	bridge     bridge.Route
 }
 
 // Run runs every check and prints its line. It returns false when a check failed, and an error when the settings
@@ -132,7 +144,7 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	c := &checks{cfg: cfg, out: opts.Out, real: cmp.Or[clock.Clock](opts.real, clock.Real{}), ok: true,
-		each: cmp.Or(opts.each, messengerTimeout), slackRoute: slackRouteOf(opts)}
+		each: cmp.Or(opts.each, messengerTimeout), slackRoute: slackRouteOf(opts), routes: routesOf(opts)}
 	c.keys, c.keysErr = keyring.Load(ctx, keyring.Env{Keys: cfg.SecretKeys, Source: cfg.SecretKeysSource},
 		opts.Development)
 	open := opts.open
@@ -170,6 +182,19 @@ func slackRouteOf(opts Options) slack.Route {
 		return devmode.SlackRoute
 	}
 	return nil
+}
+
+// routesOf is where the doctor sends the requests of a Telegram, Mattermost or Bridge Connection: the test's routes,
+// under development the routes of `muster dev`, which serve the fakes' published tokens on their realistic addresses,
+// and the Connection's address otherwise.
+func routesOf(opts Options) routes {
+	switch {
+	case opts.routes != nil:
+		return *opts.routes
+	case opts.Development:
+		return routes{telegram: devmode.TelegramRoute, mattermost: devmode.MattermostRoute, bridge: devmode.BridgeRoute}
+	}
+	return routes{}
 }
 
 // Open opens the main pool and takes one connection of it, then the session connection, and makes every
@@ -219,6 +244,7 @@ type checks struct {
 	real       clock.Clock
 	each       time.Duration
 	slackRoute slack.Route
+	routes     routes
 	conns      Connections
 	keys       *keyring.Keyring
 	keysErr    error
@@ -369,7 +395,7 @@ func (c *checks) clockSkew(ctx context.Context) {
 }
 
 // messengers checks the Connections and the Destinations of every Organization, one line each, through the
-// Organization's outbound address policy and, under development, the Slack route of `muster dev`; the outbound log lines
+// Organization's outbound address policy and, under development, the routes of `muster dev`; the outbound log lines
 // are for the server, not for the doctor.
 func (c *checks) messengers(ctx context.Context) {
 	orgs, err := kdb.New(c.conns.Main).ListOrganizationIDs(ctx)
@@ -384,6 +410,7 @@ func (c *checks) messengers(ctx context.Context) {
 	quiet := logging.New(io.Discard, logging.LevelError)
 	for _, org := range orgs {
 		svc := connections.New(connections.Config{OrgID: org, Keyring: keys, Log: quiet, SlackRoute: c.slackRoute,
+			TelegramRoute: c.routes.telegram, MattermostRoute: c.routes.mattermost, BridgeRoute: c.routes.bridge,
 			Clocks: clock.Clocks{Business: c.real, Real: c.real},
 			Network: mattermost.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(c.conns.Main),
 				org, c.real), Log: quiet, Real: c.real}})

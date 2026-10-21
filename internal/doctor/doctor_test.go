@@ -76,12 +76,14 @@ func (r *rows) Scan(dest ...any) error {
 }
 
 // fakeDB answers the doctor's statements; each answer can be replaced or failed by the SQL it matches. slackRoute is
-// where the doctor's Slack requests go, nil for none.
+// where the doctor's Slack requests go, nil for none, and routes where its Telegram, Mattermost and Bridge requests go,
+// nil for the doctor's own.
 type fakeDB struct {
 	answers    map[string]*rows
 	execs      []string
 	listen     bool
 	slackRoute slack.Route
+	routes     *routes
 }
 
 // conn is one connection of the database; notify is set on the session connection.
@@ -217,7 +219,7 @@ func run(t *testing.T, d *fakeDB, env []string) (string, bool) {
 	var out bytes.Buffer
 	ok, err := Run(t.Context(), Options{Environ: env, Out: &out,
 		open: func(context.Context, config.Config) (Connections, error) { return d.connections(), nil },
-		real: clock.Real{}, slackRoute: d.slackRoute})
+		real: clock.Real{}, slackRoute: d.slackRoute, routes: d.routes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,5 +668,78 @@ func TestSlackRoute(t *testing.T) {
 	own := func(logging.Secret) string { return "http://127.0.0.1:1/api/" }
 	if r := slackRouteOf(Options{Development: true, slackRoute: own}); ptr(r) != ptr(own) {
 		t.Error("the test's route lost")
+	}
+}
+
+// TestDevRoutes: `muster dev doctor` sends a Telegram, Mattermost or Bridge Connection's requests where `muster dev`
+// sends them, so that a Connection on a realistic address with a fake's published token reaches the fake (C-21.FR-10);
+// `muster doctor` sends them to the Connection's address, and a test's routes win over both. A routed request still
+// passes the outbound address policy: without the loopback network each is blocked.
+func TestDevRoutes(t *testing.T) {
+	ptr := func(f any) uintptr { return reflect.ValueOf(f).Pointer() }
+	if r := routesOf(Options{Development: true}); ptr(r.telegram) != ptr(devmode.TelegramRoute) ||
+		ptr(r.mattermost) != ptr(devmode.MattermostRoute) || ptr(r.bridge) != ptr(devmode.BridgeRoute) {
+		t.Error("muster dev doctor does not take the routes of muster dev")
+	}
+	if r := routesOf(Options{}); r.telegram != nil || r.mattermost != nil || r.bridge != nil {
+		t.Error("muster doctor has a route")
+	}
+	own := &routes{}
+	if r := routesOf(Options{Development: true, routes: own}); r.telegram != nil {
+		t.Error("the test's routes lost")
+	}
+
+	key, _ := keys('a')
+	d := messengerDB(t, key)
+	conns := d.answers["ListConnections"].values
+	field := func(row []any, name string) *any {
+		f, ok := reflect.TypeFor[cdb.ListConnectionsRow]().FieldByName(name)
+		if !ok {
+			t.Fatalf("no field %s", name)
+		}
+		return &row[f.Index[0]]
+	}
+	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+	fakes := map[string]string{}
+	for _, c := range []struct {
+		row   []any
+		field string
+		addr  string
+	}{
+		{conns[0], "MattermostServerUrl", devmode.MattermostRouteURL},
+		{conns[1], "TelegramBotApiBaseUrl", telegram.DefaultBaseURL},
+		{conns[2], "BridgeBaseUrl", devmode.BridgeRouteURL},
+	} {
+		v := field(c.row, c.field)
+		fakes[c.addr] = (*v).(pgtype.Text).String
+		*v = text(c.addr)
+	}
+	route := func(token string) func(string, logging.Secret) string {
+		return func(addr string, tok logging.Secret) string {
+			if string(tok) == token {
+				return fakes[addr]
+			}
+			return ""
+		}
+	}
+	d.routes = &routes{mattermost: route(doctorToken), telegram: route(doctorTelegramToken),
+		bridge: route(fakebridge.Token)}
+	out, _ := run(t, d, environ(key))
+	for _, want := range []string{"WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n",
+		"OK   connection Dev Telegram: ok\n", "OK   connection Dev Bridge: ok\n", "OK   destination alerts: ok\n",
+		"OK   destination tg-alerts: ok\n", "OK   destination br-alerts: ok\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("routed, the output lacks %q:\n%s", want, out)
+		}
+	}
+
+	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string(nil), []string(nil)}}}
+	out, ok := run(t, d, environ(key))
+	for _, name := range []string{"Dev Mattermost", "Dev Telegram", "Dev Bridge"} {
+		_, line, _ := strings.Cut(out, "FAIL connection "+name+": ")
+		line, _, _ = strings.Cut(line, "\n")
+		if ok || !strings.Contains(line, "blocked by the outbound address policy: 127.0.0.1 is loopback") {
+			t.Errorf("without loopback, %s is not blocked:\n%s", name, out)
+		}
 	}
 }

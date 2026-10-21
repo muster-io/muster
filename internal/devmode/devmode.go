@@ -6,8 +6,9 @@
 // receiver, the fake bridge and the fake HTTP and SOCKS5 proxies on fixed loopback addresses, the demo OIDC
 // configuration, and Muster itself in the same process, against the development database and migrated on start, with
 // the demo Integration that the fake Alertmanager sends to and the demo Connections to the fakes, whose Slack requests
-// go to the fake Slack server (SlackRoute); and the development clock that every replica of the development database
-// shares.
+// go to the fake Slack server (SlackRoute); the routes that send Connections on realistic addresses with the fakes'
+// published tokens to the fakes (TelegramRoute, MattermostRoute, BridgeRoute); and the development clock that every
+// replica of the development database shares.
 package devmode
 
 import (
@@ -41,6 +42,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // The development defaults, published so that anyone can run Muster locally.
@@ -271,6 +273,50 @@ func SlackRoute(botToken logging.Secret) string {
 		return SlackBaseURL
 	}
 	return ""
+}
+
+// The addresses whose Connections `muster dev` sends to the fake servers when their token is one of the fakes'
+// published tokens (C-21.FR-10): the guides show these, never a fake server's loopback address. The Telegram one is the
+// default Bot API base URL, telegram.DefaultBaseURL.
+const (
+	MattermostRouteURL = "https://chat.example.org"
+	BridgeRouteURL     = "https://bridge.example.org"
+)
+
+// TelegramRoute is the Telegram route of `muster dev`: a Telegram Connection on the default Bot API base URL whose bot
+// token is one of the fake Telegram server's published tokens calls the fake server; any other address or token calls
+// the address the Connection names.
+func TelegramRoute(baseURL string, token logging.Secret) string {
+	if sameAddress(baseURL, telegram.DefaultBaseURL) &&
+		(token == TelegramConnectionBotToken || token == TelegramSecondBotToken) {
+		return "http://" + TelegramAddr
+	}
+	return ""
+}
+
+// MattermostRoute is the Mattermost route of `muster dev`: a Mattermost Connection on MattermostRouteURL whose bot
+// token is one of the fake Mattermost server's published tokens calls the first fake Mattermost server; any other
+// address or token calls the address the Connection names.
+func MattermostRoute(serverURL string, token logging.Secret) string {
+	if sameAddress(serverURL, MattermostRouteURL) &&
+		(token == ConnectionBotToken || token == MattermostSecondBotToken) {
+		return "http://" + MattermostAddr
+	}
+	return ""
+}
+
+// BridgeRoute is the Bridge route of `muster dev`: a Bridge Connection on BridgeRouteURL whose token is one of the fake
+// bridge's published tokens calls the fake bridge; any other address or token calls the address the Connection names.
+func BridgeRoute(baseURL string, token logging.Secret) string {
+	if sameAddress(baseURL, BridgeRouteURL) && (token == BridgeConnectionBotToken || token == BridgeSecondBotToken) {
+		return "http://" + BridgeAddr
+	}
+	return ""
+}
+
+// sameAddress reports whether the address a, as a Connection stores it, is want, a trailing / aside.
+func sameAddress(a, want string) bool {
+	return strings.TrimSuffix(strings.TrimSpace(a), "/") == want
 }
 
 // TelegramCopyDelay is how long after a channel post its automatic copy reaches the bot in `muster dev`, about a

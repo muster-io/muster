@@ -54,6 +54,11 @@ theme:
 plugins:
   - search
 
+# The screenshots of the guides (make docs-screenshots), which pages mark with { .screenshot }: a thin border and at most
+# the width of the text.
+extra_css:
+  - assets/stylesheets/screenshots.css
+
 # The version selector reads versions.json at the root of the published site, which docspublish writes.
 extra:
   version:
@@ -77,6 +82,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick start: quick-start.md
+  - First alert in a messenger: first-alert.md
   - Install:
       - install/helm.md
       - install/database.md

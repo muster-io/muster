@@ -740,3 +740,54 @@ func TestClientWithoutToken(t *testing.T) {
 	}
 	wantProbeRequest(t, f)
 }
+
+// TestRoute is the route of `muster dev` (C-21.FR-10): a client whose Route answers for its server URL and token sends
+// every request there; an empty answer sends to the server URL, which the dry probe's message then names. A routed
+// request still passes the outbound address policy: without the loopback network it is blocked.
+func TestRoute(t *testing.T) {
+	f := startFake(t)
+	const server = "https://chat.example.org"
+	route := func(serverURL string, tok logging.Secret) string {
+		if serverURL == server && tok == token {
+			return f.URL()
+		}
+		return ""
+	}
+	settings := mattermost.Settings{ServerURL: server, Token: token, Route: route}
+	c, err := mattermost.NewClient(network(t, &bytes.Buffer{}, "127.0.0.0/8"), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, r := c.Me(t.Context(), outbound.ClassInteractive); !r.OK() || u.ID != fakemattermost.BotUserID {
+		t.Fatalf("routed Me = %+v, %+v", u, r)
+	}
+	if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Path != "/api/v4/users/me" {
+		t.Fatalf("requests %+v", reqs)
+	}
+
+	// Not routed: another token goes to the server URL, here an address that refuses connections, and the dry probe
+	// names it.
+	other, err := mattermost.NewClient(network(t, &bytes.Buffer{}, "127.0.0.0/8"),
+		mattermost.Settings{ServerURL: "http://127.0.0.1:1", Token: "another-token", Route: route})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := mattermost.RunDryProbe(t.Context(), other, interactive, clock.Real{})
+	if err != nil || p.OK || !strings.Contains(p.Message, "127.0.0.1:1") {
+		t.Fatalf("unrouted dry probe = %+v, %v", p, err)
+	}
+	if n := len(f.Requests()); n != 1 {
+		t.Fatalf("the fake got %d requests, want 1", n)
+	}
+	blocked, err := mattermost.NewClient(network(t, &bytes.Buffer{}), settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, r := blocked.Me(t.Context(), outbound.ClassInteractive); !r.Blocked ||
+		r.Outcome.Kind != delivery.OutcomeFatal {
+		t.Fatalf("routed Me without loopback = %+v", r)
+	}
+	if n := len(f.Requests()); n != 1 {
+		t.Fatalf("a blocked request reached the fake: %d requests", n)
+	}
+}

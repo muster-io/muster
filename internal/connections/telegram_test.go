@@ -727,3 +727,83 @@ func TestTelegramNewToken(t *testing.T) {
 		t.Fatalf("a rename forgot the offset: %+v", list)
 	}
 }
+
+// TestTelegramDevRoute is the Telegram route of muster dev (C-21.FR-10): a Connection on the default Bot API base URL
+// whose token the route publishes reaches the fake server, for its check and for long polling; the probe of an unsaved
+// base URL goes where the stored token is routed, without the token; and a routed request still passes the outbound
+// address policy, which blocks it without the loopback network.
+func TestTelegramDevRoute(t *testing.T) {
+	e := newTGEnv(t)
+	in := e.input("tg", connections.ModeLongPolling)
+	in.BotAPIBaseURL = telegram.DefaultBaseURL
+	c, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in = e.input("tg-elsewhere", connections.ModeLongPolling)
+	in.BotAPIBaseURL = "https://tg.example.org"
+	elsewhere, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := devRoutes{tg: func(base string, token logging.Secret) string {
+		if base == telegram.DefaultBaseURL && token == tgToken {
+			return e.tg.URL()
+		}
+		return ""
+	}}
+	svc, dns := routedService(t, e.env, route, "127.0.0.0/8")
+	res, err := svc.Check(t.Context(), c.PublicID, nil)
+	if err != nil || !res.OK || res.BotName != faketelegram.BotUsername {
+		t.Fatalf("routed check = %+v, %v", res, err)
+	}
+	polled, err := svc.Polling(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range polled {
+		if p.ID != c.ID {
+			continue
+		}
+		found = true
+		if u, r := p.Client.GetMe(t.Context(), outbound.ClassBackground); !r.OK() ||
+			u.Username != faketelegram.BotUsername {
+			t.Fatalf("the polling client's getMe = %+v %+v", u, r)
+		}
+	}
+	if !found {
+		t.Fatalf("polled %+v", polled)
+	}
+	if hosts := dns.take(); len(hosts) != 0 {
+		t.Fatalf("routed requests resolved %v", hosts)
+	}
+
+	// The probe of the default address for a Connection saved elsewhere goes to the fake, by its stored token, which
+	// it does not send.
+	e.tg.ResetRequests()
+	base := telegram.DefaultBaseURL
+	res, err = svc.Check(t.Context(), elsewhere.PublicID, &base)
+	if err != nil || !res.Steps[0].OK || !res.Steps[1].Skipped {
+		t.Fatalf("routed probe = %+v, %v", res, err)
+	}
+	if reqs := e.tg.Requests(); len(reqs) != 1 || reqs[0].Path != "/bot0:x/getMe" {
+		t.Fatalf("requests %+v", reqs)
+	}
+	if res, err = svc.Check(t.Context(), elsewhere.PublicID, nil); err != nil || res.OK {
+		t.Fatalf("the check of the address elsewhere = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); !slices.Equal(hosts, []string{"tg.example.org"}) {
+		t.Fatalf("the check elsewhere resolved %v", hosts)
+	}
+
+	blocked, _ := routedService(t, e.env, route)
+	e.tg.ResetRequests()
+	res, err = blocked.Check(t.Context(), c.PublicID, nil)
+	if err != nil || res.OK || res.Steps[0].Code != delivery.CodeBlocked {
+		t.Fatalf("routed check without loopback = %+v, %v", res, err)
+	}
+	if reqs := e.tg.Requests(); len(reqs) != 0 {
+		t.Fatalf("a blocked request reached the fake: %+v", reqs)
+	}
+}
