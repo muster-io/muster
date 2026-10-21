@@ -135,11 +135,15 @@ type Settings struct {
 	SkipTOTPWithIDPMFA    bool
 	Proxy                 proxyconf.Config
 	ProxyPassword         keyring.SecretStatus
-	// GroupsClaimMissing says that the last check or sign-in found no groups claim.
+	// GroupsClaimMissing says that no sign-in has seen the groups claim and the latest check found discovery not
+	// advertising it.
 	GroupsClaimMissing bool
-	Warnings           []Warning
-	Version            int64
-	UpdatedAt          *time.Time
+	// GroupsClaimSeen says that a sign-in or a link found the groups claim in an ID token or in userinfo since the
+	// groups claim, the issuer, the client ID or the scopes last changed.
+	GroupsClaimSeen bool
+	Warnings        []Warning
+	Version         int64
+	UpdatedAt       *time.Time
 }
 
 // ButtonName is the provider name of the sign-in button: the display name, or the host of the issuer URL.
@@ -185,7 +189,8 @@ type Queries interface {
 	LockSettings(ctx context.Context, orgID int64) (int64, error)
 	InsertSettings(ctx context.Context, arg dbgen.InsertSettingsParams) (int64, error)
 	UpdateSettings(ctx context.Context, arg dbgen.UpdateSettingsParams) (int64, error)
-	SetGroupsClaimMissing(ctx context.Context, arg dbgen.SetGroupsClaimMissingParams) error
+	RecordGroupsClaimSeen(ctx context.Context, arg dbgen.RecordGroupsClaimSeenParams) (int64, error)
+	RecordGroupsClaimAdvertised(ctx context.Context, arg dbgen.RecordGroupsClaimAdvertisedParams) (int64, error)
 	LatestKeptAdmin(ctx context.Context, orgID int64) (dbgen.LatestKeptAdminRow, error)
 	InsertAuthRequest(ctx context.Context, arg dbgen.InsertAuthRequestParams) (int64, error)
 	TakeAuthRequest(ctx context.Context, arg dbgen.TakeAuthRequestParams) (dbgen.TakeAuthRequestRow, error)
@@ -318,7 +323,10 @@ func settingsOf(row dbgen.OidcSetting) (Settings, error) {
 		Scopes: row.Scopes, GroupsClaim: row.GroupsClaim, UnmatchedRole: row.UnmatchedRole, SyncRole: row.SyncRole,
 		SkipTOTPWithIDPMFA: row.SkipTotpWithIdpMfa, ProxyPassword: secretOf(row.ProxyPasswordCiphertext,
 			row.ProxyPasswordKeyID, row.ProxyPasswordUpdatedAt).Status(),
-		GroupsClaimMissing: row.GroupsClaimMissingSince.Valid, Version: row.Version,
+		// A warning next to a claim seen, which an older replica may have written, is not shown.
+		GroupsClaimMissing: row.GroupsClaimMissingSince.Valid && !row.GroupsClaimSeenAt.Valid,
+		GroupsClaimSeen:    row.GroupsClaimSeenAt.Valid,
+		Version:            row.Version,
 	}
 	if row.ClientSecretExpiresOn.Valid {
 		d := row.ClientSecretExpiresOn.Time.UTC()
@@ -637,7 +645,9 @@ type CheckResult struct {
 }
 
 // Check fetches discovery with the saved settings through the interactive class and the OIDC proxy, and records
-// whether discovery advertises the groups claim.
+// whether discovery advertises the groups claim: while no sign-in has seen the claim, a claim it does not list raises
+// groups_claim_missing and a listed one clears it; once a sign-in has seen it, discovery's list, which is optional,
+// changes nothing.
 func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 	st, row, err := s.read(ctx, s.cfg.Store)
 	if err != nil {
@@ -662,8 +672,11 @@ func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 		return res, s.finishCheck(ctx, &res)
 	}
 	res.OK, res.Discovery = true, d
-	if err := s.setGroupsClaimMissing(ctx, !d.AdvertisesClaim(st.GroupsClaim)); err != nil {
-		return CheckResult{}, err
+	if _, err := s.cfg.Store.RecordGroupsClaimAdvertised(ctx, dbgen.RecordGroupsClaimAdvertisedParams{
+		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
+		Scopes: st.Scopes, Advertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),
+	}); err != nil {
+		return CheckResult{}, fmt.Errorf("record the groups claim: %w", err)
 	}
 	return res, s.finishCheck(ctx, &res)
 }
@@ -686,16 +699,25 @@ func masked(err error) string {
 	return err.Error()
 }
 
-// setGroupsClaimMissing records that the groups claim was found missing, or clears it.
-func (s *Service) setGroupsClaimMissing(ctx context.Context, missing bool) error {
-	p := dbgen.SetGroupsClaimMissingParams{OrgID: s.cfg.OrgID}
-	if missing {
-		p.Since = pgtype.Timestamptz{Time: s.cfg.Clocks.Business.Now().UTC(), Valid: true}
+// recordGroupsClaim records that a sign-in or a link found the groups claim in an ID token or in userinfo, which
+// clears groups_claim_missing for good. A sign-in without the claim records nothing: identity providers leave it out
+// for a user in no group. The query applies only while the groups claim, the issuer, the client ID and the scopes are
+// still those of st, and writes no row when there is nothing to change.
+func (s *Service) recordGroupsClaim(ctx context.Context, st Settings, found bool) error {
+	if !found {
+		return nil
 	}
-	if err := s.cfg.Store.SetGroupsClaimMissing(ctx, p); err != nil {
+	if _, err := s.cfg.Store.RecordGroupsClaimSeen(ctx, dbgen.RecordGroupsClaimSeenParams{
+		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
+		Scopes: st.Scopes, At: s.businessNow(),
+	}); err != nil {
 		return fmt.Errorf("record the groups claim: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) businessNow() time.Time {
+	return s.cfg.Clocks.Business.Now().UTC()
 }
 
 // providerFor returns the back channel of the settings' version, built once per version: its clients carry the

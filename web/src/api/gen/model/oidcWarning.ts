@@ -7,7 +7,7 @@ import type { RoleName } from './roleName';
 import type { UserRef } from './userRef';
 
 export interface OidcWarning {
-  /** `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: discovery does not advertise the groups claim, or a test sign-in carried no such claim. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`. */
+  /** `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`. */
   kind: OidcWarningKind;
   /** @nullable */
   expires_on?: string | null;

@@ -6,12 +6,15 @@ package oidc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/fakes/fakeoidc"
@@ -345,8 +348,8 @@ func TestBackChannelFailures(t *testing.T) {
 	e.idp.ResetFaults()
 }
 
-// TestGroupsFromUserinfo is D247: the groups claim is read from userinfo when the ID token lacks it; a token and
-// userinfo without it record groups_claim_missing, which a sign-in with the claim clears.
+// TestGroupsFromUserinfo is D247: the groups claim is read from userinfo when the ID token lacks it, and a claim found
+// there counts as seen; a token and userinfo without it record nothing (C-03.FR-6).
 func TestGroupsFromUserinfo(t *testing.T) {
 	e := newEnv(t)
 	e.configure(t, nil)
@@ -355,16 +358,219 @@ func TestGroupsFromUserinfo(t *testing.T) {
 	if out.Session == nil || e.user("olga").role != auth.RoleResponder {
 		t.Fatalf("groups from userinfo = %+v", out)
 	}
+	if st, _ := e.svc.Get(t.Context()); !st.GroupsClaimSeen {
+		t.Error("a claim from userinfo is not seen")
+	}
 	e.configure(t, func(in *Input) { in.GroupsClaim = "roles"; in.UnmatchedRole = UnmatchedViewer })
+	writes := e.store.writes
 	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
 	st, _ := e.svc.Get(t.Context())
-	if e.user("vic").role != auth.RoleViewer || !slices.Contains(kinds(st.Warnings), WarningGroupsClaimMissing) {
-		t.Fatalf("without the claim: role %s, warnings %v", e.user("vic").role, kinds(st.Warnings))
+	if e.user("vic").role != auth.RoleViewer || st.GroupsClaimSeen || slices.Contains(kinds(st.Warnings),
+		WarningGroupsClaimMissing) || e.store.writes != writes {
+		t.Errorf("without the claim: role %s, seen %v, warnings %v, %d writes", e.user("vic").role,
+			st.GroupsClaimSeen, kinds(st.Warnings), e.store.writes-writes)
 	}
+}
+
+// claimState is the groups claim state of the settings as the memory store holds it, and the warning shown.
+func (e *env) claimState(t *testing.T) string {
+	t.Helper()
+	st, err := e.svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.store.mu.Lock()
+	defer e.store.mu.Unlock()
+	return fmt.Sprintf("seen=%v missing=%v warned=%v", e.store.settings.GroupsClaimSeenAt.Valid,
+		e.store.settings.GroupsClaimMissingSince.Valid, slices.Contains(kinds(st.Warnings), WarningGroupsClaimMissing))
+}
+
+// setClaimState sets the groups claim state directly, as earlier sign-ins, checks or an older replica left it.
+func (e *env) setClaimState(seen, missing bool) {
+	e.store.mu.Lock()
+	defer e.store.mu.Unlock()
+	e.store.settings.GroupsClaimSeenAt = pgtype.Timestamptz{Time: t0, Valid: seen}
+	e.store.settings.GroupsClaimMissingSince = pgtype.Timestamptz{Time: t0, Valid: missing}
+}
+
+// TestGroupsClaimSeenOutranksDiscovery is C-03.FR-6 (D444): groups_claim_missing exists only while no sign-in has seen
+// the groups claim in an ID token or userinfo and the latest check found discovery not advertising it. A sign-in
+// without the claim records nothing, before or after the claim was seen; a sign-in with it clears the warning for good,
+// so that later checks without the claim advertised do not warn; while the claim is not seen, a check that finds it
+// advertised clears the warning that a check raised. A record that changes nothing writes nothing.
+func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
+	e := newEnv(t)
 	e.configure(t, func(in *Input) { in.UnmatchedRole = UnmatchedViewer })
-	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic", Groups: []string{"x"}}, "")
-	if st, _ := e.svc.Get(t.Context()); slices.Contains(kinds(st.Warnings), WarningGroupsClaimMissing) {
-		t.Error("a sign-in with the claim did not clear groups_claim_missing")
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	check := func(t *testing.T) []string {
+		t.Helper()
+		res, err := e.svc.Check(t.Context())
+		if err != nil || !res.OK {
+			t.Fatalf("check = %+v, %v", res, err)
+		}
+		return kinds(res.Warnings)
+	}
+	expect := func(t *testing.T, step, want string) {
+		t.Helper()
+		if got := e.claimState(t); got != want {
+			t.Errorf("%s: %s, want %s", step, got, want)
+		}
+	}
+
+	if ws := check(t); !slices.Contains(ws, WarningGroupsClaimMissing) {
+		t.Fatalf("a check before any sign-in: %v", ws)
+	}
+	expect(t, "a check before any sign-in", "seen=false missing=true warned=true")
+	writes := e.store.writes
+	check(t)
+	if e.store.writes != writes {
+		t.Error("a check that finds what the last one found wrote the row")
+	}
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(false)})
+	if ws := check(t); slices.Contains(ws, WarningGroupsClaimMissing) {
+		t.Errorf("a check that finds the claim advertised: %v", ws)
+	}
+	expect(t, "an advertising check, the claim not seen", "seen=false missing=false warned=false")
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	check(t)
+	expect(t, "a check without the claim again", "seen=false missing=true warned=true")
+
+	olga := fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}}
+	if out := e.signIn(t, olga, ""); out.Session == nil {
+		t.Fatalf("sign-in = %+v", out)
+	}
+	expect(t, "a sign-in with the claim", "seen=true missing=false warned=false")
+	e.store.mu.Lock()
+	first := e.store.settings.GroupsClaimSeenAt.Time
+	e.store.mu.Unlock()
+	e.business.Advance(time.Hour)
+	writes = e.store.writes
+	e.signIn(t, olga, "")
+	for i := range 2 {
+		if ws := check(t); slices.Contains(ws, WarningGroupsClaimMissing) {
+			t.Fatalf("check %d after the claim was seen: %v", i+1, ws)
+		}
+	}
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(false)})
+	check(t)
+	expect(t, "checks after the claim was seen", "seen=true missing=false warned=false")
+	if e.store.writes != writes {
+		t.Errorf("a sign-in and checks that change nothing wrote the row %d times", e.store.writes-writes)
+	}
+	e.store.mu.Lock()
+	if !e.store.settings.GroupsClaimSeenAt.Time.Equal(first) {
+		t.Error("a later sign-in moved the time the claim was first seen")
+	}
+	e.store.mu.Unlock()
+
+	writes = e.store.writes
+	nina := fakeoidc.User{Subject: "u-3", PreferredUsername: "nina", NoGroupsClaim: true}
+	if out := e.signIn(t, nina, ""); out.Session == nil {
+		t.Fatalf("sign-in without the claim = %+v", out)
+	}
+	expect(t, "a sign-in without the claim after it was seen", "seen=true missing=false warned=false")
+	if e.store.writes != writes {
+		t.Error("a sign-in without the claim wrote the row")
+	}
+	e.configure(t, func(in *Input) { in.GroupsClaim = "roles"; in.UnmatchedRole = UnmatchedViewer })
+	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
+	expect(t, "a sign-in without the claim before it was seen", "seen=false missing=false warned=false")
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	check(t)
+	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
+	expect(t, "a sign-in without the claim after a check warned", "seen=false missing=true warned=true")
+}
+
+// TestGroupsClaimSeenResets is C-03.FR-6 (D444): saving another groups claim, issuer, client ID or scopes forgets the
+// claim seen and the warning, so that the next check without the claim advertised warns; other changes keep both.
+func TestGroupsClaimSeenResets(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	for _, tc := range []struct {
+		name   string
+		change func(*Input)
+		reset  bool
+	}{
+		{"groups claim", func(in *Input) { in.GroupsClaim = "roles" }, true},
+		{"issuer", func(in *Input) { in.IssuerURL = e.idp.URL() + "/" }, true},
+		{"client ID", func(in *Input) { in.ClientID = "muster-2" }, true},
+		{"scopes", func(in *Input) { in.Scopes = &[]string{"profile"} }, true},
+		{"mappings", func(in *Input) { in.UnmatchedRole = UnmatchedViewer }, false},
+	} {
+		e.configure(t, nil)
+		e.setClaimState(true, true)
+		e.configure(t, tc.change)
+		want := "seen=true missing=true warned=false"
+		if tc.reset {
+			want = "seen=false missing=false warned=false"
+		}
+		if got := e.claimState(t); got != want {
+			t.Errorf("another %s: %s, want %s", tc.name, got, want)
+		}
+	}
+	e.configure(t, nil)
+	e.setClaimState(true, false)
+	e.configure(t, func(in *Input) { in.ClientID = "muster-2" })
+	if ws, _ := e.svc.Check(t.Context()); !slices.Contains(kinds(ws.Warnings), WarningGroupsClaimMissing) {
+		t.Errorf("a check after another client ID: %v", kinds(ws.Warnings))
+	}
+}
+
+// TestStaleGroupsClaimRecord: a sign-in or a check that read the settings before an Admin saved another groups claim,
+// issuer, client ID or scopes records nothing; a warning that a 0.1.0 replica left next to a claim seen is not shown
+// and the next record clears it.
+func TestStaleGroupsClaimRecord(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	read, err := e.svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		stale func(*Settings)
+	}{
+		{"groups claim", func(st *Settings) { st.GroupsClaim = "roles" }},
+		{"issuer", func(st *Settings) { st.IssuerURL += "/" }},
+		{"client ID", func(st *Settings) { st.ClientID = "muster-2" }},
+		{"scopes", func(st *Settings) { st.Scopes = []string{"profile"} }},
+	} {
+		stale := read
+		stale.Scopes = slices.Clone(read.Scopes)
+		tc.stale(&stale)
+		e.setClaimState(false, true)
+		if err := e.svc.recordGroupsClaim(t.Context(), stale, true); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := e.store.RecordGroupsClaimAdvertised(t.Context(), dbgen.RecordGroupsClaimAdvertisedParams{
+			OrgID: 1, GroupsClaim: stale.GroupsClaim, IssuerUrl: stale.IssuerURL, ClientID: stale.ClientID,
+			Scopes: stale.Scopes, Advertised: true, At: t0}); err != nil || n != 0 {
+			t.Errorf("a stale %s check: %d rows, %v", tc.name, n, err)
+		}
+		if got := e.claimState(t); got != "seen=false missing=true warned=true" {
+			t.Errorf("a stale %s record changed the state: %s", tc.name, got)
+		}
+	}
+
+	e.setClaimState(true, true)
+	if got := e.claimState(t); got != "seen=true missing=true warned=false" {
+		t.Errorf("a 0.1.0 state: %s", got)
+	}
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	if res, err := e.svc.Check(t.Context()); err != nil || slices.Contains(kinds(res.Warnings),
+		WarningGroupsClaimMissing) {
+		t.Errorf("a check on a 0.1.0 state = %+v, %v", res, err)
+	}
+	if got := e.claimState(t); got != "seen=true missing=false warned=false" {
+		t.Errorf("a check did not repair a 0.1.0 state: %s", got)
+	}
+	e.setClaimState(true, true)
+	if err := e.svc.recordGroupsClaim(t.Context(), read, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.claimState(t); got != "seen=true missing=false warned=false" {
+		t.Errorf("a sign-in did not repair a 0.1.0 state: %s", got)
 	}
 }
 

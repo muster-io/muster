@@ -895,8 +895,13 @@ func (s *probeOIDCStore) UpdateSettings(_ context.Context, a odb.UpdateSettingsP
 	return 1, nil
 }
 
-func (s *probeOIDCStore) SetGroupsClaimMissing(context.Context, odb.SetGroupsClaimMissingParams) error {
-	return nil
+func (s *probeOIDCStore) RecordGroupsClaimSeen(context.Context, odb.RecordGroupsClaimSeenParams) (int64, error) {
+	return 0, nil
+}
+
+func (s *probeOIDCStore) RecordGroupsClaimAdvertised(context.Context, odb.RecordGroupsClaimAdvertisedParams) (int64,
+	error) {
+	return 0, nil
 }
 
 func (s *probeOIDCStore) LatestKeptAdmin(context.Context, int64) (odb.LatestKeptAdminRow, error) {

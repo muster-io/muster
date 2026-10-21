@@ -251,10 +251,8 @@ func (s *Service) complete(ctx context.Context, cb Callback) (Outcome, string, e
 	if err != nil {
 		return Outcome{}, "userinfo", err
 	}
-	if found == st.GroupsClaimMissing {
-		if err := s.setGroupsClaimMissing(ctx, !found); err != nil {
-			return Outcome{}, "settings", err
-		}
+	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
+		return Outcome{}, "settings", err
 	}
 	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens)), req.ReturnTo.String)
 }

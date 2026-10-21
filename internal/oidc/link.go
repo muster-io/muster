@@ -179,10 +179,8 @@ func (s *Service) completeLink(ctx context.Context, sess auth.Session, cb Callba
 	if err != nil {
 		return Outcome{}, "userinfo", err
 	}
-	if found == st.GroupsClaimMissing {
-		if err := s.setGroupsClaimMissing(ctx, !found); err != nil {
-			return Outcome{}, "settings", err
-		}
+	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
+		return Outcome{}, "settings", err
 	}
 	id := identityOf(d.Issuer, idt, groups, offlineToken(tokens))
 	// An identity whose groups map to no Role could not sign in afterwards, so the link is refused as a sign-in is.

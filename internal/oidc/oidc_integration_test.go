@@ -330,6 +330,206 @@ func TestIntegrationSettings(t *testing.T) {
 	})
 }
 
+// TestIntegrationGroupsClaimSeen is C-03.FR-6 (D444) against PostgreSQL. groups_claim_missing exists only while no
+// sign-in has seen the groups claim and the latest check found it not advertised: a check before any sign-in warns, an
+// advertising check clears what a check raised, a sign-in with the claim records the first time it was seen and clears
+// the warning for good, so that later checks do not warn, and a sign-in without the claim records nothing, before or
+// after the claim was seen. Records that change nothing write no row version; records for a groups claim, issuer,
+// client ID or scopes that are no longer saved change nothing; saving another of those four forgets the claim seen; a
+// warning that a 0.1.0 replica left next to a claim seen is not shown, and the next record clears it. None of it moves
+// the version of the settings.
+func TestIntegrationGroupsClaimSeen(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		w := setup(t, s)
+		q := oidcdb.New(w.d.Pool)
+		check := func(t *testing.T) bool {
+			t.Helper()
+			res, err := w.svc.Check(t.Context())
+			if err != nil || !res.OK {
+				t.Fatalf("check = %+v, %v", res, err)
+			}
+			return slices.ContainsFunc(res.Warnings, func(x oidc.Warning) bool {
+				return x.Kind == oidc.WarningGroupsClaimMissing
+			})
+		}
+		// state is the row as seen=… missing=… version=…, with whether the settings show the warning.
+		state := func(t *testing.T) string {
+			t.Helper()
+			st, err := w.svc.Get(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			warned := slices.ContainsFunc(st.Warnings, func(x oidc.Warning) bool {
+				return x.Kind == oidc.WarningGroupsClaimMissing
+			})
+			return fmt.Sprint(w.scalar(t, `SELECT format('seen=%s missing=%s version=%s',
+				groups_claim_seen_at IS NOT NULL, groups_claim_missing_since IS NOT NULL, version) FROM oidc_settings`),
+				" warned=", warned)
+		}
+		expect := func(t *testing.T, step, want string) {
+			t.Helper()
+			if got := state(t); got != want {
+				t.Errorf("%s: %s, want %s", step, got, want)
+			}
+		}
+		// rowVersion is the system column xmin: a record whose WHERE excludes the row leaves it as it was.
+		rowVersion := func(t *testing.T) string {
+			t.Helper()
+			return fmt.Sprint(w.scalar(t, `SELECT xmin::text FROM oidc_settings`))
+		}
+		set := func(t *testing.T, seen, missing bool) {
+			t.Helper()
+			if _, err := w.d.Pool.Exec(t.Context(), `UPDATE oidc_settings
+				SET groups_claim_seen_at = CASE WHEN $1 THEN $3::timestamptz END,
+					groups_claim_missing_since = CASE WHEN $2 THEN $3::timestamptz END`, seen, missing, t0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		update := func(t *testing.T, change func(*oidc.Input)) {
+			t.Helper()
+			st, err := w.svc.Get(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			scopes := slices.Clone(st.Scopes)
+			in := oidc.Input{Enabled: st.Enabled, DisplayName: &st.DisplayName, IssuerURL: st.IssuerURL,
+				ClientID: st.ClientID, Scopes: &scopes, GroupsClaim: st.GroupsClaim, GroupMappings: st.GroupMappings,
+				UnmatchedRole: st.UnmatchedRole, SyncRole: st.SyncRole}
+			change(&in)
+			if _, err := w.svc.Update(t.Context(), oidc.Requester{Actor: audit.System, Transport: audit.TransportUI},
+				&st.Version, in); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ada := fakeoidc.User{Subject: "u-1", PreferredUsername: "ada", Groups: []string{"oncall"}}
+		vic := fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}
+
+		w.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+		if !check(t) {
+			t.Fatal("a check before any sign-in did not warn")
+		}
+		expect(t, "a check before any sign-in", "seen=f missing=t version=1 warned=true")
+		before := rowVersion(t)
+		check(t)
+		if rowVersion(t) != before {
+			t.Error("a check that finds what the last one found wrote the row")
+		}
+		w.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(false)})
+		if check(t) {
+			t.Error("a check that finds the claim advertised warned")
+		}
+		expect(t, "an advertising check", "seen=f missing=f version=1 warned=false")
+		w.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+		check(t)
+
+		if out := w.signIn(t, ada, ""); out.Session == nil {
+			t.Fatalf("sign-in = %+v", out)
+		}
+		expect(t, "a sign-in with the claim", "seen=t missing=f version=1 warned=false")
+		first := fmt.Sprint(w.scalar(t, `SELECT groups_claim_seen_at::text FROM oidc_settings`))
+		w.business.Advance(time.Hour)
+		before = rowVersion(t)
+		w.signIn(t, ada, "")
+		for i := range 2 {
+			if check(t) {
+				t.Errorf("check %d after the claim was seen warned", i+1)
+			}
+		}
+		if rowVersion(t) != before {
+			t.Error("a sign-in and checks that change nothing wrote the row")
+		}
+		if got := fmt.Sprint(w.scalar(t, `SELECT groups_claim_seen_at::text FROM oidc_settings`)); got != first {
+			t.Errorf("a later sign-in moved the claim first seen from %s to %s", first, got)
+		}
+		update(t, func(in *oidc.Input) { in.UnmatchedRole = oidc.UnmatchedViewer })
+		before = rowVersion(t)
+		if out := w.signIn(t, fakeoidc.User{Subject: "u-3", PreferredUsername: "nina", NoGroupsClaim: true},
+			""); out.Session == nil {
+			t.Fatalf("sign-in without the claim = %+v", out)
+		}
+		if rowVersion(t) != before {
+			t.Error("a sign-in without the claim after it was seen wrote the row")
+		}
+		expect(t, "a sign-in without the claim after it was seen", "seen=t missing=f version=2 warned=false")
+
+		// The fake issues no "roles" claim: vic's sign-ins carry none.
+		update(t, func(in *oidc.Input) { in.GroupsClaim = "roles" })
+		expect(t, "another groups claim", "seen=f missing=f version=3 warned=false")
+		before = rowVersion(t)
+		if out := w.signIn(t, vic, ""); out.Session == nil {
+			t.Fatalf("sign-in without the claim = %+v", out)
+		}
+		if rowVersion(t) != before {
+			t.Error("a sign-in without the claim before it was seen wrote the row")
+		}
+		if !check(t) {
+			t.Error("a check after another groups claim did not warn")
+		}
+		w.signIn(t, vic, "")
+		expect(t, "a sign-in without the claim after a check warned", "seen=f missing=t version=3 warned=true")
+		set(t, true, false)
+		w.signIn(t, vic, "")
+		expect(t, "a sign-in without the claim after it was seen", "seen=t missing=f version=3 warned=false")
+
+		set(t, true, true)
+		expect(t, "a 0.1.0 state", "seen=t missing=t version=3 warned=false")
+		if check(t) {
+			t.Error("a check on a 0.1.0 state warned")
+		}
+		expect(t, "a check on a 0.1.0 state", "seen=t missing=f version=3 warned=false")
+		set(t, true, true)
+		st, err := w.svc.Get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := oidcdb.RecordGroupsClaimSeenParams{OrgID: w.orgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL,
+			ClientID: st.ClientID, Scopes: st.Scopes, At: t0.Add(2 * time.Hour)}
+		if n, err := q.RecordGroupsClaimSeen(t.Context(), seen); err != nil || n != 1 {
+			t.Errorf("a sign-in on a 0.1.0 state: %d rows, %v", n, err)
+		}
+		expect(t, "a sign-in on a 0.1.0 state", "seen=t missing=f version=3 warned=false")
+		if got := fmt.Sprint(w.scalar(t, `SELECT groups_claim_seen_at = $1 FROM oidc_settings`, t0)); got != "true" {
+			t.Error("a sign-in on a 0.1.0 state moved the claim first seen")
+		}
+
+		for _, tc := range []struct {
+			name  string
+			stale func(*oidcdb.RecordGroupsClaimSeenParams)
+		}{
+			{"groups claim", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.GroupsClaim = "groups" }},
+			{"issuer", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.IssuerUrl += "/" }},
+			{"client ID", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.ClientID = "muster-2" }},
+			{"scopes", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.Scopes = []string{"profile"} }},
+		} {
+			p := seen
+			p.Scopes = slices.Clone(seen.Scopes)
+			tc.stale(&p)
+			set(t, false, true)
+			n1, err1 := q.RecordGroupsClaimSeen(t.Context(), p)
+			n2, err2 := q.RecordGroupsClaimAdvertised(t.Context(), oidcdb.RecordGroupsClaimAdvertisedParams{
+				OrgID: w.orgID, GroupsClaim: p.GroupsClaim, IssuerUrl: p.IssuerUrl, ClientID: p.ClientID,
+				Scopes: p.Scopes, Advertised: true, At: t0})
+			if err1 != nil || err2 != nil || n1 != 0 || n2 != 0 {
+				t.Errorf("stale %s records: %d, %v; %d, %v", tc.name, n1, err1, n2, err2)
+			}
+			expect(t, "stale "+tc.name+" records", "seen=f missing=t version=3 warned=true")
+		}
+
+		for i, tc := range []struct {
+			name   string
+			change func(*oidc.Input)
+		}{
+			{"client ID", func(in *oidc.Input) { in.ClientID = "muster-2" }},
+			{"scopes", func(in *oidc.Input) { in.Scopes = &[]string{"profile"} }},
+			{"issuer", func(in *oidc.Input) { in.IssuerURL = "http://127.0.0.1:1" }},
+		} {
+			set(t, true, true)
+			update(t, tc.change)
+			expect(t, "another "+tc.name, fmt.Sprintf("seen=f missing=f version=%d warned=false", 4+i))
+		}
+	})
+}
+
 // TestIntegrationDemoRename: settings of an earlier `muster dev` that carry the demo's earlier display name get the
 // current one at start, once, with their secret and version kept apart from the rename; other settings stay.
 func TestIntegrationDemoRename(t *testing.T) {

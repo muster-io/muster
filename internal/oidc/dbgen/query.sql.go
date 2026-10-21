@@ -413,7 +413,7 @@ const getSettings = `-- name: GetSettings :one
 SELECT org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphertext, client_secret_key_id,
        client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, unmatched_role,
        sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
-       proxy_password_updated_at, groups_claim_missing_since, version, updated_at
+       proxy_password_updated_at, groups_claim_missing_since, version, updated_at, groups_claim_seen_at
 FROM oidc_settings
 WHERE org_id = $1
 `
@@ -447,6 +447,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (OidcSetting, er
 		&i.GroupsClaimMissingSince,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.GroupsClaimSeenAt,
 	)
 	return i, err
 }
@@ -911,6 +912,85 @@ func (q *Queries) RecordContact(ctx context.Context, arg RecordContactParams) er
 	return err
 }
 
+const recordGroupsClaimAdvertised = `-- name: RecordGroupsClaimAdvertised :execrows
+UPDATE oidc_settings
+SET groups_claim_missing_since = CASE
+        WHEN $1::boolean OR groups_claim_seen_at IS NOT NULL THEN NULL
+        ELSE coalesce(groups_claim_missing_since, $2::timestamptz)
+    END
+WHERE org_id = $3 AND groups_claim = $4 AND issuer_url = $5 AND client_id = $6
+    AND scopes = $7::text[]
+    AND (groups_claim_missing_since IS NOT NULL) = ($1::boolean OR groups_claim_seen_at IS NOT NULL)
+`
+
+type RecordGroupsClaimAdvertisedParams struct {
+	Advertised  bool
+	At          time.Time
+	OrgID       int64
+	GroupsClaim string
+	IssuerUrl   string
+	ClientID    string
+	Scopes      []string
+}
+
+// RecordGroupsClaimAdvertised records what a check found in discovery while no sign-in has seen the groups claim: an
+// unlisted claim raises the warning, a listed one clears it. Once a sign-in has seen the claim the warning stays clear,
+// since discovery's list of claims is optional and identity providers leave the claims of their mappers out of it; a
+// warning that an older replica raised next to a claim seen is cleared. It changes nothing when an Admin saved another
+// groups claim, issuer, client ID or scopes since the check read them, and writes no row when the warning already is
+// what the check found.
+func (q *Queries) RecordGroupsClaimAdvertised(ctx context.Context, arg RecordGroupsClaimAdvertisedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordGroupsClaimAdvertised,
+		arg.Advertised,
+		arg.At,
+		arg.OrgID,
+		arg.GroupsClaim,
+		arg.IssuerUrl,
+		arg.ClientID,
+		arg.Scopes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordGroupsClaimSeen = `-- name: RecordGroupsClaimSeen :execrows
+UPDATE oidc_settings
+SET groups_claim_seen_at = coalesce(groups_claim_seen_at, $1::timestamptz), groups_claim_missing_since = NULL
+WHERE org_id = $2 AND groups_claim = $3 AND issuer_url = $4 AND client_id = $5
+    AND scopes = $6::text[] AND (groups_claim_seen_at IS NULL OR groups_claim_missing_since IS NOT NULL)
+`
+
+type RecordGroupsClaimSeenParams struct {
+	At          time.Time
+	OrgID       int64
+	GroupsClaim string
+	IssuerUrl   string
+	ClientID    string
+	Scopes      []string
+}
+
+// RecordGroupsClaimSeen records that a sign-in or a link found the groups claim in an ID token or in userinfo: the
+// first time is kept, and the warning is cleared for good, until an Admin saves another groups claim, issuer, client ID
+// or scopes. A sign-in without the claim records nothing: identity providers leave it out for a user in no group. It
+// changes nothing when an Admin saved other values of those four since the sign-in read them, and writes no row when
+// the claim is already seen and the warning clear. The warning is not a configured value, so the version stays.
+func (q *Queries) RecordGroupsClaimSeen(ctx context.Context, arg RecordGroupsClaimSeenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordGroupsClaimSeen,
+		arg.At,
+		arg.OrgID,
+		arg.GroupsClaim,
+		arg.IssuerUrl,
+		arg.ClientID,
+		arg.Scopes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const refuseUser = `-- name: RefuseUser :exec
 UPDATE users
 SET oidc_refused_at = $1::timestamptz, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
@@ -982,27 +1062,6 @@ func (q *Queries) ScheduleCheck(ctx context.Context, arg ScheduleCheckParams) er
 		arg.Deadline,
 		arg.Now,
 	)
-	return err
-}
-
-const setGroupsClaimMissing = `-- name: SetGroupsClaimMissing :exec
-UPDATE oidc_settings
-SET groups_claim_missing_since = CASE
-        WHEN $1::timestamptz IS NULL THEN NULL
-        ELSE coalesce(groups_claim_missing_since, $1::timestamptz)
-    END
-WHERE org_id = $2
-`
-
-type SetGroupsClaimMissingParams struct {
-	Since pgtype.Timestamptz
-	OrgID int64
-}
-
-// SetGroupsClaimMissing records since when the groups claim was found missing, or clears it with null; the warning is
-// not a configured value, so the version stays.
-func (q *Queries) SetGroupsClaimMissing(ctx context.Context, arg SetGroupsClaimMissingParams) error {
-	_, err := q.db.Exec(ctx, setGroupsClaimMissing, arg.Since, arg.OrgID)
 	return err
 }
 
@@ -1153,7 +1212,12 @@ SET enabled = $1, display_name = $2, issuer_url = $3, client_id = $4,
     proxy_password_key_id = $17,
     proxy_password_updated_at = $18,
     groups_claim_missing_since = CASE
-        WHEN groups_claim = $10 AND issuer_url = $3 THEN groups_claim_missing_since
+        WHEN groups_claim = $10 AND issuer_url = $3 AND client_id = $4
+            AND scopes = $9 THEN groups_claim_missing_since
+    END,
+    groups_claim_seen_at = CASE
+        WHEN groups_claim = $10 AND issuer_url = $3 AND client_id = $4
+            AND scopes = $9 THEN groups_claim_seen_at
     END,
     version = version + 1, updated_at = $19
 WHERE org_id = $20 AND version = $21
