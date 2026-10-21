@@ -15,6 +15,7 @@ import {
 import type { ServiceAccount } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { ServiceAccountDialog } from "../components/service-account-dialog";
 import { roleLabel, statusLabel } from "../components/user-create-dialog";
 
@@ -86,7 +87,7 @@ function ServiceAccountsPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{t("serviceAccounts.title")}</h1>
+            <PageTitle docs="page.service_accounts">{t("serviceAccounts.title")}</PageTitle>
             <p className="text-muted-foreground">{t("serviceAccounts.hint")}</p>
           </div>
           {canWrite && <ServiceAccountDialog />}

@@ -12,6 +12,7 @@ import { getListLinkRulesQueryKey, listLinkRules } from "../api/gen/endpoints/li
 import type { LinkRule } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { BuiltinBadge, scopeText } from "../components/link-rule-form";
 import { matcherText } from "../components/matcher-builder";
 import { buttonVariants } from "../components/ui/button";
@@ -87,7 +88,7 @@ function LinkRulesPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{t("linkRules.title")}</h1>
+            <PageTitle docs="page.link_rules">{t("linkRules.title")}</PageTitle>
             <p className="text-muted-foreground">{t("linkRules.hint")}</p>
           </div>
           {canWrite && (

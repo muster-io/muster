@@ -1304,7 +1304,7 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(fake.oidc.demo) != 1 || fake.oidc.demo[0].IssuerUrl != "http://127.0.0.1:18090" ||
-		fake.oidc.demo[0].DisplayName.String != "Dev IdP" || len(fake.oidc.demo[0].ClientSecretCiphertext) == 0 {
+		fake.oidc.demo[0].DisplayName.String != "Example SSO" || len(fake.oidc.demo[0].ClientSecretCiphertext) == 0 {
 		t.Errorf("demo = %+v", fake.oidc.demo)
 	}
 	if len(fake.oidc.allowed) != 1 || fake.oidc.allowed[0] != "127.0.0.0/8" {
@@ -1317,7 +1317,7 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 		string(fake.integ.created[0].StaticLabels) != `{"cluster":"dev"}` {
 		t.Errorf("demo integration = %+v", fake.integ.created)
 	}
-	if len(fake.conns.created) != 1 || fake.conns.created[0].Name != "Dev Mattermost" ||
+	if len(fake.conns.created) != 1 || fake.conns.created[0].Name != "Example Mattermost" ||
 		fake.conns.created[0].ServerUrl.String != "http://127.0.0.1:18065" ||
 		!slices.Equal(fake.conns.audited, []string{"connection.created"}) {
 		t.Errorf("demo connection = %+v, audited %v", fake.conns.created, fake.conns.audited)

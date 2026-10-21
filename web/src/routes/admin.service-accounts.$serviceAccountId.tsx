@@ -27,6 +27,7 @@ import {
 } from "../api/gen/endpoints/api-tokens/api-tokens";
 import type { RoleName, ServiceAccount } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { DocsLink, PageTitle } from "../components/docs-link";
 import { TokenList } from "../components/profile-tokens";
 import { serviceAccountFieldText } from "../components/service-account-dialog";
 import { TokenCreateDialog } from "../components/token-created-dialog";
@@ -62,11 +63,23 @@ function useStoreAccount() {
   };
 }
 
-function Details({ account }: { account: ServiceAccount }) {
+/**
+ * The details of the account. A reader who cannot change the Role finds "Learn more" about the Permissions it gives
+ * beside it here, as the Role card, which only a writer sees, has it.
+ */
+function Details({ account, canWrite }: { account: ServiceAccount; canWrite: boolean }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
+  const role = canWrite ? (
+    roleLabel(t, account.role)
+  ) : (
+    <span className="flex flex-wrap items-baseline gap-x-2">
+      <span>{roleLabel(t, account.role)}</span>
+      <DocsLink to="field.permissions" kind="learn_more" about={t("docs.fields.permissions")} />
+    </span>
+  );
   const rows: [string, ReactNode, string][] = [
-    [t("serviceAccounts.fields.role"), roleLabel(t, account.role), "role"],
+    [t("serviceAccounts.fields.role"), role, "role"],
     [t("serviceAccounts.fields.status"), statusLabel(t, account.status), "status"],
     [t("serviceAccounts.fields.tokens"), String(account.token_count), "tokens"],
     [t("serviceAccounts.fields.created"), dateTime(account.created_at), "created"],
@@ -144,9 +157,12 @@ function RoleCard({ account }: { account: ServiceAccount }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          <h2>{t("serviceAccounts.fields.role")}</h2>
-        </CardTitle>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <CardTitle>
+            <h2>{t("serviceAccounts.fields.role")}</h2>
+          </CardTitle>
+          <DocsLink to="field.permissions" kind="learn_more" about={t("docs.fields.permissions")} />
+        </div>
         <CardDescription>{t("serviceAccounts.page.roleHint")}</CardDescription>
       </CardHeader>
       <CardContent>
@@ -390,9 +406,9 @@ function ServiceAccountView({ serviceAccountId }: { serviceAccountId: string }) 
           <ArrowLeftIcon aria-hidden="true" />
           {t("serviceAccounts.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight break-words">
+        <PageTitle docs="page.service_accounts">
           {account?.name ?? t("serviceAccounts.page.title")}
-        </h1>
+        </PageTitle>
       </div>
       {account === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -400,7 +416,7 @@ function ServiceAccountView({ serviceAccountId }: { serviceAccountId: string }) 
         </p>
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Details account={account} />
+          <Details account={account} canWrite={canWrite} />
           {canWrite && <RoleCard key={account.id} account={account} />}
           {canWrite && <ActionsCard account={account} />}
           <TokensCard account={account} canWrite={canWrite} />

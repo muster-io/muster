@@ -104,7 +104,7 @@ const BRIDGE: BridgeConnection = {
 const SLACK: SlackConnection = {
   id: "CN0000000000SL",
   type: "slack",
-  name: "Dev Slack",
+  name: "Example Slack",
   event_mode: "socket",
   limiter: { limit: 1, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-20T09:30:00Z" },

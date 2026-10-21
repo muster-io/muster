@@ -7,11 +7,11 @@
 // try is refused, Alice unlinks, the Admin removes her last link from her user page — her open "Relink Telegram" dialog
 // stays open, as the hint names a link that went away —, and the section and both dialogs fit 360 pixels. The logins are link-alice and link-bob, as the profile spec takes "Alice" and "bob".
 // Through Bridges (Verification step 3 of their story): Bob links the fake bridge's u-bob through the spec's own "br",
-// the second bot, by sending the token to it, and through the demo Connection "Dev Bridge", the first bot, with the
+// the second bot, by sending the token to it, and through the demo Connection "Example Bridge", the first bot, with the
 // code it sent to his email once the bridge finds people by email and a check read that; the Admin's user page lists
 // both links by the bridge's messenger; and an Alert Group of a Route to a Bridge Destination of "br" that Bob
 // acknowledges through the fake shows "Bob via Bridge" in its Timeline. The token, the handle and the code entry fit
-// 360 pixels, in English and in Russian. The fake's configuration is put back and "Dev Bridge" checked again at the
+// 360 pixels, in English and in Russian. The fake's configuration is put back and "Example Bridge" checked again at the
 // end, before the rest of the cleaning, each step of which runs whatever the others do.
 // Through Slack (Verification step 5 of its story): the Admin links alice of the fake Slack server's second app
 // through the spec's own Connection "ui" by her email and the code the bot sent her, the list shows "Slack · ui · Alice
@@ -136,7 +136,7 @@ async function newCode(userId: string, before: number): Promise<string> {
   return code;
 }
 
-/** The direct messages the first bot of the fake bridge, the one of "Dev Bridge", sent to a person. */
+/** The direct messages the first bot of the fake bridge, the one of "Example Bridge", sent to a person. */
 async function bridgeDms(userId: string): Promise<BridgeDm[]> {
   // The fake answers null while its bots have sent none.
   const all = (await fbr<BridgeDm[] | null>("GET", "/direct-messages")) ?? [];
@@ -240,7 +240,7 @@ test.beforeAll(async () => {
     await deleteBridgeRoute(admin);
     await removeBridgeConnection(admin);
     brId = await createBridgeConnection(admin);
-    devBridgeId = await connectionNamed(admin, "Dev Bridge");
+    devBridgeId = await connectionNamed(admin, "Example Bridge");
   } finally {
     await admin.dispose();
   }
@@ -257,8 +257,8 @@ async function cleaning(failures: unknown[], step: () => Promise<unknown>): Prom
 
 test.afterAll(async () => {
   const failures: unknown[] = [];
-  // First the fake's configuration, and "Dev Bridge" reads it again, so that its stored info finds people by login once
-  // more: the specs after this one see the state they expect whatever else fails here.
+  // First the fake's configuration, and "Example Bridge" reads it again, so that its stored info finds people by login
+  // once more: the specs after this one see the state they expect whatever else fails here.
   await cleaning(failures, resetFakeBridge);
   const admin = await adminApi();
   try {
@@ -310,7 +310,9 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await expect(alice.getByTestId("account-link-summary")).toHaveText(
     "Telegram · @alice_t · for all Telegram bots",
   );
-  await expect(alice.getByTestId("account-link-via")).toHaveText("linked via Dev Telegram · Never");
+  await expect(alice.getByTestId("account-link-via")).toHaveText(
+    "linked via Example Telegram · Never",
+  );
   await expect(alice.getByRole("button", { name: "Relink Telegram" })).toBeVisible();
 
   // 3. Mattermost: a wrong code counts down the attempts, the right one links.
@@ -369,7 +371,7 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await expect(page.getByRole("heading", { name: "Account links" })).toBeVisible();
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page)).toContainText("Telegram · @alice_t · for all Telegram bots");
-  await expect(rows(page)).toContainText("linked via Dev Telegram");
+  await expect(rows(page)).toContainText("linked via Example Telegram");
   await expect(page.getByRole("button", { name: /^Link/ })).toHaveCount(0);
   await shot(page, "account-links-admin");
   await page.getByRole("button", { name: "Remove @alice_t", exact: true }).click();
@@ -445,12 +447,12 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   const token = (await tokenBlock.textContent()) ?? "";
   await fbr("POST", "/link", { user_id: "u-bob", token, bot: 2 });
   await expect(tokenDialog).toBeHidden({ timeout: 15_000 });
-  await expect(rows(bob).filter({ hasText: "Fake chat · Bob Brown · via br" })).toHaveCount(1);
+  await expect(rows(bob).filter({ hasText: "Example chat · Bob Brown · via br" })).toHaveCount(1);
   await expect(
     rows(bob).getByTestId("account-link-summary").filter({ hasText: "via br" }),
-  ).toHaveText("Fake chat · Bob Brown · via br");
+  ).toHaveText("Example chat · Bob Brown · via br");
 
-  // 3. The bridge finds people by email; once a check of "Dev Bridge" read that, Bob links through it with the code
+  // 3. The bridge finds people by email; once a check of "Example Bridge" read that, Bob links through it with the code
   // the bot sent him, after a wrong one: the handle step and the code entry with its attempts fit 360 pixels.
   await fbr("PUT", "/config", { user_lookup: "email" });
   const admin = await adminApi();
@@ -460,7 +462,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
     await admin.dispose();
   }
   await bob.reload();
-  await bob.getByRole("button", { name: "Link through Dev Bridge", exact: true }).click();
+  await bob.getByRole("button", { name: "Link through Example Bridge", exact: true }).click();
   const codeDialog = bob.getByRole("dialog");
   await codeDialog.getByRole("tab", { name: "Code" }).click();
   await expect(codeDialog.getByLabel("Email", { exact: true })).toBeVisible();
@@ -488,9 +490,9 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await codeInput.fill(await newBridgeCode("u-bob", before));
   await codeDialog.getByRole("button", { name: "Link", exact: true }).click();
   await expect(codeDialog).toBeHidden();
-  await expect(rows(bob).filter({ hasText: "Fake chat · Bob Brown · via Dev Bridge" })).toHaveCount(
-    1,
-  );
+  await expect(
+    rows(bob).filter({ hasText: "Example chat · Bob Brown · via Example Bridge" }),
+  ).toHaveCount(1);
   await expectNoHorizontalScroll(bob);
   await shot(bob, "account-links-bridge-list-360");
   await bob.setViewportSize({ width: 1280, height: 800 });
@@ -500,9 +502,9 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await signInAdmin(page);
   await page.goto(`/admin/users/${bobId}`);
   await expect(page.getByRole("heading", { name: "Account links" })).toBeVisible();
-  await expect(rows(page).filter({ hasText: "Fake chat · Bob Brown · via br" })).toHaveCount(1);
+  await expect(rows(page).filter({ hasText: "Example chat · Bob Brown · via br" })).toHaveCount(1);
   await expect(
-    rows(page).filter({ hasText: "Fake chat · Bob Brown · via Dev Bridge" }),
+    rows(page).filter({ hasText: "Example chat · Bob Brown · via Example Bridge" }),
   ).toHaveCount(1);
 
   // 4. An Alert Group delivered to a Bridge Destination of "br"; Bob presses "Ack" in the fake, and its Timeline names
@@ -605,8 +607,8 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   ).toBeVisible();
   await shot(bob, "account-links-bridge-timeline");
 
-  // 5. Bob reads Russian on his phone: the token of "br" and the code entry of "Dev Bridge" in Russian, each step at
-  // 360 pixels without scrolling sideways; then English again.
+  // 5. Bob reads Russian on his phone: the token of "br" and the code entry of "Example Bridge" in Russian, each step
+  // at 360 pixels without scrolling sideways; then English again.
   await bob.setViewportSize({ width: 360, height: 740 });
   await bob.goto("/profile");
   await bob.getByLabel("Language").selectOption("ru");
@@ -620,7 +622,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
   await bob.context().close();
 });
 
-/** "Привязать через br" by token and "Привязать через Dev Bridge" up to the code entry, in Russian at 360 pixels. */
+/** "Привязать через br" by token and "Привязать через Example Bridge" up to the code entry, in Russian at 360 pixels. */
 async function russianBridgeDialogs(bob: Page): Promise<void> {
   await bob.getByRole("button", { name: "Привязать через br", exact: true }).click();
   const token = bob.getByRole("dialog");
@@ -638,7 +640,7 @@ async function russianBridgeDialogs(bob: Page): Promise<void> {
   await bob.keyboard.press("Escape");
   await expect(token).toBeHidden();
 
-  await bob.getByRole("button", { name: "Привязать через Dev Bridge", exact: true }).click();
+  await bob.getByRole("button", { name: "Привязать через Example Bridge", exact: true }).click();
   const code = bob.getByRole("dialog");
   await expect(code.getByRole("tab", { name: "Токен" })).toHaveAttribute("aria-selected", "true");
   await expect(code.getByTestId("link-bridge-token")).toHaveText(/^[A-Za-z0-9_-]{43}$/);

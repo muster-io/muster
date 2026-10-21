@@ -183,6 +183,13 @@ VALUES (
 )
 ON CONFLICT (org_id) DO NOTHING;
 
+-- RenameDemoSettings gives the settings that still carry the demo configuration's earlier display name its current
+-- one; `muster dev` runs it at start, and any other settings stay as they are.
+-- name: RenameDemoSettings :execrows
+UPDATE oidc_settings
+SET display_name = @display_name, version = version + 1, updated_at = @updated_at
+WHERE org_id = @org_id AND display_name = @was;
+
 -- AllowNetwork adds a network to the Organization's allowed outbound networks when it is not listed; `muster dev`
 -- allows loopback this way so that Muster may call the fake servers.
 -- name: AllowNetwork :execrows

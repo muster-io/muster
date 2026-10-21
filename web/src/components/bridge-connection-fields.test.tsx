@@ -41,8 +41,8 @@ const CALLBACK = "http://localhost:8081/api/v1/callbacks/bridge/CN0000000000BR";
 /** The info of the fake bridge with its default configuration. */
 const INFO: BridgeInfo = {
   protocol_version: "1",
-  bridge: { name: "Muster fake bridge", version: "1.0.0" },
-  messenger: { name: "Fake chat" },
+  bridge: { name: "Example bridge", version: "1.0.0" },
+  messenger: { name: "Example chat" },
   capabilities: {
     buttons: {
       max_per_message: 10,
@@ -676,8 +676,8 @@ describe("BridgeInfoPanel", () => {
     await expect
       .poll(infoLines)
       .toEqual([
-        "Bridge: Muster fake bridge 1.0.0",
-        "Messenger: Fake chat",
+        "Bridge: Example bridge 1.0.0",
+        "Messenger: Example chat",
         "Protocol version 1",
         "Longest message text: 4000 characters",
         "Edits without a time limit",
@@ -724,8 +724,8 @@ describe("BridgeInfoPanel", () => {
     await expect
       .poll(infoLines)
       .toEqual([
-        "Bridge: Muster fake bridge 1.0.0",
-        "Messenger: Fake chat",
+        "Bridge: Example bridge 1.0.0",
+        "Messenger: Example chat",
         "Protocol version 1",
         "Longest message text: 501 characters",
         "Edits for 48 h after posting",
@@ -759,8 +759,8 @@ describe("BridgeInfoPanel", () => {
     await expect
       .poll(infoLines)
       .toEqual([
-        "Мост: Muster fake bridge 1.0.0",
-        "Мессенджер: Fake chat",
+        "Мост: Example bridge 1.0.0",
+        "Мессенджер: Example chat",
         "Версия протокола 1",
         "Самый длинный текст сообщения: 4000 символов",
         "Правка без ограничения по времени",

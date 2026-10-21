@@ -6,7 +6,7 @@
 // entry of the denied list.
 
 import { PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useRowKeys } from "./header-editor";
@@ -22,6 +22,7 @@ export function NetworkListEditor({
   addLabel,
   placeholder,
   hint,
+  docs,
   readOnly = false,
 }: {
   id: string;
@@ -33,6 +34,8 @@ export function NetworkListEditor({
   addLabel: string;
   placeholder?: string;
   hint?: string;
+  /** A "Learn more" link beside the label. */
+  docs?: ReactNode;
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
@@ -50,8 +53,15 @@ export function NetworkListEditor({
   });
   const hintId = hint === undefined ? undefined : `${id}-hint`;
   return (
-    <fieldset className="flex min-w-0 flex-col gap-2" aria-describedby={hintId}>
-      <legend className="mb-1 text-sm font-medium">{label}</legend>
+    <fieldset
+      className="flex min-w-0 flex-col gap-2"
+      aria-labelledby={docs === undefined ? undefined : `${id}-label`}
+      aria-describedby={hintId}
+    >
+      <legend className="mb-1 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+        <span id={`${id}-label`}>{label}</span>
+        {docs}
+      </legend>
       {hint !== undefined && (
         <p id={hintId} className="text-sm text-muted-foreground">
           {hint}

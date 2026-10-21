@@ -19,7 +19,7 @@ export const FAM = "http://127.0.0.1:19093/_fake";
 export const FTG = "http://127.0.0.1:18081/_fake";
 export const FMM = "http://127.0.0.1:18065/_fake";
 export const FMM2 = "http://127.0.0.1:18066/_fake";
-/** The published token of the first Mattermost bot, the one of the demo Connection "Dev Mattermost". */
+/** The published token of the first Mattermost bot, the one of the demo Connection "Example Mattermost". */
 export const MM_TOKEN = "muster-dev-mattermost-token";
 /** The published tokens of the second bots of the fake servers, for which `muster dev` creates no Connection. */
 export const MM_SECOND_TOKEN = "muster-dev-mattermost-token-b";
@@ -27,7 +27,7 @@ export const TG_SECOND_TOKEN = "234567:dev-telegram-token-b";
 /** The fake bridge of `muster dev` and its control API. */
 export const BRIDGE_URL = "http://127.0.0.1:18094";
 export const FBR = `${BRIDGE_URL}/_fake`;
-/** The published token of the fake bridge's first bot, the one of the demo Connection "Dev Bridge". */
+/** The published token of the fake bridge's first bot, the one of the demo Connection "Example Bridge". */
 export const BRIDGE_TOKEN = "muster-dev-bridge-token";
 /** The published token of the fake bridge's second bot, for which `muster dev` creates no Connection. */
 export const BRIDGE_SECOND_TOKEN = "muster-dev-bridge-token-b";

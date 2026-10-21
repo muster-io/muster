@@ -142,15 +142,15 @@ func newStore() *fakeStore {
 		{daveID, davePID, "deleted-user-" + davePID, "deleted-user-" + davePID, "responder", statusDeleted, ""},
 	}
 	s.conns = []fConn{
-		{tgID, tgPID, MessengerTelegram, "Dev Telegram", "", "muster_dev_bot", false},
+		{tgID, tgPID, MessengerTelegram, "Example Telegram", "", "muster_dev_bot", false},
 		{mmID, mmPID, MessengerMattermost, "mm", "bot-id", "", false},
 		{goneID, gonePID, MessengerTelegram, "gone", "", "gone_bot", true},
 		{tg2ID, tg2PID, MessengerTelegram, "Second", "", "", false},
-		{brID, brPID, MessengerBridge, "Dev Bridge", "", "", false},
+		{brID, brPID, MessengerBridge, "Example Bridge", "", "", false},
 		{br2ID, br2PID, MessengerBridge, "br", "", "", false},
 		{brGoneID, brGonePID, MessengerBridge, "gone bridge", "", "", true},
 		{slID, slPID, MessengerSlack, "sl", "", "", false},
-		{sl2ID, sl2PID, MessengerSlack, "Dev Slack", "", "", false},
+		{sl2ID, sl2PID, MessengerSlack, "Example Slack", "", "", false},
 		{slGoneID, slGonePID, MessengerSlack, "gone slack", "", "", true},
 	}
 	s.infos = map[int64]fInfo{brID: {lookup: LookupEmail, botCanStart: true, template: linkTemplate}}
@@ -812,12 +812,12 @@ func TestLists(t *testing.T) {
 	conns, err := e.s.Connections(t.Context())
 	if want := []LinkableConnection{
 		{PublicID: br2PID, Name: "br", Messenger: MessengerBridge, LinkMethods: []string{MethodToken}},
-		{PublicID: brPID, Name: "Dev Bridge", Messenger: MessengerBridge, LinkMethods: []string{MethodToken, MethodCode},
+		{PublicID: brPID, Name: "Example Bridge", Messenger: MessengerBridge, LinkMethods: []string{MethodToken, MethodCode},
 			HandleKind: LookupEmail},
 		{PublicID: mmPID, Name: "mm", Messenger: MessengerMattermost},
-		{PublicID: sl2PID, Name: "Dev Slack", Messenger: MessengerSlack},
+		{PublicID: sl2PID, Name: "Example Slack", Messenger: MessengerSlack},
 		{PublicID: slPID, Name: "sl", Messenger: MessengerSlack},
-		{PublicID: tgPID, Name: "Dev Telegram", Messenger: MessengerTelegram},
+		{PublicID: tgPID, Name: "Example Telegram", Messenger: MessengerTelegram},
 		{PublicID: tg2PID, Name: "Second", Messenger: MessengerTelegram},
 	}; err != nil || !reflect.DeepEqual(conns, want) {
 		t.Errorf("Connections = %+v, %v", conns, err)

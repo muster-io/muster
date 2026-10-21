@@ -258,6 +258,7 @@ type Queries interface {
 	FindConnectionByName(ctx context.Context, arg dbgen.FindConnectionByNameParams) (int64, error)
 	InsertConnection(ctx context.Context, arg dbgen.InsertConnectionParams) (int64, error)
 	UpdateConnection(ctx context.Context, arg dbgen.UpdateConnectionParams) error
+	RenameConnection(ctx context.Context, arg dbgen.RenameConnectionParams) error
 	SetBotIdentity(ctx context.Context, arg dbgen.SetBotIdentityParams) error
 	SetBridgeInfo(ctx context.Context, arg dbgen.SetBridgeInfoParams) (int64, error)
 	SetSlackIdentity(ctx context.Context, arg dbgen.SetSlackIdentityParams) (int64, error)
@@ -1236,11 +1237,12 @@ func (s *Service) learnBot(ctx context.Context, row dbgen.GetConnectionRow, bot 
 // Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server, or, with the type telegram, a
 // Telegram one to the fake Bot API in the long-polling mode, or, with the type bridge, a Bridge to the fake bridge
 // (BaseURL) in poll mode, or, with the type slack, a Slack Connection in socket mode with the fake Slack server's bot
-// token and app-level token (AppToken), such as "Dev Slack", whose requests the route of `muster dev` sends to the
-// fake server.
+// token and app-level token (AppToken), such as "Example Slack", whose requests the route of `muster dev` sends to the
+// fake server. Was is the name an earlier version gave it, such as "Dev Slack".
 type Demo struct {
 	Type      string
 	Name      string
+	Was       string
 	ServerURL string
 	BaseURL   string
 	BotToken  logging.Secret
@@ -1248,7 +1250,9 @@ type Demo struct {
 }
 
 // EnsureDemo creates the demo Connection d unless a Connection that is not deleted has its name, as a start-up step of
-// `muster dev` that replicas starting together run once.
+// `muster dev` that replicas starting together run once. A Connection of d's type with its earlier name (Was), kept in
+// a development database from an earlier version, is renamed instead, with its id and secrets; one of another type
+// with that name is left alone and nothing is created.
 func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 	by := Requester{Actor: audit.System, Transport: audit.TransportSystem}
 	return s.cfg.Store.InTx(ctx, func(q Queries) error {
@@ -1261,6 +1265,9 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("find the demo connection: %w", err)
+		}
+		if done, err := s.renameDemo(ctx, q, d); done || err != nil {
+			return err
 		}
 		in := Input{Type: TypeMattermost, Name: d.Name, ServerURL: d.ServerURL, BotToken: keyring.Replace(d.BotToken),
 			Limiter: Limiter{Limit: DefaultLimit, PerSeconds: DefaultPerSeconds}}
@@ -1294,6 +1301,50 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: c.PublicID})
 	})
+}
+
+// renameDemo gives the Connection with the earlier name of the demo d its current name, recorded in the Audit log as
+// done by the system; done reports that a Connection with the earlier name exists, renamed or, of another type, left
+// alone.
+func (s *Service) renameDemo(ctx context.Context, q Queries, d Demo) (bool, error) {
+	if d.Was == "" {
+		return false, nil
+	}
+	id, err := q.FindConnectionByName(ctx, dbgen.FindConnectionByNameParams{OrgID: s.cfg.OrgID, Name: d.Was})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("find the earlier demo connection: %w", err)
+	}
+	row, err := q.GetConnection(ctx, dbgen.GetConnectionParams{OrgID: s.cfg.OrgID, ID: pgtype.Int8{Int64: id,
+		Valid: true}})
+	if err != nil {
+		return false, fmt.Errorf("read the earlier demo connection: %w", err)
+	}
+	want := d.Type
+	if want == "" {
+		want = TypeMattermost
+	}
+	if row.Type != want {
+		return true, nil
+	}
+	before, err := connectionOf(row)
+	if err != nil {
+		return false, err
+	}
+	if err := q.RenameConnection(ctx, dbgen.RenameConnectionParams{OrgID: s.cfg.OrgID, ID: row.ID, Name: d.Name,
+		Now: s.cfg.Clocks.Business.Now().UTC()}); err != nil {
+		return false, fmt.Errorf("rename the demo connection %s: %w", row.PublicID, nameTaken(err))
+	}
+	after := before
+	after.Name = d.Name
+	if err := s.cfg.Audit.Record(ctx, q, audit.Entry{OrgID: s.cfg.OrgID, Actor: audit.System,
+		Transport: audit.TransportSystem, Action: ActionUpdated, Resource: resourceOf(after),
+		Diff: audit.Diff(viewOf(before), viewOf(after)), Details: map[string]any{"development_demo": true}}); err != nil {
+		return false, err
+	}
+	return true, q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: after.PublicID})
 }
 
 // connectionOf is the Connection of a row.

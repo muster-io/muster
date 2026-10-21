@@ -203,7 +203,7 @@ test.beforeAll(async () => {
       await admin.call<{ destination: Named }>("POST", "/api/v1/destinations", {
         type: "telegram",
         name: "dlf-telegram",
-        connection_id: connections.items.find((c) => c.name === "Dev Telegram")?.id,
+        connection_id: connections.items.find((c) => c.name === "Example Telegram")?.id,
         channel_id: "@muster_alerts",
         mentions: MENTIONS,
         limiter: { limit: 30, per_seconds: 1 },
@@ -658,7 +658,7 @@ test("a check that passes and an empty state show no link of their own", async (
       "GET",
       "/api/v1/connections?limit=500",
     );
-    telegram = connections.items.find((c) => c.name === "Dev Telegram")?.id ?? "";
+    telegram = connections.items.find((c) => c.name === "Example Telegram")?.id ?? "";
   } finally {
     await admin.dispose();
   }

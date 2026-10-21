@@ -137,6 +137,13 @@ SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
     limiter_per_seconds = @limiter_per_seconds, updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
+-- RenameConnection gives a Connection a new name and changes nothing else: `muster dev` renames its demo Connection
+-- of an earlier version, kept in a development database, to the current name.
+-- name: RenameConnection :exec
+UPDATE connections
+SET name = @name, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND deleted_at IS NULL;
+
 -- SetBotIdentity records the bot that a successful Connection check found; it is not a change of the configuration.
 -- name: SetBotIdentity :exec
 UPDATE connections

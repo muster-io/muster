@@ -4,8 +4,10 @@
 // One resource, several pages (C-20.FR-1): every Organization page edits its slice of the Organization and sends the
 // whole update as it was read, with the version the page was read at as If-Match, so a save over a newer version shows
 // a conflict instead of overwriting it. A saved page says "Saved."; the field errors of a refusal show at their fields.
+// Each page's title links to the guide of its entry of the sub-navigation (C-21.FR-11).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import {
   type BaseSyntheticEvent,
@@ -39,6 +41,8 @@ import type {
 } from "../api/gen/model";
 import { applyFieldErrors, fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { RequirePermission } from "./app-shell";
+import { PageTitle } from "./docs-link";
+import { organizationDocs } from "./organization-nav";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
@@ -312,11 +316,17 @@ function OrganizationView({
   );
 }
 
-/** The heading of an Organization page. */
+/** The heading of an Organization page, with the Guide link of its entry of the sub-navigation. */
 export function PageHeading({ title, hint }: { title: string; hint?: string }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const docs = organizationDocs(pathname);
   return (
     <div className="flex flex-col gap-1">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      {docs === undefined ? (
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      ) : (
+        <PageTitle docs={docs}>{title}</PageTitle>
+      )}
       {hint !== undefined && <p className="text-muted-foreground">{hint}</p>}
     </div>
   );

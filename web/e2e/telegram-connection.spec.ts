@@ -114,7 +114,7 @@ test("creates a Telegram Connection and checks it step by step, an unsaved path 
   );
   const demo = page
     .getByRole("row")
-    .filter({ has: page.getByRole("link", { name: "Dev Telegram", exact: true }) });
+    .filter({ has: page.getByRole("link", { name: "Example Telegram", exact: true }) });
   await expect(demo).toContainText("Telegram");
 
   // 1. "Create connection" → Telegram → the default base URL with its hint → name, token, an http base URL → "Save" →

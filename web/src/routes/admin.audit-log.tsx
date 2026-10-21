@@ -20,6 +20,7 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { AuditDiff } from "../components/audit-diff";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
 import { unreachable } from "../components/destination-test-panel";
+import { PageTitle } from "../components/docs-link";
 import { OrganizationLayout } from "../components/organization-nav";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -456,7 +457,7 @@ function AuditLogView() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("audit.title")}</h1>
+        <PageTitle docs="page.audit_log">{t("audit.title")}</PageTitle>
         <p className="text-muted-foreground">{t("audit.hint")}</p>
       </div>
       <Filters search={search} defaultFrom={dayIn(defaultFrom, timeZone)} />

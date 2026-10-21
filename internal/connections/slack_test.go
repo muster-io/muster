@@ -777,7 +777,7 @@ func TestSlackChannelCheckThroughProxy(t *testing.T) {
 // entry.
 func TestSlackDemo(t *testing.T) {
 	e, _ := newSlackEnv(t)
-	d := connections.Demo{Type: connections.TypeSlack, Name: "Dev Slack", BotToken: logging.Secret(fakeslack.BotToken),
+	d := connections.Demo{Type: connections.TypeSlack, Name: "Example Slack", BotToken: logging.Secret(fakeslack.BotToken),
 		AppToken: logging.Secret(fakeslack.AppToken)}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), d); err != nil {
@@ -789,7 +789,7 @@ func TestSlackDemo(t *testing.T) {
 		t.Fatalf("list = %+v, %v", page, err)
 	}
 	c := page.Connections[0]
-	if c.Type != connections.TypeSlack || c.Name != "Dev Slack" || c.EventMode != connections.EventModeSocket ||
+	if c.Type != connections.TypeSlack || c.Name != "Example Slack" || c.EventMode != connections.EventModeSocket ||
 		!c.BotToken.Set || !c.AppToken.Set || c.SlackSigningSecret.Set || c.Limiter.Limit != 50 ||
 		c.Limiter.PerSeconds != 60 {
 		t.Errorf("demo %+v", c)

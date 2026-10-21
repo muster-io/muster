@@ -14,6 +14,7 @@ import {
   getListLinkRulesQueryKey,
 } from "../api/gen/endpoints/links/links";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { LinkRuleForm } from "../components/link-rule-form";
 import { buttonVariants } from "../components/ui/button";
 
@@ -36,7 +37,7 @@ function NewLinkRule() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("linkRules.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("linkRules.create.title")}</h1>
+        <PageTitle docs="page.link_rules">{t("linkRules.create.title")}</PageTitle>
       </div>
       <LinkRuleForm
         submitLabel={t("linkRules.create.submit")}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -318,6 +319,20 @@ func (s *memStore) InsertDemoSettings(_ context.Context, a dbgen.InsertDemoSetti
 		ClientSecretUpdatedAt: a.UpdatedAt, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
 		GroupMappings: a.GroupMappings, UnmatchedRole: UnmatchedNone, SyncRole: true, Proxy: []byte(`{"enabled":false}`),
 		Version: 1, UpdatedAt: a.UpdatedAt.Time}
+	return 1, nil
+}
+
+func (s *memStore) RenameDemoSettings(_ context.Context, a dbgen.RenameDemoSettingsParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fail != nil {
+		return 0, s.fail
+	}
+	if s.settings == nil || s.settings.DisplayName != a.Was {
+		return 0, nil
+	}
+	s.settings.DisplayName = a.DisplayName
+	s.settings.Version++
 	return 1, nil
 }
 
@@ -706,7 +721,7 @@ func TestCheck(t *testing.T) {
 
 func TestSignInOptionsAndDemo(t *testing.T) {
 	e := newEnv(t)
-	demo := Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret", DisplayName: "Dev IdP",
+	demo := Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret", DisplayName: "Example SSO",
 		AllowNetwork: "127.0.0.0/8", Mappings: []GroupMapping{{Group: "oncall", Role: auth.RoleResponder}}}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), demo); err != nil {
@@ -717,7 +732,7 @@ func TestSignInOptionsAndDemo(t *testing.T) {
 		t.Errorf("demo audits %v, allowed %v", e.store.audited(ActionSettingsUpdated), e.store.allowed)
 	}
 	on, name, err := e.svc.SignInOptions(t.Context())
-	if err != nil || !on || name != "Dev IdP" {
+	if err != nil || !on || name != "Example SSO" {
 		t.Errorf("sign-in options = %v %q %v", on, name, err)
 	}
 	st, err := e.svc.Get(t.Context())
@@ -726,5 +741,44 @@ func TestSignInOptionsAndDemo(t *testing.T) {
 	}
 	if (Settings{IssuerURL: "::"}).ButtonName() != "OIDC" {
 		t.Error("an issuer without a host has no fallback name")
+	}
+}
+
+// TestDemoRenamesEarlierDisplayName: settings that still carry the demo's earlier display name get its current one,
+// once, recorded as done by the system; settings with any other name stay as they are.
+func TestDemoRenamesEarlierDisplayName(t *testing.T) {
+	e := newEnv(t)
+	earlier := Demo{IssuerURL: e.idp.URL(), ClientID: "muster-dev", ClientSecret: "dev-secret", DisplayName: "Dev IdP",
+		AllowNetwork: "127.0.0.0/8"}
+	if err := e.svc.EnsureDemo(t.Context(), earlier); err != nil {
+		t.Fatal(err)
+	}
+	secret := slices.Clone(e.store.settings.ClientSecretCiphertext)
+	demo := earlier
+	demo.DisplayName, demo.DisplayNameWas = "Example SSO", "Dev IdP"
+	for range 2 {
+		if err := e.svc.EnsureDemo(t.Context(), demo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, name, err := e.svc.SignInOptions(t.Context())
+	updated := e.store.audited(ActionSettingsUpdated)
+	if err != nil || name != "Example SSO" || e.store.settings.Version != 2 ||
+		!slices.Equal(e.store.settings.ClientSecretCiphertext, secret) || len(updated) != 2 {
+		t.Fatalf("name %q, version %d, %d audit entries, %v", name, e.store.settings.Version, len(updated), err)
+	}
+	if diff := updated[1]["diff"]; fmt.Sprint(diff) != "[map[after:Example SSO before:Dev IdP pointer:/display_name]]" {
+		t.Errorf("rename diff = %v", diff)
+	}
+
+	e.store.settings.DisplayName = pgtype.Text{String: "Corporate SSO", Valid: true}
+	if err := e.svc.EnsureDemo(t.Context(), demo); err != nil || e.store.settings.DisplayName.String != "Corporate SSO" ||
+		len(e.store.audited(ActionSettingsUpdated)) != 2 {
+		t.Errorf("other settings renamed: %v %+v", err, e.store.settings.DisplayName)
+	}
+	e.store.settings.DisplayName = pgtype.Text{String: "Dev IdP", Valid: true}
+	e.store.fail = errors.New("down")
+	if err := e.svc.EnsureDemo(t.Context(), demo); err == nil {
+		t.Error("a failed rename is not reported")
 	}
 }

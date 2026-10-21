@@ -2,12 +2,12 @@
 // Copyright The Muster Authors
 
 // Several Connections of one messenger against `muster dev`: the pages of the Verification of their stories with two
-// Mattermost Connections on the first fake Mattermost server ("Dev Mattermost" and "mm-b", its second bot), one on the
-// second server ("mm-2"), two Telegram Connections ("Dev Telegram" and "tg-b", the second bot, both checked so that
-// their @bot shows), a Destination of each in one channel and an outgoing webhook, all on one Route. The Connections
-// list with the Mattermost server or the Telegram @bot; the Destinations list with "Connection · channel"; a Telegram
-// Destination of the second bot; the Route's Destinations with their full labels, the picker's options and one
-// duplicate-chat warning per chat; the delivery section and the Timeline of an Alert Group with the full label as
+// Mattermost Connections on the first fake Mattermost server ("Example Mattermost" and "mm-b", its second bot), one on
+// the second server ("mm-2"), two Telegram Connections ("Example Telegram" and "tg-b", the second bot, both checked so
+// that their @bot shows), a Destination of each in one channel and an outgoing webhook, all on one Route. The
+// Connections list with the Mattermost server or the Telegram @bot; the Destinations list with "Connection · channel";
+// a Telegram Destination of the second bot; the Route's Destinations with their full labels, the picker's options and
+// one duplicate-chat warning per chat; the delivery section and the Timeline of an Alert Group with the full label as
 // tooltip; the "Delivery problem" filter; the profile's Messenger accounts with the Telegram row, "Relink Telegram"
 // and the Mattermost hint; and the user page's Account links — each at 1280 and 360 px wide, in English and Russian.
 // With MUSTER_E2E_SCREENSHOTS set, each page is saved as <name>-desktop.png, <name>-360.png, <name>-ru-desktop.png and
@@ -258,10 +258,10 @@ function label(lang: Lang, name: string, messenger: string, connection: string, 
 }
 
 const LABELS = (lang: Lang): Record<string, string> => ({
-  "mm-a-alerts": label(lang, "mm-a-alerts", "Mattermost", "Dev Mattermost", "#alerts"),
+  "mm-a-alerts": label(lang, "mm-a-alerts", "Mattermost", "Example Mattermost", "#alerts"),
   "mm-b-alerts": label(lang, "mm-b-alerts", "Mattermost", "mm-b", "#alerts"),
   "mm-2-alerts": label(lang, "mm-2-alerts", "Mattermost", "mm-2", "#alerts"),
-  "tg-a-alerts": label(lang, "tg-a-alerts", "Telegram", "Dev Telegram", "Muster alerts"),
+  "tg-a-alerts": label(lang, "tg-a-alerts", "Telegram", "Example Telegram", "Muster alerts"),
   "tg-b-alerts": label(lang, "tg-b-alerts", "Telegram", "tg-b", "Muster alerts"),
   "s069-hook": [
     "s069-hook",
@@ -275,8 +275,8 @@ test.beforeAll(async () => {
   try {
     await cleanUp(admin);
     integrationId = await fakeIntegration("s069");
-    const mmA = await connectionId(admin, "Dev Mattermost");
-    const tgA = await connectionId(admin, "Dev Telegram");
+    const mmA = await connectionId(admin, "Example Mattermost");
+    const tgA = await connectionId(admin, "Example Telegram");
     const mmB = (
       await admin.call<Named>("POST", "/api/v1/connections", {
         type: "mattermost",
@@ -470,10 +470,10 @@ inBothLanguages(
         .getByRole("row")
         .filter({ has: page.getByRole("link", { name, exact: true }) })
         .getByTestId("connection-account");
-    await expect(account("Dev Mattermost")).toHaveText("127.0.0.1:18065");
+    await expect(account("Example Mattermost")).toHaveText("127.0.0.1:18065");
     await expect(account("mm-b")).toHaveText("127.0.0.1:18065");
     await expect(account("mm-2")).toHaveText("127.0.0.1:18066");
-    await expect(account("Dev Telegram")).toHaveText("@muster_dev_bot");
+    await expect(account("Example Telegram")).toHaveText("@muster_dev_bot");
     await expect(account("tg-b")).toHaveText("@muster_dev_b_bot");
     await both(page, "connections", lang);
   },
@@ -500,10 +500,10 @@ inBothLanguages(
         .getByRole("row")
         .filter({ has: page.getByRole("link", { name, exact: true }) })
         .getByTestId("destination-place");
-    await expect(place("mm-a-alerts")).toHaveText("Dev Mattermost · #alerts");
+    await expect(place("mm-a-alerts")).toHaveText("Example Mattermost · #alerts");
     await expect(place("mm-b-alerts")).toHaveText("mm-b · #alerts");
     await expect(place("mm-2-alerts")).toHaveText("mm-2 · #alerts");
-    await expect(place("tg-a-alerts")).toHaveText("Dev Telegram · Muster alerts");
+    await expect(place("tg-a-alerts")).toHaveText("Example Telegram · Muster alerts");
     await expect(place("tg-b-alerts")).toHaveText("tg-b · Muster alerts");
     await expect(place("s069-hook")).toHaveText(HOOK_HOST);
     await both(page, "destinations", lang);
@@ -699,7 +699,7 @@ inBothLanguages(
       .getByRole("button", { name: ru ? "Привязать Mattermost" : "Link Mattermost" })
       .click();
     const mm = page.getByRole("dialog").getByLabel(ru ? "Подключение" : "Connection");
-    for (const name of ["Dev Mattermost", "mm-b", "mm-2"]) {
+    for (const name of ["Example Mattermost", "mm-b", "mm-2"]) {
       await expect(mm.getByRole("option", { name, exact: true })).toHaveCount(1);
     }
     await page.keyboard.press("Escape");
@@ -711,7 +711,7 @@ inBothLanguages(
     await page.getByRole("button", { name: relink }).click();
     await expect(page.getByRole("dialog").getByRole("heading", { name: relink })).toBeVisible();
     const tg = page.getByRole("dialog").getByLabel(ru ? "Подключение" : "Connection");
-    for (const name of ["Dev Telegram", "tg-b"]) {
+    for (const name of ["Example Telegram", "tg-b"]) {
       await expect(tg.getByRole("option", { name, exact: true })).toHaveCount(1);
     }
     await page.keyboard.press("Escape");

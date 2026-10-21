@@ -64,29 +64,29 @@ fake Slack server on `127.0.0.1:18097`, and prints their addresses; each records
 takes scripted faults at `/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second bot, with
 the published tokens `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, so that several Connections of
 one messenger can be tried; `muster dev` creates no Connection for them. The fake bridge serves two bots as well:
-`muster-dev-bridge-token`, which the demo Connection "Dev Bridge" uses in poll mode, and `muster-dev-bridge-token-b`,
-for which `muster dev` creates no Connection; `/_fake/config` changes what its `info` says, such as the protocol
-version, the features or the event delivery modes. The fake Slack server serves two Slack apps, each a workspace with a
-bot, so that Slack Connections can be tried without a workspace: the bot token `xoxb-muster-dev-slack-token` with the
-app-level token `xapp-muster-dev-slack-token`, which the demo Connection "Dev Slack" uses in `socket` mode, and
-`xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;
-their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under
-`muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
-`/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's, the app of each
-token, the channels of each app, merged by id, a page size for `conversations.list`, the `request_url` of each app,
-its Interactivity Request URL, the `extra_connections` of each app, the Socket Mode connections of other programs
-that its `hello` counts, and `messages_tab_off`, the apps whose Messages tab is off, whose bot's direct messages to a
-person answer `messages_tab_disabled`; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and
-`C0FAKEOTHER` "other", without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in
-every channel with the bot. Each app's directory pages them with `users.list` over three pages, beside Slackbot, two
-accounts whose display name is "Sam", a bot whose display name is "Bob", the app's bot user and a deleted account whose
-display name is "bob"; `users.lookupByEmail` finds them by `alice@example.org` and the like in any letter case,
-`users.info` by user id, and `conversations.open` answers the bot's direct chat with one of them. `chat.postMessage` to
-a person's user id posts into that direct chat, `cannot_dm_bot` for a bot and `user_not_found` for a deleted account,
-and `GET /_fake/dms?user=U…&app=a|b` lists what the bot sent there, such as an Account link code. In Socket Mode
-`apps.connections.open` answers an address `ws://127.0.0.1:18097/link/?ticket=…&app_id=…` with a single-use ticket;
-`/link/` accepts one WebSocket for it and sends `hello`, whose `num_connections` counts the app's open sockets that
-said `hello` and its `extra_connections`, or `too_many_websockets` when that would exceed ten.
+`muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll mode, and
+`muster-dev-bridge-token-b`, for which `muster dev` creates no Connection; `/_fake/config` changes what its `info` says,
+such as the protocol version, the features or the event delivery modes. The fake Slack server serves two Slack apps,
+each a workspace with a bot, so that Slack Connections can be tried without a workspace: the bot token
+`xoxb-muster-dev-slack-token` with the app-level token `xapp-muster-dev-slack-token`, which the demo Connection "Example
+Slack" uses in `socket` mode, and `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which
+`muster dev` creates no Connection; their Slack signing secrets are `muster-dev-slack-signing-secret` and
+`muster-dev-slack-signing-secret-b`. Under `muster dev` a Slack Connection whose bot token is one of these calls the
+fake server instead of `slack.com`; `/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered
+as a person's, the app of each token, the channels of each app, merged by id, a page size for `conversations.list`, the
+`request_url` of each app, its Interactivity Request URL, the `extra_connections` of each app, the Socket Mode
+connections of other programs that its `hello` counts, and `messages_tab_off`, the apps whose Messages tab is off, whose
+bot's direct messages to a person answer `messages_tab_disabled`; both apps have the channel `C0FAKEALERTS` "alerts",
+with the bot, and `C0FAKEOTHER` "other", without it, and the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and
+`U0FAKEDORA` are in every channel with the bot. Each app's directory pages them with `users.list` over three pages,
+beside Slackbot, two accounts whose display name is "Sam", a bot whose display name is "Bob", the app's bot user and a
+deleted account whose display name is "bob"; `users.lookupByEmail` finds them by `alice@example.org` and the like in any
+letter case, `users.info` by user id, and `conversations.open` answers the bot's direct chat with one of them.
+`chat.postMessage` to a person's user id posts into that direct chat, `cannot_dm_bot` for a bot and `user_not_found` for
+a deleted account, and `GET /_fake/dms?user=U…&app=a|b` lists what the bot sent there, such as an Account link code. In
+Socket Mode `apps.connections.open` answers an address `ws://127.0.0.1:18097/link/?ticket=…&app_id=…` with a single-use
+ticket; `/link/` accepts one WebSocket for it and sends `hello`, whose `num_connections` counts the app's open sockets
+that said `hello` and its `extra_connections`, or `too_many_websockets` when that would exceed ten.
 `GET /_fake/socket` shows each app's open and opened sockets, its `hello`s and whether the last planned refresh
 overlapped the next socket, and every envelope sent with its confirmation; `POST /_fake/socket` sends the newest socket
 of an app a `disconnect` with a reason, arms sockets without `hello` or refused with `too_many_websockets`, ends the
@@ -105,7 +105,9 @@ with a development default takes it unless the variable is set, even empty, and 
 command with the same defaults. The database default also yields to any field of the main connection
 (`MUSTER_DATABASE_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`, `_PASSWORD_FILE`, `_SSLMODE`), and the master key and
 the Admin password to their `_FILE` variables. `docker compose -f deploy/dev/docker-compose.yml down -v` removes the
-development database with its data.
+development database with its data. A development database of an earlier version keeps the demo Connections under
+their earlier names ("Dev Mattermost", "Dev Telegram", "Dev Bridge", "Dev Slack") and the OIDC demo as "Dev IdP";
+`muster dev` renames them at start.
 
 The screenshots of the documentation, under `docs/assets/screenshots/`, are taken by `make docs-screenshots`: the
 Playwright suite `web/e2e/screenshots/` walks the guides on a `muster dev` of its own, inside the Playwright image that

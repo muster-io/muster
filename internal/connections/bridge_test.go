@@ -85,7 +85,7 @@ func (b *standIn) serve(w http.ResponseWriter, r *http.Request) {
 	info := map[string]any{
 		"protocol_version": "1",
 		"bridge":           map[string]any{"name": "Stand-in", "version": "0.1.0"},
-		"messenger":        map[string]any{"name": "Fake chat"},
+		"messenger":        map[string]any{"name": "Example chat"},
 		"capabilities": map[string]any{
 			"buttons": map[string]any{"max_per_message": 8, "max_per_row": 4, "data_max_bytes": 256,
 				"styles": []any{"primary", "danger"}},
@@ -446,7 +446,7 @@ func TestBridgeCheck(t *testing.T) {
 	}
 	var read map[string]any
 	if err := json.Unmarshal(res.Info, &read); err != nil || read["protocol_version"] != "1" ||
-		read["messenger"].(map[string]any)["name"] != "Fake chat" || read["future_field"] == nil {
+		read["messenger"].(map[string]any)["name"] != "Example chat" || read["future_field"] == nil {
 		t.Errorf("info %s, %v", res.Info, err)
 	}
 	reqs := b.seen()
@@ -667,7 +667,7 @@ func TestBridgeStoredInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, ok, err := e.svc.StoredInfo(ctx, conn)
-	if err != nil || !ok || st.Info.Messenger.Name != "Fake chat" || !st.ReadAt.Equal(t0) ||
+	if err != nil || !ok || st.Info.Messenger.Name != "Example chat" || !st.ReadAt.Equal(t0) ||
 		!bytes.Contains(st.Info.Raw, []byte("future_field")) {
 		t.Fatalf("stored = %+v, %v, %v", st, ok, err)
 	}
@@ -733,7 +733,7 @@ func TestBridgeIsNotMattermost(t *testing.T) {
 // the default limiter.
 func TestEnsureDemoBridge(t *testing.T) {
 	e, b := newBridgeEnv(t)
-	d := connections.Demo{Type: connections.TypeBridge, Name: "Dev Bridge", BaseURL: b.srv.URL + "/",
+	d := connections.Demo{Type: connections.TypeBridge, Name: "Example Bridge", BaseURL: b.srv.URL + "/",
 		BotToken: bridgeToken}
 	for range 2 {
 		if err := e.svc.EnsureDemo(t.Context(), d); err != nil {

@@ -930,6 +930,34 @@ func (q *Queries) RefuseUser(ctx context.Context, arg RefuseUserParams) error {
 	return err
 }
 
+const renameDemoSettings = `-- name: RenameDemoSettings :execrows
+UPDATE oidc_settings
+SET display_name = $1, version = version + 1, updated_at = $2
+WHERE org_id = $3 AND display_name = $4
+`
+
+type RenameDemoSettingsParams struct {
+	DisplayName pgtype.Text
+	UpdatedAt   time.Time
+	OrgID       int64
+	Was         pgtype.Text
+}
+
+// RenameDemoSettings gives the settings that still carry the demo configuration's earlier display name its current
+// one; `muster dev` runs it at start, and any other settings stay as they are.
+func (q *Queries) RenameDemoSettings(ctx context.Context, arg RenameDemoSettingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameDemoSettings,
+		arg.DisplayName,
+		arg.UpdatedAt,
+		arg.OrgID,
+		arg.Was,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const scheduleCheck = `-- name: ScheduleCheck :exec
 INSERT INTO oidc_checks (user_id, org_id, deadline, created_at, updated_at)
 VALUES ($1, $2, $3::timestamptz, $4::timestamptz, $4::timestamptz)

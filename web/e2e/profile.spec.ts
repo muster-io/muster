@@ -124,7 +124,7 @@ test("refuses a taken login, links OIDC after the warning and ends the session t
   await localUser("Alice", "alice-password-1");
   await nextIdpUser("u-web-alice", "alice", ["oncall"]);
   await page.goto("/sign-in");
-  await page.getByText("Sign in with Dev IdP").click();
+  await page.getByText("Sign in with Example SSO").click();
   await expect(page).toHaveURL(`${APP}/sign-in?error=login_taken`);
   await expect(
     page.getByText(

@@ -19,11 +19,11 @@ export interface SectionEntry<L extends string> {
   permission: Permission;
 }
 
-/** The sub-entries whose Permission the session holds. */
-export function allowedEntries<L extends string>(
-  entries: readonly SectionEntry<L>[],
+/** The sub-entries whose Permission the session holds, as the section declares them. */
+export function allowedEntries<E extends SectionEntry<string>>(
+  entries: readonly E[],
   permissions: readonly Permission[],
-): SectionEntry<L>[] {
+): E[] {
   return entries.filter((e) => permissions.includes(e.permission));
 }
 

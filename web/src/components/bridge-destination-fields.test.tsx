@@ -35,8 +35,8 @@ const FORBIDDEN_TEXT =
 
 const INFO: BridgeInfo = {
   protocol_version: "1",
-  bridge: { name: "Muster fake bridge", version: "1.0.0" },
-  messenger: { name: "Fake chat" },
+  bridge: { name: "Example bridge", version: "1.0.0" },
+  messenger: { name: "Example chat" },
   capabilities: {
     buttons: { max_per_message: 10, max_per_row: 5, data_max_bytes: 64, styles: [] },
   },
@@ -76,7 +76,7 @@ const UNREAD = bridgeConnection("CN0000000000BU", "br-unread", null);
 const MM: MattermostConnection = {
   id: "CN0000000000MM",
   type: "mattermost",
-  name: "Dev Mattermost",
+  name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
@@ -248,7 +248,7 @@ describe("DestinationForm with the Bridge fields", () => {
     // Only the Bridge Connections.
     await expect.element(page.getByRole("option", { name: "br", exact: true })).toBeInTheDocument();
     await expect
-      .element(page.getByRole("option", { name: "Dev Mattermost" }))
+      .element(page.getByRole("option", { name: "Example Mattermost" }))
       .not.toBeInTheDocument();
     expect(limiter()).toEqual(["30", "60"]);
     const connection = page.getByLabelText("Connection", { exact: true });

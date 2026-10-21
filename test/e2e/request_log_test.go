@@ -520,7 +520,7 @@ func TestRequestLog(t *testing.T) {
 			http.StatusUnauthorized {
 			t.Fatalf("a long-polling Connection = %d %s", a.status, a.body)
 		}
-		eventually(t, "the refusal under Dev Telegram", func() bool {
+		eventually(t, "the refusal under Example Telegram", func() bool {
 			return ofStatus(e.inbound(dev, "update"), http.StatusUnauthorized) != nil
 		})
 
@@ -659,7 +659,7 @@ func TestRequestLog(t *testing.T) {
 		if got := signed(t, hook+dev, "ev-rl5", now, event("ev-rl5"), ""); got != http.StatusUnauthorized {
 			t.Fatalf("a Connection in poll mode = %d", got)
 		}
-		eventually(t, "the refusal under Dev Bridge", func() bool {
+		eventually(t, "the refusal under Example Bridge", func() bool {
 			return ofStatus(e.inbound(dev, "push"), http.StatusUnauthorized) != nil
 		})
 		if n := naming(t, h, "CN0000000000Z9"); n != 0 {
@@ -719,7 +719,7 @@ func TestRequestLog(t *testing.T) {
 		}
 		r4 := draft(`{"type":"bridge","connection_id":"` + dev + `","base_url":"` + h.Fakes.Bridge +
 			`","event_delivery":"poll"}`)
-		wantRun("a draft of a saved Connection", r4, e.waitRecords("the records of a draft of Dev Bridge", "run="+r4, 1),
+		wantRun("a draft of a saved Connection", r4, e.waitRecords("the records of a draft of Example Bridge", "run="+r4, 1),
 			"draft_check", dev)
 
 		// A Destination's check on its save and by checkDestination, and its test.

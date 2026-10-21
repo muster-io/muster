@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import {
   OutgoingHeartbeatForm,
   OutgoingHeartbeatLastResult,
@@ -28,7 +29,9 @@ function OutgoingHeartbeatView() {
   const status = useSystemStatus(canRead);
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("outgoingHeartbeat.title")}</h1>
+      <PageTitle docs="page.organization.outgoing_heartbeat">
+        {t("outgoingHeartbeat.title")}
+      </PageTitle>
       {query.data === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}

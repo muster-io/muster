@@ -5,17 +5,17 @@
 // "In the browser" of its story. The create form of each type checks its draft — Mattermost on the second fake server
 // with the second bot's token, Telegram and the Bridge with their second bots — and a draft without a token gets the
 // dry probe alone, its other steps asking for the token; nothing is saved: the Connections and the Audit log stay as
-// they were. On the pages of "Dev Mattermost", "Dev Telegram" and "Dev Bridge" the form's changes are checked as a
-// draft, which never changes the bot the page names: another server URL gets only the ping, without a token; another
-// path prefix fails the dry probe and the fake records no request with a token under it; only the proxy changed gets
-// the dry probe through the proxy and asks for the token again, which, typed, runs every step; a base URL that is not a
-// bridge fails with its text, and the stored token reaches no fake but the saved address. A Slack draft (C-24.FR-2,
-// AC-2): the create form checks "Token", "Scopes" and "App-level token" with the second app's tokens, the bot, the
-// workspace and the app, and saves nothing; on the page of the spec's own Slack Connection "ui" only the proxy changed
-// gets the dry probe alone through the proxy, and the fake Slack server sees no request with the stored bot token; the
-// bot token typed again runs "Token" and "Scopes" through the proxy and says why "App-level token" was skipped, and both
-// tokens typed run every step. An Admin reading Russian sees the same at phone width. No page scrolls sideways at 360 px, on the create and the edit page, in English and Russian;
-// no Content Security Policy violation.
+// they were. On the pages of "Example Mattermost", "Example Telegram" and "Example Bridge" the form's changes are
+// checked as a draft, which never changes the bot the page names: another server URL gets only the ping, without a
+// token; another path prefix fails the dry probe and the fake records no request with a token under it; only the proxy
+// changed gets the dry probe through the proxy and asks for the token again, which, typed, runs every step; a base URL
+// that is not a bridge fails with its text, and the stored token reaches no fake but the saved address. A Slack draft
+// (C-24.FR-2, AC-2): the create form checks "Token", "Scopes" and "App-level token" with the second app's tokens, the
+// bot, the workspace and the app, and saves nothing; on the page of the spec's own Slack Connection "ui" only the proxy
+// changed gets the dry probe alone through the proxy, and the fake Slack server sees no request with the stored bot
+// token; the bot token typed again runs "Token" and "Scopes" through the proxy and says why "App-level token" was
+// skipped, and both tokens typed run every step. An Admin reading Russian sees the same at phone width. No page scrolls
+// sideways at 360 px, on the create and the edit page, in English and Russian; no Content Security Policy violation.
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -55,7 +55,7 @@ const TG_URL = "http://127.0.0.1:18081";
 /** The development HTTP proxy of `muster dev` and its control API. */
 const HTTP_PROXY = "127.0.0.1:18091";
 const FPROXY = `http://${HTTP_PROXY}/_fake`;
-/** The published token of the demo Connection "Dev Telegram". */
+/** The published token of the demo Connection "Example Telegram". */
 const TG_TOKEN = "123456:dev-telegram-token";
 
 const DRAFT = "The check uses the values in the form and saves nothing.";
@@ -207,7 +207,7 @@ test("checks drafts of new Connections of every type and saves nothing", async (
 
     // Leaving the form saves nothing: the Connections, their versions and the Audit log are as they were.
     await page.goto("/connections");
-    await expect(page.getByRole("link", { name: "Dev Mattermost", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Example Mattermost", exact: true })).toBeVisible();
     expect(await saved(admin)).toEqual(before);
 
     // At phone width, a Bridge draft without a token: the page scrolls vertically only.
@@ -241,8 +241,8 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     await signInAdmin(page);
     const before = await saved(admin);
 
-    // Dev Mattermost with another server URL: only the ping there, without a token.
-    const mm = await connectionNamed(admin, "Dev Mattermost");
+    // Example Mattermost with another server URL: only the ping there, without a token.
+    const mm = await connectionNamed(admin, "Example Mattermost");
     await page.goto(`/connections/${mm}`);
     await expect(page.getByTestId("connection-bot")).toHaveText(/^Bot: /);
     const mmBot = (await page.getByTestId("connection-bot").textContent()) ?? "";
@@ -273,8 +273,8 @@ test("checks the changes of saved Connections as drafts, the stored token only a
       [],
     );
 
-    // Dev Telegram with another path prefix: the dry probe fails there and no token goes under it.
-    const tg = await connectionNamed(admin, "Dev Telegram");
+    // Example Telegram with another path prefix: the dry probe fails there and no token goes under it.
+    const tg = await connectionNamed(admin, "Example Telegram");
     await page.goto(`/connections/${tg}`);
     const baseUrl = page.getByRole("textbox", { name: "Bot API base URL" });
     await expect(baseUrl).toHaveValue(TG_URL);
@@ -320,8 +320,8 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     ]);
     await expect(page.getByTestId("connection-bot")).toHaveText(tgBot);
 
-    // Dev Bridge pointed at the fake Mattermost server: not a bridge, and its token never goes there.
-    const br = await connectionNamed(admin, "Dev Bridge");
+    // Example Bridge pointed at the fake Mattermost server: not a bridge, and its token never goes there.
+    const br = await connectionNamed(admin, "Example Bridge");
     await page.goto(`/connections/${br}`);
     await forget(FMM);
     const fields = page.getByTestId("bridge-connection-fields");
@@ -346,7 +346,7 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     await checkButton(page).click();
     await expect(summary(page)).toHaveText("The check passed.");
 
-    // At phone width, a draft of Dev Telegram with only the proxy changed: the page scrolls vertically only.
+    // At phone width, a draft of Example Telegram with only the proxy changed: the page scrolls vertically only.
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto(`/connections/${tg}`);
     await page.getByLabel("Use a proxy").check();
@@ -412,7 +412,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     await checkButton(page).click();
     await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
     await expect(steps(page)).toHaveText([
-      /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
       "Scopes: ok · direct",
       /^App-level token: ok · \d+ ms · direct · App: A0MUSTERDEVB$/,
     ]);
@@ -450,7 +450,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     await checkButton(page).click();
     await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
     await expect(steps(page)).toHaveText([
-      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
       "Scopes: ok · through the proxy",
       `App-level token: ${APP_TOKEN_RETYPE}`,
     ]);
@@ -463,7 +463,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     );
     await checkButton(page).click();
     await expect(steps(page)).toHaveText([
-      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Fake workspace B$/,
+      /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
       "Scopes: ok · through the proxy",
       /^App-level token: ok · \d+ ms · through the proxy · App: A0MUSTERDEVB$/,
     ]);
@@ -522,9 +522,9 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expectNoHorizontalScroll(page);
   await shot(page, "connection-checks-ru-new-360");
 
-  // Dev Mattermost with another server URL: the token step asks for the token again or a save.
+  // Example Mattermost with another server URL: the token step asks for the token again or a save.
   await page.goto("/connections");
-  await page.getByRole("link", { name: "Dev Mattermost", exact: true }).click();
+  await page.getByRole("link", { name: "Example Mattermost", exact: true }).click();
   await page.getByRole("textbox", { name: "URL сервера" }).fill(MM2_URL);
   await expect(page.getByTestId("connection-check-draft")).toHaveText(DRAFT_RU);
   await checkButton(page, "Проверить подключение").click();

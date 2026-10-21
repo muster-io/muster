@@ -14,6 +14,7 @@ import {
   getListLookupTablesQueryKey,
 } from "../api/gen/endpoints/links/links";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { LookupTableEditor } from "../components/lookup-table-editor";
 import { buttonVariants } from "../components/ui/button";
 
@@ -36,7 +37,7 @@ function NewLookupTable() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("lookupTables.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("lookupTables.create.title")}</h1>
+        <PageTitle docs="page.lookup_tables">{t("lookupTables.create.title")}</PageTitle>
       </div>
       <LookupTableEditor
         submitLabel={t("lookupTables.create.submit")}

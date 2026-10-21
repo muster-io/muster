@@ -31,12 +31,12 @@ test("opens the sign-in page, signs the Admin in and shows the recovery banner l
   await expect(page).toHaveURL(`${APP}/sign-in`);
   await expect(page.getByRole("heading", { name: "Sign in to Muster" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
-  await expect(page.getByText("Sign in with Dev IdP")).toBeVisible();
+  await expect(page.getByText("Sign in with Example SSO")).toBeVisible();
   await shot(page, "sign-in-light");
   // A reload shows the dark theme without the transitions of the switch.
   await page.emulateMedia({ colorScheme: "dark" });
   await page.reload();
-  await expect(page.getByText("Sign in with Dev IdP")).toBeVisible();
+  await expect(page.getByText("Sign in with Example SSO")).toBeVisible();
   await shot(page, "sign-in-dark");
   await page.emulateMedia({ colorScheme: "light" });
 
@@ -103,7 +103,7 @@ test("signs in through the fake IdP and shows the refusal texts of the callback"
 }) => {
   await nextIdpUser("u-web-oscar", "oscar", ["oncall"]);
   await page.goto("/sign-in");
-  await page.getByText("Sign in with Dev IdP").click();
+  await page.getByText("Sign in with Example SSO").click();
   await expect(page).toHaveURL(`${APP}/alert-groups`);
   await expect(page.getByTestId("user-menu-name")).toHaveText("oscar");
   await page.getByRole("button", { name: /oscar/ }).click();
@@ -111,7 +111,7 @@ test("signs in through the fake IdP and shows the refusal texts of the callback"
   await expect(page).toHaveURL(`${APP}/sign-in`);
 
   await nextIdpUser("u-web-mallory", "mallory", ["contractors"]);
-  await page.getByText("Sign in with Dev IdP").click();
+  await page.getByText("Sign in with Example SSO").click();
   await expect(page).toHaveURL(`${APP}/sign-in?error=no_access`);
   await expect(
     page.getByText("You have no access to Muster. Contact your administrator."),

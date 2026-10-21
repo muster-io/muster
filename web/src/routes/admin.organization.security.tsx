@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import type { Organization, TotpPolicy } from "../api/gen/model";
+import { DocsLink } from "../components/docs-link";
 import {
   Field,
   OrganizationPage,
@@ -98,8 +99,15 @@ function SecurityForm({ organization }: { organization: Organization }) {
           <CardDescription>{t("security.totp.hint")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <fieldset className="flex flex-col gap-3">
-            <legend className="mb-2 text-sm font-medium">{t("security.totp.legend")}</legend>
+          <fieldset className="flex flex-col gap-3" aria-labelledby="totp-policy-legend">
+            <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+              <span id="totp-policy-legend">{t("security.totp.legend")}</span>
+              <DocsLink
+                to="field.totp_policy"
+                kind="learn_more"
+                about={t("docs.fields.totpPolicy")}
+              />
+            </legend>
             {POLICIES.map((policy) => (
               <div key={policy} className="flex items-start gap-2">
                 <input

@@ -53,7 +53,7 @@ const SLACK: SlackConnection = {
   bot_name: "muster-dev-bot-b",
   bot_user_id: "U0MUSTERBOTB",
   team_id: "T0MUSTERDEVB",
-  team_name: "Fake workspace B",
+  team_name: "Example workspace B",
   app_id: "A0MUSTERDEVB",
   socket: null,
   proxy: { enabled: false },
@@ -353,7 +353,7 @@ const PASSED: ConnectionCheckResult = {
   bot_name: "muster-dev-bot-b",
   slack: {
     team_id: "T0MUSTERDEVB",
-    team_name: "Fake workspace B",
+    team_name: "Example workspace B",
     bot_user_id: "U0MUSTERBOTB",
     app_id: "A0MUSTERDEVB",
   },
@@ -402,7 +402,7 @@ describe("the check of a Slack Connection", () => {
       .element(page.getByTestId("connection-check-summary"))
       .toHaveTextContent("Connected as muster-dev-bot-b");
     expect(stepTexts()).toEqual([
-      "Token: ok · 3 ms · direct · Bot: muster-dev-bot-b · Workspace: Fake workspace B",
+      "Token: ok · 3 ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B",
       "Scopes: ok · direct",
       "App-level token: ok · 3 ms · direct · App: A0MUSTERDEVB",
     ]);
@@ -538,7 +538,9 @@ describe("the page of a Slack Connection", () => {
     const screen = await render(providers(<SlackConnectionInfo connection={SLACK} />));
     await expect
       .element(page.getByTestId("connection-bot"))
-      .toHaveTextContent("Bot: muster-dev-bot-b · Workspace: Fake workspace B · App: A0MUSTERDEVB");
+      .toHaveTextContent(
+        "Bot: muster-dev-bot-b · Workspace: Example workspace B · App: A0MUSTERDEVB",
+      );
     await screen.unmount();
     await i18n.changeLanguage("ru");
     await render(

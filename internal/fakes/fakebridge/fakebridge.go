@@ -4,7 +4,7 @@
 // Package fakebridge is the fake bridge of the Bridge protocol (api/bridge.yaml) for tests and `muster dev`. It serves
 // two bots, one per published token, each with its own state, as the protocol's "one token, one bot" asks: Token,
 // which the demo Connection of `muster dev` uses, and SecondToken. getInfo answers the configured info — the
-// messenger "Fake chat", every feature on and both event delivery modes by default — checkChannel answers the
+// messenger "Example chat", every feature on and both event delivery modes by default — checkChannel answers the
 // configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
 // their edits and Thread replies, and deleteMessage marks a message of the bot deleted, without a message_deleted
 // event, answering 204 also for one already deleted, of the other bot or unknown (messages.go), pollEvents and
@@ -68,8 +68,8 @@ const (
 
 // What getInfo names.
 const (
-	MessengerName = "Fake chat"
-	BridgeName    = "Muster fake bridge"
+	MessengerName = "Example chat"
+	BridgeName    = "Example bridge"
 	BridgeVersion = "1.0.0"
 )
 
