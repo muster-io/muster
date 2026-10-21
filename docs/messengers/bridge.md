@@ -11,9 +11,9 @@ To write a bridge, read [Write a bridge](write-a-bridge.md); the protocol itself
 [Bridge protocol](../reference/bridge-protocol.md) reference.
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_INGEST_URL` is
-`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The examples use the
-[API](../reference/api.md), with a Personal access token of an Admin in `MUSTER_TOKEN`; the web UI has the same forms
-under **Connections** and **Destinations**.
+`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The steps use the web UI;
+the examples do the same with the [API](../reference/api.md), with a Personal access token of an Admin in
+`MUSTER_TOKEN`.
 
 ## Create the Connection
 
@@ -38,6 +38,24 @@ Choose how the bridge reports **events** — the presses of buttons and the mess
 A Connection also has a **proxy**, for a bridge that Muster reaches only through one, and a **limiter**: 10 requests
 per second by default, shared by all its Destinations. When the bridge answers that it is rate-limited, Muster waits
 as long as it asks, whatever the limiter allows.
+
+1. Open **Connections**, select **Create connection** and choose **Bridge**.
+2. Enter a **Name**, the **Base URL** and, after **Set a value**, the **Token**. Choose the event delivery mode,
+   **Polling** or **Push**; with push, also the push secret.
+
+    ![The form of a new Bridge Connection: the name Team chat, the base URL https://bridge.example.org, the token and polling](../assets/screenshots/messengers/bridge/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**, below the form. It runs the steps of [What the check shows](#what-the-check-shows)
+   against the values in the form and saves nothing.
+
+    ![The Connection check: the steps Bridge info and Event delivery passed](../assets/screenshots/messengers/bridge/02-check-connection.png){ .screenshot }
+
+4. Select **Save**, then **Check connection** on the saved Connection: Muster keeps what the bridge offers, which the
+   page shows.
+
+    ![What the bridge offers, as the saved Connection shows it: the bridge, the messenger, the protocol version and its features](../assets/screenshots/messengers/bridge/03-saved-connection.png){ .screenshot }
+
+With the API:
 
 ```sh
 curl -X POST https://muster.example.org/api/v1/connections \
@@ -124,6 +142,25 @@ A **Bridge Destination** is one channel of the messenger, named by its **channel
 names it, which the bridge's documentation explains how to find. Its **Mention settings** take nobody or chosen
 users; everyone in the chat and messenger groups are not available through a bridge. Its limiter allows 30 requests
 per minute by default, sends and edits together.
+
+1. Open **Destinations**, select **Create destination** and choose **Bridge**.
+2. Choose the **Connection**, enter the **Channel id** and a **Name**.
+
+    ![The form of a new Bridge Destination: the Connection Team chat, the channel id ch-alerts and the name alerts](../assets/screenshots/messengers/bridge/04-new-destination.png){ .screenshot }
+
+3. Select **Save**, which runs the Destination check below. The saved Destination shows the channel's name as the
+   bridge reports it.
+
+    ![The saved Destination alerts: Bridge, Healthy, with the channel's name](../assets/screenshots/messengers/bridge/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**: the bridge posts a message marked 🧪,
+   and the result shows the envelope Muster sent. Links in the screenshot start with `http://localhost:8080`, the
+   address of a development installation; yours start with your `MUSTER_PUBLIC_URL`. See
+   [Test messages and previews](#test-messages-and-previews).
+
+    ![The result of the test message: Test passed, Message: Sent, with the envelope sent to the bridge](../assets/screenshots/messengers/bridge/06-test-message.png){ .screenshot }
+
+With the API:
 
 ```sh
 curl -X POST https://muster.example.org/api/v1/destinations \

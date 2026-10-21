@@ -213,16 +213,28 @@ Muster stores all three secrets encrypted, never shows them again and writes the
 
 ## Create the Connection
 
-In Muster, create a **Connection** of type Slack. Enter a name, choose the event mode, and enter the bot token and, in
-Socket Mode, the app-level token, or over HTTP the Slack signing secret. A Slack Connection has no address field, since
-Slack's address is fixed. Then **Check connection**. The check runs in steps and shows the latency of each and whether
-it went through the proxy:
+1. In Muster, open **Connections**, select **Create connection** and choose **Slack**.
+2. Enter a **Name**, choose the **Event mode**, and enter the **Bot token** and, in Socket Mode, the **App-level
+   token**, or over HTTP the **Slack signing secret**, each after **Set a value**. A Slack Connection has no address
+   field, since Slack's address is fixed.
 
-1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not a
-   bot's;
-2. **Scopes**: every scope of the manifest is granted;
-3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
-   connection for it. The check opens no WebSocket.
+    ![The form of a new Slack Connection in Socket Mode, with the bot token and the app-level token](../assets/screenshots/messengers/slack/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**. The check runs in steps and shows the latency of each and whether it went through the
+   proxy:
+
+    1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not
+       a bot's;
+    2. **Scopes**: every scope of the manifest is granted;
+    3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
+       connection for it. The check opens no WebSocket.
+
+    ![The Connection check: the token, the scopes and the app-level token passed, with the bot and the workspace](../assets/screenshots/messengers/slack/02-check-connection.png){ .screenshot }
+
+4. Select **Save**. On the saved Connection, **Check connection** records the bot, the workspace and the app, which
+   the page then names.
+
+    ![The saved Connection Slack with its bot, workspace and app, in Socket Mode](../assets/screenshots/messengers/slack/03-saved-connection.png){ .screenshot }
 
 Over HTTP no request can show that Slack reaches the callback address or that the Slack signing secret is right, because
 a bot cannot press its own button. The first press does: see [The test message](#the-test-message).
@@ -240,10 +252,28 @@ or private:
 /invite @Muster
 ```
 
-In Muster, create a **Destination** of type Slack with the Connection and the channel. The form lists the public and
-private channels the bot is a member of; for a channel that is not listed, type its id as Slack shows it in the
-channel's details, `C…` or `G…`. A direct chat or a person cannot be a Destination. Saving runs the **Destination
-check**, which asks Slack about the channel with `conversations.info` and refuses a Destination that fails:
+In Muster, create a **Destination** of type Slack with the Connection and the channel:
+
+1. Open **Destinations**, select **Create destination** and choose **Slack**.
+2. Choose the **Connection** and the **Channel**. The form lists the public and private channels the bot is a member
+   of; for a channel that is not listed, type its id as Slack shows it in the channel's details, `C…` or `G…`. A direct
+   chat or a person cannot be a Destination. Give the Destination a **Name**.
+
+    ![The form of a new Slack Destination: the Connection Slack, the channel #alerts and the name alerts](../assets/screenshots/messengers/slack/04-new-destination.png){ .screenshot }
+
+3. Select **Save**, which runs the Destination check below. The saved Destination shows the channel's name.
+
+    ![The saved Destination alerts: Slack, Healthy, the channel #alerts](../assets/screenshots/messengers/slack/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**: a message marked 🧪 appears in the
+   channel. In the screenshot the request line, which names a development server, is hidden, and links start with
+   `http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`. See
+   [The test message](#the-test-message).
+
+    ![The result of the test message: Test passed, Message: Sent](../assets/screenshots/messengers/slack/06-test-message.png){ .screenshot }
+
+Saving runs the **Destination check**, which asks Slack about the channel with `conversations.info` and refuses a
+Destination that fails:
 
 - `channel_not_found`: no such channel, or a private channel the bot is not in;
 - `channel_archived`: the channel is archived;

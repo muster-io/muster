@@ -20,16 +20,33 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_IN
 
 The bot token works even when **Enable Personal Access Tokens** is off, its default.
 
-In Muster, create a **Connection** of type Mattermost with the server's address and the bot token, then **Check** it:
-the check reads the bot's own user with the token and shows the bot's name. Then create a **Destination** for each
-channel; saving it checks that the bot is a member of the channel and refuses the Destination otherwise, naming the
-failing check.
+## Create the Connection
+
+1. In Muster, open **Connections**, select **Create connection** and choose **Mattermost**.
+2. Enter a **Name** and the **Server URL**, the address people open Mattermost at, such as `https://chat.example.org`.
+   Select **Set a value** next to **Bot token** and paste the bot's access token.
+
+    ![The form of a new Mattermost Connection: the name, the server URL https://chat.example.org and the bot token](../assets/screenshots/messengers/mattermost/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**, below the form. The check reads the bot's own user with the token and shows the
+   bot's name. When the bot may not make ephemeral posts, it passes with a warning: see
+   [Where answers to presses show](#where-answers-to-presses-show).
+
+    ![The Connection check: connected as the bot, with the warning that answers to presses show in the Thread](../assets/screenshots/messengers/mattermost/02-check-connection.png){ .screenshot }
+
+4. Select **Save**. The saved Connection shows its **callback address**, which Mattermost calls when someone presses
+   a button: `MUSTER_INGEST_URL` followed by `/api/v1/callbacks/mattermost/CN…`. In the screenshot it is
+   `http://localhost:8081`, the ingest address of a development installation; yours starts with your
+   `MUSTER_INGEST_URL`. [Let button presses reach Muster](#let-button-presses-reach-muster) says what the server
+   needs to call it.
+
+    ![The saved Connection Mattermost with its bot and its callback address](../assets/screenshots/messengers/mattermost/03-saved-connection.png){ .screenshot }
 
 ## Check before saving
 
-**Check connection** also works in the form, before anything is saved: in the form of a new Connection, and on the
-page of a saved one while the form holds changes. It checks the values in the form — the server URL, the proxy and the
-bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets no entry.
+**Check connection** checks the values in the form, before anything is saved: in the form of a new Connection, as
+above, and on the page of a saved one while the form holds changes. It saves nothing: no bot name is recorded and the
+Audit log gets no entry.
 
 - With the bot token typed in the form, the check reads the bot's own user at the server URL in the form, through the
   proxy in the form, and shows the bot's name.
@@ -50,6 +67,35 @@ curl -X POST https://muster.example.org/api/v1/connections/checks \
 ```
 
 Add `"connection_id":"CN…"` to check the changes of a saved Connection, whose stored token the rule above may use.
+
+## Add a Destination
+
+A Mattermost Destination is one channel of one team that the bot is a member of.
+
+1. Open **Destinations**, select **Create destination** and choose **Mattermost**.
+2. Choose the **Connection**, the **Team** and the **Channel**. The list shows the channels the bot is a member of:
+   add the bot to a channel to send there. The **Name** takes the channel's name; change it if you like.
+
+    ![The form of a new Mattermost Destination: the Connection, the team dev and the channel alerts](../assets/screenshots/messengers/mattermost/04-new-destination.png){ .screenshot }
+
+3. Select **Save**. Saving runs the **Destination check**: the bot is a member of the channel, which belongs to the
+   team and is not archived. A Destination that fails the check is not saved, and the check names what failed.
+
+    ![The saved Destination alerts: Mattermost, Healthy](../assets/screenshots/messengers/mattermost/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**. Muster posts a message marked 🧪;
+   the result shows the request it sent and Mattermost's answer. Links in the screenshot start with
+   `http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`.
+
+    ![The result of the test message: Test passed, Message: Sent, with the request to the Mattermost server](../assets/screenshots/messengers/mattermost/06-test-message.png){ .screenshot }
+
+    Muster then presses the message's first button through the bot. The step **Button press** says whether the press
+    reached Muster at the callback address; when it did not, read
+    [Let button presses reach Muster](#let-button-presses-reach-muster).
+
+    ![The step Button press of the test: Button presses reach Muster](../assets/screenshots/messengers/mattermost/07-button-press.png){ .screenshot }
+
+**Check** on the Destination page runs the Destination check at any time.
 
 ## Direct messages
 

@@ -62,13 +62,20 @@ type Network struct {
 	Recorder outbound.Recorder
 }
 
-// Settings are a Connection as its client needs it: the server URL, the bot token and the proxy, nil for none; and the
-// Connection whose Request log keeps its requests, none for a client that records nothing.
+// Route names the address a Connection's requests go to instead of its server URL, by that URL and the bot token:
+// under `muster dev` the first fake Mattermost server for https://chat.example.org with one of its published tokens; an
+// empty answer is the Connection's own server URL.
+type Route func(serverURL string, token logging.Secret) string
+
+// Settings are a Connection as its client needs it: the server URL, the bot token and the proxy, nil for none; the
+// Connection whose Request log keeps its requests, none for a client that records nothing; and the Route of `muster
+// dev`, nil outside it.
 type Settings struct {
 	ServerURL string
 	Token     logging.Secret
 	Proxy     *outbound.Proxy
 	Owner     outbound.Owner
+	Route     Route
 }
 
 // Client calls the REST API of one Mattermost Connection, in the interactive and the delivery client classes and, for
@@ -77,15 +84,25 @@ type Client struct {
 	network  Network
 	settings Settings
 	via      string
+	// base is where the requests go: the server URL, or the Route's answer. What the client shows — the address in a
+	// check's message, a test message's request, the permalink of a post — is the server URL.
+	base string
 
 	mu      sync.Mutex
 	clients map[outbound.Class]*outbound.Client
 }
 
-// NewClient builds the client of the Connection s, checking its settings with the interactive class. The bot token
-// and the proxy password are registered for redaction.
+// NewClient builds the client of the Connection s, checking its settings with the interactive class. Its requests go
+// to the server URL, or to what s.Route answers for it and the bot token when it answers. The bot token and the proxy
+// password are registered for redaction.
 func NewClient(n Network, s Settings) (*Client, error) {
-	c := &Client{network: n, settings: s, via: ViaDirect, clients: map[outbound.Class]*outbound.Client{}}
+	c := &Client{network: n, settings: s, via: ViaDirect, base: s.ServerURL,
+		clients: map[outbound.Class]*outbound.Client{}}
+	if s.Route != nil {
+		if b := s.Route(s.ServerURL, s.Token); b != "" {
+			c.base = b
+		}
+	}
 	if s.Proxy != nil {
 		c.via = ViaProxy
 	}
@@ -107,7 +124,7 @@ func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
 	}
 	s, n := c.settings, c.network
 	oc, err := outbound.New(outbound.Config{Class: class, ConnectTimeout: connectTimeout, Timeout: callTimeout,
-		Proxy: s.Proxy, Secrets: []logging.Secret{s.Token}, BaseURL: s.ServerURL, Policy: n.Policy, Logger: n.Log,
+		Proxy: s.Proxy, Secrets: []logging.Secret{s.Token}, BaseURL: c.base, Policy: n.Policy, Logger: n.Log,
 		Clock: n.Real, Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err

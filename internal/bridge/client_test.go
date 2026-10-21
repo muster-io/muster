@@ -603,3 +603,44 @@ func TestRequestLog(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// TestRoute is the route of `muster dev` (C-21.FR-10): a client whose Route answers for its base URL and token sends
+// every request there, below the routed address; an empty answer sends to the base URL. A routed request still passes
+// the outbound address policy: without the loopback network it is blocked.
+func TestRoute(t *testing.T) {
+	b := startStandIn(t, answerJSON(http.StatusOK, "application/json", string(validInfo(t, nil))))
+	const base = "https://bridge.example.org"
+	route := func(baseURL string, token logging.Secret) string {
+		if baseURL == base && token == testToken {
+			return b.srv.URL
+		}
+		return ""
+	}
+	c := newClient(t, network(t, nil), Settings{BaseURL: base, Token: testToken, Route: route})
+	if _, r := c.GetInfo(t.Context(), outbound.ClassInteractive); !r.OK() {
+		t.Fatalf("routed getInfo = %+v", r)
+	}
+	if got := b.seen(); len(got) != 1 || got[0].Path != "/v1/info" {
+		t.Fatalf("requests %+v", got)
+	}
+
+	other := newClient(t, network(t, nil), Settings{BaseURL: "http://127.0.0.1:1", Token: "another-token",
+		Route: route})
+	if _, r := other.GetInfo(t.Context(), outbound.ClassInteractive); r.OK() || r.Network == "" {
+		t.Fatalf("unrouted getInfo = %+v", r)
+	}
+	if n := len(b.seen()); n != 1 {
+		t.Fatalf("the stand-in got %d requests, want 1", n)
+	}
+
+	p, _ := outbound.ParsePolicy("standard", nil, nil)
+	n := network(t, nil)
+	n.Policy = outbound.StaticPolicy(p)
+	blocked := newClient(t, n, Settings{BaseURL: base, Token: testToken, Route: route})
+	if _, r := blocked.GetInfo(t.Context(), outbound.ClassInteractive); !r.Blocked {
+		t.Fatalf("routed getInfo without loopback = %+v", r)
+	}
+	if n := len(b.seen()); n != 1 {
+		t.Fatalf("a blocked request reached the stand-in: %d requests", n)
+	}
+}

@@ -107,6 +107,16 @@ command with the same defaults. The database default also yields to any field of
 the Admin password to their `_FILE` variables. `docker compose -f deploy/dev/docker-compose.yml down -v` removes the
 development database with its data.
 
+The screenshots of the documentation, under `docs/assets/screenshots/`, are taken by `make docs-screenshots`: the
+Playwright suite `web/e2e/screenshots/` walks the guides on a `muster dev` of its own, inside the Playwright image that
+the Makefile pins by digest, so that every run has the same fonts. It runs only on Linux with Docker, such as the VM
+muster-lab, and refuses anywhere else; `GUIDES=telegram` runs one spec. Under `muster dev` a Telegram Connection on
+`https://api.telegram.org`, a Mattermost Connection on `https://chat.example.org` and a Bridge Connection on
+`https://bridge.example.org` call the fake servers when their token is one of the published tokens above, so that the
+screenshots show no loopback address. Only when every spec passed does the target replace the images of the pages it
+took; review them and commit them by hand, as no CI run commits them. The nightly job `docs-screenshots` runs the suite
+without committing, so that a broken screenshot spec shows the next night.
+
 In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `generate` (`make generate-check`),
 `licenses`, `vulncheck`, `helm-check` (`make helm-check rules-test`), `compose-check` (`make compose-check`, then the
 example's PostgreSQL settings) and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on

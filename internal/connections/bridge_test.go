@@ -1329,3 +1329,52 @@ func TestBridgePruneEventsSeen(t *testing.T) {
 		t.Error("a failed delete pruned")
 	}
 }
+
+// TestBridgeDevRoute is the Bridge route of muster dev (C-21.FR-10): a Connection on https://bridge.example.org whose
+// token the route publishes reaches the fake bridge; another token goes to the address the Connection names; and a
+// routed request still passes the outbound address policy, which blocks it without the loopback network.
+func TestBridgeDevRoute(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	const base = "https://bridge.example.org"
+	create := func(name, token string) connections.Connection {
+		in := bridgeInput(name, base, connections.EventDeliveryPoll)
+		in.BotToken = keyring.Replace(logging.Secret(token))
+		c, err := e.svc.Create(t.Context(), by, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	routed, other := create("br", fakebridge.SecondToken), create("br-other", bridgeToken)
+	route := devRoutes{br: func(baseURL string, token logging.Secret) string {
+		if baseURL == base && token == fakebridge.SecondToken {
+			return f.URL()
+		}
+		return ""
+	}}
+	svc, dns := routedService(t, e, route, "127.0.0.0/8")
+	res, err := svc.Check(t.Context(), routed.PublicID, nil)
+	if err != nil || !res.OK || res.Info == nil {
+		t.Fatalf("routed check = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); len(hosts) != 0 {
+		t.Fatalf("a routed check resolved %v", hosts)
+	}
+	n := len(f.Requests())
+	if res, err := svc.Check(t.Context(), other.PublicID, nil); err != nil || res.OK {
+		t.Fatalf("unrouted check = %+v, %v", res, err)
+	}
+	if hosts := dns.take(); !slices.Equal(hosts, []string{"bridge.example.org"}) {
+		t.Fatalf("the unrouted check resolved %v", hosts)
+	}
+
+	blocked, _ := routedService(t, e, route)
+	res, err = blocked.Check(t.Context(), routed.PublicID, nil)
+	if err != nil || res.OK || res.Steps[0].Code != delivery.CodeBlocked {
+		t.Fatalf("routed check without loopback = %+v, %v", res, err)
+	}
+	if got := len(f.Requests()); got != n {
+		t.Fatalf("unrouted or blocked requests reached the fake: %d, want %d", got, n)
+	}
+}

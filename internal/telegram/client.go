@@ -73,14 +73,20 @@ type Network struct {
 	Recorder outbound.Recorder
 }
 
+// Route names the base URL a Connection's requests go to instead of its Bot API base URL, by that address and the bot
+// token: under `muster dev` the fake Telegram server for the default address with one of its published tokens; an empty
+// answer is the Connection's own address.
+type Route func(baseURL string, token logging.Secret) string
+
 // Settings are a Connection as its client needs it: the normalized Bot API base URL, the bot token — empty for the
-// client of the dry probe of an unsaved base URL — and the proxy, nil for none; and the Connection whose Request log
-// keeps its requests, none for a client that records nothing.
+// client of the dry probe of an unsaved base URL — and the proxy, nil for none; the Connection whose Request log keeps
+// its requests, none for a client that records nothing; and the Route of `muster dev`, nil outside it.
 type Settings struct {
 	BaseURL string
 	Token   logging.Secret
 	Proxy   *outbound.Proxy
 	Owner   outbound.Owner
+	Route   Route
 }
 
 // Client calls the Bot API of one Connection, in the interactive and the delivery client classes, and in the
@@ -89,6 +95,9 @@ type Client struct {
 	network  Network
 	settings Settings
 	via      string
+	// base is where the requests go: the Bot API base URL, or the Route's answer. What the client shows — the
+	// address in a check's message, a test message's request, the origin in log lines — is the Bot API base URL.
+	base string
 
 	mu      sync.Mutex
 	clients map[clientKey]*outbound.Client
@@ -101,10 +110,16 @@ type clientKey struct {
 	long  bool
 }
 
-// NewClient builds the client of the Connection s, checking its settings with the interactive class. The bot token
-// and the proxy password are registered for redaction.
+// NewClient builds the client of the Connection s, checking its settings with the interactive class. Its requests go
+// to the Bot API base URL, or to what s.Route answers for it and the bot token when it answers. The bot token and the
+// proxy password are registered for redaction.
 func NewClient(n Network, s Settings) (*Client, error) {
-	c := &Client{network: n, settings: s, via: ViaDirect, clients: map[clientKey]*outbound.Client{}}
+	c := &Client{network: n, settings: s, via: ViaDirect, base: s.BaseURL, clients: map[clientKey]*outbound.Client{}}
+	if s.Route != nil {
+		if b := s.Route(s.BaseURL, s.Token); b != "" {
+			c.base = b
+		}
+	}
 	if s.Proxy != nil {
 		c.via = ViaProxy
 	}
@@ -139,7 +154,7 @@ func (c *Client) client(k clientKey) (*outbound.Client, error) {
 		secrets = append(secrets, s.Token)
 	}
 	oc, err := outbound.New(outbound.Config{Class: k.class, ConnectTimeout: connectTimeout, Timeout: timeout,
-		Proxy: s.Proxy, Secrets: secrets, BaseURL: s.BaseURL, Policy: n.Policy, Logger: n.Log, Clock: n.Real,
+		Proxy: s.Proxy, Secrets: secrets, BaseURL: c.base, Policy: n.Policy, Logger: n.Log, Clock: n.Real,
 		Resolver: n.Resolver, MaxBodyBytes: maxAnswerBytes, Recorder: n.Recorder, Owner: s.Owner})
 	if err != nil {
 		return nil, err

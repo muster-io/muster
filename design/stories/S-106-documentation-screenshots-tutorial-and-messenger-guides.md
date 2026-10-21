@@ -42,6 +42,9 @@ files_touched:
   - internal/doctor/doctor_test.go
   - internal/tools/imagecheck/main.go
   - internal/tools/imagecheck/imagecheck_test.go
+  - internal/tools/llmsgen/main.go
+  - internal/tools/llmsgen/llmsgen_test.go
+  - docs/install/helm.md
   - docs/first-alert.md
   - docs/messengers/mattermost.md
   - docs/messengers/telegram.md
@@ -151,13 +154,16 @@ issue: 335
   and the fake servers' control endpoints (`support.ts` gains the helpers they share): the fake Telegram server's
   second bot (`234567:dev-telegram-token-b`, for which `muster dev` creates no Connection) on the default Bot API
   address, its chats through `PUT /_fake/chats/{chat}`, the `/start` of the Account link through
-  `POST /_fake/updates` and the press of Ack through `POST /_fake/press`; the fake Mattermost server's second bot
+  `POST /_fake/private`, which opens the person's private chat with the bot as a first message does, and the press of
+  Ack through `POST /_fake/press`; the fake Mattermost server's second bot
   (`muster-dev-mattermost-token-b`) on `https://chat.example.org`; the fake Slack server's second app
   (`xoxb-muster-dev-slack-token-b`, `xapp-muster-dev-slack-token-b`); the fake bridge's second bot
   (`muster-dev-bridge-token-b`) on `https://bridge.example.org`. Names on the screens are neutral and realistic
   ("Production Alertmanager", "checkout", "#alerts"); no screenshot shows a real workspace, server, person or token,
   or a fake server's address. The callback addresses that Muster shows for Mattermost and Bridges are Muster's own
-  development address, `http://localhost:8081`, which the guides tell the reader to read as their `MUSTER_INGEST_URL`.
+  development address, `http://localhost:8081`, which the guides tell the reader to read as their `MUSTER_INGEST_URL`;
+  likewise the links in test messages and previews start with Muster's own development `MUSTER_PUBLIC_URL`,
+  `http://localhost:8080`, which the guides tell the reader to read as their `MUSTER_PUBLIC_URL`.
 - **Independence**: a spec's images do not depend on which other specs ran before it. Each spec:
   - removes in `afterAll` what it created — Integrations, Connections, Destinations, Routes and Account links, as
     `deleteRoute` and `removeSlackConnection` of `support.ts` do — and reverts every Organization setting it saved,
@@ -175,7 +181,9 @@ issue: 335
   generated files that `files_touched` does not list ([README §2](README.md#2-repository-layout)). Pages reference them
   with relative paths and alternative text that says what the screen shows, and the class `screenshot` through
   `attr_list` (`![…](…){ .screenshot }`), which `docs/assets/stylesheets/screenshots.css` (in `extra_css` of
-  `mkdocs.yml`) gives a thin border and a full-width maximum.
+  `mkdocs.yml`) gives a thin border and a full-width maximum. `internal/tools/llmsgen` ends a URL before a brace, which
+  RFC 3986 does not allow unescaped, so that it does not read the attribute list as part of the image's address in the
+  full text.
 - **Image check** (`internal/tools/imagecheck`, Go, no dependencies): reads every Markdown page under `docs/` except
   the excluded files of `mkdocs.yml`, collects image references outside code blocks — `![alt](path)` and
   `<img src alt>` — and fails, naming `page:line` and the image, for a relative path that does not resolve to a file
@@ -183,6 +191,7 @@ issue: 335
   `docs/assets/screenshots/` that no page references; it also fails for an image whose source is another site
   (`http:`, `https:` or `//`), which `make docs` does not refuse today (`REMOTE_ASSET_RE` covers scripts and
   stylesheets) and which a reader's browser would load from that site.
+  The Artifact Hub badge that `docs/install/helm.md` loaded from `img.shields.io` becomes a plain link to Artifact Hub.
 - **Pages**:
   - `docs/first-alert.md` (new), "First alert in a messenger", in the `nav` of `mkdocs.yml` right after Quick start. It
     starts where Quick start ends — Muster running, the Admin signed in — and has the sections "1. Create the
