@@ -38,9 +38,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-16 Destination test | Shadow | 14 | S-047, S-048, S-099 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
 | C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070, S-100, S-102 | yes | 18 of 18 |
-| C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
+| C-19 Self-observation | Operations | 15 | S-053, S-054, S-059, S-108 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 14 | S-055, S-071, S-056, S-072, S-092, S-094 | yes | 14 of 14 |
-| C-21 Documentation site and runbooks | Operations | 11 | S-057, S-058, S-060, S-091 | yes | 11 of 11 |
+| C-21 Documentation site and runbooks | Operations | 20 | S-057, S-058, S-060, S-091, S-106, S-107, S-108, S-109, S-110 | yes | 20 of 20 |
 | C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090, S-097, S-100, S-101 | yes | 13 of 13 |
 | C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
@@ -685,7 +685,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-19
 
-[Self-observation](../prd/l1/C-19-self-observation.md) · Operations · stories: S-053, S-054, S-059
+[Self-observation](../prd/l1/C-19-self-observation.md) · Operations · stories: S-053, S-054, S-059, S-108
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -694,7 +694,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-19.FR-4 | S-059 | complete |  |
 | C-19.FR-5 | S-053 | complete |  |
 | C-19.FR-7 | S-053 (part), S-054 (part) | complete |  |
-| C-19.FR-9 | S-053 (part), S-058 (part), S-059 | complete | Internal alerts S-053, pages S-058, chart rules S-059 |
+| C-19.FR-9 | S-053 (part), S-058 (part), S-059, S-108 (part) | complete | Internal alerts S-053, pages S-058, chart rules S-059; `latest` for snapshot and pre-release versions S-108 |
 | C-19.FR-10 | S-053 (part), S-054 (part) | complete |  |
 | C-19.AC-1 | S-053 (part), S-059 | complete | the outgoing heartbeat stops without a Leader (S-053); `MusterNoLeader` is the chart rule of S-059, checked by its unit test |
 | C-19.AC-2 | S-053 | complete |  |
@@ -728,7 +728,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-21
 
-[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057, S-058, S-060, S-091
+[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057, S-058, S-060, S-091, S-106, S-107, S-108, S-109, S-110
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -739,10 +739,19 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-21.FR-5 | S-057 (part), S-058 (part), S-060 (part) | complete |  |
 | C-21.FR-7 | S-058 | complete |  |
 | C-21.FR-8 | S-091 | complete |  |
+| C-21.FR-9 | S-106 (part), S-107 (part) | complete | the tutorial and the messenger pages S-106, the other pages S-107 |
+| C-21.FR-10 | S-106 | complete |  |
+| C-21.FR-11 | S-108 (part), S-109 (part), S-110 (part) | complete | the version, the component and the main page titles S-108; fields and problems S-109; the admin pages S-110 |
+| C-21.FR-12 | S-108 | complete |  |
 | C-21.AC-1 | S-057 (part), S-058 (part), S-059 | complete | verified by S-059: the chart's `runbook_url`s exist once the chart renders its rules |
 | C-21.AC-2 | S-060 | complete |  |
 | C-21.AC-3 | S-058 | complete |  |
 | C-21.AC-4 | S-091 | complete |  |
+| C-21.AC-5 | S-106 | complete |  |
+| C-21.AC-6 | S-106 (part), S-107 (part) | complete |  |
+| C-21.AC-7 | S-108 | complete |  |
+| C-21.AC-8 | S-108 (part), S-109 (part), S-110 (part) | complete | complete with S-110, after which every place of reference.md's Documentation links shows its link |
+| C-21.AC-9 | S-108 | complete |  |
 
 ## C-22
 
@@ -880,7 +889,7 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
 | NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075, S-087, S-088, S-089, S-097, S-100 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075); a stored token sent only to its saved address and a typed one only to the address typed with it, in the check before saving (S-087); secrets masked in the Request log (S-088, S-089); Slack's tokens sent only to Slack's fixed address (S-097); Slack's presses verified by their signature (S-100) |
-| NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
+| NFR-7 Privacy | S-005, S-011, S-108 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); documentation links that load nothing before they are followed and send no `Referer` (S-108); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |
 | NFR-10 Retention | S-008, S-029, S-055 | partitions dropped by retention (S-008); batched deletes of summary rows and details (S-029, with the other owners of unpartitioned tables); editing the periods (S-055) |
