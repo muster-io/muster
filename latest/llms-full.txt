@@ -9104,8 +9104,9 @@ raised it, and the chart rules link to the same pages:
 ```
 
 `MUSTER_RUNBOOK_BASE_URL` is `https://muster-io.github.io/muster` by default, the published site; point it at your own
-copy of the site where people cannot reach the public one. `<version>` is the `major.minor` of the binary, such as
-`1.2`, or `latest` for a development build. For example, `MusterOIDCSecretExpiring` of a development build links to
+copy of the site where people cannot reach the public one. `<version>` is the `major.minor` of a release, such as `1.2`
+for `1.2.3`, or `latest` for any version that is not a release `X.Y.Z`: a development build, the `sha-…` and `edge`
+images and pre-releases. For example, `MusterOIDCSecretExpiring` of a development build links to
 `https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring/`.
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDown.md -->
@@ -10963,8 +10964,8 @@ Stale. Besides `alertname` and `severity`, a configuration entity appears by its
 `route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and
 the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every
 Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
-`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The
-capability is the one that raises it.
+`major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
+joined by `/`. The capability is the one that raises it.
 
 ### `MusterDestinationBroken`
 
@@ -11634,7 +11635,7 @@ The chart's alert rules about Muster itself, for the Prometheus Operator and the
 
 string · default: `https://muster-io.github.io/muster`
 
-The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.
+The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for any version that is not a release X.Y.Z), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.
 
 ### `alerting.jobSelector`
 

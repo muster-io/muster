@@ -10,8 +10,8 @@ Stale. Besides `alertname` and `severity`, a configuration entity appears by its
 `route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and
 the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every
 Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
-`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The
-capability is the one that raises it.
+`major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
+joined by `/`. The capability is the one that raises it.
 
 ### `MusterDestinationBroken`
 

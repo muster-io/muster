@@ -2801,8 +2801,9 @@ raised it, and the chart rules link to the same pages:</p>
 <div class="highlight"><pre><span></span><code>&lt;MUSTER_RUNBOOK_BASE_URL&gt;/&lt;version&gt;/operations/runbooks/&lt;alertname&gt;/
 </code></pre></div>
 <p><code>MUSTER_RUNBOOK_BASE_URL</code> is <code>https://muster-io.github.io/muster</code> by default, the published site; point it at your own
-copy of the site where people cannot reach the public one. <code>&lt;version&gt;</code> is the <code>major.minor</code> of the binary, such as
-<code>1.2</code>, or <code>latest</code> for a development build. For example, <code>MusterOIDCSecretExpiring</code> of a development build links to
+copy of the site where people cannot reach the public one. <code>&lt;version&gt;</code> is the <code>major.minor</code> of a release, such as <code>1.2</code>
+for <code>1.2.3</code>, or <code>latest</code> for any version that is not a release <code>X.Y.Z</code>: a development build, the <code>sha-…</code> and <code>edge</code>
+images and pre-releases. For example, <code>MusterOIDCSecretExpiring</code> of a development build links to
 <code>https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring/</code>.</p>
 
 

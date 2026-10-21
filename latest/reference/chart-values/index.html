@@ -6246,7 +6246,7 @@
 <p>The chart's alert rules about Muster itself, for the Prometheus Operator and the VictoriaMetrics Operator; send the critical ones through an Alertmanager route that bypasses Muster.</p>
 <h3 id="alertingrunbookbaseurl"><code>alerting.runbookBaseURL</code><a class="headerlink" href="#alertingrunbookbaseurl" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>https://muster-io.github.io/muster</code></p>
-<p>The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.</p>
+<p>The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for any version that is not a release X.Y.Z), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.</p>
 <h3 id="alertingjobselector"><code>alerting.jobSelector</code><a class="headerlink" href="#alertingjobselector" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>""</code></p>
 <p>The label matchers that select Muster's series, part of every series selector of every rule, such as job="muster"; empty selects the job named after the chart, or after nameOverride when it is set, which is the job the ServiceMonitor scrapes into.</p>
