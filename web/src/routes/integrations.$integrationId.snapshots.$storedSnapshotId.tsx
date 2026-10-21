@@ -255,9 +255,7 @@ function StoredSnapshotView({
             {snapshot?.integration.name ?? t("integrations.page.title")}
           </span>
         </Link>
-        <PageTitle docs="page.stored_snapshot" about={t("snapshots.viewer.title")}>
-          {t("snapshots.viewer.title")}
-        </PageTitle>
+        <PageTitle docs="page.stored_snapshot">{t("snapshots.viewer.title")}</PageTitle>
         {snapshot !== undefined && (
           <p className="text-muted-foreground" data-testid="snapshot-received">
             {t("snapshots.viewer.received", { time: dateTime(snapshot.received_at) })}

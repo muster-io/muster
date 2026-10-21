@@ -159,9 +159,7 @@ function DestinationsPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <PageTitle docs="page.destinations" about={t("destinations.title")}>
-              {t("destinations.title")}
-            </PageTitle>
+            <PageTitle docs="page.destinations">{t("destinations.title")}</PageTitle>
             <p className="text-muted-foreground">{t("destinations.hint")}</p>
           </div>
           {canWrite && (

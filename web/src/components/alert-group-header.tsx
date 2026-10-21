@@ -251,11 +251,7 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
             </span>
           )}
         </div>
-        <PageTitle
-          docs="page.alert_group"
-          about={t("docs.alertGroup")}
-          data-testid="alert-group-title"
-        >
+        <PageTitle docs="page.alert_group" data-testid="alert-group-title">
           {group.title}
         </PageTitle>
         {group.summary && (

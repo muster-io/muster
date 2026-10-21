@@ -441,9 +441,7 @@ function AlertGroups() {
   };
   return (
     <div className="flex flex-col gap-4">
-      <PageTitle docs="page.alert_groups" about={t("alertGroups.title")}>
-        {t("alertGroups.title")}
-      </PageTitle>
+      <PageTitle docs="page.alert_groups">{t("alertGroups.title")}</PageTitle>
       <StatusTabs
         tabs={ALERT_GROUP_TABS}
         value={tab}

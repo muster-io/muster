@@ -109,9 +109,7 @@ function IntegrationsPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <PageTitle docs="page.integrations" about={t("integrations.title")}>
-              {t("integrations.title")}
-            </PageTitle>
+            <PageTitle docs="page.integrations">{t("integrations.title")}</PageTitle>
             <p className="text-muted-foreground">{t("integrations.hint")}</p>
           </div>
           {canWrite && (

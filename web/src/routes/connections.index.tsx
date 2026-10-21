@@ -90,9 +90,7 @@ function ConnectionsPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <PageTitle docs="page.connections" about={t("connections.title")}>
-              {t("connections.title")}
-            </PageTitle>
+            <PageTitle docs="page.connections">{t("connections.title")}</PageTitle>
             <p className="text-muted-foreground">{t("connections.hint")}</p>
           </div>
           {canWrite && (

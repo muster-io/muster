@@ -37,9 +37,7 @@ function NewIntegration() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("integrations.title")}
         </Link>
-        <PageTitle docs="page.integrations" about={t("integrations.create.title")}>
-          {t("integrations.create.title")}
-        </PageTitle>
+        <PageTitle docs="page.integrations">{t("integrations.create.title")}</PageTitle>
       </div>
       <IntegrationForm
         submitLabel={t("integrations.create.submit")}

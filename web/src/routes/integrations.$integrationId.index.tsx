@@ -163,7 +163,7 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <PageTitle docs="page.integrations" about={t("integrations.page.title")}>
+            <PageTitle docs="page.integrations">
               {integration?.name ?? t("integrations.page.title")}
             </PageTitle>
             {integration?.builtin === true && <BuiltinBadge />}

@@ -7,6 +7,7 @@
 // loads nothing from the site until the link is followed. PageTitle is the h1 of a page with its Guide link beside it,
 // wrapping under the title on a narrow screen. Only the pages of an active, full session use them.
 
+import type { TFunction } from "i18next";
 import { BookOpenIcon, CircleHelpIcon, WrenchIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
@@ -66,15 +67,39 @@ export function DocsLink({ to, kind, about, className }: DocsLinkProps) {
   );
 }
 
+/** A key of docs-links.json for the Guide link beside a page title. */
+export type PageDocsKey = Extract<DocsKey, `page.${string}`>;
+
+/** What the guide of each page is about, which its accessible name adds: "Guide: Telegram Connection". */
+const GUIDE_ABOUT = {
+  "page.alert_groups": (t) => t("docs.guides.alertGroups"),
+  "page.alert_group": (t) => t("docs.guides.alertGroup"),
+  "page.integrations": (t) => t("docs.guides.integrations"),
+  "page.stored_snapshot": (t) => t("docs.guides.storedSnapshots"),
+  "page.routes": (t) => t("docs.guides.routes"),
+  "page.connections": (t) => t("docs.guides.connections"),
+  "page.connection.mattermost": (t) => t("docs.guides.connection.mattermost"),
+  "page.connection.telegram": (t) => t("docs.guides.connection.telegram"),
+  "page.connection.slack": (t) => t("docs.guides.connection.slack"),
+  "page.connection.bridge": (t) => t("docs.guides.connection.bridge"),
+  "page.destinations": (t) => t("docs.guides.destinations"),
+  "page.destination.mattermost": (t) => t("docs.guides.destination.mattermost"),
+  "page.destination.telegram": (t) => t("docs.guides.destination.telegram"),
+  "page.destination.slack": (t) => t("docs.guides.destination.slack"),
+  "page.destination.bridge": (t) => t("docs.guides.destination.bridge"),
+  "page.destination.webhook_events": (t) => t("docs.guides.destination.webhookEvents"),
+  "page.destination.webhook_template": (t) => t("docs.guides.destination.webhookTemplate"),
+} satisfies Record<PageDocsKey, (t: TFunction) => string>;
+
 export interface PageTitleProps extends ComponentProps<"h1"> {
-  /** The entry of docs-links.json of the page's guide. */
-  docs: DocsKey;
-  /** What the guide is about, for its accessible name: "Guide: Routes". */
-  about: string;
+  /** The entry of docs-links.json of the page's guide; it also names what the guide is about. */
+  docs: PageDocsKey;
 }
 
 /** The h1 of a page with the Guide link beside it; the link wraps under the title when the line is too narrow. */
-export function PageTitle({ docs, about, className, children, ...heading }: PageTitleProps) {
+export function PageTitle({ docs, className, children, ...heading }: PageTitleProps) {
+  const { t } = useTranslation();
+  const about = GUIDE_ABOUT[docs](t);
   return (
     <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1" data-testid="page-title">
       <h1

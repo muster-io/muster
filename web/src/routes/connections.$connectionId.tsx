@@ -217,7 +217,6 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
           <div className="flex min-w-0 flex-col gap-1">
             <PageTitle
               docs={connection === undefined ? "page.connections" : connectionDocs(connection.type)}
-              about={t("connections.edit.title")}
             >
               {connection?.name ?? t("connections.edit.title")}
             </PageTitle>

@@ -98,9 +98,7 @@ function EditIntegration({ integrationId }: { integrationId: string }) {
           <ArrowLeftIcon aria-hidden="true" />
           <span className="truncate">{integration?.name ?? t("integrations.page.title")}</span>
         </Link>
-        <PageTitle docs="page.integrations" about={t("integrations.edit.title")}>
-          {t("integrations.edit.title")}
-        </PageTitle>
+        <PageTitle docs="page.integrations">{t("integrations.edit.title")}</PageTitle>
       </div>
       {integration === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

@@ -112,9 +112,7 @@ function RouteEditor({ routeId }: { routeId: string }) {
           {t("routes.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <PageTitle docs="page.routes" about={t("routes.edit.title")}>
-            {route?.name ?? t("routes.edit.title")}
-          </PageTitle>
+          <PageTitle docs="page.routes">{route?.name ?? t("routes.edit.title")}</PageTitle>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && route !== undefined && !route.is_default && (
             <RouteDeleteDialog route={route} />

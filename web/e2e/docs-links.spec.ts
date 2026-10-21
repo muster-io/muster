@@ -238,6 +238,10 @@ test("the Guide link opens the page of the running version in a new tab without 
   await page.goto("/routes");
   await expectGuide(page, "Routes", "Routes", "concepts/routes-and-group-keys/");
   expect(requests, "nothing is loaded from the site before the link is followed").toEqual([]);
+  await expect(page.locator('meta[http-equiv="x-dns-prefetch-control"]')).toHaveAttribute(
+    "content",
+    "off",
+  );
 
   const opened = context.waitForEvent("page");
   await guide(page, "Routes").click();
@@ -263,36 +267,41 @@ test("every page of Alert Groups, Integrations, Routes, Connections and Destinat
   await page.goto("/alert-groups");
   await expectGuide(page, "Alert Groups", "Alert Groups", "concepts/alert-groups/");
   await page.goto(`/alert-groups/${ids.alertGroup}`);
-  await expectGuide(page, /DocsLinks/, "Alert Group", "concepts/statuses-and-commands/");
+  await expectGuide(
+    page,
+    /DocsLinks/,
+    "Alert Group statuses and commands",
+    "concepts/statuses-and-commands/",
+  );
 
   await page.goto("/integrations");
   await expectGuide(page, "Integrations", "Integrations", "integrations/alertmanager/");
   await page.goto("/integrations/new");
-  await expectGuide(page, "Create integration", "Create integration", "integrations/alertmanager/");
+  await expectGuide(page, "Create integration", "Integrations", "integrations/alertmanager/");
   await page.goto(`/integrations/${ids.integration}`);
-  await expectGuide(page, "docs-links", "Integration", "integrations/alertmanager/");
+  await expectGuide(page, "docs-links", "Integrations", "integrations/alertmanager/");
   await page.goto(`/integrations/${ids.integration}/edit`);
-  await expectGuide(page, "Edit integration", "Edit integration", "integrations/alertmanager/");
+  await expectGuide(page, "Edit integration", "Integrations", "integrations/alertmanager/");
   await page.goto(`/integrations/${ids.integration}/snapshots/${ids.snapshot}`);
-  await expectGuide(page, "Stored Snapshot", "Stored Snapshot", "concepts/snapshot-semantics/");
+  await expectGuide(page, "Stored Snapshot", "Stored Snapshots", "concepts/snapshot-semantics/");
 
   await page.goto("/routes/new");
-  await expectGuide(page, "Create route", "Create route", "concepts/routes-and-group-keys/");
+  await expectGuide(page, "Create route", "Routes", "concepts/routes-and-group-keys/");
   await page.goto(`/routes/${ids.route}`);
-  await expectGuide(page, "Default", "Route", "concepts/routes-and-group-keys/");
+  await expectGuide(page, "Default", "Routes", "concepts/routes-and-group-keys/");
 
   await page.goto("/connections");
   await expectGuide(page, "Connections", "Connections", "messengers/");
   await page.goto("/connections/new");
-  await expectGuide(page, "New Connection", "New Connection", "messengers/");
-  for (const [name, target] of [
-    ["Dev Telegram", "messengers/telegram/"],
-    ["Dev Mattermost", "messengers/mattermost/"],
-    ["Dev Slack", "messengers/slack/"],
-    ["Dev Bridge", "messengers/bridge/"],
+  await expectGuide(page, "New Connection", "Connections", "messengers/");
+  for (const [name, about, target] of [
+    ["Dev Telegram", "Telegram Connection", "messengers/telegram/"],
+    ["Dev Mattermost", "Mattermost Connection", "messengers/mattermost/"],
+    ["Dev Slack", "Slack Connection", "messengers/slack/"],
+    ["Dev Bridge", "Bridge Connection", "messengers/bridge/"],
   ] as const) {
     await page.goto(`/connections/${ids.connections[name]}`);
-    await expectGuide(page, name, "Connection", target);
+    await expectGuide(page, name, about, target);
   }
 
   await page.goto("/destinations");
@@ -306,23 +315,31 @@ test("every page of Alert Groups, Integrations, Routes, Connections and Destinat
   await expectGuide(
     page,
     "New Destination",
-    "New Destination",
+    "Destinations",
     "messengers/#what-each-destination-type-can-do",
   );
-  for (const [key, name, target] of [
-    ["telegram", "docs-telegram", "messengers/telegram/#add-a-destination"],
-    ["slack", "docs-slack", "messengers/slack/#invite-the-bot-and-create-destinations"],
-    ["template", "docs-template", "outgoing-webhooks/templates/"],
-    ["events", "docs-events", "outgoing-webhooks/events/"],
+  for (const [key, name, about, target] of [
+    ["telegram", "docs-telegram", "Telegram Destination", "messengers/telegram/#add-a-destination"],
+    [
+      "slack",
+      "docs-slack",
+      "Slack Destination",
+      "messengers/slack/#invite-the-bot-and-create-destinations",
+    ],
+    ["template", "docs-template", "Outgoing webhook templates", "outgoing-webhooks/templates/"],
+    ["events", "docs-events", "Outgoing webhook events", "outgoing-webhooks/events/"],
   ] as const) {
     await page.goto(`/destinations/${ids.destinations[key]}`);
-    await expectGuide(page, name, "Destination", target);
+    await expectGuide(page, name, about, target);
   }
 
   // From the list: Connections → the demo Telegram Connection.
   await page.goto("/connections");
   await page.getByRole("link", { name: "Dev Telegram", exact: true }).click();
-  await expect(guide(page, "Connection")).toHaveAttribute("href", `${DOCS}messengers/telegram/`);
+  await expect(guide(page, "Telegram Connection")).toHaveAttribute(
+    "href",
+    `${DOCS}messengers/telegram/`,
+  );
 
   expect(requests, "nothing is loaded from the site while the pages are read").toEqual([]);
   expect(csp).toEqual([]);
@@ -347,12 +364,12 @@ async function narrow(browser: Browser): Promise<void> {
   await signInAdmin(page);
   for (const [address, about] of [
     ["/routes", "Routes"],
-    [`/connections/${ids.connections["Dev Telegram"]}`, "Connection"],
-    [`/destinations/${ids.destinations.slack}`, "Destination"],
-    [`/destinations/${ids.destinations.template}`, "Destination"],
-    [`/alert-groups/${ids.alertGroup}`, "Alert Group"],
+    [`/connections/${ids.connections["Dev Telegram"]}`, "Telegram Connection"],
+    [`/destinations/${ids.destinations.slack}`, "Slack Destination"],
+    [`/destinations/${ids.destinations.template}`, "Outgoing webhook templates"],
+    [`/alert-groups/${ids.alertGroup}`, "Alert Group statuses and commands"],
     ["/alert-groups", "Alert Groups"],
-    [`/integrations/${ids.integration}`, "Integration"],
+    [`/integrations/${ids.integration}`, "Integrations"],
   ] as const) {
     await page.goto(address);
     await expect(guide(page, about)).toBeVisible();
@@ -381,6 +398,14 @@ test("the link reads «Руководство» in Russian", async ({ browser })
   });
   await expect(link).toHaveText("Руководство");
   await expect(link).toHaveAttribute("href", `${DOCS}concepts/routes-and-group-keys/`);
+  await page.goto(`/connections/${ids.connections["Dev Telegram"]}`);
+  await expect(
+    page.getByRole("link", {
+      name: "Руководство: Подключение Telegram (откроется в новой вкладке)",
+      exact: true,
+    }),
+  ).toHaveText("Руководство");
+  await page.goto("/routes");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);
   await context.close();

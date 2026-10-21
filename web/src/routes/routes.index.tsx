@@ -29,13 +29,7 @@ function Routes() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <PageTitle
-            docs="page.routes"
-            about={t("routes.title")}
-            ref={heading}
-            tabIndex={-1}
-            className="outline-none"
-          >
+          <PageTitle docs="page.routes" ref={heading} tabIndex={-1} className="outline-none">
             {t("routes.title")}
           </PageTitle>
           <p className="text-muted-foreground">{t("routes.hint")}</p>

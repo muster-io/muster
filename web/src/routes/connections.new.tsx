@@ -58,9 +58,7 @@ function NewConnection() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("connections.title")}
         </Link>
-        <PageTitle docs="page.connections" about={t("connections.create.title")}>
-          {t("connections.create.title")}
-        </PageTitle>
+        <PageTitle docs="page.connections">{t("connections.create.title")}</PageTitle>
       </div>
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-sm font-medium">{t("connections.create.type")}</legend>

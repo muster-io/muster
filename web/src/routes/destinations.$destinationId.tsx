@@ -360,7 +360,6 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           <div className="flex min-w-0 flex-col gap-1">
             <PageTitle
               docs={destination === undefined ? "page.destinations" : destinationDocs(destination)}
-              about={t("destinations.edit.title")}
             >
               {destination?.name ?? t("destinations.edit.title")}
             </PageTitle>

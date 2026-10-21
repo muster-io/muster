@@ -75,9 +75,7 @@ function NewDestination() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("destinations.title")}
         </Link>
-        <PageTitle docs="page.destinations" about={t("destinations.create.title")}>
-          {t("destinations.create.title")}
-        </PageTitle>
+        <PageTitle docs="page.destinations">{t("destinations.create.title")}</PageTitle>
       </div>
       <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="mb-2 text-sm font-medium">{t("destinations.create.type")}</legend>

@@ -139,7 +139,9 @@ describe("AlertGroupHeader", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent(group({}).title);
-    const link = page.getByRole("link", { name: "Guide: Alert Group (opens in a new tab)" });
+    const link = page.getByRole("link", {
+      name: "Guide: Alert Group statuses and commands (opens in a new tab)",
+    });
     await expect.element(link).toHaveTextContent("Guide");
     await expect
       .element(link)
@@ -151,7 +153,9 @@ describe("AlertGroupHeader", () => {
     await i18n.changeLanguage("ru");
     await expect
       .element(
-        page.getByRole("link", { name: "Руководство: Группа алертов (откроется в новой вкладке)" }),
+        page.getByRole("link", {
+          name: "Руководство: Статусы и команды групп алертов (откроется в новой вкладке)",
+        }),
       )
       .toHaveTextContent("Руководство");
   });

@@ -54,9 +54,7 @@ function NewRoute() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("routes.title")}
         </Link>
-        <PageTitle docs="page.routes" about={t("routes.create.title")}>
-          {t("routes.create.title")}
-        </PageTitle>
+        <PageTitle docs="page.routes">{t("routes.create.title")}</PageTitle>
       </div>
       {profile === undefined ? (
         <ProfilePicker onPick={setProfile} autoFocus={changed} />

@@ -60,6 +60,7 @@ jobs:
             minor=$(printf '%s' "${newest#v}" | cut -d. -f1,2)
             [ "$INPUT_VERSION" = "$minor" ] || fail "only the newest released minor $minor can be corrected, not $INPUT_VERSION"
             version="$minor"
+            echo "RELEASE_TAG=$newest" >>"$GITHUB_ENV"
           elif [ "$REF_TYPE" = tag ]; then
             [[ "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]] || fail "$REF_NAME is not a release tag vX.Y.Z"
             version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
@@ -86,6 +87,23 @@ jobs:
           cache-dependency-path: docs/requirements.txt
       # The links of llms.txt and llms-full.txt point into the version being published.
       - run: make docs DOCS_VERSION="$VERSION"
+      # make docs checks master's documentation links. A correction publishes the site as a released minor, whose
+      # binaries link to the entries of the release's own web/src/lib/docs-links.json, so the built site must hold those
+      # too (C-21.FR-12); a release older than the list links to no page of the site.
+      - name: check the documentation links of the release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          list=web/src/lib/docs-links.json
+          if ! git rev-parse --verify --quiet "$RELEASE_TAG^{commit}" >/dev/null; then
+            echo "::error::no tag $RELEASE_TAG"
+            exit 1
+          fi
+          if ! git cat-file -e "$RELEASE_TAG:$list" 2>/dev/null; then
+            echo "$RELEASE_TAG has no $list: its web UI links to no page of the site, nothing to check"
+            exit 0
+          fi
+          git show "$RELEASE_TAG:$list" >"$RUNNER_TEMP/docs-links.json"
+          go run ./internal/tools/docslinkcheck -links "$RUNNER_TEMP/docs-links.json" -site site
       # A fresh shallow clone of gh-pages for each attempt, or a new orphan branch on the first publish; a push that
       # loses a race with another run is retried on top of it.
       - name: publish to gh-pages

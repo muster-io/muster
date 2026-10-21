@@ -25,6 +25,7 @@ const (
 	repoDashboard = "../../../deploy/helm/muster/files/dashboard.json"
 	repoTests     = "../../../deploy/helm/muster/tests/rules"
 	repoHelpers   = "../../../deploy/helm/muster/templates/_helpers.tpl"
+	repoVersions  = "../../internalalerts/testdata/runbook_versions.json"
 	testBaseURL   = "https://docs.example.org/muster/"
 	dashboardCM   = "m-muster-dashboard"
 	successPrefix = "chart rules and dashboard match reference.md and the metric catalogue: 12 rules, "
@@ -779,17 +780,27 @@ func TestRunErrors(t *testing.T) {
 	}
 }
 
-// runbookVersions is the table of versions of internalalerts.TestRunbookVersion (C-19.FR-9, C-21.AC-7).
-var runbookVersions = map[string]string{
-	"0.1.0": "0.1", "0.1.7": "0.1", "1.12.3": "1.12", "v1.2.3": "1.2", "v2.10.3": "2.10",
-	"0.0.0-dev": "latest", "0.1.1-SNAPSHOT-abc1234": "latest", "0.2.0-rc.1": "latest", "0.1.0+meta": "latest",
-	"main": "latest", "": "latest", "garbage": "latest", "1.4": "latest", "1.4.0.1": "latest", "V1.2.3": "latest",
-	"1.2.3-": "latest", "release-1.2.3": "latest",
+// runbookVersions is the table of versions of internalalerts.TestRunbookVersion (C-19.FR-9, C-21.AC-7), read from
+// its testdata so that the binary and the chart are tested on the same versions.
+func runbookVersions(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(repoVersions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var versions map[string]string
+	if err := json.Unmarshal(data, &versions); err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) == 0 {
+		t.Fatalf("%s holds no version", repoVersions)
+	}
+	return versions
 }
 
 // TestRunbookVersionsAgree checks that chartcheck's expectation, internalalerts.RunbookVersion, takes the table.
 func TestRunbookVersionsAgree(t *testing.T) {
-	for v, want := range runbookVersions {
+	for v, want := range runbookVersions(t) {
 		if got := internalalerts.RunbookVersion(v); got != want {
 			t.Errorf("internalalerts.RunbookVersion(%q) = %q, want %q", v, got, want)
 		}
@@ -826,7 +837,7 @@ func TestRunbookVersionHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for v, want := range runbookVersions {
+	for v, want := range runbookVersions(t) {
 		var out bytes.Buffer
 		if err := tpl.ExecuteTemplate(&out, "muster.runbookVersion",
 			map[string]any{"Chart": map[string]any{"AppVersion": v}}); err != nil {

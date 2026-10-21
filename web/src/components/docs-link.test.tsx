@@ -142,11 +142,39 @@ describe("DocsLink", () => {
 });
 
 describe("PageTitle", () => {
+  test.each([
+    ["page.alert_group", "Alert Group statuses and commands", "Статусы и команды групп алертов"],
+    ["page.connection.telegram", "Telegram Connection", "Подключение Telegram"],
+    ["page.connection.bridge", "Bridge Connection", "Подключение через мост"],
+    ["page.destination.slack", "Slack Destination", "Место доставки Slack"],
+    [
+      "page.destination.webhook_template",
+      "Outgoing webhook templates",
+      "Шаблоны исходящего вебхука",
+    ],
+    ["page.destination.webhook_events", "Outgoing webhook events", "События исходящего вебхука"],
+    ["page.integrations", "Integrations", "Интеграции"],
+  ] as const)("the Guide of %s is about %s", async (docs, english, russian) => {
+    const screen = await renderIn(<PageTitle docs={docs}>Title</PageTitle>, session("latest"));
+    await expect
+      .element(
+        screen.getByRole("link", { name: `Guide: ${english} (opens in a new tab)`, exact: true }),
+      )
+      .toHaveTextContent("Guide");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(
+        screen.getByRole("link", {
+          name: `Руководство: ${russian} (откроется в новой вкладке)`,
+          exact: true,
+        }),
+      )
+      .toHaveTextContent("Руководство");
+  });
+
   test("renders the h1 with its Guide link beside it", async () => {
     const screen = await renderIn(
-      <PageTitle docs="page.routes" about="Routes">
-        Routes
-      </PageTitle>,
+      <PageTitle docs="page.routes">Routes</PageTitle>,
       session("latest"),
     );
     const heading = screen.getByRole("heading", { level: 1, name: "Routes" });
@@ -164,14 +192,14 @@ describe("PageTitle", () => {
     const title = "A very long name of a Destination that takes the whole line";
     const screen = await renderIn(
       <div className="w-full max-w-full px-4">
-        <PageTitle docs="page.destination.telegram" about="Destination">
-          {title}
-        </PageTitle>
+        <PageTitle docs="page.destination.telegram">{title}</PageTitle>
       </div>,
       session("latest"),
     );
     const heading = screen.getByRole("heading", { level: 1, name: title });
-    const link = screen.getByRole("link", { name: "Guide: Destination (opens in a new tab)" });
+    const link = screen.getByRole("link", {
+      name: "Guide: Telegram Destination (opens in a new tab)",
+    });
     await expect.element(link).toBeVisible();
     const h = heading.element().getBoundingClientRect();
     const l = link.element().getBoundingClientRect();
