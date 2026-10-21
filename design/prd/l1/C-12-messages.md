@@ -94,10 +94,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   its Alerts carry counts as missing), a scope — the Alert Group, or each distinct value of a label among its Alerts —
   and a URL template that may call `lookup`, which reads one cell: `lookup "grafana" .Labels.cluster "datasource_uid"`.
   A built-in "Explore" rule (which cannot be deleted) turns `generatorURL` into a Grafana Explore link through the
-  Lookup table "environment or cluster → Grafana address and data source UID", whose columns are `address` and
-  `datasource_uid`. The annotations `runbook_url` and `dashboard_url`, and `generatorURL` as "Source", become links as
-  well. Links appear as one line in the message and as a block on the Alert Group page; message templates do not build
-  them.
+  Lookup table `grafana`, keyed by the `environment` label, else the `cluster` label, whose columns are `address` (the
+  Grafana address) and `datasource_uid`. The annotations `runbook_url` and `dashboard_url`, and `generatorURL` as
+  "Source", become links as well. Links appear as one line in the message and as a block on the Alert Group page;
+  message templates do not build them.
 - **C-12.FR-10** The Storm summary reads "⛈ Storm on {Route}: K Alert Groups, C urgent — open in Muster" and, in its
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the

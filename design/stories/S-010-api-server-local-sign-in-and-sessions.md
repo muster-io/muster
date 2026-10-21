@@ -163,7 +163,8 @@ issue: 10
   {route_pattern,method}`, where `route_pattern` is the spec's path template; `muster_login_failures_total{method}`
   with the value set of the catalogue: `local`, `oidc`, `totp`.
 - **Log events**: `audit_entry`, `bootstrap_admin_ignored`, `bootstrap_admin_missing`, and `api_request_failed`
-  (ERROR) for an API request that fails with an unexpected error and answers `500` `internal`.
+  (ERROR) for an API request that fails with an unexpected error and answers `500` `internal`; `public_url_insecure`
+  (WARN) was added after this story (see Notes).
 
 ## Steps
 
@@ -264,6 +265,10 @@ None.
 - Suggested commit: `feat(auth): add API server with local sign-in, sessions and the bootstrap admin`.
 - `operator_attention: true` — P-42 (the allocation of Permissions to Roles) is a product decision confirmed here.
 - P-06 and P-07 are confirmed or changed here, with defaults.md and L1.md updated in the same pull request.
+- Added after all stories of L1 had merged (D393): the session cookie stays `Secure`, so the server logs
+  `public_url_insecure` (WARN, with the host) at start when `MUSTER_PUBLIC_URL` is plain `http` on a host that is not
+  `localhost`, a name under `.localhost` or a loopback address, and the sign-in page says that sign-in needs HTTPS or
+  `localhost` when it is not a secure context (C-03.FR-9, FR-24).
 
 ## Coverage
 

@@ -41,7 +41,8 @@ first story, so every later capability lands behind the same gates.
   binaries for linux and darwin on amd64 and arm64, a multi-arch distroless image running as non-root, an SBOM, keyless
   cosign signatures and the Helm chart.
 - **C-01.FR-10** The Helm chart defaults `image.tag` to the chart's `appVersion` and `replicas` to 1; reads the database
-  settings, master keys and the bootstrap admin password from an existing Secret; renders objects that a cluster may lack
+  settings, master keys and the bootstrap admin password from an existing Secret, the database password or URL
+  optionally from a Secret of its own, such as the one CloudNativePG generates; renders objects that a cluster may lack
   (monitoring CRDs, ServiceMonitor, NetworkPolicy, dashboard resources) only behind conditions or flags; offers a
   PodDisruptionBudget and two replicas as options; and exposes the app and ingest listeners through optional
   `ingress.*` and `httpRoute.*` values while always creating Services. CI renders the chart with `helm template` and

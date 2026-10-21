@@ -232,14 +232,18 @@ issue: 256
   did, which the ruleset of `master` requires. The tools are pinned in the Makefile under `# renovate:` comments and
   built into `bin/tools/`.
 - **Releases** (`release-please.yml`, `release-please-config.json`, `.release-please-manifest.json`): release-please
-  with the release type `go`, `bump-minor-pre-major`, `include-component-in-tag: false` and the manifest at `0.0.0`, run
-  with the GitHub App's token as in Muster's repository, so that its tag starts workflows; a release is the tag
-  `vX.Y.Z`, and the workflow then asks `proxy.golang.org` for the new version so that `go get` finds it at once.
-  Versions stay `0.x` until Muster's first release, then `1.0.0` for protocol version 1 (ADR-0017).
+  with the release type `go`, `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` (D399), `changelog-sections`
+  that list `build` under "Dependencies" and hide `docs`, `chore`, `ci`, `test`, `refactor` and `style` (D394),
+  `include-component-in-tag: false` and the manifest at `0.0.0`, run with the GitHub App's token as in Muster's
+  repository, so that its tag starts workflows; a release is the tag `vX.Y.Z`, and the workflow then asks
+  `proxy.golang.org` for the new version so that `go get` finds it at once. Versions stay `0.x` until Muster 1.0, and
+  every library release speaks the protocol versions Muster supports at that time, today protocol version 1 (ADR-0017).
 - **Renovate, CodeQL, Scorecard** (`.github/renovate.json5`, `codeql.yml`, `scorecard.yml`): the policy of Muster's
   `.github/renovate.json5` — `config:best-practices`, pinned versions and digests, weekly grouped updates that merge
   themselves on green checks, majors through the Dependency Dashboard, the regex manager for the Makefile's tool
-  versions; CodeQL for Go and Actions; Scorecard weekly and on pushes to `master`. Every Action is pinned by commit SHA.
+  versions, semantic commits with the scope `deps`, `build` for the module's `require` dependencies and `chore` for the
+  other updates and lock-file updates (D394); CodeQL for Go and Actions; Scorecard weekly and on pushes to `master`.
+  Every Action is pinned by commit SHA.
 
 ## Steps
 
