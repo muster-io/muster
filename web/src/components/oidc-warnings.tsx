@@ -59,11 +59,7 @@ function warningShown(
       return {
         text: t("oidc.warnings.nobodyCanSignIn"),
         fix: (
-          <DocsLink
-            to="fix.oidc_mapping"
-            kind="how_to_fix"
-            about={t("docs.fixes.oidcMapping")}
-          />
+          <DocsLink to="fix.oidc_mapping" kind="how_to_fix" about={t("docs.fixes.oidcMapping")} />
         ),
       };
     case "groups_claim_missing":
@@ -82,11 +78,7 @@ function warningShown(
         ? {
             text: t("oidc.warnings.secretExpiring", { date: date(w.expires_on) }),
             fix: (
-              <DocsLink
-                to="fix.oidc_secret"
-                kind="how_to_fix"
-                about={t("docs.fixes.oidcSecret")}
-              />
+              <DocsLink to="fix.oidc_secret" kind="how_to_fix" about={t("docs.fixes.oidcSecret")} />
             ),
           }
         : null;

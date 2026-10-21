@@ -254,7 +254,7 @@ export const useUpdateOidcSettings = <TError = BadRequestResponse | Unauthorized
 }
 
 /**
- * Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
+ * Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
  * @summary Check the connection to the identity provider
  */
 export const checkOidcSettings = async ( options?: Parameters<typeof apiFetch>[1]): Promise<OidcCheckResult> => {
