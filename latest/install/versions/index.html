@@ -442,6 +442,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#version-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Version numbers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image-tags" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2739,6 +2750,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#version-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Version numbers
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image-tags" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2781,8 +2803,9 @@
 
 
 <h1 id="requirements-and-tested-versions">Requirements and tested versions<a class="headerlink" href="#requirements-and-tested-versions" title="Permanent link">&para;</a></h1>
-<p>What Muster needs, which versions it was checked against, and how to verify that a release you download is the one the
-project built. "Tested" means different things for different rows, so each row says which.</p>
+<p>What Muster needs, which versions it was checked against, how its own versions are numbered, and how to verify that a
+release you download is the one the project built. "Tested" means different things for different rows, so each row says
+which.</p>
 <ul>
 <li><strong>CI</strong> means an automated job that runs on the project's pull requests or nightly, and fails the build.</li>
 <li><strong>Development stand</strong> means a person ran the behaviour against a real server of that version and recorded what it did,
@@ -2831,6 +2854,17 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 <dt>The web UI</dt>
 <dd>Its component tests and its end-to-end tests run in Chromium in <strong>CI</strong>. Other browsers are not tested.</dd>
 </dl>
+<h2 id="version-numbers">Version numbers<a class="headerlink" href="#version-numbers" title="Permanent link">&para;</a></h2>
+<p>Muster's versions are <code>0.N.x</code>, and 1.0 is a long way off.</p>
+<ul>
+<li><strong><code>0.N</code> is layer N of the <a href="https://github.com/muster-io/muster#roadmap">roadmap</a>.</strong> L1, Alert Groups in messengers,
+  is released as <code>0.1.x</code>; L2 will be <code>0.2.x</code>, L3 <code>0.3.x</code>, and so on. Layer N+1 starts with the release <code>0.(N+1).0</code>,
+  which the maintainers set with release-please's <code>release-as</code>.</li>
+<li><strong><code>0.N.x</code> releases bring fixes and small changes</strong>, and nothing that breaks an installation: settings, the API under
+  <code>/api/v1</code> and the database keep working without a change on your side.</li>
+<li><strong>Breaking changes come only with the next layer's minor version</strong>, and its release notes say what to change before
+  you upgrade. See <a href="../../operations/upgrades/">Upgrades</a> for how to upgrade.</li>
+</ul>
 <h2 id="image-tags">Image tags<a class="headerlink" href="#image-tags" title="Permanent link">&para;</a></h2>
 <p>The images are <code>ghcr.io/muster-io/muster</code> and the tags are:</p>
 <ul>

@@ -3546,15 +3546,16 @@ you write only the calls to your messenger.</p>
 <li>the reports of what people do: a press, a message in a Thread, a deleted message and a direct message;</li>
 <li>the rendering of the envelope in the messenger's markup (see <a href="#rendering-the-envelope">Rendering the envelope</a>).</li>
 </ul>
-<p>The Go library, <code>muster-bridge-go</code>, follows the protocol's major version and is released from its own repository,
-under the MIT licence and without a CLA. The same holds for every bridge library of the project.</p>
+<p>The Go library, <code>muster-bridge-go</code>, is released from its own repository, under the MIT licence and without a CLA. The
+same holds for every bridge library of the project.</p>
 <h3 id="the-go-library">The Go library<a class="headerlink" href="#the-go-library" title="Permanent link">&para;</a></h3>
 <p>The Go module is <code>github.com/muster-io/muster-bridge-go</code>, and its package is <code>bridge</code>.</p>
 <div class="highlight"><pre><span></span><code>go<span class="w"> </span>get<span class="w"> </span>github.com/muster-io/muster-bridge-go
 </code></pre></div>
-<p>The libraries are released when Muster's first release is. The module is at <code>0.x</code> until then, and <code>go get</code> without a
-version takes the latest commit of its <code>master</code> branch. From the first release, <code>1.x</code> speaks protocol version 1, and
-each release is a tag <code>vX.Y.Z</code>.</p>
+<p>The libraries are released when Muster's first release is, and <code>go get</code> without a version takes the latest commit of the
+module's <code>master</code> branch until then. Each release is a tag <code>vX.Y.Z</code>. Versions stay <code>0.x</code> until Muster 1.0, and every
+library release speaks the protocol versions Muster supports at that time, today protocol version 1; a breaking protocol
+change is a new protocol version, not a new major version of a library.</p>
 <p><strong>1. Implement <code>bridge.Messenger</code>.</strong> It has five methods, each given the name of the bot whose token Muster sent:
 <code>PostMessage</code>, <code>EditMessage</code>, <code>ReplyInThread</code>, <code>CheckChannel</code> and <code>AnswerEvent</code>. The sketch below is for Parley, a
 fictional messenger; its client <code>parleyClient</code> stands for whatever library your messenger has.</p>
@@ -3776,8 +3777,8 @@ newer and depends only on Starlette, httpx and pydantic 2. Like the Go library, 
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>muster-bridge
 </code></pre></div>
 <p>The libraries are released when Muster's first release is. Until then the package is not on PyPI, so
-<code>pip install muster-bridge</code> finds nothing: install it from a clone of its repository with <code>pip install .</code>. Its version
-is <code>0.x</code> until Muster's first release; from then, <code>1.x</code> speaks protocol version 1.</p>
+<code>pip install muster-bridge</code> finds nothing: install it from a clone of its repository with <code>pip install .</code>. Its versions
+stay <code>0.x</code> until Muster 1.0 and speak the protocol versions Muster supports, as the Go library's do.</p>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/muster-io/muster-bridge-python<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>muster-bridge-python
 python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>.<span class="w"> </span>.venv/bin/activate
 pip<span class="w"> </span>install<span class="w"> </span>.

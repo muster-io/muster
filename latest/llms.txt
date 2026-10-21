@@ -74,7 +74,7 @@
 
 - [Install with Helm](https://muster-io.github.io/muster/latest/install/helm.md): The Helm chart runs Muster on Kubernetes 1.30 or newer.
 - [The database](https://muster-io.github.io/muster/latest/install/database.md): Muster keeps everything in PostgreSQL 14 or newer, and nothing else stateful: no Redis and no queue.
-- [Requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md): What Muster needs, which versions it was checked against, and how to verify that a release you download is the one the project built.
+- [Requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md): What Muster needs, which versions it was checked against, how its own versions are numbered, and how to verify that a release you download is the one the project built.
 
 ### Configure
 
@@ -164,4 +164,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 648057 bytes, about 162014 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 649039 bytes, about 162259 tokens.
