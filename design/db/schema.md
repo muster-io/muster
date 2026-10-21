@@ -698,13 +698,15 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   session, so an identity cannot be linked into someone else's account through a forged callback.
 - **`oidc_settings`** — one row once configured: issuer, client, client secret (Secret) and its optional expiry date
   (`MusterOIDCSecretExpiring`), scopes, groups claim, group-to-Role mappings, the unmatched Role, the switches, the
-  proxy, the time since which no groups claim was found (warning `groups_claim_missing`: the last sign-in's tokens
-  lacked it, or a check found discovery not advertising it while `groups_claim_seen_at` was null), and
-  `groups_claim_seen_at`, when a sign-in or a link first found the claim in the tokens since saving another groups
-  claim or issuer, or since a sign-in without it (migration 0020). A sign-in that
-  finds the claim sets `groups_claim_seen_at` and clears the warning, one that does not clears `groups_claim_seen_at`
-  and raises the warning, and saving another groups claim or issuer clears both, so that a check of discovery, whose
-  list of claims is optional, never overrules what a token showed.
+  proxy, `groups_claim_missing_since` (warning `groups_claim_missing`: since when the latest check found discovery not
+  advertising the groups claim while `groups_claim_seen_at` was null) and `groups_claim_seen_at` (migration 0020: when
+  a sign-in or a link first found the claim in an ID token or userinfo). A sign-in that finds the claim sets
+  `groups_claim_seen_at`, keeping the first time, and clears the warning; one without it writes nothing; a check
+  raises or clears the warning only while `groups_claim_seen_at` is null, and clears it when it is set, which repairs a
+  warning that a 0.1.0 replica wrote during a rolling update; the settings show the warning only while
+  `groups_claim_seen_at` is null. Saving another groups claim, issuer, client ID or scopes clears both. The records
+  carry the groups claim, issuer, client ID and scopes they read and change nothing when an Admin saved others
+  meanwhile, and write no row when nothing changes.
 
 ### 4.4 Service accounts and API tokens
 

@@ -89,7 +89,7 @@ forwards Thread messages, and otherwise offers only the link to Muster (C-22.FR-
 | UI, every page | recovering after downtime | "Muster is recovering after downtime. Data may be incomplete until HH:MM." | C-02, C-03 |
 | UI, Admins | no replica is leading | "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode, Heartbeat and Stale checks are paused." | C-02, C-03, C-24 |
 | OIDC settings | mapping empty and no Role for unmatched users (`nobody_can_sign_in`) | "Nobody will be able to sign in through OIDC." | C-03 |
-| OIDC settings | the last sign-in carried no groups claim, or none has carried it yet (`groups_claim_missing`) | "The last sign-in carried no groups claim ‘{claim}’, or no sign-in has carried it yet, so group mappings cannot match and only the Role for users without a matching group applies." | C-03 |
+| OIDC settings | no sign-in has carried the groups claim, and the latest check found it not advertised (`groups_claim_missing`) | "No sign-in has carried the groups claim ‘{claim}’ yet, so group mappings have not matched anyone yet." | C-03 |
 | OIDC settings | the client secret expires within `oidc.secret_expiry_lead` | "The client secret expires on {date}. Issue a new one in the identity provider and enter it here." | C-03 |
 | OIDC settings | Role sync would lower the last active Admin | "{user} stays Admin: they are the last active Admin, and the identity provider maps them to {role}. Make another user Admin first." | C-03 |
 | Token list | token without expiry | "This token never expires." | C-04 |

@@ -1241,8 +1241,9 @@ paths:
       - OIDC
       summary: Check the connection to the identity provider
       description: Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups
-        claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no
-        sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
+        claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the
+        issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning
+        `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
       x-permission: oidc:write
       x-listener: app
       security:
@@ -9370,11 +9371,11 @@ components:
           - secret_expiring
           - last_admin_kept
           description: '`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`:
-            the last sign-in carried no groups claim, or no sign-in has carried it yet, so group mappings cannot match and
-            only the Role for unmatched users applies: the token and userinfo of the last sign-in lacked it, or discovery
-            does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed.
-            `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin,
-            although the identity provider maps them to `role`.'
+            no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen
+            it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and
+            the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`:
+            Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them
+            to `role`.'
         expires_on:
           type:
           - string

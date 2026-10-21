@@ -46,7 +46,7 @@ files_touched:
   - docs/sign-in/oidc-keycloak.md
 acceptance:
   - "[C-03.FR-5, C-03.FR-21, C-03.AC-6] Saving OIDC settings stores the client secret encrypted; reading them returns only `client_secret_status` (whether it is set and when it changed), and the Audit log diff says the secret changed without its value."
-  - "[C-03.FR-6] With an empty mapping and `unmatched_role` `none` the settings carry the warning `nobody_can_sign_in`; after a check that finds the groups claim missing from discovery before any sign-in has seen it in a token, `groups_claim_missing`."
+  - "[C-03.FR-6] With an empty mapping and `unmatched_role` `none` the settings carry the warning `nobody_can_sign_in`; after a check that finds the groups claim missing from discovery while no sign-in has seen it in an ID token or userinfo, `groups_claim_missing`."
   - "[C-03.FR-5, C-03.AC-7] With `client_secret_expires_on` 10 days ahead the settings carry the warning `secret_expiring` with that date; 30 days ahead they do not."
   - "[C-03.FR-8, C-03.FR-19, C-03.AC-8] The connection check fetches discovery from the fake IdP; with a proxy in the settings it reaches the IdP only through the fake proxy and reports `via: proxy`; a proxy at 169.254.169.254 fails the check, naming the rule."
   - "[C-03.FR-25, C-03.AC-16] `GET /api/v1/sessions/oidc/start` redirects to the IdP with PKCE `S256`, `state` and `nonce`; a person in no mapped group is redirected to `/sign-in?error=no_access`; a start with `return_to=//evil.example` or `return_to=https://evil.example` ignores it and lands on `/`."
@@ -99,9 +99,10 @@ issue: 13
   (`oidc.skip_totp_with_idp_mfa`) and `proxy`; updates need `If-Match`. A read returns `display_name` only when an
   Admin set one, so that a read sent back unchanged keeps the default. Before an Admin saves them, a read returns the
   defaults with OIDC off and the ETag `"0"`, which the first update names. `warnings`: `nobody_can_sign_in` (empty
-  mapping and no Role for unmatched users), `groups_claim_missing` (the last sign-in token lacked the claim, or a check
-  found discovery's `claims_supported` without it while no sign-in had seen it in a token since the groups claim or the
-  issuer last changed; a sign-in token that carries it clears the warning and a later check does not raise it again),
+  mapping and no Role for unmatched users), `groups_claim_missing` (no sign-in has seen the claim in an ID token or
+  userinfo since the groups claim, issuer, client ID or scopes last changed, and the latest check found discovery's
+  `claims_supported` without it; a sign-in that carries it clears the warning for good, one without it changes
+  nothing),
   `secret_expiring` (the expiry is less than `oidc.secret_expiry_lead` away; with `expires_on`), `last_admin_kept` (the
   latest `user.role_sync_kept_admin` entry names a user who is still the last active Admin and whose last OIDC contact
   is not newer than the entry; with that user and the mapped Role, the fields `user` and `role` of `OidcWarning`).
@@ -119,8 +120,8 @@ issue: 13
   `github.com/go-jose/go-jose/v4` only, for the asymmetric algorithms (RS, PS, ES); `none` and HMAC are refused.
 - **Connection check** (C-03.FR-8): `checkOidcSettings` fetches `<issuer>/.well-known/openid-configuration` with the
   saved settings and returns `ok`, `via` (`direct` or `proxy`), `latency_ms`, the endpoints, a masked `error` and
-  warnings; it records whether discovery advertises the groups claim (`groups_claim_missing_since`), raising the
-  warning only while no sign-in has seen the claim (`groups_claim_seen_at`).
+  warnings; it records whether discovery advertises the groups claim (`groups_claim_missing_since`), raising or
+  clearing the warning only while no sign-in has seen the claim (`groups_claim_seen_at`).
 - **Sign-in flow** (C-03.FR-25, FR-28, FR-7, FR-10; `oidc_auth_requests`): `startOidcSignIn` stores a request keyed by
   the hash of `state`, with the nonce, the PKCE verifier (a Secret), `return_to` (kept only when it is a relative path
   starting with a single `/`; the parameter carries no `pattern` in the spec, so anything else is ignored rather than

@@ -39,7 +39,7 @@ describe("OIDC warnings", () => {
     await expect
       .element(
         warning.getByText(
-          "The last sign-in carried no groups claim ‘idp-groups’, or no sign-in has carried it yet, so group mappings cannot match and only the Role for users without a matching group applies.",
+          "No sign-in has carried the groups claim ‘idp-groups’ yet, so group mappings have not matched anyone yet.",
           { exact: true },
         ),
       )
@@ -75,7 +75,7 @@ describe("OIDC warnings", () => {
       )
       .toBeVisible();
     await expect
-      .element(warnings.filter({ hasText: "The last sign-in carried no groups claim ‘groups’" }))
+      .element(warnings.filter({ hasText: "No sign-in has carried the groups claim ‘groups’ yet" }))
       .toBeVisible();
   });
 
@@ -91,10 +91,17 @@ describe("OIDC warnings", () => {
         screen
           .getByTestId("oidc-warning")
           .getByText(
-            "Claim с группами «groups» не пришёл при последнем входе или ещё ни при одном входе, поэтому сопоставления групп не сработают: назначается только роль для пользователей без подходящей группы.",
+            "Ещё ни при одном входе не пришёл claim с группами «groups», поэтому сопоставления групп пока ни к кому не применялись.",
             { exact: true },
           ),
       )
       .toBeVisible();
+    const fix = screen.getByTestId("oidc-warning").getByRole("link", {
+      name: "Как исправить: Claim с группами ещё не получен (откроется в новой вкладке)",
+    });
+    await expect.element(fix).toHaveTextContent("Как исправить");
+    const href = new URL(fix.element().getAttribute("href") ?? "");
+    expect(href.pathname).toBe("/muster/latest/sign-in/oidc-keycloak/");
+    expect(href.hash).toBe("#2-add-the-groups-claim");
   });
 });
