@@ -2886,6 +2886,10 @@ include PostgreSQL: Muster takes an <a href="../database/">external database</a>
 <div class="highlight"><pre><span></span><code>helm<span class="w"> </span>install<span class="w"> </span>muster<span class="w"> </span>oci://ghcr.io/muster-io/charts/muster<span class="w"> </span>--version<span class="w"> </span>&lt;version&gt;<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--namespace<span class="w"> </span>muster<span class="w"> </span>--create-namespace<span class="w"> </span>-f<span class="w"> </span>values.yaml
 </code></pre></div>
+<p>The release signs the chart with cosign, keyless, as it signs the image; <a href="../versions/#verify-a-release">Verify a release</a>
+shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
+with its changes and the image it runs, pinned by digest:</p>
+<p><a href="https://artifacthub.io/packages/search?repo=muster"><img alt="Artifact Hub" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/muster" /></a></p>
 <div class="admonition note">
 <p class="admonition-title">Before the first release</p>
 <p>Nothing is released yet, so the registry holds no chart. Install it from a clone of the repository instead, with the
