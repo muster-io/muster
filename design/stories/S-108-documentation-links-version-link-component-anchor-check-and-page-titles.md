@@ -52,7 +52,7 @@ acceptance:
   - "[C-21.FR-12, C-21.AC-9] `make docs` runs `internal/tools/docslinkcheck` after the build: it reads `web/src/lib/docs-links.json` and fails, naming the key and the target, when the built site has no page for an entry or the page has no element with the entry's anchor as its `id`; `docslinkcheck_test.go` covers a missing page, a missing anchor and a passing list, and an entry of `docs-links.json` changed to an anchor the page lacks makes `make docs-check` fail naming its key; a removed heading that the UI links to fails the build, naming the key or, when a page of the site links to the heading too, that page (the strict build checks it first)."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 337
 ---
 
 # S-108. Documentation links in the web UI: the documentation version, the link component, the check of linked anchors, and links next to the titles of the Alert Group, Integration, Route, Connection and Destination pages (FE)

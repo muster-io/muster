@@ -46,7 +46,7 @@ acceptance:
   - "[C-21.AC-8] Every place of reference.md's Documentation links now shows its link: `docs-links.json` holds every key of the table and `make docs-check` passes; the links read in Russian as in English; and the Organization, Access and Statistics pages keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links-admin.spec.ts`)."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 339
 ---
 
 # S-110. Documentation links on the Statistics, profile, Access and Organization pages: page titles, fields and problems (FE)

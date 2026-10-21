@@ -39,7 +39,7 @@ acceptance:
   - "[C-21.FR-9, C-21.FR-10] `make docs-check` passes: the site builds strictly, every page is in the navigation, no link, anchor or image is broken, and `llms.txt` and the full text are current."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 335
 ---
 
 # S-106. Screenshots for the documentation, the image check, the tutorial "First alert in a messenger" and step-by-step sections on the messenger pages

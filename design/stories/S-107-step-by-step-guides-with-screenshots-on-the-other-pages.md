@@ -42,7 +42,7 @@ acceptance:
   - "[C-21.FR-9, C-21.AC-6] Every image of these pages is written by `make docs-screenshots` from the seven new specs, which pass on a fresh `muster dev`; every screenshot is of the English UI with alternative text; the headings these sections give are the anchors of reference.md's Documentation links; and `make docs-check` passes."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 336
 ---
 
 # S-107. Step-by-step sections with screenshots on the pages of Integrations, Routes, templates, Account links, access, Outgoing webhooks, the Organization and Alert Groups

@@ -51,7 +51,7 @@ acceptance:
   - "[C-21.AC-8] The texts are \"Learn more\" / «Подробнее» and \"How to fix\" / «Как исправить» with their accessible names in both languages, `make lint` finds no missing key, `make docs-check` passes with every new key of `docs-links.json`, and the Route editor, a Slack Connection's create form and a Telegram Destination with a failed check keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links-forms.spec.ts`)."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 338
 ---
 
 # S-109. "Learn more" links next to complex fields and "How to fix" links next to checks, warnings and Broken states on the Integration, Route, Connection, Destination and Alert Group pages (FE)
