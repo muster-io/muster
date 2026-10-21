@@ -273,9 +273,9 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   work is `chore` or `ci`.
 - No AI attribution: no `Co-Authored-By` trailers for tools, no "Generated with" lines, in commits or pull requests.
 - Pull requests are squash-merged, so the title is the commit message, and release-please writes the changelog from it.
-  Nothing is released before L1 is complete: never merge the release pull request. Each commit on `master` is
-  published as the development image `ghcr.io/muster-io/muster:sha-<7 hex digits>` (and `edge` for the newest). The
-  bridge libraries' repositories release `0.x` versions before that, as their stories say (ADR-0017).
+  Only the maintainer merges a release pull request: an agent never merges one. Each commit on `master` is published
+  as the development image `ghcr.io/muster-io/muster:sha-<7 hex digits>` (and `edge` for the newest). The bridge
+  libraries' repositories release their own `0.x` versions, as their stories say (ADR-0017).
 - The pull request body has `Closes #<issue>`, `Story: S-NNN`, a table with every `acceptance` statement and its
   evidence (test name, command with output, Playwright trace or screenshot), the output of `verify`, and every change
   to the story file with its reason.
