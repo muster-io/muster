@@ -2,11 +2,11 @@
 // Copyright The Muster Authors
 
 // A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-1, FR-3, FR-17;
-// C-24.FR-3, FR-13): its messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner, its
-// Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group it found, a Bridge or
-// Slack, which show the channel's name they found, or the outgoing webhook, followed by its Secrets and its Signing
-// secret — read-only without destinations:write; "Check" with destinations:test for the types that have a Destination
-// check, and "Delete" with destinations:write.
+// C-24.FR-3, FR-13): its messenger — a Bridge's as its Connection's bridge names it — health with the Broken banner,
+// the banner of a template that keeps failing (C-15.FR-7), its Routes, and its form — Mattermost, Telegram, which shows
+// the channel and the discussion group it found, a Bridge or Slack, which show the channel's name they found, or the
+// outgoing webhook, followed by its Secrets and its Signing secret — read-only without destinations:write; "Check" with
+// destinations:test for the types that have a Destination check, and "Delete" with destinations:write.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -60,6 +60,7 @@ import { SigningSecret } from "../components/signing-secret";
 import { SLACK_KIND } from "../components/slack-destination-fields";
 import { StatusTabs } from "../components/status-tabs";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
+import { TemplateErrorBanner } from "../components/template-error-banner";
 import { EXAMPLE, type PickedSource, TestSourcePicker } from "../components/test-source-picker";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
@@ -387,6 +388,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           <div role="status" aria-live="polite" className="empty:hidden">
             <BrokenBanner health={destination.health} />
           </div>
+          {destination.template_error && <TemplateErrorBanner state={destination.template_error} />}
           {destination.type === "webhook" ? (
             <RequestLogTabs
               search={search}

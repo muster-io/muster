@@ -7,7 +7,7 @@
 // Storm threshold of C-11), the Snooze durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
 // the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
 // policy field is shown; a new Route starts with the values of its profile. Without routes:write the editor only shows
-// the Route.
+// the Route. The Matchers, the urgent mark and the Group key have "Learn more" beside their labels.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import type { ProblemError, Route, RouteInput } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 import { GroupKeyEditor } from "./group-key-editor";
 import { GroupKeyPreviewPanel, type PreviewQuery } from "./group-key-preview";
 import {
@@ -541,8 +542,15 @@ export function RouteForm({
           </p>
         )}
       </div>
-      <fieldset className="flex min-w-0 flex-col gap-2" aria-describedby={`${ID}-matchers-hint`}>
-        <legend className="mb-2 text-sm font-medium">{t("routes.fields.matchers")}</legend>
+      <fieldset
+        className="flex min-w-0 flex-col gap-2"
+        aria-labelledby={`${ID}-matchers-title`}
+        aria-describedby={`${ID}-matchers-hint`}
+      >
+        <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+          <span id={`${ID}-matchers-title`}>{t("routes.fields.matchers")}</span>
+          <DocsLink to="field.matchers" kind="learn_more" about={t("docs.fields.matchers")} />
+        </legend>
         <p id={`${ID}-matchers-hint`} className="text-sm text-muted-foreground">
           {isDefault ? t("routes.form.defaultMatchers") : t("routes.matchers.hint")}
         </p>
@@ -586,15 +594,21 @@ export function RouteForm({
           className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           {...form.register("urgent")}
         />
-        <Label htmlFor={`${ID}-urgent`} className="leading-snug">
-          {t("routes.form.urgent")}
-        </Label>
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <Label htmlFor={`${ID}-urgent`} className="leading-snug">
+            {t("routes.form.urgent")}
+          </Label>
+          <DocsLink to="field.urgent" kind="learn_more" about={t("docs.fields.urgent")} />
+        </div>
       </div>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2">
-          <Label id={`${ID}-group-key-title`} htmlFor={`${ID}-group-key`}>
-            {t("routes.fields.groupKey")}
-          </Label>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <Label id={`${ID}-group-key-title`} htmlFor={`${ID}-group-key`}>
+              {t("routes.fields.groupKey")}
+            </Label>
+            <DocsLink to="field.group_key" kind="learn_more" about={t("docs.fields.groupKey")} />
+          </div>
           <Controller
             control={form.control}
             name="group_key"

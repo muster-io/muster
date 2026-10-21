@@ -740,7 +740,17 @@ describe("the callback address", () => {
     await expect
       .element(page.getByTestId("connection-callback-hint"))
       .toHaveTextContent(
-        `Mattermost calls ${CALLBACK} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it.`,
+        `Mattermost calls ${CALLBACK} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it. Learn more`,
+      );
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Learn more: Button presses in Mattermost (opens in a new tab)",
+        }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/messengers/mattermost/#let-button-presses-reach-muster",
       );
     await page.getByRole("button", { name: "Copy" }).click();
     expect(writeText).toHaveBeenCalledWith(CALLBACK);
@@ -752,7 +762,7 @@ describe("the callback address", () => {
     await expect
       .element(page.getByTestId("connection-callback-hint"))
       .toHaveTextContent(
-        `Mattermost обращается к ${CALLBACK}, когда кто-то нажимает кнопку. Если этот адрес внутренний, добавьте его хост в AllowedUntrustedInternalConnections в настройках сервера Mattermost, иначе нажатия завершатся ошибкой «Action integration error». Проверить это можно тестовым сообщением в место доставки.`,
+        `Mattermost обращается к ${CALLBACK}, когда кто-то нажимает кнопку. Если этот адрес внутренний, добавьте его хост в AllowedUntrustedInternalConnections в настройках сервера Mattermost, иначе нажатия завершатся ошибкой «Action integration error». Проверить это можно тестовым сообщением в место доставки. Подробнее`,
       );
   });
 });
@@ -798,7 +808,9 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-step"))
       .toHaveTextContent("Token: ok · 12 ms · direct");
-    await expect.element(page.getByTestId("connection-check-warning")).toHaveTextContent(WARNING);
+    await expect
+      .element(page.getByTestId("connection-check-warning"))
+      .toHaveTextContent(`${WARNING} How to fix`);
     // The permission is Mattermost's identifier and shows as code.
     expect(
       page.getByTestId("connection-check-warning").element().querySelector("code")?.textContent,
@@ -861,7 +873,7 @@ describe("ConnectionCheck", () => {
       .toHaveTextContent("Токен бота недействителен.");
     await expect
       .element(page.getByTestId("connection-check-step"))
-      .toHaveTextContent("Токен: ошибка 8 мс · напрямуюТокен бота недействителен.");
+      .toHaveTextContent("Токен: ошибка 8 мс · напрямуюТокен бота недействителен. Как исправить");
     await expect.element(page.getByTestId("connection-check-step-detail")).not.toBeInTheDocument();
   });
 
@@ -886,7 +898,7 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-step"))
       .toHaveTextContent(
-        "Token: failed 3 ms · directThe host name does not resolve.Details: dns: lookup mm.invalid: no such host",
+        "Token: failed 3 ms · directThe host name does not resolve. How to fixDetails: dns: lookup mm.invalid: no such host",
       );
   });
 
@@ -915,7 +927,7 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-warning"))
       .toHaveTextContent(
-        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.",
+        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора. Как исправить",
       );
     expect(checkErrorText(i18n.t, refusal(503, {}, 3))).toBe(
       "Мессенджер занят, повторите через 3 с.",

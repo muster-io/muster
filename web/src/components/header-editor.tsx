@@ -5,7 +5,8 @@
 // with the URLs: a header is a name and a value, a Go template that may read Secrets as {{ .Secrets.<name> }}. A
 // refused save shows its problem at the field, with the line and column of a template error; a template that reads
 // .Secrets or .Response other than by a literal name is refused (D291). The stored Destination warns where a header
-// named Authorization or the URL's query or user information holds a literal value, while the field still holds it.
+// named Authorization or the URL's query or user information holds a literal value, while the field still holds it,
+// with "How to fix" to the Secrets.
 
 import type { TFunction } from "i18next";
 import { PlusIcon, TriangleAlertIcon, XIcon } from "lucide-react";
@@ -15,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import type { HeaderTemplate, ProblemError } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import type { FieldProblem } from "./destination-form";
+import { DocsLink } from "./docs-link";
 import { positionedErrorText } from "./template-editor";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -139,12 +141,19 @@ export function useRowKeys(length: number): {
 export function LiteralWarning({ id }: { id: string }) {
   const { t } = useTranslation();
   return (
-    <p id={id} className="flex items-start gap-1.5 text-sm" data-testid="literal-credential">
+    <p className="flex items-start gap-1.5 text-sm" data-testid="literal-credential">
       <TriangleAlertIcon
         aria-hidden="true"
         className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
       />
-      <span>{t("destinations.webhook.literalCredential")}</span>
+      <span className="min-w-0 wrap-anywhere">
+        <span id={id}>{t("destinations.webhook.literalCredential")}</span>{" "}
+        <DocsLink
+          to="fix.webhook_credential"
+          kind="how_to_fix"
+          about={t("docs.fixes.webhookCredential")}
+        />
+      </span>
     </p>
   );
 }

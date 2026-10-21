@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The Delivery section of the Route editor (C-08.FR-1, the C-11 fields of the Route): the Thread batching window in
-// seconds and the Storm threshold in new Alert Groups per minute. A new Route starts with the values of its profile.
+// seconds and the Storm threshold in new Alert Groups per minute, with "Learn more" beside its title. A new Route
+// starts with the values of its profile.
 
 import type { TFunction } from "i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -12,6 +13,7 @@ import { z } from "zod";
 import type { RoutePolicy } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import { formatDuration } from "../lib/time";
+import { DocsLink } from "./docs-link";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
@@ -129,8 +131,15 @@ export function RoutePolicyDelivery({
     return code === undefined ? undefined : errorText(t, field, code);
   };
   return (
-    <fieldset className="flex min-w-0 flex-col gap-4" data-testid="route-delivery">
-      <legend className="mb-2 text-base font-semibold">{t("routes.delivery.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-4"
+      data-testid="route-delivery"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.delivery.title")}</span>
+        <DocsLink to="field.loud_quiet" kind="learn_more" about={t("docs.fields.loudQuiet")} />
+      </legend>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <NumberField
           id={`${id}-window`}

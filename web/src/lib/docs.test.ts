@@ -71,7 +71,8 @@ describe("docsUrl", () => {
     const keys = Object.keys(links);
     expect(keys).toEqual(keys.toSorted());
     for (const [key, target] of Object.entries(links)) {
-      expect(target, key).toMatch(/^[a-z0-9-]+(\/[a-z0-9-]+)*\.md(#[a-z0-9-]+)?$/);
+      // A runbook page is named after its Internal alert, such as operations/runbooks/MusterTemplateError.md.
+      expect(target, key).toMatch(/^[a-z0-9-]+(\/[A-Za-z0-9-]+)*\.md(#[a-z0-9-]+)?$/);
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the keys of the JSON are its DocsKeys
       const url = docsUrl(key as DocsKey);
       const parsed = new URL(url);

@@ -9,7 +9,8 @@
 // the bot says to invite it, naming the bot of the Connection (C-24.FR-3). A passing check ends the Broken
 // state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
 // answers 503 with Retry-After: "The messenger is busy; try again in N s." A result names its check run, and "Requests
-// of this check" opens the requests it made (C-23.FR-6).
+// of this check" opens the requests it made (C-23.FR-6). A failed check ends with "How to fix" where reference.md names a
+// guide for its code and the Destination's type (C-21.FR-11).
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -26,10 +27,13 @@ import type {
   DestinationCheckItem,
   DestinationCheckItemName,
   DestinationCheckResult,
+  DestinationType,
 } from "../api/gen/model";
 import i18n from "../i18n";
+import { checkFixAbout, destinationCheckFix } from "../lib/check-fixes";
 import { type CheckCode, checkCodeText, checkErrorText } from "./connection-check";
 import { unreachable } from "./destination-test-panel";
+import { DocsLink } from "./docs-link";
 import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -105,11 +109,22 @@ export function destinationCheckDetail(
   return message === destinationCheckText(i18n.getFixedT("en"), code, context) ? null : message;
 }
 
-function Item({ item, slackBot }: { item: DestinationCheckItem; slackBot?: string | null }) {
+function Item({
+  item,
+  type,
+  slackBot,
+}: {
+  item: DestinationCheckItem;
+  /** The type of the Destination, which is its Connection's. */
+  type: DestinationType;
+  slackBot?: string | null;
+}) {
   const { t } = useTranslation();
   const code = item.code ?? null;
   const context: DestinationCheckContext = { scopes: item.missing_scopes, slackBot };
   const detail = item.ok ? null : destinationCheckDetail(code, item.message, context);
+  // A failed check links to the guide of its code, at the end of its line; a check that passed never does.
+  const fix = item.ok ? undefined : destinationCheckFix(type, code);
   return (
     <li className="flex min-w-0 items-start gap-2 text-sm" data-testid="destination-check-item">
       {item.ok ? (
@@ -133,6 +148,12 @@ function Item({ item, slackBot }: { item: DestinationCheckItem; slackBot?: strin
                 : destinationCheckText(t, code, context)}
             </span>
           )}
+          {fix !== undefined && (
+            <>
+              {" "}
+              <DocsLink to={fix} kind="how_to_fix" about={checkFixAbout(t, fix)} />
+            </>
+          )}
         </span>
         {detail !== null && (
           <span
@@ -149,9 +170,11 @@ function Item({ item, slackBot }: { item: DestinationCheckItem; slackBot?: strin
 
 function Result({
   result,
+  type,
   slackBot,
 }: {
   result: DestinationCheckResult;
+  type: DestinationType;
   slackBot?: string | null;
 }) {
   const { t } = useTranslation();
@@ -169,7 +192,7 @@ function Result({
       {result.checks.length > 0 && (
         <ul className="flex flex-col gap-1.5" aria-label={t("destinations.check.itemsLabel")}>
           {result.checks.map((item, index) => (
-            <Item key={`${item.name}-${index}`} item={item} slackBot={slackBot} />
+            <Item key={`${item.name}-${index}`} item={item} type={type} slackBot={slackBot} />
           ))}
         </ul>
       )}
@@ -231,7 +254,9 @@ export function DestinationCheck({ destination, dirty, slackBot }: DestinationCh
               {checkErrorText(t, check.error)}
             </div>
           )}
-          {check.isSuccess && <Result result={check.data} slackBot={slackBot} />}
+          {check.isSuccess && (
+            <Result result={check.data} type={destination.type} slackBot={slackBot} />
+          )}
         </div>
         {check.isSuccess && (
           <div>

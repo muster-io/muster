@@ -193,15 +193,15 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Route, Group key and its preview | `field.group_key` | `concepts/routes-and-group-keys.md#group-keys` | S-109 |
 | Route, Route profile · Urgent | `field.route_profile` · `field.urgent` | `concepts/routes-and-group-keys.md#route-profiles` · `#urgent` | S-109 |
 | Route, message template | `field.template` | `configure/messages-and-templates.md#the-template-language` | S-109 |
-| Route and Destination, Mention settings | `field.mentions` | `configure/messages-and-templates.md#whom-a-message-mentions` | S-109 |
+| Destination, Mention settings | `field.mentions` | `configure/messages-and-templates.md#whom-a-message-mentions` | S-109 |
 | Route, delivery (Loud and Quiet) | `field.loud_quiet` | `concepts/loud-and-quiet.md` | S-109 |
 | Route, ack timeout and Reminders | `field.timers` | `concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge` | S-109 |
 | Route, Snooze durations | `field.snooze` | `concepts/statuses-and-commands.md#snooze-presets` | S-109 |
-| Route, lifecycle | `field.lifecycle` | `concepts/snapshot-semantics.md` | S-109 |
+| Route, lifecycle | `field.lifecycle` | `concepts/alert-groups.md#reopening` | S-109 |
 | Integration, Static labels | `field.static_labels` | `integrations/alertmanager.md#static-labels` | S-109 |
 | Integration token, the snippet | `field.integration_snippet` | `integrations/alertmanager.md#create-a-token-and-paste-the-snippet` | S-109 |
 | Integration, Heartbeat | `field.heartbeat` | `integrations/heartbeat.md#turn-it-on` | S-109 |
-| Connection and OIDC, proxy | `field.proxy` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
+| Connection, OIDC, outgoing webhook Destination and Organization → Outgoing heartbeat, proxy | `field.proxy` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
 | Mattermost Connection, the callback address | `field.mattermost_callback` | `messengers/mattermost.md#let-button-presses-reach-muster` | S-109 |
 | Telegram Connection, long polling or webhook · Bot API base URL | `field.telegram_mode` · `field.telegram_base_url` | `messengers/telegram.md#long-polling-or-webhook` · `messengers/telegram-restricted-networks.md` | S-109 |
 | Slack Connection, event mode · tokens · the hint "Create the Slack app from the manifest first, then install it and copy its tokens." above the token fields | `field.slack_event_mode` · `field.slack_tokens` · `field.slack_manifest` | `messengers/slack.md#socket-mode-or-http` · `#install-the-app-and-create-the-tokens` · `#create-the-app-from-a-manifest` | S-109 |
@@ -220,11 +220,13 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Connection and Destination checks, `token_invalid` | `fix.token.<type>` | `messengers/mattermost.md#create-the-bot-account` · `messengers/telegram.md#create-the-bot` · `messengers/slack.md#install-the-app-and-create-the-tokens` · `messengers/bridge.md#create-the-connection` | S-109 |
 | Connection and Destination checks, `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused` | `fix.network` | `messengers/proxies.md#where-you-set-a-proxy` | S-109 |
 | Connection and Destination checks, `blocked` | `fix.blocked` | `messengers/proxies.md#what-the-outbound-address-policy-checks` | S-109 |
-| Telegram Connection check, `not_bot_api`, `wrong_path_prefix`; the base URL uses `http` | `fix.telegram_base_url` | `messengers/telegram-restricted-networks.md` | S-109 |
+| Telegram Connection check, `not_bot_api`, `wrong_path_prefix`, `unexpected_status`; the base URL uses `http` | `fix.telegram_base_url` | `messengers/telegram-restricted-networks.md` | S-109 |
 | Mattermost Connection check, `not_mattermost`, `wrong_path_prefix`, `unexpected_status` | `fix.mattermost_server` | `messengers/mattermost.md#create-the-connection` | S-109 |
-| Slack Connection check, `wrong_token_type`, `app_mismatch`, `not_slack` | `fix.slack_tokens` | `messengers/slack.md#install-the-app-and-create-the-tokens` | S-109 |
+| Slack Connection check, `wrong_token_type`, `app_mismatch` | `fix.slack_tokens` | `messengers/slack.md#install-the-app-and-create-the-tokens` | S-109 |
+| Slack Connection check, `not_slack`, `unexpected_status` | `fix.slack_server` | `messengers/slack.md#the-proxy` | S-109 |
 | Slack Connection and Destination checks, `missing_scope` | `fix.slack_scopes` | `messengers/slack.md#the-scopes` | S-109 |
-| Bridge Connection check, `not_bridge`, `protocol_version_unknown`, `protocol_mismatch`, `event_delivery_not_offered` | `fix.bridge_check` | `messengers/bridge.md#what-the-check-shows` | S-109 |
+| Bridge Connection check, `not_bridge`, `wrong_path_prefix`, `unexpected_status` | `fix.bridge_server` | `messengers/bridge.md#check-before-saving` | S-109 |
+| Bridge Connection check, `protocol_version_unknown`, `protocol_mismatch`, `event_delivery_not_offered` | `fix.bridge_check` | `messengers/bridge.md#what-the-check-shows` | S-109 |
 | Mattermost Connection check, warning `press_answers_in_thread` | `fix.press_answers_in_thread` | `messengers/mattermost.md#where-answers-to-presses-show` | S-109 |
 | Slack Connection page and check, warning `another_client_connected` | `fix.another_client_connected` | `messengers/slack.md#one-slack-app-per-connection` | S-109 |
 | Mattermost Destination check, `bot_not_in_channel`, `channel_in_other_team`, `channel_archived` | `fix.mattermost_destination` | `messengers/mattermost.md#add-a-destination` | S-109 |
@@ -233,11 +235,12 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Telegram Destination check, `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`, `bot_not_group_admin` | `fix.telegram_admin` | `messengers/telegram.md#make-the-bot-an-admin-of-the-channel-and-of-the-group` | S-109 |
 | Slack Destination check, `bot_not_in_channel`, `channel_not_found`, `channel_archived` | `fix.slack_destination` | `messengers/slack.md#invite-the-bot-and-create-destinations` | S-109 |
 | Bridge Destination check, `channel_forbidden` | `fix.bridge_destination` | `messengers/bridge.md#add-a-destination` | S-109 |
-| Destination and its Routes, Broken; Alert Group page, delivery state "Not delivered" or "Waiting: {Destination} is Broken" | `fix.broken` | `concepts/broken-destinations.md#recovery` | S-109 |
+| Destination and its Routes, Broken; Alert Group page, delivery state "Waiting: {Destination} is Broken", or "Not delivered" while the Destination is Broken | `fix.broken` | `concepts/broken-destinations.md#recovery` | S-109 |
+| Alert Group page, delivery state "Not delivered" while the Destination is healthy | `fix.not_delivered` | `concepts/broken-destinations.md#when-a-destination-becomes-broken` | S-109 |
 | Integration, a truncated `groupKey` | `fix.truncated` | `integrations/alertmanager.md#send-every-alert-of-the-group` | S-109 |
 | Integration, a long repeat interval | `fix.repeat_interval` | `integrations/alertmanager.md#repeat-intervals` | S-109 |
-| Integration, no Heartbeat · waiting for the first Heartbeat signal · Heartbeat lost | `fix.heartbeat` · `fix.heartbeat_lost` | `integrations/heartbeat.md#turn-it-on` · `integrations/heartbeat.md#when-the-heartbeat-is-lost` | S-109 |
-| Alert Group page, a Replacement happened | `fix.replacement` | `concepts/alert-groups.md#instance-labels` | S-109 |
+| Integration, no Heartbeat · waiting for the first Heartbeat signal · Heartbeat lost | `fix.heartbeat` · `fix.heartbeat_waiting` · `fix.heartbeat_lost` | `integrations/heartbeat.md#turn-it-on` · `integrations/heartbeat.md#the-snippet` · `operations/runbooks/MusterHeartbeatLost.md#fix` | S-109 |
+| Alert Group page, a Replacement happened | `fix.replacement` | `integrations/alertmanager.md#instance-labels-in-informational-alerts` | S-109 |
 | Route or Destination, a template keeps failing | `fix.template_error` | `operations/runbooks/MusterTemplateError.md` | S-109 |
 | Outgoing webhook Destination, a literal credential · the previous Signing secret not retired | `fix.webhook_credential` · `fix.webhook_signing_secret` | `outgoing-webhooks/events.md#secrets` · `outgoing-webhooks/events.md#regenerate-and-retire-the-signing-secret` | S-109 |
 | Every page, Admins: no replica is leading · recovering after downtime | `fix.no_leader` · `fix.after_downtime` | `operations/runbooks/MusterNoLeader.md` · `operations/high-availability.md#after-downtime` | S-110 |
@@ -246,13 +249,15 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Keyring, a key no longer needed · activation refused | `fix.keyring` | `operations/key-rotation.md` | S-110 |
 
 The codes of the checks without a link: `request_failed`, whose `message` names an error no page can foresee, and
-`webhook_set`, a step that passed. A new code of `NullableConnectionCheckCode`, `NullableDestinationCheckCode` or the
+`webhook_set`, a step that passed. A code a type never gives, such as `not_slack` of a Telegram check, has no link
+there. A new code of `NullableConnectionCheckCode`, `NullableDestinationCheckCode` or the
 check's `warnings` gets a row here, or joins this list, in the story that adds it.
 
 The warnings and notices without a link, each because its own text or page already says what to do: the Severity
 levels' unmapped values seen (on the page whose Guide link opens `configure/organization.md#severity-levels`), the
 OIDC warning `last_admin_kept` ("Make another user Admin first", done in Muster), the token without expiry, the
-Snooze dialog's "no end", and the hints that ask for nothing.
+Snooze dialog's "no end", and the hints that ask for nothing. For now also the error classes of a Destination test
+(`DeliveryErrorClass`, such as `blocked` and `template_error`) and the errors of Mattermost button presses.
 
 ## Roles and Permissions
 

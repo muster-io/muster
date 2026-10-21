@@ -19,7 +19,9 @@
 // workspace, and the app; a refused or wrong token is named as the token of its step, the bot's or the app-level one;
 // the scopes a bot token lacks come from the step's missing_scopes and are named in the reader's language (D396). A
 // draft whose bot token is typed but whose app-level token goes nowhere — none typed, and the stored one is sent only
-// with the stored bot token through the saved proxy — skips "App-level token", and the step says to type it.
+// with the stored bot token through the saved proxy — skips "App-level token", and the step says to type it. A failed
+// step and a warning end with "How to fix" where reference.md names a guide for their code and the Connection's type
+// (C-21.FR-11); a step that passed or was skipped never does.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -46,8 +48,10 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { isApiError, problemText } from "../lib/api";
+import { checkFixAbout, checkWarningFix, connectionCheckFix } from "../lib/check-fixes";
 import { draftAddress, draftFieldErrorText, serverErrors } from "./connection-form";
 import { unreachable } from "./destination-test-panel";
+import { DocsLink } from "./docs-link";
 import { RequestLogButton } from "./request-log";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -375,12 +379,14 @@ function probePassedText(t: TFunction, type: Connection["type"]): string {
 
 function Step({
   step,
+  type,
   skipReason,
   bot,
   pendingUpdates,
   slack,
 }: {
   step: ConnectionCheckStep;
+  type: Connection["type"];
   skipReason?: SkipReason;
   bot?: string;
   pendingUpdates?: number;
@@ -424,6 +430,8 @@ function Step({
   const code = step.code ?? null;
   // A step that passed may say what it found, such as the host of a webhook that is set.
   const found = step.ok && !skipped && step.message !== undefined && step.message !== null;
+  // A failed step links to the guide of its code, at the end of the line of its text; a step that passed never does.
+  const fix = failed ? connectionCheckFix(type, code) : undefined;
   return (
     <li className="flex min-w-0 items-start gap-2 text-sm" data-testid="connection-check-step">
       {failed ? (
@@ -447,13 +455,21 @@ function Step({
           {details.join(" · ")}
         </span>
         {failed && (
-          <span
-            className="wrap-anywhere text-destructive"
-            data-testid="connection-check-step-reason"
-          >
-            {code === null
-              ? (step.message ?? t("connections.check.unknownError"))
-              : checkCodeText(t, code, step.missing_scopes, step.name)}
+          <span className="min-w-0">
+            <span
+              className="wrap-anywhere text-destructive"
+              data-testid="connection-check-step-reason"
+            >
+              {code === null
+                ? (step.message ?? t("connections.check.unknownError"))
+                : checkCodeText(t, code, step.missing_scopes, step.name)}
+            </span>
+            {fix !== undefined && (
+              <>
+                {" "}
+                <DocsLink to={fix} kind="how_to_fix" about={checkFixAbout(t, fix)} />
+              </>
+            )}
           </span>
         )}
         {found && (
@@ -524,6 +540,7 @@ function Result({
           <Step
             key={`${step.name}-${index}`}
             step={step}
+            type={type}
             skipReason={reasons[index]}
             bot={bot}
             pendingUpdates={result.pending_updates ?? undefined}
@@ -543,21 +560,30 @@ function Result({
           <p className="min-w-0 wrap-anywhere">{t("connections.check.webhookSet")}</p>
         </div>
       )}
-      {result.warnings.map((warning) => (
-        <div
-          key={warning}
-          className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
-          data-testid="connection-check-warning"
-        >
-          <TriangleAlertIcon
-            aria-hidden="true"
-            className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
-          />
-          <p className="min-w-0 wrap-anywhere">
-            <WarningText warning={warning} />
-          </p>
-        </div>
-      ))}
+      {result.warnings.map((warning) => {
+        const fix = checkWarningFix(warning);
+        return (
+          <div
+            key={warning}
+            className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
+            data-testid="connection-check-warning"
+          >
+            <TriangleAlertIcon
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
+            />
+            <p className="min-w-0 wrap-anywhere">
+              <WarningText warning={warning} />
+              {fix !== undefined && (
+                <>
+                  {" "}
+                  <DocsLink to={fix} kind="how_to_fix" about={checkFixAbout(t, fix)} />
+                </>
+              )}
+            </p>
+          </div>
+        );
+      })}
     </div>
   );
 }

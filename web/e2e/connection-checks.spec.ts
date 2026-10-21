@@ -285,7 +285,7 @@ test("checks the changes of saved Connections as drafts, the stored token only a
     await checkButton(page).click();
     await expect(summary(page)).toHaveText("The check failed.");
     await expect(steps(page)).toHaveText([
-      /^Dry probe without the token: failed \d+ ms · directWrong path prefix: the server answered 404\.$/,
+      /^Dry probe without the token: failed \d+ ms · directWrong path prefix: the server answered 404\. How to fix$/,
       `getMe: ${EARLIER}`,
       `getWebhookInfo: ${EARLIER}`,
     ]);

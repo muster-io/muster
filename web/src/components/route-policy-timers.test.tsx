@@ -8,6 +8,7 @@
 // the read-only view and the Russian plurals.
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { I18nextProvider } from "react-i18next";
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -17,6 +18,7 @@ import { z } from "zod";
 
 import type { RoutePolicy } from "../api/gen/model";
 import i18n from "../i18n";
+import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import {
   RoutePolicyTimers,
   RoutePolicyTimersReadOnly,
@@ -104,9 +106,17 @@ function Harness({
 
 async function renderSection(policy: RoutePolicy = ON_CALL, serverErrors: ServerErrors = {}) {
   const onSave = vi.fn<(p: RoutePolicy) => void>();
+  // The section's "Learn more" reads the documentation version from the session, which the root route has read.
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(SESSION_QUERY_KEY, {
+    session: null,
+    ended: false,
+  } satisfies SessionRead);
   const screen = await render(
     <I18nextProvider i18n={i18n}>
-      <Harness policy={policy} onSave={onSave} serverErrors={serverErrors} />
+      <QueryClientProvider client={queryClient}>
+        <Harness policy={policy} onSave={onSave} serverErrors={serverErrors} />
+      </QueryClientProvider>
     </I18nextProvider>,
   );
   return { screen, onSave };

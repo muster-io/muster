@@ -3,9 +3,9 @@
 
 // A write-only Secret field (C-03.FR-21): a read shows only whether a value is set and when it changed, never the
 // value. "Replace" opens an empty input for a new value, "Clear" removes the stored one where the API allows it, and
-// without either the stored value is kept.
+// without either the stored value is kept. A field may have a "Learn more" link beside its label.
 
-import { useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { SecretStatus } from "../api/gen/model";
@@ -47,6 +47,8 @@ export interface SecretFieldProps {
   error?: string;
   /** The id of a text outside the field that explains it, read with the input and its buttons. */
   describedBy?: string;
+  /** A "Learn more" link beside the label. */
+  docs?: ReactNode;
 }
 
 export function SecretField({
@@ -59,6 +61,7 @@ export function SecretField({
   disabled = false,
   error,
   describedBy,
+  docs,
 }: SecretFieldProps) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
@@ -92,9 +95,18 @@ export function SecretField({
   }
   return (
     <div className="flex flex-col gap-2" data-testid={`secret-${id}`}>
-      <Label htmlFor={value.mode === "replace" ? id : undefined} id={`${id}-label`}>
-        {label}
-      </Label>
+      {docs === undefined ? (
+        <Label htmlFor={value.mode === "replace" ? id : undefined} id={`${id}-label`}>
+          {label}
+        </Label>
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <Label htmlFor={value.mode === "replace" ? id : undefined} id={`${id}-label`}>
+            {label}
+          </Label>
+          {docs}
+        </div>
+      )}
       {value.mode === "replace" ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input

@@ -530,7 +530,15 @@ describe("the Broken banner", () => {
     await expect
       .element(page.getByTestId("broken-banner"))
       .toHaveTextContent(
-        "Broken since 10:05: 403 Forbidden: the bot is not a member of the channel. Muster tries again every 5 min.",
+        "Broken since 10:05: 403 Forbidden: the bot is not a member of the channel. Muster tries again every 5 min. How to fix",
+      );
+    await expect
+      .element(
+        page.getByRole("link", { name: "How to fix: Broken Destination (opens in a new tab)" }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/concepts/broken-destinations/#recovery",
       );
   });
 
@@ -644,7 +652,7 @@ describe("Check", () => {
       .toHaveTextContent("ошибка Бот не состоит в этом канале.");
     await expect
       .element(page.getByTestId("destination-check-item").nth(1))
-      .toHaveTextContent("Бот в канале: ошибка Бот не состоит в этом канале.");
+      .toHaveTextContent("Бот в канале: ошибка Бот не состоит в этом канале. Как исправить");
     await expect.element(page.getByTestId("destination-check-item-detail")).not.toBeInTheDocument();
     await expect
       .element(page.getByTestId("destination-check-item").nth(0))
@@ -694,7 +702,7 @@ describe("Check", () => {
     await expect
       .element(page.getByTestId("destination-check-item"))
       .toHaveTextContent(
-        "Channel: failed The bridge refused the channel: it does not exist, or the bot cannot use it.Details: The bot is not a member of this channel.",
+        "Channel: failed The bridge refused the channel: it does not exist, or the bot cannot use it. How to fixDetails: The bot is not a member of this channel.",
       );
     await check.click();
     await expect
@@ -712,7 +720,7 @@ describe("Check", () => {
     await expect
       .element(page.getByTestId("destination-check-item"))
       .toHaveTextContent(
-        "Канал: ошибка Мост отклонил канал: его нет или бот не может им пользоваться.Подробности: The bot is not a member of this channel.",
+        "Канал: ошибка Мост отклонил канал: его нет или бот не может им пользоваться. Как исправитьПодробности: The bot is not a member of this channel.",
       );
   });
 

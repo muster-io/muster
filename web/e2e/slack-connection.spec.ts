@@ -210,13 +210,19 @@ test("warns while another program is connected to the Slack app", async ({ page 
   }
   await signInAdmin(page);
   await page.goto(`/connections/${connectionId}`);
-  await expect(page.getByTestId("slack-shared-app")).toHaveText(SHARED);
+  await expect(page.getByTestId("slack-shared-app")).toContainText(SHARED);
+  await expect(
+    page.getByTestId("slack-shared-app").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
   // The check passes, with the warning.
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText(
     "Connected as muster-dev-bot-b",
   );
-  await expect(page.getByTestId("connection-check-warning")).toHaveText(SHARED);
+  await expect(page.getByTestId("connection-check-warning")).toContainText(SHARED);
+  await expect(
+    page.getByTestId("connection-check-warning").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
   await shot(page, "slack-connection-shared");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);

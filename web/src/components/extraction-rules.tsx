@@ -3,12 +3,13 @@
 
 // The extraction rules of the "Create" and "Open thread" requests of an outgoing webhook (C-15.FR-3, FR-4): each takes
 // a value from the JSON response by a JSONPath, such as $.data.id, and keeps it under its name for the Alert Group and
-// the Destination; the later requests read it as {{ .Response.<name> }}.
+// the Destination; the later requests read it as {{ .Response.<name> }}. "Learn more" sits beside the title.
 
 import { PlusIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ExtractionRule } from "../api/gen/model";
+import { DocsLink } from "./docs-link";
 import { type FieldNotes, ListProblem, problemText, reference, useRowKeys } from "./header-editor";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -74,9 +75,18 @@ export function ExtractionRules({
     );
   };
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3" data-testid={id}>
-      <legend className="mb-2 text-sm font-medium">
-        {t("destinations.webhook.extract.title")}
+    <fieldset
+      className="flex min-w-0 flex-col gap-3"
+      aria-labelledby={`${id}-title`}
+      data-testid={id}
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+        <span id={`${id}-title`}>{t("destinations.webhook.extract.title")}</span>
+        <DocsLink
+          to="field.webhook_extraction"
+          kind="learn_more"
+          about={t("docs.fields.webhookExtraction")}
+        />
       </legend>
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">
         {t("destinations.webhook.extract.hint", { ref: reference("Response", "<name>") })}

@@ -4,7 +4,8 @@
 // The create and edit form of an Integration (C-05.FR-1, C-07.FR-2): the name, the description, the Static labels,
 // the duplicate window, pre-filled with integration.duplicate_window, and the Heartbeat: on or off, its timeout in
 // minutes, pre-filled with integration.heartbeat_timeout, and the Heartbeat URL with how to pass the token. The
-// Connection mode is shown, not chosen: L1 has only "Webhook only", with the precision it gives.
+// Connection mode is shown, not chosen: L1 has only "Webhook only", with the precision it gives. The Static labels and
+// the Heartbeat have "Learn more" beside their titles.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -16,6 +17,7 @@ import { z } from "zod";
 
 import type { Integration, IntegrationInput } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 import { LABEL_NAME, type LabelRow, LabelsEditor, labelRows, labelsOf } from "./labels-editor";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -190,8 +192,15 @@ function HeartbeatSection({
   const { t } = useTranslation();
   const enabled = useWatch({ control: form.control, name: "heartbeat_enabled" });
   return (
-    <fieldset className="flex flex-col gap-3" aria-describedby="integration-heartbeat-hint">
-      <legend className="mb-2 text-sm font-medium">{t("heartbeat.title")}</legend>
+    <fieldset
+      className="flex flex-col gap-3"
+      aria-labelledby="integration-heartbeat-title"
+      aria-describedby="integration-heartbeat-hint"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+        <span id="integration-heartbeat-title">{t("heartbeat.title")}</span>
+        <DocsLink to="field.heartbeat" kind="learn_more" about={t("docs.fields.heartbeat")} />
+      </legend>
       <p id="integration-heartbeat-hint" className="text-sm text-muted-foreground">
         {t("heartbeat.form.hint")}
       </p>
@@ -393,9 +402,18 @@ export function IntegrationForm({
           </p>
         )}
       </div>
-      <fieldset className="flex flex-col gap-2" aria-describedby="integration-labels-hint">
-        <legend className="mb-2 text-sm font-medium">
-          {t("integrations.fields.staticLabels")}
+      <fieldset
+        className="flex flex-col gap-2"
+        aria-labelledby="integration-labels-title"
+        aria-describedby="integration-labels-hint"
+      >
+        <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+          <span id="integration-labels-title">{t("integrations.fields.staticLabels")}</span>
+          <DocsLink
+            to="field.static_labels"
+            kind="learn_more"
+            about={t("docs.fields.staticLabels")}
+          />
         </legend>
         <p id="integration-labels-hint" className="text-sm text-muted-foreground">
           {t("integrations.form.staticLabelsHint")}

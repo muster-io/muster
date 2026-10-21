@@ -5,7 +5,7 @@
 // its first interval in minutes, the Reminders on or off with their first interval and their cap in hours, and
 // auto-unacknowledge, which needs the Reminders. The fields of a switch that is off are hidden. Under the fields the
 // times they give are spelled out — only as an explanation of the policy; the server keeps the schedule. A new Route
-// starts with the values of its profile; the API keeps them in seconds.
+// starts with the values of its profile; the API keeps them in seconds. "Learn more" sits beside the title.
 
 import type { TFunction } from "i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { RoutePolicy } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import { formatDuration } from "../lib/time";
+import { DocsLink } from "./docs-link";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
@@ -329,8 +330,15 @@ export function RoutePolicyTimers({
       ? reminderTimes(values.reminders_first_hours, values.reminders_cap_hours)
       : undefined;
   return (
-    <fieldset className="flex min-w-0 flex-col gap-4" data-testid="route-timers">
-      <legend className="mb-2 text-base font-semibold">{t("routes.timers.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-4"
+      data-testid="route-timers"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.timers.title")}</span>
+        <DocsLink to="field.timers" kind="learn_more" about={t("docs.fields.timers")} />
+      </legend>
       <div className="flex min-w-0 flex-col gap-3">
         <Switch
           id={`${id}-ack-timeout`}

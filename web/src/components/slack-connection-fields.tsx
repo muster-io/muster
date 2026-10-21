@@ -8,7 +8,8 @@
 // proxy and the limiter are the form's own. The page of a saved Connection shows what its last check learned — the
 // bot, the workspace and the app — and, while the Leader's last Socket Mode hello counted another connection of the
 // app, the warning that another program shares its presses (C-24.FR-2, FR-9). What Slack sends is untrusted text,
-// shown as text only.
+// shown as text only. Above the token fields a hint says to create the app from its manifest first; the hint, the event
+// mode and the app-level token have "Learn more", and the warning of a shared app "How to fix".
 
 import type { TFunction } from "i18next";
 import { TriangleAlertIcon } from "lucide-react";
@@ -17,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import type { SecretStatus, SlackConnection, SlackEventMode } from "../api/gen/model";
 import { CallbackAddress } from "./callback-hint";
 import { unreachable } from "./destination-test-panel";
+import { DocsLink } from "./docs-link";
 import { type SecretChange, SecretField } from "./secret-field";
 
 /** connection.slack.event_mode: the Leader holds a Socket Mode connection. */
@@ -50,6 +52,26 @@ function eventModeHint(t: TFunction, mode: SlackEventMode): string {
     default:
       return unreachable(mode);
   }
+}
+
+/** The hint above the token fields of a Slack Connection: the app comes from its manifest, then its tokens. */
+export function SlackManifestHint() {
+  const { t } = useTranslation();
+  return (
+    <p className="text-sm wrap-anywhere text-muted-foreground" data-testid="slack-manifest-hint">
+      {t("connections.slack.manifestHint")}{" "}
+      <DocsLink
+        to="field.slack_manifest"
+        kind="learn_more"
+        about={t("docs.fields.slackManifest")}
+      />
+    </p>
+  );
+}
+
+/** "Learn more" beside a token field of a Slack Connection: how to install the app and copy its tokens. */
+export function SlackTokenDocs({ about }: { about: string }) {
+  return <DocsLink to="field.slack_tokens" kind="learn_more" about={about} />;
 }
 
 export interface SlackConnectionFieldsProps {
@@ -94,10 +116,16 @@ export function SlackConnectionFields({
       <fieldset
         className="flex min-w-0 flex-col gap-2"
         disabled={disabled}
+        aria-labelledby={`${modeId}-title`}
         aria-describedby={errors.eventMode === undefined ? undefined : `${modeId}-error`}
       >
-        <legend className="mb-2 text-sm leading-none font-medium">
-          {t("connections.slack.eventMode")}
+        <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-sm leading-none font-medium">
+          <span id={`${modeId}-title`}>{t("connections.slack.eventMode")}</span>
+          <DocsLink
+            to="field.slack_event_mode"
+            kind="learn_more"
+            about={t("docs.fields.slackEventMode")}
+          />
         </legend>
         {EVENT_MODES.map((mode) => (
           <div key={mode} className="flex min-w-0 items-start gap-2">
@@ -141,6 +169,7 @@ export function SlackConnectionFields({
             disabled={disabled}
             error={errors.appToken}
             describedBy={`${appId}-hint`}
+            docs={<SlackTokenDocs about={t("docs.fields.slackAppToken")} />}
             onChange={onAppTokenChange}
           />
           <p id={`${appId}-hint`} className="text-sm wrap-anywhere text-muted-foreground">
@@ -232,7 +261,12 @@ export function SlackSharedAppWarning({ connection }: { connection: SlackConnect
         className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
       />
       <p className="min-w-0 wrap-anywhere">
-        {t("connections.check.warnings.anotherClientConnected")}
+        {t("connections.check.warnings.anotherClientConnected")}{" "}
+        <DocsLink
+          to="fix.another_client_connected"
+          kind="how_to_fix"
+          about={t("docs.fixes.anotherClientConnected")}
+        />
       </p>
     </div>
   );

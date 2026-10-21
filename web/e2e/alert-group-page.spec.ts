@@ -130,7 +130,17 @@ test("shows the header, notices, Alerts, labels, Timeline and previous Alert Gro
   await expect(page.getByTestId("fact-route")).toContainText("ag-db");
   await expect(page.getByTestId("fact-integrations")).toContainText("ag-page");
   await expect(page.getByTestId("fact-severity")).toContainText("warning");
-  await expect(page.getByTestId("notice-replacement")).toHaveText(REPLACEMENT);
+  await expect(page.getByTestId("notice-replacement")).toContainText(REPLACEMENT);
+  await expect(
+    page.getByTestId("notice-replacement").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
+  const fix = page
+    .getByTestId("notice-replacement")
+    .getByRole("link", { name: "How to fix: Replacement (opens in a new tab)", exact: true });
+  const href = new URL((await fix.getAttribute("href")) ?? "");
+  expect(href.origin + href.pathname + href.hash).toBe(
+    "https://muster-io.github.io/muster/latest/integrations/alertmanager/#instance-labels-in-informational-alerts",
+  );
   const replaced = entry(page, "Alert replaced");
   await expect(replaced).toHaveCount(1);
   await expect(replaced.getByTestId("replaced-label")).toHaveText("pod");
@@ -239,7 +249,7 @@ test("shows the page in Russian", async ({ page }) => {
   await page.goto(`/alert-groups/${g1.id}`);
   await expect(page.getByTestId("alert-group-status")).toHaveText("Горит");
   await expect(page.getByTestId("notice-replacement")).toHaveText(
-    "Алерты заменились, потому что изменилась метка pod. Стоит убрать метки экземпляра из правила, например without(pod, instance).",
+    "Алерты заменились, потому что изменилась метка pod. Стоит убрать метки экземпляра из правила, например without(pod, instance). Как исправить",
   );
   await expect(entry(page, "Алерт заменён")).toHaveCount(1);
   await expect(entry(page, "Группа алертов создана").getByTestId("timeline-loud")).toHaveText(

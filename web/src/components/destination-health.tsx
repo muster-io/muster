@@ -4,7 +4,7 @@
 // The health of a Destination (C-13.FR-9, C-11.FR-9; reference.md, banners): "Healthy", or "Broken" with the banner
 // "Broken since HH:MM: {reason}. Muster tries again every {interval}." in the user's time zone. The reason comes from
 // the messenger and is shown as text only. The list, the Destination page and the Route editor's Destinations section
-// show the same banner.
+// show the same banner, with "How to fix" to the recovery of a Broken Destination at the end of its line.
 
 import type { TFunction } from "i18next";
 import { CircleCheckIcon, TriangleAlertIcon } from "lucide-react";
@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import type { DestinationHealth, DestinationType } from "../api/gen/model";
 import { formatDuration, useTimeFormat } from "../lib/time";
+import { DocsLink } from "./docs-link";
 import { cn } from "./ui/utils";
 
 /** delivery.broken_probe_interval: built in, 5 minutes. */
@@ -109,7 +110,8 @@ export function BrokenBanner({ health, name }: { health: DestinationHealth; name
             {": "}
           </>
         )}
-        <span data-testid="broken-banner-text">{brokenText(t, health, time)}</span>
+        <span data-testid="broken-banner-text">{brokenText(t, health, time)}</span>{" "}
+        <DocsLink to="fix.broken" kind="how_to_fix" about={t("docs.fixes.broken")} />
       </p>
     </div>
   );

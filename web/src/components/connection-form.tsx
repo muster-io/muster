@@ -13,7 +13,8 @@
 // draft before anything is saved (C-13.FR-14): the type's address, the proxy, the token only when one is typed — and for
 // Slack the event mode and, in Socket Mode, the app-level token when one is typed —, and the saved Connection an edit
 // holds. Without connections:write the form only shows the Connection. The delete dialog
-// refuses a Connection that Destinations use (in_use).
+// refuses a Connection that Destinations use (in_use). A Slack Connection shows the hint about its manifest above the
+// token fields, and its bot token "Learn more".
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -68,6 +69,8 @@ import {
   BOT_TOKEN_PREFIX,
   DEFAULT_EVENT_MODE,
   SlackConnectionFields,
+  SlackManifestHint,
+  SlackTokenDocs,
 } from "./slack-connection-fields";
 import {
   DEFAULT_BOT_API_BASE_URL,
@@ -880,6 +883,7 @@ export function ConnectionForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            {kind === "slack" && !readOnly && <SlackManifestHint />}
             <div className="grid gap-4 md:grid-cols-2">
               {text("name", t("connections.fields.name"))}
               {kind === "mattermost" &&
@@ -903,6 +907,11 @@ export function ConnectionForm({
                     value={field.value}
                     disabled={readOnly}
                     error={err("/bot_token")}
+                    docs={
+                      kind === "slack" ? (
+                        <SlackTokenDocs about={t("docs.fields.slackBotToken")} />
+                      ) : undefined
+                    }
                     onChange={field.onChange}
                   />
                 )}

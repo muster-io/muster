@@ -6,7 +6,8 @@
 // request builders "Create" and "Update", and "Open thread" and "Reply in thread" when added, with the extraction rules
 // of "Create" and "Open thread"; "Both" shows both parts. The proxy form follows. An outgoing webhook has no Connection
 // and no Destination check. The stored Destination's literal_credential warnings show at their fields while those
-// still hold the stored value. Mentions are data the receiver formats, so the only chat-wide choice is everyone.
+// still hold the stored value. Mentions are data the receiver formats, so the only chat-wide choice is everyone. The
+// template part has "Learn more" beside its title.
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -21,6 +22,7 @@ import type {
   WebhookTemplateConfig,
 } from "../api/gen/model";
 import type { DestinationKind, TypeFieldsProps } from "./destination-form";
+import { DocsLink } from "./docs-link";
 import {
   type FieldNotes,
   HeaderEditor,
@@ -458,7 +460,14 @@ export function WebhookDestinationFields({
         )}
         {sendsTemplate(value.mode) && (
           <section className="flex min-w-0 flex-col gap-4" data-testid="webhook-template">
-            <h3 className="text-base font-semibold">{t("destinations.webhook.templateTitle")}</h3>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="text-base font-semibold">{t("destinations.webhook.templateTitle")}</h3>
+              <DocsLink
+                to="field.webhook_templates"
+                kind="learn_more"
+                about={t("docs.fields.webhookTemplates")}
+              />
+            </div>
             <p className="text-sm text-muted-foreground">
               {t("destinations.webhook.templateHint", { ref: reference("Secrets", "token") })}
             </p>

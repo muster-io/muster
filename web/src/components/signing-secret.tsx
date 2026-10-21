@@ -5,7 +5,8 @@
 // changed, never its value. "Regenerate" asks first, then shows the new secret once; requests then carry signatures
 // with the new and the previous secret, and the section says "The previous secret still signs, since {date}." with
 // "Retire previous secret" until it is retired. Without destinations:write the section only shows the status. A change
-// of the Signing secret gives the Destination a new version, so the Destination and its Secrets are read again.
+// of the Signing secret gives the Destination a new version, so the Destination and its Secrets are read again. The
+// title has "Learn more" to verifying a signature, and the previous secret's warning "How to fix" to retiring it.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TriangleAlertIcon } from "lucide-react";
@@ -23,6 +24,7 @@ import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { refreshWebhook } from "./destination-secrets";
+import { DocsLink } from "./docs-link";
 import { SigningSecretDialog } from "./signing-secret-dialog";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -72,8 +74,13 @@ export function SigningSecret({ destination }: { destination: WebhookDestination
   return (
     <Card data-testid="signing-secret">
       <CardHeader>
-        <CardTitle>
+        <CardTitle className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2>{t("destinations.signing.title")}</h2>
+          <DocsLink
+            to="field.webhook_signing_secret"
+            kind="learn_more"
+            about={t("docs.fields.webhookSigningSecret")}
+          />
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -89,7 +96,14 @@ export function SigningSecret({ destination }: { destination: WebhookDestination
           <Alert data-testid="signing-secret-previous">
             <TriangleAlertIcon aria-hidden="true" />
             <AlertDescription className="flex flex-col gap-3">
-              <span>{t("destinations.signing.previousActive", { date: dateTime(previous) })}</span>
+              <span className="wrap-anywhere">
+                {t("destinations.signing.previousActive", { date: dateTime(previous) })}{" "}
+                <DocsLink
+                  to="fix.webhook_signing_secret"
+                  kind="how_to_fix"
+                  about={t("docs.fixes.webhookSigningSecret")}
+                />
+              </span>
               {canWrite && (
                 <Button
                   type="button"

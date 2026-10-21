@@ -12,7 +12,8 @@
 // steps and translates its four codes; the scopes a bot token lacks are named from missing_scopes, never read from the
 // English message, and without them the text names none (D396). "Slack refused the token." stays the detail of the
 // generic text of token_invalid. A Slack check that passes with another_client_connected warns that another program
-// shares the app (C-24.FR-2). English and Russian.
+// shares the app (C-24.FR-2). A failed step and a warning end with "How to fix" to the guide of their code and type, and
+// a step that passed or failed with request_failed has none (C-21.FR-11). English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -238,7 +239,7 @@ describe("the check of a new Connection", () => {
     await expect
       .poll(stepTexts)
       .toEqual([
-        "Dry probe without the token: failed 2 ms · directThe address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem.Details: The address answered 200 text/html, not a problem: it is not a bridge, or the path prefix is wrong.",
+        "Dry probe without the token: failed 2 ms · directThe address answers, but not as a bridge: a bridge answers a request without its token with 401 and a problem. How to fixDetails: The address answered 200 text/html, not a problem: it is not a bridge, or the path prefix is wrong.",
         "Bridge info: Skipped: an earlier step failed",
         "Event delivery: Skipped: an earlier step failed",
       ]);
@@ -447,7 +448,7 @@ describe("the check in Russian", () => {
     // The message is the English text of its code: no English repeats the Russian text.
     await expect
       .poll(stepTexts)
-      .toEqual(["Токен: ошибка 4 мс · напрямуюТокен бота недействителен."]);
+      .toEqual(["Токен: ошибка 4 мс · напрямуюТокен бота недействителен. Как исправить"]);
     expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
 
     vi.restoreAllMocks();
@@ -574,7 +575,7 @@ describe("the check of a Slack Connection", () => {
       "This is not a bot token.",
       undefined,
       [
-        "Token: failed 4 ms · directThis is not a bot token.",
+        "Token: failed 4 ms · directThis is not a bot token. How to fix",
         "Scopes: Skipped: an earlier step failed",
         "App-level token: Skipped: an earlier step failed",
       ],
@@ -586,7 +587,7 @@ describe("the check of a Slack Connection", () => {
       EMAIL_SCOPE,
       [
         "Token: ok · 12 ms · direct",
-        "Scopes: failed directThe bot token lacks the scopes users:read.email.",
+        "Scopes: failed directThe bot token lacks the scopes users:read.email. How to fix",
         "App-level token: Skipped: an earlier step failed",
       ],
     ],
@@ -598,7 +599,7 @@ describe("the check of a Slack Connection", () => {
       [
         "Token: ok · 12 ms · direct",
         "Scopes: ok · direct",
-        "App-level token: failed 4 ms · directThe app-level token belongs to another Slack app than the bot token.",
+        "App-level token: failed 4 ms · directThe app-level token belongs to another Slack app than the bot token. How to fix",
       ],
     ],
   ] as const)(
@@ -636,7 +637,7 @@ describe("the check of a Slack Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Токен: успешно · 12 мс · напрямую",
-        "Права: ошибка напрямуюУ токена бота нет прав users:read.email.",
+        "Права: ошибка напрямуюУ токена бота нет прав users:read.email. Как исправить",
         "Токен уровня приложения: Пропущено: предыдущий шаг не прошёл",
       ]);
     expect(page.getByTestId("connection-check-step-detail").elements()).toHaveLength(0);
@@ -698,17 +699,19 @@ describe("the check of a Slack Connection", () => {
       "en",
       "Check connection",
       "Connected as muster-dev-slack-bot",
-      "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.",
+      "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation. How to fix",
+      "How to fix: Another program uses this Slack app (opens in a new tab)",
     ],
     [
       "ru",
       "Проверить подключение",
       "Подключено как muster-dev-slack-bot",
-      "К этому приложению Slack через Socket Mode подключена другая программа: нажатия случайным образом делятся между ними. Используйте отдельное приложение Slack для каждого подключения и не используйте его в других подключениях и установках.",
+      "К этому приложению Slack через Socket Mode подключена другая программа: нажатия случайным образом делятся между ними. Используйте отдельное приложение Slack для каждого подключения и не используйте его в других подключениях и установках. Как исправить",
+      "Как исправить: Это приложение Slack использует другая программа (откроется в новой вкладке)",
     ],
   ] as const)(
-    "passes with the warning that another program shares the Slack app (%s)",
-    async (language, start, summary, warning) => {
+    "passes with the warning that another program shares the Slack app, and its How to fix (%s)",
+    async (language, start, summary, warning, fix) => {
       await i18n.changeLanguage(language);
       answer(() =>
         json(200, {
@@ -728,6 +731,12 @@ describe("the check of a Slack Connection", () => {
       await expect.element(page.getByTestId("connection-check-summary")).toHaveTextContent(summary);
       await expect.element(page.getByTestId("connection-check-warning")).toHaveTextContent(warning);
       expect(page.getByTestId("connection-check-warning").elements()).toHaveLength(1);
+      await expect
+        .element(page.getByTestId("connection-check-warning").getByRole("link", { name: fix }))
+        .toHaveAttribute(
+          "href",
+          "https://muster-io.github.io/muster/latest/messengers/slack/#one-slack-app-per-connection",
+        );
     },
   );
 
@@ -868,5 +877,132 @@ describe("the requests of a check", () => {
         page.getByRole("dialog", { name: "Запросы этой проверки" }).getByTestId("request-check"),
       )
       .toHaveTextContent("Проверка перед сохранением");
+  });
+});
+
+const SITE = "https://muster-io.github.io/muster/latest";
+
+/** The "How to fix" links of the panel. */
+function fixLinks() {
+  return page.getByRole("link", { name: /^How to fix: / }).elements();
+}
+
+describe("How to fix", () => {
+  test.each([
+    [
+      "telegram",
+      "dry_probe",
+      "not_bot_api",
+      "How to fix: Telegram in restricted networks (opens in a new tab)",
+      `${SITE}/messengers/telegram-restricted-networks/`,
+    ],
+    [
+      "mattermost",
+      "token",
+      "token_invalid",
+      "How to fix: The token is not valid (opens in a new tab)",
+      `${SITE}/messengers/mattermost/#create-the-bot-account`,
+    ],
+    [
+      "bridge",
+      "info",
+      "protocol_mismatch",
+      "How to fix: The bridge does not answer as expected (opens in a new tab)",
+      `${SITE}/messengers/bridge/#what-the-check-shows`,
+    ],
+    [
+      "mattermost",
+      "token",
+      "proxy_refused",
+      "How to fix: Muster cannot reach the address (opens in a new tab)",
+      `${SITE}/messengers/proxies/#where-you-set-a-proxy`,
+    ],
+    [
+      "slack",
+      "token",
+      "blocked",
+      "How to fix: The outbound address policy blocks the address (opens in a new tab)",
+      `${SITE}/messengers/proxies/#what-the-outbound-address-policy-checks`,
+    ],
+  ] as const)(
+    "a %s step %s failing with %s links to its guide at the end of its line",
+    async (type, name, code, label, href) => {
+      answer(() =>
+        json(200, {
+          ok: false,
+          steps: [step(name, { ok: false, latency_ms: 3, code })],
+          warnings: [],
+          request_log_run: RUN,
+        } satisfies ConnectionCheckResult),
+      );
+      await renderCheck({ connectionId: SAVED_ID, type });
+      await page.getByRole("button", { name: "Check connection" }).click();
+      const link = page.getByTestId("connection-check-step").getByRole("link", { name: label });
+      await expect.element(link).toHaveAttribute("href", href);
+      await expect.element(link).toHaveAttribute("target", "_blank");
+      expect(fixLinks()).toHaveLength(1);
+    },
+  );
+
+  test("a Slack bot token without the scopes Muster needs links to the scopes", async () => {
+    answer(() => json(200, slackFailed("scopes", "missing_scope", MISSING_EMAIL, EMAIL_SCOPE)));
+    await renderCheck({ connectionId: SAVED_ID, type: "slack" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(
+        page.getByRole("link", { name: "How to fix: Missing Slack scopes (opens in a new tab)" }),
+      )
+      .toHaveAttribute("href", `${SITE}/messengers/slack/#the-scopes`);
+    // The steps that passed or were skipped have none.
+    expect(fixLinks()).toHaveLength(1);
+  });
+
+  test("an error no page can foresee and a check that passes show no How to fix", async () => {
+    answer(() =>
+      json(200, {
+        ok: false,
+        steps: [step("token", { ok: false, code: "request_failed", message: "500 Internal" })],
+        warnings: [],
+        request_log_run: RUN,
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("The request failed.");
+    expect(fixLinks()).toHaveLength(0);
+
+    vi.restoreAllMocks();
+    answer(() => json(200, CONNECTED));
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-summary"))
+      .toHaveTextContent("Connected as muster-dev-bot-b");
+    expect(
+      page
+        .getByRole("link")
+        .elements()
+        .filter((e) => e.textContent === "How to fix"),
+    ).toHaveLength(0);
+  });
+
+  test("the Mattermost warning links to where answers to presses show, in Russian too", async () => {
+    await i18n.changeLanguage("ru");
+    answer(() =>
+      json(200, {
+        ...CONNECTED,
+        warnings: ["press_answers_in_thread"],
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Проверить подключение" }).click();
+    const link = page.getByTestId("connection-check-warning").getByRole("link", {
+      name: "Как исправить: Ответы на нажатия кнопок появляются в треде (откроется в новой вкладке)",
+    });
+    await expect.element(link).toHaveTextContent("Как исправить");
+    await expect
+      .element(link)
+      .toHaveAttribute("href", `${SITE}/messengers/mattermost/#where-answers-to-presses-show`);
   });
 });

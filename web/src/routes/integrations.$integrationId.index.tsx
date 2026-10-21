@@ -2,11 +2,11 @@
 // Copyright The Muster Authors
 
 // An Integration's page (C-05.FR-1, FR-2, FR-7, FR-8, C-06.FR-14, FR-18, FR-19, C-07.FR-3, FR-5): the Heartbeat state
-// beside the name and its banner; the details with the Connection mode and its precision, the Static labels and the
-// duplicate window; the last Snapshot and the number received; the tokens; the warnings; the learned Alertmanager
-// routes; the Alerts view for alerts:read; the Stored Snapshots for stored-snapshots:read; Edit and Delete for
-// integrations:write. The built-in Integration "Muster" shows only what it
-// is, its Alerts view and its Stored Snapshots.
+// beside the name and its banner; the details with the Connection mode and its precision, the Static labels with "Learn
+// more" and the duplicate window; the last Snapshot and the number received; the tokens; the warnings; the learned
+// Alertmanager routes; the Alerts view for alerts:read; the Stored Snapshots for stored-snapshots:read; Edit and Delete
+// for integrations:write. The built-in Integration "Muster" shows only what it is, its Alerts view and its Stored
+// Snapshots.
 
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon, PencilIcon } from "lucide-react";
@@ -17,7 +17,7 @@ import { useGetIntegration } from "../api/gen/endpoints/integrations/integration
 import type { Integration } from "../api/gen/model";
 import { AlertmanagerRoutes } from "../components/alertmanager-routes";
 import { RequirePermission, useCan } from "../components/app-shell";
-import { PageTitle } from "../components/docs-link";
+import { DocsLink, PageTitle } from "../components/docs-link";
 import { IntegrationAlerts } from "../components/integration-alerts";
 import { type AlertSearch, alertSearchSchema } from "../components/integration-alerts-search";
 import { IntegrationDeleteDialog } from "../components/integration-delete-dialog";
@@ -62,10 +62,17 @@ function StaticLabels({ labels }: { labels: Record<string, string> }) {
 
 function Details({ integration }: { integration: Integration }) {
   const { t } = useTranslation();
-  const rows: [string, ReactNode, string][] = [
+  const rows: [ReactNode, ReactNode, string][] = [
     [t("integrations.fields.connectionMode"), <ConnectionMode key="mode" />, "connection-mode"],
     [
-      t("integrations.fields.staticLabels"),
+      <span key="label" className="flex flex-wrap items-baseline gap-x-2">
+        {t("integrations.fields.staticLabels")}
+        <DocsLink
+          to="field.static_labels"
+          kind="learn_more"
+          about={t("docs.fields.staticLabels")}
+        />
+      </span>,
       <StaticLabels key="labels" labels={integration.static_labels} />,
       "static-labels",
     ],

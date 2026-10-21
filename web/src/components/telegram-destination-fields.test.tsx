@@ -371,7 +371,7 @@ describe("DestinationCheck of a Telegram Destination", () => {
       .element(page.getByTestId("destination-check-item").nth(3))
       .toHaveTextContent(
         "Права бота в группе обсуждения: ошибка Бот не администратор группы обсуждения. Сделайте бота " +
-          `администратором там, с правом публиковать сообщения.Подробности: ${NOT_ADMIN}`,
+          `администратором там, с правом публиковать сообщения. Как исправитьПодробности: ${NOT_ADMIN}`,
       );
   });
 });

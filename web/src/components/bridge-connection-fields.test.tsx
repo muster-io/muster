@@ -564,7 +564,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
       await expect
         .poll(stepTexts)
         .toEqual([
-          `Bridge info: failed 3 ms · direct${reason}Details: ${message}`,
+          `Bridge info: failed 3 ms · direct${reason} How to fixDetails: ${message}`,
           "Event delivery: Skipped: an earlier step failed",
         ]);
       await expect
@@ -594,7 +594,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Bridge info: ok · 4 ms · direct",
-        "Event delivery: failed directThe bridge does not offer this event delivery mode.Details: The bridge does not offer push event delivery.",
+        "Event delivery: failed directThe bridge does not offer this event delivery mode. How to fixDetails: The bridge does not offer push event delivery.",
       ]);
   });
 
@@ -617,7 +617,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
       await expect
         .poll(stepTexts)
         .toEqual([
-          `Сведения о мосте: ошибка 3 мс · напрямую${reasonRu}Подробности: ${message}`,
+          `Сведения о мосте: ошибка 3 мс · напрямую${reasonRu} Как исправитьПодробности: ${message}`,
           "Доставка событий: Пропущено: предыдущий шаг не прошёл",
         ]);
     },
@@ -644,7 +644,7 @@ describe("ConnectionCheck of a Bridge Connection", () => {
       .poll(stepTexts)
       .toEqual([
         "Сведения о мосте: успешно · 4 мс · напрямую",
-        "Доставка событий: ошибка напрямуюМост не поддерживает этот способ доставки событий.Подробности: The bridge does not offer push event delivery.",
+        "Доставка событий: ошибка напрямуюМост не поддерживает этот способ доставки событий. Как исправитьПодробности: The bridge does not offer push event delivery.",
       ]);
   });
 });

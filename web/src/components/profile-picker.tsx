@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The choice of a Route profile that starts "Create route" (C-08.FR-7): On-call and Informational, as listRouteProfiles
-// serves them from the built-in defaults, each with a line on what it is for. A profile only pre-fills the editor.
+// serves them from the built-in defaults, each with a line on what it is for, and "Learn more" beside the heading. A
+// profile only pre-fills the editor.
 
 import type { TFunction } from "i18next";
 import { useEffect, useRef } from "react";
@@ -11,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useListRouteProfiles } from "../api/gen/endpoints/routes/routes";
 import type { RouteProfile, RouteProfileId } from "../api/gen/model";
 import { problemText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 
 /** The name of a Route profile in the language of the page. */
 export function profileName(t: TFunction, id: RouteProfileId): string {
@@ -50,14 +52,21 @@ export function ProfilePicker({
   return (
     <section aria-labelledby="route-profile-title" className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h2
-          ref={heading}
-          id="route-profile-title"
-          tabIndex={-1}
-          className="text-lg font-semibold outline-none"
-        >
-          {t("routes.profiles.title")}
-        </h2>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2
+            ref={heading}
+            id="route-profile-title"
+            tabIndex={-1}
+            className="text-lg font-semibold outline-none"
+          >
+            {t("routes.profiles.title")}
+          </h2>
+          <DocsLink
+            to="field.route_profile"
+            kind="learn_more"
+            about={t("docs.fields.routeProfile")}
+          />
+        </div>
         <p className="text-sm text-muted-foreground">{t("routes.profiles.hint")}</p>
       </div>
       <ul className="grid gap-3 sm:grid-cols-2">

@@ -20,6 +20,7 @@ import type {
   UserRef,
 } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
+import { DocsLink } from "./docs-link";
 import { directoryLabel } from "./owner-filter";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -334,8 +335,15 @@ export function MentionSettingsField({
   const directory = useDirectory(true);
   const users = directory.data?.items ?? [];
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3" data-testid="mention-settings">
-      <legend className="mb-2 text-base font-semibold">{t("mentions.title")}</legend>
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="mention-settings"
+    >
+      <legend className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("mentions.title")}</span>
+        <DocsLink to="field.mentions" kind="learn_more" about={t("docs.fields.mentions")} />
+      </legend>
       <p className="text-sm text-muted-foreground">{t("mentions.hint")}</p>
       <p id={`${id}-everyone-hint`} className="sr-only">
         {everyoneHint ?? t("mentions.everyoneHint")}

@@ -83,7 +83,7 @@ describe("HeartbeatBanner", () => {
     await expect
       .element(screen.getByTestId("heartbeat-banner"))
       .toHaveTextContent(
-        "No Heartbeat: Muster will not notice when Alertmanager goes quiet, and Stale resolution is off.",
+        "No Heartbeat: Muster will not notice when Alertmanager goes quiet, and Stale resolution is off. How to fix",
       );
   });
 
@@ -92,7 +92,17 @@ describe("HeartbeatBanner", () => {
     await expect
       .element(screen.getByTestId("heartbeat-banner"))
       .toHaveTextContent(
-        "Waiting for the first Heartbeat signal. Stale resolution is off until it arrives.",
+        "Waiting for the first Heartbeat signal. Stale resolution is off until it arrives. How to fix",
+      );
+    await expect
+      .element(
+        screen.getByRole("link", {
+          name: "How to fix: Waiting for the first Heartbeat signal (opens in a new tab)",
+        }),
+      )
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/integrations/heartbeat/#the-snippet",
       );
   });
 
@@ -108,14 +118,14 @@ describe("HeartbeatBanner", () => {
     await expect
       .element(banner)
       .toHaveTextContent(
-        `No contact with Alertmanager since ${time}. Nothing is resolved as Stale until contact returns.`,
+        `No contact with Alertmanager since ${time}. Nothing is resolved as Stale until contact returns. How to fix`,
       );
     await expect.element(banner).toHaveAttribute("data-kind", "heartbeat_lost");
     await i18n.changeLanguage("ru");
     await expect
       .element(banner)
       .toHaveTextContent(
-        `Связи с Alertmanager нет с ${lostSinceText(since, browserTimeZone(), "ru")}. Пока она не восстановится, ничего не закрывается как устаревшее.`,
+        `Связи с Alertmanager нет с ${lostSinceText(since, browserTimeZone(), "ru")}. Пока она не восстановится, ничего не закрывается как устаревшее. Как исправить`,
       );
   });
 

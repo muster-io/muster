@@ -13,8 +13,6 @@ files_touched:
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/docs-links-forms.spec.ts
-  - web/src/components/matcher-builder.tsx
-  - web/src/components/group-key-editor.tsx
   - web/src/components/route-form.tsx
   - web/src/components/profile-picker.tsx
   - web/src/components/route-policy-message.tsx
@@ -41,11 +39,40 @@ files_touched:
   - web/src/components/destination-check.tsx
   - web/src/components/destination-health.tsx
   - web/src/components/alert-group-deliveries.tsx
+  - web/src/components/alert-group-deliveries.test.tsx
   - web/src/components/integration-warnings.tsx
   - web/src/components/alert-group-notices.tsx
   - web/src/components/template-error-banner.tsx
+  - web/src/components/template-error-banner.test.tsx
+  - web/src/routes/destinations.$destinationId.tsx
+  - design/prd/l1/reference.md
+  - web/src/lib/docs.ts
+  - web/src/lib/docs.test.ts
+  - web/src/components/connection-form.tsx
+  - web/src/components/secret-field.tsx
+  - web/src/components/bridge-connection-fields.test.tsx
+  - web/src/components/connection-form.test.tsx
+  - web/src/components/destination-form.test.tsx
+  - web/src/components/heartbeat-badge.test.tsx
+  - web/src/components/route-policy-timers.test.tsx
+  - web/src/components/slack-connection-fields.test.tsx
+  - web/src/components/telegram-connection-fields.test.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
+  - web/src/components/webhook-destination-fields.test.tsx
+  - web/e2e/docs-links.spec.ts
+  - web/e2e/alert-group-page.spec.ts
+  - web/e2e/connection-checks.spec.ts
+  - web/e2e/destinations.spec.ts
+  - web/e2e/heartbeat.spec.ts
+  - web/e2e/mattermost-connection.spec.ts
+  - web/e2e/route-message.spec.ts
+  - web/e2e/slack-connection.spec.ts
+  - web/e2e/slack-destination.spec.ts
+  - web/e2e/telegram-connection.spec.ts
+  - web/e2e/telegram-destination.spec.ts
+  - web/e2e/webhook-secrets.spec.ts
 acceptance:
-  - "[C-21.FR-11, C-21.AC-8] Every field of the rows of reference.md's \"Next to fields\" marked S-109 — the Route's Matchers, Group key, Route profile, Urgent, message template, Mention settings, delivery, ack timeout and Reminders, Snooze durations and lifecycle; the Integration's Static labels, snippet and Heartbeat; the proxy of Connections and of the OIDC settings, the Mattermost callback address, Telegram's mode and Bot API base URL, Slack's event mode, its tokens and the new hint above them \"Create the Slack app from the manifest first, then install it and copy its tokens.\", the Bridge's event delivery; the outgoing webhook's templates, extraction rules, Secrets and Signing secret — shows \"Learn more\" beside its label, linking to the row's target of the running version."
+  - "[C-21.FR-11, C-21.AC-8] Every field of the rows of reference.md's \"Next to fields\" marked S-109 — the Route's Matchers, Group key, Route profile, Urgent, message template, delivery, ack timeout and Reminders, Snooze durations and lifecycle; the Destination's Mention settings; the Integration's Static labels, snippet and Heartbeat; the proxy of Connections, of the OIDC settings, of outgoing webhook Destinations and of the outgoing heartbeat, the Mattermost callback address, Telegram's mode and Bot API base URL, Slack's event mode, its tokens and the new hint above them \"Create the Slack app from the manifest first, then install it and copy its tokens.\", the Bridge's event delivery; the outgoing webhook's templates, extraction rules, Secrets and Signing secret — shows \"Learn more\" beside its label, linking to the row's target of the running version."
   - "[C-21.FR-11, C-21.AC-8] `check-fixes.ts` maps each code of a Connection or Destination check and each check warning to its key of \"Next to problems\" by the Connection's type, and a code without a row to none (`check-fixes.test.ts`, every code of `NullableConnectionCheckCode`, `NullableDestinationCheckCode` and the warnings of the spec); the check panels show \"How to fix\" beside a failed step or check and beside a warning that has a key — in a create form, an edit form and on a saved page."
   - "[C-21.FR-11, C-21.AC-8] \"How to fix\" also shows beside the Broken state of a Destination and of its Routes, the delivery states \"Not delivered\" and \"Waiting: {Destination} is Broken\" of the Alert Group page, the Integration warnings (truncated `groupKey`, a long repeat interval, no Heartbeat, waiting for the first Heartbeat signal, Heartbeat lost), the Replacement notice of the Alert Group page, the template error banner of a Route or Destination, the Telegram warning about `http`, and the outgoing webhook's warnings about a literal credential and a previous Signing secret; it never shows beside a passed step, an empty state or a hint that asks for nothing."
   - "[C-21.AC-8] The texts are \"Learn more\" / «Подробнее» and \"How to fix\" / «Как исправить» with their accessible names in both languages, `make lint` finds no missing key, `make docs-check` passes with every new key of `docs-links.json`, and the Route editor, a Slack Connection's create form and a Telegram Destination with a failed check keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links-forms.spec.ts`)."
@@ -88,7 +115,9 @@ issue: 338
   `mention-settings.tsx`) shows the link in each of them.
 - **Slack hint**: `slack-connection-fields.tsx` gains, above the token fields, the hint "Create the Slack app from the
   manifest first, then install it and copy its tokens." / «Сначала создайте приложение Slack из манифеста, затем
-  установите его и скопируйте его токены.» with "Learn more" to `field.slack_manifest`.
+  установите его и скопируйте его токены.» with "Learn more" to `field.slack_manifest`. The bot token is the
+  Connection form's own field, above the type's slot, so `connection-form.tsx` shows the hint, `SlackManifestHint` of
+  `slack-connection-fields.tsx`, above it, and gives the bot token its "Learn more" through `secret-field.tsx`.
 - **Texts**: those of S-108, with accessible names that name the field or the problem ("Learn more: Group key (opens in
   a new tab)").
 - **End-to-end** (`web/e2e/docs-links-forms.spec.ts`): the fields and problems of the acceptance on `muster dev`, the
@@ -136,7 +165,13 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link complex fields and problems to the documentation`.
-- With 37 files the story stays under the size signal; the forms and problems of the admin pages are S-110.
+- 65 files, most of them exact-text test updates: tests whose texts now end with the link's text. `docs.ts` changes
+  because its page helpers return page keys now that the list has field and problem keys too, and the Destination page
+  (`destinations.$destinationId.tsx`) because it did not show the template error banner yet: a C-15.FR-7 gap that
+  acceptance 3 depends on. The forms and problems of the admin pages are S-110.
+- D434 changes `design/prd/l1/reference.md` in this pull request: rows for the check codes that had none, the
+  proxy of every form that has one, Mention settings on Destinations only, and the no-link list; targets refined.
+  Acceptance 1 follows it: Mention settings are a Destination's, and the proxy shows wherever the proxy form does.
 - A component test that asserts a warning's whole text with `toHaveTextContent` may need the link's text excluded;
   such a test file is added to `files_touched` in the pull request, as AGENTS.md allows.
 
