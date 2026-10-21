@@ -8,6 +8,10 @@ depends_on: [S-106]
 covers: [C-21.FR-11, C-21.FR-12, C-21.AC-7, C-21.AC-8, C-21.AC-9, C-19.FR-9]
 files_touched:
   - api/openapi.yaml
+  - design/prd/l1/reference.md
+  - .github/workflows/docs.yml
+  - web/index.html
+  - internal/internalalerts/testdata/runbook_versions.json
   - internal/api/sessions.go
   - internal/api/sessions_test.go
   - docs/operations/runbooks/index.md
@@ -47,6 +51,36 @@ files_touched:
   - web/src/routes/destinations.index.tsx
   - web/src/routes/destinations.new.tsx
   - web/src/routes/destinations.$destinationId.tsx
+  - web/src/components/access-nav.test.tsx
+  - web/src/components/account-links-table.test.tsx
+  - web/src/components/alert-group-deliveries.test.tsx
+  - web/src/components/app-shell.test.tsx
+  - web/src/components/bridge-connection-fields.test.tsx
+  - web/src/components/bridge-destination-fields.test.tsx
+  - web/src/components/bulk-actions-bar.test.tsx
+  - web/src/components/command-buttons.test.tsx
+  - web/src/components/connection-form.test.tsx
+  - web/src/components/destination-form.test.tsx
+  - web/src/components/destination-preview-panel.test.tsx
+  - web/src/components/destination-secrets.test.tsx
+  - web/src/components/destination-test-panel.test.tsx
+  - web/src/components/link-bridge-dialog.test.tsx
+  - web/src/components/link-mattermost-dialog.test.tsx
+  - web/src/components/link-slack-dialog.test.tsx
+  - web/src/components/link-telegram-dialog.test.tsx
+  - web/src/components/live-indicator.test.tsx
+  - web/src/components/lookup-table-editor.test.tsx
+  - web/src/components/request-log.test.tsx
+  - web/src/components/request-record.test.tsx
+  - web/src/components/route-destinations.test.tsx
+  - web/src/components/slack-connection-fields.test.tsx
+  - web/src/components/slack-destination-fields.test.tsx
+  - web/src/components/snooze-dialog.test.tsx
+  - web/src/components/system-status-sections.test.tsx
+  - web/src/components/telegram-connection-fields.test.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
+  - web/src/components/timeline.test.tsx
+  - web/src/components/webhook-destination-fields.test.tsx
 acceptance:
   - "[C-21.FR-11, C-21.AC-7, C-19.FR-9] `Session` — the answer of `getCurrentSession`, `createSession` and `submitSessionTotp` — carries `docs_version`, computed from the binary's version by `internalalerts.RunbookVersion`: `0.1.0` and `0.1.7` give `0.1`, `1.12.3` gives `1.12`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234`, `0.2.0-rc.1`, `0.1.0+meta` and `main` give `latest` (`TestRunbookVersion`, `sessions_test.go`); the `runbook_url` of Internal alerts and the chart helper `muster.runbookVersion` follow the same rule (`chartcheck_test.go`), and a sign-in with `curl` on a binary built with `VERSION=0.1.0` shows `\"docs_version\":\"0.1\"`."
   - "[C-21.FR-11] `web/src/lib/docs.ts` builds every documentation URL from the build constant `https://muster-io.github.io/muster`, the session's `docs_version` (`latest` until the session has been read) and an entry of `docs-links.json` — `concepts/alert-groups.md` becomes `…/latest/concepts/alert-groups/`, `messengers/index.md#what-each-destination-type-can-do` becomes `…/latest/messengers/#what-each-destination-type-can-do` (`docs.test.ts`); no other file of `web/src` outside the generated client and tests names the site's address."
@@ -91,10 +125,12 @@ issue: 337
   but `-dev`, so a snapshot image linked its runbooks to a minor whose documentation may not exist yet; both change
   to this rule, which C-19.FR-9 now states, and their tests take the same table of versions.
 - **Link module** (`web/src/lib/docs.ts`): the constant `DOCS_SITE = "https://muster-io.github.io/muster"`, the only
-  place of the SPA that names it; `docsVersion()` from the cached session (`latest` before it is read); `docsUrl(key)`
-  for a key of `docs-links.json`, typed from the JSON's keys so that an unknown key does not compile. A target
-  `<path>.md#<anchor>` becomes `<site>/<version>/<path>/#<anchor>`, an `index.md` its directory, the anchor kept as
-  written.
+  place of the SPA that names it; `docsVersion(session)`, the session's `docs_version` or `latest` before the session
+  has been read (or for a value that is no version segment), and `useDocsVersion()`, the same for the session the root
+  route last read; `docsUrl(key, version?)` for a key of `docs-links.json`, typed from the JSON's keys so that an
+  unknown key does not compile, in `latest` when no version is given; `connectionDocs(type)` and
+  `destinationDocs(destination)`, the key of a Connection's or a Destination's page. A target `<path>.md#<anchor>`
+  becomes `<site>/<version>/<path>/#<anchor>`, an `index.md` its directory, the anchor kept as written.
 - **The list** (`web/src/lib/docs-links.json`): one object from key to target, sorted by key, holding the keys of
   reference.md's [Documentation links](../prd/l1/reference.md#documentation-links) that this story places
   (`page.alert_groups`, `page.alert_group`, `page.integrations`, `page.stored_snapshot`, `page.routes`,
@@ -103,17 +139,24 @@ issue: 337
   S-109 and S-110 add theirs.
 - **Components** (`web/src/components/docs-link.tsx`): `DocsLink` (`to`, `kind` — `guide`, `learn_more` or
   `how_to_fix` — and `about`, the words its accessible name adds), and `PageTitle` (`docs` and the title), which the
-  pages use in place of their `h1`; the icon is from the SPA's icon set, the link styled as the UI's other links.
+  pages use in place of their `h1`; its accessible name says what the guide of its key is about ("Guide: Routes",
+  "Guide: Telegram Connection", "Guide: Outgoing webhook templates"), not the page's title; the icon is from the
+  SPA's icon set, the link styled as the UI's other links.
 - **Placement**: each page of the rows of "Next to page titles" marked S-108 replaces its `h1` with `PageTitle`; a
   Connection page and a Destination page pick the key of their type, and an outgoing webhook Destination of its mode;
   `alert-group-header.tsx` carries the title of the Alert Group page.
 - **Texts** (`en.json`, `ru.json`): `docs.guide` "Guide" / «Руководство», `docs.learnMore` "Learn more" /
   «Подробнее», `docs.howToFix` "How to fix" / «Как исправить», and the accessible names `docs.guideAbout` "Guide:
-  {about} (opens in a new tab)" and the like, in both languages.
+  {about} (opens in a new tab)" and the like, and what each page's guide is about (`docs.guides.*`, «Руководство:
+  Подключение Telegram (откроется в новой вкладке)»), in both languages. `web/index.html` turns DNS prefetching off,
+  so that the browser resolves nothing of the site before a link is followed.
 - **Anchor check** (`internal/tools/docslinkcheck`, Go, no dependencies): `-links web/src/lib/docs-links.json -site
   site`; for each entry, the page `site/<path>/index.html` (or `site/<dir>/index.html` for an `index.md`) exists and,
-  for an anchor, holds an element with `id="<anchor>"`; it prints the number of entries checked. `make docs` runs it
-  after `zensical build`, so `make docs-check` and the docs workflow run it too.
+  for an anchor, holds an element with `id="<anchor>"`; it prints the number of entries checked, or one line per
+  problem on stderr, or the single line "site not built: <dir>" when there is no built site. `make docs` runs it
+  after `zensical build`, so `make docs-check` and the docs workflow run it too. A manual run of the docs workflow,
+  which publishes master's site as the newest released minor, also checks the `docs-links.json` of that release's
+  tag, whose binaries link to its entries; a tag older than the list is skipped with a message.
 - **End-to-end** (`web/e2e/docs-links.spec.ts`): the placement, texts and widths of the acceptance against `muster dev`;
   the site's address is answered by `context.route`, so the spec needs no network and checks that no `Referer` arrives.
 - **AGENTS.md**: the row of `make docs-check` names the check of linked anchors.
@@ -186,6 +229,13 @@ None.
 - The story has a small backend part — one field and the shared rule — in the same pull request, because the field is
   useless without the links and the links are wrong without the field; S-087 set the precedent.
 - With 40 files the story is at the edge of the size signal; the links next to fields and problems are S-109 and S-110.
+  The required `docs_version` also makes the TypeScript type check fail on every component test that builds a
+  `Session` for the query cache, so those 30 tests gain the line `docs_version: "latest"` and are listed in
+  `files_touched` too; they change nothing else, so the story is not split for them.
+- An outgoing webhook Destination in the mode `both` links to `page.destination.webhook_template`, as the row of
+  reference.md now says (D431): the templates page describes that mode.
+- `.github/workflows/docs.yml` is touched because a documentation correction republishes a released minor from
+  master, and master's list may have renamed an anchor that the release's binaries still link to.
 
 ## Coverage
 

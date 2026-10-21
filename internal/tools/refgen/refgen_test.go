@@ -57,7 +57,7 @@ func TestRunWritesPages(t *testing.T) {
 			"### `MusterOIDCSecretExpiring`\n\nwarning · no labels · C-19 · runbook: " +
 				"[`operations/runbooks/MusterOIDCSecretExpiring/`](../operations/runbooks/MusterOIDCSecretExpiring.md)\n\n",
 			"labels: `integration`, `integration_name`, the Integration's Static labels · C-07",
-			"(`latest` for a development build)"},
+			"(`latest` for any version that is not a release `X.Y.Z`)"},
 	}
 	for name, wants := range tests {
 		data, err := os.ReadFile(filepath.Join(dir, name))

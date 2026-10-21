@@ -91,7 +91,7 @@ HELM_CHECK_VALUES := $(sort $(wildcard $(CHART)/ci/*-values.yaml))
 HELM_CHECK_KUBE_VERSION := 1.33.0
 HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret and set existingSecret
 HELM_CHECK_DASHBOARD_ERROR := dashboard.grafanaDashboard.enabled needs dashboard.configMap.enabled
-HELM_CHECK_RELEASE_APP := v1.4.0-rc.1
+HELM_CHECK_RELEASE_APP := v1.4.2
 KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERSION) -schema-location default \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/4c8dc296d32b06d15ccde9668ff136c951f4d539/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
@@ -599,17 +599,20 @@ docs-vendor:
 # alerts, the chart rules of reference.md and the rules of the chart rendered with its all-options values, when a
 # rendered rule's runbook_url does not end in its page, or a page lacks one of its four sections; its commands are not
 # echoed, so that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other
-# files and not the navigation, so after the build the rendered references are checked, then that every page the nav
-# of mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the
-# nav, and that no page loads a script or a stylesheet from another host and every page with a diagram loads Mermaid
-# from the site. Last, llmsgen writes llms.txt from docs/llms.txt.tmpl, llms-full.txt, the Markdown version of every
-# page and the copied specifications into site/, with links into DOCS_VERSION, and checks them; it fails naming the file
-# when the template names a page, an anchor, a phrase, a setting or an enum that its source no longer has.
-docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references, build the site strictly into site/ and write its llms.txt for DOCS_VERSION
+# files and not the navigation, so after the build docslinkcheck fails, naming the key and the target, when a page or an
+# anchor of web/src/lib/docs-links.json, the links of the web UI, is missing from the site; then the rendered references
+# are checked, then that every page the nav of mkdocs.yml names exists under docs/ and that every page under docs/,
+# except those exclude_docs names, is in the nav, and that no page loads a script or a stylesheet from another host and
+# every page with a diagram loads Mermaid from the site. Last, llmsgen writes llms.txt from docs/llms.txt.tmpl,
+# llms-full.txt, the Markdown version of every page and the copied specifications into site/, with links into
+# DOCS_VERSION, and checks them; it fails naming the file when the template names a page, an anchor, a phrase, a setting
+# or an enum that its source no longer has.
+docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references, build the site strictly into site/, check the web UI's documentation links against it and write its llms.txt for DOCS_VERSION
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \
 		$(GO) run ./internal/tools/runbookcheck -manifest "$$tmp/chart.yaml"
 	$(ZENSICAL) build --strict --config-file mkdocs.yml
+	$(GO) run ./internal/tools/docslinkcheck -links web/src/lib/docs-links.json -site site
 	@test -s site/$(API_REFERENCE:docs/%=%) || \
 		{ echo "site/$(API_REFERENCE:docs/%=%) is missing: the API page links to it"; exit 1; }
 	@test -s site/$(BRIDGE_REFERENCE:docs/%=%) || \
@@ -640,7 +643,7 @@ docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and ser
 # phone: such entries are laid out as a definition list, a block per entry. imagecheck fails, naming the page, the line
 # and the image, on an image that does not exist, has no alternative text or comes from another site, and on a
 # screenshot under docs/assets/screenshots/ that no page references.
-docs-check: ## Fail on stale generated files, on long inline code in tables and on broken images, check the runbook pages, build the site strictly (broken links and anchors fail) and check llms.txt
+docs-check: ## Fail on stale generated files, on long inline code in tables and on broken images, check the runbook pages, build the site strictly (broken links and anchors fail), check the web UI's documentation links and llms.txt
 	$(MAKE) --no-print-directory generate-check
 	$(GO) run ./internal/tools/tablecheck docs
 	$(GO) run ./internal/tools/imagecheck docs

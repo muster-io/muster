@@ -47,6 +47,7 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { BulkActionsBar } from "../components/bulk-actions-bar";
 import { personName } from "../components/command-buttons";
 import type { CursorList } from "../components/data-table";
+import { PageTitle } from "../components/docs-link";
 import { NewAlertGroupsBanner } from "../components/new-alert-groups-banner";
 import { MineToggle } from "../components/owner-filter";
 import { StatusTabs } from "../components/status-tabs";
@@ -440,7 +441,7 @@ function AlertGroups() {
   };
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">{t("alertGroups.title")}</h1>
+      <PageTitle docs="page.alert_groups">{t("alertGroups.title")}</PageTitle>
       <StatusTabs
         tabs={ALERT_GROUP_TABS}
         value={tab}

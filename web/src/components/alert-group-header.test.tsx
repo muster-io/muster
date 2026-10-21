@@ -56,6 +56,7 @@ const SESSION: SessionRead = {
     csrf_token: "csrf",
     expires_at: "2026-10-13T09:00:00Z",
     idle_expires_at: "2026-10-13T09:00:00Z",
+    docs_version: "latest",
     method: "local",
     permissions: ["routes:read"],
   },
@@ -131,5 +132,31 @@ describe("AlertGroupHeader", () => {
     await expect
       .element(nextNotice())
       .toHaveTextContent(`Следующее напоминание: ${formatDateTime(AT, ZONE, "ru")}`);
+  });
+
+  test("shows the Guide link to the statuses and commands beside the title (C-21.FR-11)", async () => {
+    await renderHeader(group({}));
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent(group({}).title);
+    const link = page.getByRole("link", {
+      name: "Guide: Alert Group statuses and commands (opens in a new tab)",
+    });
+    await expect.element(link).toHaveTextContent("Guide");
+    await expect
+      .element(link)
+      .toHaveAttribute(
+        "href",
+        "https://muster-io.github.io/muster/latest/concepts/statuses-and-commands/",
+      );
+    await expect.element(link).toHaveAttribute("rel", "noopener noreferrer");
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: "Руководство: Статусы и команды групп алертов (откроется в новой вкладке)",
+        }),
+      )
+      .toHaveTextContent("Руководство");
   });
 });

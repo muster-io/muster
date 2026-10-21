@@ -42,13 +42,14 @@ const DefaultRunbookBase = "https://muster-io.github.io/muster"
 // version is the version of the binary whose runbooks the runbook_url points at; tests replace it.
 var version = func() string { return buildinfo.Version }
 
-var releaseRe = regexp.MustCompile(`^v?(\d+)\.(\d+)(\.\d+)?([-+].*)?$`)
+var releaseRe = regexp.MustCompile(`^v?(\d+)\.(\d+)\.\d+$`)
 
-// RunbookVersion is the segment of the documentation site for the binary of version v (C-19.FR-9): its major.minor,
-// or latest for the development version 0.0.0-dev and any version that is not a release number.
+// RunbookVersion is the segment of the documentation site for the binary of version v (C-19.FR-9, C-21.FR-11): the
+// major.minor of a release X.Y.Z, with an optional leading v, or latest for any other version: the development
+// version, snapshots, pre-releases and build metadata.
 func RunbookVersion(v string) string {
 	m := releaseRe.FindStringSubmatch(v)
-	if m == nil || (m[1] == "0" && m[2] == "0" && m[3] == ".0" && strings.HasPrefix(m[4], "-dev")) {
+	if m == nil {
 		return "latest"
 	}
 	return m[1] + "." + m[2]

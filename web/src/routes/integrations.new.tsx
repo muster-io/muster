@@ -14,6 +14,7 @@ import {
   getListIntegrationsQueryKey,
 } from "../api/gen/endpoints/integrations/integrations";
 import { RequirePermission } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { IntegrationForm } from "../components/integration-form";
 import { buttonVariants } from "../components/ui/button";
 
@@ -36,7 +37,7 @@ function NewIntegration() {
           <ArrowLeftIcon aria-hidden="true" />
           {t("integrations.title")}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("integrations.create.title")}</h1>
+        <PageTitle docs="page.integrations">{t("integrations.create.title")}</PageTitle>
       </div>
       <IntegrationForm
         submitLabel={t("integrations.create.submit")}

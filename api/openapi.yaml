@@ -8694,6 +8694,7 @@ components:
       - idle_expires_at
       - method
       - permissions
+      - docs_version
       properties:
         user:
           $ref: '#/components/schemas/User'
@@ -8715,6 +8716,13 @@ components:
           items:
             $ref: '#/components/schemas/Permission'
           description: Empty while the session is limited (`totp_required`, `totp_enrolment_required`).
+        docs_version:
+          type: string
+          pattern: ^(latest|[0-9]+\.[0-9]+)$
+          description: The version segment of the documentation site the web UI links to (C-21.FR-11), derived from
+            the version of the running build by the rule of the `runbook_url` of Internal alerts (C-19.FR-9) — the
+            `major.minor` of a release `X.Y.Z`, or `latest` for any other version (a development build, a snapshot
+            image, a pre-release).
     SessionMethod:
       type: string
       description: How the session signed in. OIDC accounts are re-checked at the identity provider per user, in the

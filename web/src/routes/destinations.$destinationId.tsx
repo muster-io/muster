@@ -52,6 +52,7 @@ import { BrokenBanner, HealthBadge } from "../components/destination-health";
 import { destinationMessengerName, useConnectionsById } from "../components/destination-label";
 import { DestinationPreviewPanel } from "../components/destination-preview-panel";
 import { DestinationTestPanel } from "../components/destination-test-panel";
+import { PageTitle } from "../components/docs-link";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { RequestLogTabs } from "../components/request-log";
 import { type RequestLogSearch, requestLogSearchSchema } from "../components/request-log-search";
@@ -65,6 +66,7 @@ import { buttonVariants } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
 import { problemText } from "../lib/api";
+import { destinationDocs } from "../lib/docs";
 
 export const Route = createFileRoute("/destinations/$destinationId")({
   validateSearch: requestLogSearchSchema,
@@ -356,9 +358,11 @@ function DestinationView({ destinationId }: { destinationId: string }) {
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
+            <PageTitle
+              docs={destination === undefined ? "page.destinations" : destinationDocs(destination)}
+            >
               {destination?.name ?? t("destinations.edit.title")}
-            </h1>
+            </PageTitle>
             {destination !== undefined && (
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                 <span className="wrap-anywhere" data-testid="destination-type">

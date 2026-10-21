@@ -95,15 +95,15 @@ scrapes into, named after the app.kubernetes.io/name label.
 
 {{/*
 The version segment of the documentation site for the appVersion, as internalalerts.RunbookVersion computes it for
-the binary (C-19.FR-9): major.minor of a release number, latest for 0.0.0-dev and for anything that is not one.
+the binary (C-19.FR-9): major.minor of a release X.Y.Z, with an optional leading v, and latest for any other version.
 */}}
 {{- define "muster.runbookVersion" -}}
 {{- $v := toString .Chart.AppVersion }}
-{{- $release := `^v?(\d+)\.(\d+)(\.\d+)?([-+].*)?$` }}
-{{- if or (not (regexMatch $release $v)) (regexMatch `^v?0\.0\.0-dev` $v) }}
-{{- "latest" }}
-{{- else }}
+{{- $release := `^v?(\d+)\.(\d+)\.\d+$` }}
+{{- if regexMatch $release $v }}
 {{- regexReplaceAll $release $v "${1}.${2}" }}
+{{- else }}
+{{- "latest" }}
 {{- end }}
 {{- end }}
 

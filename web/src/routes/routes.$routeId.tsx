@@ -23,6 +23,7 @@ import {
 } from "../api/gen/endpoints/routes/routes";
 import type { Route as RouteModel } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { RouteDeleteDialog } from "../components/route-delete-dialog";
 import { RouteForm } from "../components/route-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -111,9 +112,7 @@ function RouteEditor({ routeId }: { routeId: string }) {
           {t("routes.title")}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
-            {route?.name ?? t("routes.edit.title")}
-          </h1>
+          <PageTitle docs="page.routes">{route?.name ?? t("routes.edit.title")}</PageTitle>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
           {canWrite && route !== undefined && !route.is_default && (
             <RouteDeleteDialog route={route} />

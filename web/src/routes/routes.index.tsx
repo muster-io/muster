@@ -9,6 +9,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { RequirePermission, useCan } from "../components/app-shell";
+import { PageTitle } from "../components/docs-link";
 import { RouteList } from "../components/route-list";
 import { RouteSuggestions } from "../components/route-suggestions";
 import { buttonVariants } from "../components/ui/button";
@@ -28,13 +29,9 @@ function Routes() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1
-            ref={heading}
-            tabIndex={-1}
-            className="text-2xl font-semibold tracking-tight outline-none"
-          >
+          <PageTitle docs="page.routes" ref={heading} tabIndex={-1} className="outline-none">
             {t("routes.title")}
-          </h1>
+          </PageTitle>
           <p className="text-muted-foreground">{t("routes.hint")}</p>
         </div>
         {canWrite && (

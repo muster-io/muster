@@ -1160,6 +1160,37 @@
     "title": "Test and preview",
     "unsaved": "The test uses the saved settings: save your changes first."
   },
+  "docs": {
+    "guide": "Guide",
+    "guideAbout": "Guide: {{about}} (opens in a new tab)",
+    "guides": {
+      "alertGroup": "Alert Group statuses and commands",
+      "alertGroups": "Alert Groups",
+      "connection": {
+        "bridge": "Bridge Connection",
+        "mattermost": "Mattermost Connection",
+        "slack": "Slack Connection",
+        "telegram": "Telegram Connection"
+      },
+      "connections": "Connections",
+      "destination": {
+        "bridge": "Bridge Destination",
+        "mattermost": "Mattermost Destination",
+        "slack": "Slack Destination",
+        "telegram": "Telegram Destination",
+        "webhookEvents": "Outgoing webhook events",
+        "webhookTemplate": "Outgoing webhook templates"
+      },
+      "destinations": "Destinations",
+      "integrations": "Integrations",
+      "routes": "Routes",
+      "storedSnapshots": "Stored Snapshots"
+    },
+    "howToFix": "How to fix",
+    "howToFixAbout": "How to fix: {{about}} (opens in a new tab)",
+    "learnMore": "Learn more",
+    "learnMoreAbout": "Learn more: {{about}} (opens in a new tab)"
+  },
   "duration": {
     "between": "{{start}} – {{end}}",
     "days": "{{value}} d",

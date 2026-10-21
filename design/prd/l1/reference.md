@@ -172,7 +172,7 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Destinations, New Destination | `page.destinations` | `messengers/index.md#what-each-destination-type-can-do` | S-108 |
 | A Mattermost, Telegram or Bridge Destination | `page.destination.<type>` | `messengers/<type>.md#add-a-destination` | S-108 |
 | A Slack Destination | `page.destination.slack` | `messengers/slack.md#invite-the-bot-and-create-destinations` | S-108 |
-| An outgoing webhook Destination, events mode · template mode | `page.destination.webhook_events` · `page.destination.webhook_template` | `outgoing-webhooks/events.md` · `outgoing-webhooks/templates.md` | S-108 |
+| An outgoing webhook Destination, events mode · template mode or `both` | `page.destination.webhook_events` · `page.destination.webhook_template` | `outgoing-webhooks/events.md` · `outgoing-webhooks/templates.md` | S-108 |
 | Statistics | `page.statistics` | `concepts/alert-groups.md#statistics` | S-110 |
 | Profile | `page.profile` | `sign-in/index.md#your-profile` | S-110 |
 | Access → Users, a User | `page.users` | `sign-in/index.md#add-a-user` | S-110 |

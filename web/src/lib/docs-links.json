@@ -1,0 +1,19 @@
+{
+  "page.alert_group": "concepts/statuses-and-commands.md",
+  "page.alert_groups": "concepts/alert-groups.md",
+  "page.connection.bridge": "messengers/bridge.md",
+  "page.connection.mattermost": "messengers/mattermost.md",
+  "page.connection.slack": "messengers/slack.md",
+  "page.connection.telegram": "messengers/telegram.md",
+  "page.connections": "messengers/index.md",
+  "page.destination.bridge": "messengers/bridge.md#add-a-destination",
+  "page.destination.mattermost": "messengers/mattermost.md#add-a-destination",
+  "page.destination.slack": "messengers/slack.md#invite-the-bot-and-create-destinations",
+  "page.destination.telegram": "messengers/telegram.md#add-a-destination",
+  "page.destination.webhook_events": "outgoing-webhooks/events.md",
+  "page.destination.webhook_template": "outgoing-webhooks/templates.md",
+  "page.destinations": "messengers/index.md#what-each-destination-type-can-do",
+  "page.integrations": "integrations/alertmanager.md",
+  "page.routes": "concepts/routes-and-group-keys.md",
+  "page.stored_snapshot": "concepts/snapshot-semantics.md"
+}
