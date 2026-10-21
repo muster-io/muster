@@ -155,6 +155,8 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 ## Next steps
 
+- **Send your first alert to a messenger.** [First alert in a messenger](first-alert.md) connects Telegram, sends
+  the Alert Groups of one service to a channel, and acknowledges one from Telegram, step by step.
 - **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
   under **Organization → General**: see [Organization settings](configure/organization.md#general).
 - **Connect a messenger.** Connect [Mattermost](messengers/mattermost.md), [Slack](messengers/slack.md) or

@@ -40,6 +40,8 @@ of each Alert Group there up to date until the Alert Group is resolved.
 
 - [Quick start](https://muster-io.github.io/muster/latest/quick-start.md): run Muster with Docker Compose, sign in, connect Alertmanager and send a test alert,
   in about five minutes.
+- [First alert in a messenger](https://muster-io.github.io/muster/latest/first-alert.md): connect Telegram, route the Alert Groups of one service to a channel
+  and acknowledge one from Telegram, step by step with screenshots.
 - [Install](https://muster-io.github.io/muster/latest/install/helm.md): run Muster in production with [Helm](https://muster-io.github.io/muster/latest/install/helm.md) and an external
   [PostgreSQL](https://muster-io.github.io/muster/latest/install/database.md), and read the [requirements and tested versions](https://muster-io.github.io/muster/latest/install/versions.md) and how
   to verify a release.
@@ -235,6 +237,8 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
 
 ## Next steps
 
+- **Send your first alert to a messenger.** [First alert in a messenger](https://muster-io.github.io/muster/latest/first-alert.md) connects Telegram, sends
+  the Alert Groups of one service to a channel, and acknowledges one from Telegram, step by step.
 - **Set the time zone.** The Organization's time zone is UTC until you change it, so times in messages are UTC. Set it
   under **Organization → General**: see [Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#general).
 - **Connect a messenger.** Connect [Mattermost](https://muster-io.github.io/muster/latest/messengers/mattermost.md), [Slack](https://muster-io.github.io/muster/latest/messengers/slack.md) or
@@ -261,6 +265,170 @@ To resolve it, send the same request with both `"status": "firing"` changed to `
   [Operations](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md) for backups, upgrades and monitoring.
 
 `docker compose down` stops Muster and keeps its data; `docker compose down -v` deletes the database too.
+
+<!-- Source: https://muster-io.github.io/muster/latest/first-alert.md -->
+# First alert in a messenger
+
+This tutorial takes one alert from Alertmanager to a Telegram channel and back: you connect Alertmanager, connect a
+Telegram bot, send Alert Groups of one service to a channel, and acknowledge the Alert Group from Telegram. It starts
+where [Quick start](https://muster-io.github.io/muster/latest/quick-start.md) ends: Muster runs and you are signed in as the Admin. It takes about fifteen
+minutes.
+
+Telegram needs no address of Muster that Telegram can reach: Muster asks Telegram for updates itself. Before you start,
+in Telegram:
+
+- create a bot with [@BotFather](https://t.me/BotFather) and copy its token, as
+  [Create the bot](https://muster-io.github.io/muster/latest/messengers/telegram.md#create-the-bot) describes;
+- create a channel for the alerts, enable comments on it, and make the bot an admin of the channel and of its
+  discussion group, as [Enable comments on the channel](https://muster-io.github.io/muster/latest/messengers/telegram.md#enable-comments-on-the-channel) and
+  [Make the bot an admin](https://muster-io.github.io/muster/latest/messengers/telegram.md#make-the-bot-an-admin-of-the-channel-and-of-the-group) describe.
+
+The screenshots show the channel `@muster_alerts` and the bot `@muster_dev_b_bot`; yours have your names.
+
+## 1. Create the Integration
+
+An **Integration** is the way one Alertmanager sends to Muster. Open **Integrations**, select **Create integration**,
+name it after your Alertmanager, such as `Production Alertmanager`, and select **Create**.
+
+![The form of a new Integration with the name Production Alertmanager](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/01-create-integration.png){ .screenshot }
+
+On the Integration's page, under **Tokens**, select **Create token**, name it, such as `alertmanager`, and select
+**Create**. The dialog shows the **Token** and the **Alertmanager configuration** once; copy both before you select
+**Done**. Add the configuration to your Alertmanager and reload it. In the screenshot both are hidden.
+
+![The dialog of a new token, which shows the token and the Alertmanager configuration once](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/02-integration-token.png){ .screenshot }
+
+[Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) explains every line of the configuration.
+
+## 2. Connect Telegram
+
+A **Connection** holds the credentials Muster uses to talk to a messenger, here a Telegram bot. Open **Connections**, select **Create connection** and choose
+**Telegram**. Enter a **Name**, such as `Telegram`, select **Set a value** next to **Bot token** and paste the bot's
+token. Keep the **Bot API base URL** `https://api.telegram.org` and the **Update mode** **Long polling**.
+
+Select **Check connection**. The check runs in three steps against the values in the form and saves nothing; it names
+the bot when they pass. Then select **Save**.
+
+![The Connection check of the form: the dry probe, getMe and getWebhookInfo passed, connected as the bot](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/03-connection-check.png){ .screenshot }
+
+[Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md#create-the-connection) explains each field and each step of the check.
+
+## 3. Add a Destination
+
+A **Destination** is the channel Muster posts to. Open **Destinations**, select **Create destination** and choose
+**Telegram**. Choose the **Connection** of step 2, enter the **Channel** as `@username`, or its chat id for a private
+channel, give it a **Name**, such as `alerts`, and select **Save**. Saving runs the **Destination check**: the bot is
+an admin of the channel and of its discussion group. The saved Destination shows the discussion group it found.
+
+![The saved Destination alerts: Telegram, Healthy, the channel Muster alerts and its discussion group](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/04-destination.png){ .screenshot }
+
+Under **Test and preview**, on the tab **Test**, select **Send test message**. A message marked 🧪 appears in the
+channel, and the result shows the request Muster sent, with the bot token hidden. Links in the screenshots start with
+`http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`.
+
+![The result of the test message: Test passed, Message: Sent, with the request to the Bot API](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/05-test-message.png){ .screenshot }
+
+[Connect Telegram](https://muster-io.github.io/muster/latest/messengers/telegram.md#add-a-destination) lists what the Destination check needs and what it says
+when it fails.
+
+## 4. Send Alert Groups to the Destination
+
+A **Route** picks Alerts by their labels and decides where their Alert Groups go. Alerts that no other Route takes go
+to the **Default route**, which has no Destination yet. Open **Routes**, select **Create route** and choose the profile
+**On-call**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
+**Group key**, remove `severity` and `cluster` and add `service`, so that each alert name of each service is one Alert
+Group. Under **Destinations**, choose `alerts` in **Add a Destination**, then select **Create**.
+
+![The Route checkout with the Matcher service="checkout", the Group key alertname and service, and the Destination alerts](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/06-route.png){ .screenshot }
+
+[Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) explains Matchers, Group keys and the order of the Routes.
+
+## 5. Link your Telegram account
+
+A button in Telegram acts as a Muster User only through an **Account link**. Open your profile from the user menu and,
+under **Messenger accounts**, select **Link Telegram**. With more than one Telegram Connection, choose the one of step
+2 and select **Get link**. Select **Open Telegram**, or scan the QR code with your phone, and press **Start** in the
+chat with the bot. The link works once and expires after a few minutes; in the screenshot the code and the time are
+hidden.
+
+![The dialog Link Telegram after Get link: the button Open Telegram and its QR code, with the QR code and the expiry time hidden](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/07-link-telegram.png){ .screenshot }
+
+The dialog closes once the bot has linked your account, and your profile shows it.
+
+![Messenger accounts: Telegram, @oncall_admin, for all Telegram bots](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/08-telegram-linked.png){ .screenshot }
+
+[Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-telegram) explains the other messengers.
+
+## 6. Send a test alert
+
+Send an alert of the service `checkout`, as Alertmanager would send it, with the request of
+[Quick start](https://muster-io.github.io/muster/latest/quick-start.md#send-a-test-alert) and the token of step 1 in `TOKEN`:
+
+```sh
+TOKEN=mstr_int_...
+curl -sS -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/v1/ingest \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @- <<EOF
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HighErrorRate\"}",
+  "status": "firing",
+  "receiver": "muster-prod-eu",
+  "groupLabels": {"alertname": "HighErrorRate"},
+  "commonLabels": {"alertname": "HighErrorRate", "service": "checkout", "severity": "critical"},
+  "commonAnnotations": {"summary": "Error rate of checkout is above 5 %"},
+  "externalURL": "http://localhost:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {"alertname": "HighErrorRate", "service": "checkout", "severity": "critical"},
+      "annotations": {"summary": "Error rate of checkout is above 5 %"},
+      "startsAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "endsAt": "0001-01-01T00:00:00Z"
+    }
+  ]
+}
+EOF
+```
+
+Muster answers `202`. Open **Alert Groups**: the Alert Group `HighErrorRate` is there, Firing, on the Route
+`checkout`. Its page shows the Alert, its labels, its delivery to `alerts` and its Timeline.
+
+![The page of the Alert Group HighErrorRate, Firing, with its Alert and its Timeline](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/09-alert-group.png){ .screenshot }
+
+At the same moment the bot posts its **Root message** in the channel: the status, the title, the labels and the
+buttons. The Destination's **Preview**, based on the Alert Group, shows that message as Telegram draws it.
+
+![The preview of the Root message in the Destination alerts, with its buttons Ack, Resolve and the Snooze durations](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/10-preview.png){ .screenshot }
+
+[Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md) explains how Alerts become Alert Groups.
+
+## 7. Acknowledge it in Telegram
+
+In the channel, press **Ack** under the Root message. Telegram shows "Done: Acknowledge", the message changes to
+Acknowledged, and the Alert Group's page names you as its **Owner**. Its Timeline records that you acknowledged it
+through Telegram.
+
+![The Alert Group Acknowledged, Owner admin, with the Timeline entry admin via Telegram](https://muster-io.github.io/muster/latest/assets/screenshots/first-alert/11-acknowledged.png){ .screenshot }
+
+[Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md) lists what each button does.
+
+## Next steps
+
+Mattermost, Slack and Bridges differ only in steps 2, 3 and 5:
+
+- **Mattermost**: [create the Connection](https://muster-io.github.io/muster/latest/messengers/mattermost.md#create-the-connection) with the server's address and
+  a bot token, [add a Destination](https://muster-io.github.io/muster/latest/messengers/mattermost.md#add-a-destination) for a channel the bot is a member of, and
+  [link the account](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-mattermost) with a code the bot sends. Mattermost calls Muster for
+  button presses, so it must reach `MUSTER_INGEST_URL`.
+- **Slack**: [create the app and the Connection](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-connection), invite the bot and
+  [create Destinations](https://muster-io.github.io/muster/latest/messengers/slack.md#invite-the-bot-and-create-destinations), and
+  [link the account](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack). In Socket Mode, Slack needs no address of Muster.
+- **Any other messenger** through a [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#create-the-connection), with a Destination for each
+  [channel](https://muster-io.github.io/muster/latest/messengers/bridge.md#add-a-destination).
+
+Then set the [time zone of the Organization](https://muster-io.github.io/muster/latest/configure/organization.md#general), change
+[what messages say](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md), and watch the path from Alertmanager with a
+[Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md).
 
 <!-- Source: https://muster-io.github.io/muster/latest/install/helm.md -->
 # Install with Helm
@@ -292,9 +460,7 @@ helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
 
 The release signs the chart with cosign, keyless, as it signs the image; [Verify a release](https://muster-io.github.io/muster/latest/install/versions.md#verify-a-release)
 shows how to check the signature before you install. Artifact Hub lists the released versions of the chart, each
-with its changes and the image it runs, pinned by digest:
-
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/muster)](https://artifacthub.io/packages/search?repo=muster)
+with its changes and the image it runs, pinned by digest: [Muster on Artifact Hub](https://artifacthub.io/packages/search?repo=muster).
 
 !!! note "Before the first release"
     Nothing is released yet, so the registry holds no chart. Install it from a clone of the repository instead, with the
@@ -2120,16 +2286,33 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_IN
 
 The bot token works even when **Enable Personal Access Tokens** is off, its default.
 
-In Muster, create a **Connection** of type Mattermost with the server's address and the bot token, then **Check** it:
-the check reads the bot's own user with the token and shows the bot's name. Then create a **Destination** for each
-channel; saving it checks that the bot is a member of the channel and refuses the Destination otherwise, naming the
-failing check.
+## Create the Connection
+
+1. In Muster, open **Connections**, select **Create connection** and choose **Mattermost**.
+2. Enter a **Name** and the **Server URL**, the address people open Mattermost at, such as `https://chat.example.org`.
+   Select **Set a value** next to **Bot token** and paste the bot's access token.
+
+    ![The form of a new Mattermost Connection: the name, the server URL https://chat.example.org and the bot token](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**, below the form. The check reads the bot's own user with the token and shows the
+   bot's name. When the bot may not make ephemeral posts, it passes with a warning: see
+   [Where answers to presses show](https://muster-io.github.io/muster/latest/messengers/mattermost.md#where-answers-to-presses-show).
+
+    ![The Connection check: connected as the bot, with the warning that answers to presses show in the Thread](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/02-check-connection.png){ .screenshot }
+
+4. Select **Save**. The saved Connection shows its **callback address**, which Mattermost calls when someone presses
+   a button: `MUSTER_INGEST_URL` followed by `/api/v1/callbacks/mattermost/CN…`. In the screenshot it is
+   `http://localhost:8081`, the ingest address of a development installation; yours starts with your
+   `MUSTER_INGEST_URL`. [Let button presses reach Muster](https://muster-io.github.io/muster/latest/messengers/mattermost.md#let-button-presses-reach-muster) says what the server
+   needs to call it.
+
+    ![The card Button presses of the saved Connection: the callback address and the hint to allow its host in AllowedUntrustedInternalConnections](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/03-saved-connection.png){ .screenshot }
 
 ## Check before saving
 
-**Check connection** also works in the form, before anything is saved: in the form of a new Connection, and on the
-page of a saved one while the form holds changes. It checks the values in the form — the server URL, the proxy and the
-bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets no entry.
+**Check connection** checks the values in the form, before anything is saved: in the form of a new Connection, as
+above, and on the page of a saved one while the form holds changes. It saves nothing: no bot name is recorded and the
+Audit log gets no entry.
 
 - With the bot token typed in the form, the check reads the bot's own user at the server URL in the form, through the
   proxy in the form, and shows the bot's name.
@@ -2150,6 +2333,35 @@ curl -X POST https://muster.example.org/api/v1/connections/checks \
 ```
 
 Add `"connection_id":"CN…"` to check the changes of a saved Connection, whose stored token the rule above may use.
+
+## Add a Destination
+
+A Mattermost Destination is one channel of one team that the bot is a member of.
+
+1. Open **Destinations**, select **Create destination** and choose **Mattermost**.
+2. Choose the **Connection**, the **Team** and the **Channel**. The list shows the channels the bot is a member of:
+   add the bot to a channel to send there. The **Name** takes the channel's name; change it if you like.
+
+    ![The form of a new Mattermost Destination: the Connection, the team dev and the channel alerts](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/04-new-destination.png){ .screenshot }
+
+3. Select **Save**. Saving runs the **Destination check**: the bot is a member of the channel, which belongs to the
+   team and is not archived. A Destination that fails the check is not saved, and the check names what failed.
+
+    ![The saved Destination alerts: Mattermost, Healthy](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**. Muster posts a message marked 🧪;
+   the result shows the request it sent and Mattermost's answer. Links in the screenshot start with
+   `http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`.
+
+    ![The result of the test message: Test passed, Message: Sent, with the request to the Mattermost server](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/06-test-message.png){ .screenshot }
+
+    Muster then presses the message's first button through the bot. The step **Button press** says whether the press
+    reached Muster at the callback address; when it did not, read
+    [Let button presses reach Muster](https://muster-io.github.io/muster/latest/messengers/mattermost.md#let-button-presses-reach-muster).
+
+    ![The step Button press of the test: Button presses reach Muster](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/mattermost/07-button-press.png){ .screenshot }
+
+**Check** on the Destination page runs the Destination check at any time.
 
 ## Direct messages
 
@@ -2250,23 +2462,36 @@ In the examples, `MUSTER_INGEST_URL` is `https://ingest.muster.example.org` and 
    stores it encrypted and never shows it again.
 3. Leave the bot's privacy mode on, the default. Muster needs no other setting in BotFather.
 
-In Muster, create a **Connection** of type Telegram with the bot token, then **Check** it. Its **Bot API base URL** is
-`https://api.telegram.org` unless Telegram is blocked in your network; for a proxy or another address, see
-[Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md). The check runs in steps and shows the latency of
-each and whether it went through the proxy:
+## Create the Connection
 
-1. a dry probe, `GET <base>/bot0:x/getMe` without your token, which only a Bot API answers with `401` and JSON — it
-   tells a wrong address, a wrong path prefix, a proxy that refuses or a web server that is not a Bot API apart before
-   your token goes anywhere;
-2. `getMe` with your token, which names the bot;
-3. `getWebhookInfo`, which says whether a webhook is set and how many updates wait.
+1. In Muster, open **Connections**, select **Create connection** and choose **Telegram**.
+2. Enter a **Name**, select **Set a value** next to **Bot token** and paste the bot token. Keep the **Bot API base
+   URL** `https://api.telegram.org` unless Telegram is blocked in your network; for a proxy or another address, see
+   [Telegram in restricted networks](https://muster-io.github.io/muster/latest/messengers/telegram-restricted-networks.md). Keep the **Update mode** **Long polling** unless
+   Telegram can reach Muster: see [Long polling or webhook](https://muster-io.github.io/muster/latest/messengers/telegram.md#long-polling-or-webhook).
+
+    ![The form of a new Telegram Connection: the name, the bot token, the default Bot API base URL and long polling](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**, below the form. The check runs in steps and shows the latency of each and whether it
+   went through the proxy:
+
+    1. a dry probe, `GET <base>/bot0:x/getMe` without your token, which only a Bot API answers with `401` and JSON — it
+       tells a wrong address, a wrong path prefix, a proxy that refuses or a web server that is not a Bot API apart
+       before your token goes anywhere;
+    2. `getMe` with your token, which names the bot;
+    3. `getWebhookInfo`, which says whether a webhook is set and how many updates wait.
+
+    ![The Connection check: the dry probe, getMe and getWebhookInfo passed, connected as the bot](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/02-check-connection.png){ .screenshot }
+
+4. Select **Save**. On the saved Connection, **Check connection** records the bot, which the page then names.
+
+    ![The saved Connection Telegram with its bot, the stored token and the default Bot API base URL](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/03-saved-connection.png){ .screenshot }
 
 ## Check before saving
 
-**Check connection** also works in the form, before anything is saved: in the form of a new Connection, and on the
-page of a saved one while the form holds changes. It checks the values in the form — the Bot API base URL, the update
-mode, the proxy and the bot token, if you typed one — and saves nothing: no bot name is recorded and the Audit log gets
-no entry.
+**Check connection** checks the values in the form, before anything is saved: in the form of a new Connection, as
+above, and on the page of a saved one while the form holds changes. It saves nothing: no bot name is recorded and the
+Audit log gets no entry.
 
 - With the bot token typed in the form, the check runs its three steps against the base URL in the form, through the
   proxy in the form, with that token.
@@ -2309,27 +2534,49 @@ You never enter the group in Muster: the Destination check finds it through the 
    group. The bot must be an admin, not a plain member: Telegram does not send a bot that is a plain member the copies
    of the channel's posts in the group, which the Threads of the Root messages hang under.
 
-In Muster, create a **Destination** of type Telegram with the Connection and the channel only — its chat id, such as
-`-1001234567890`, or `@username` for a public channel. Saving it runs the **Destination check**:
+## Add a Destination
 
-- `getChat` on the channel: it exists and is a channel, and it names its discussion group;
-- `getChatMember` for the bot in the channel: an admin allowed to post and to edit messages;
-- `getChatMember` for the bot in the discussion group: an admin there.
+A Telegram Destination is the channel only: Muster finds its discussion group.
 
-A Destination that fails the check is not saved, and the check says what to fix:
+1. Open **Destinations**, select **Create destination** and choose **Telegram**.
+2. Choose the **Connection** and enter the **Channel**: its chat id, such as `-1001234567890`, or `@username` for a
+   public channel. Give the Destination a **Name**.
 
-- "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its
-  discussion group."
-- "The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post messages."
-- "The bot is not an admin of the channel.", "The bot may not post messages in the channel." or "The bot may not edit
-  messages in the channel."
+    ![The form of a new Telegram Destination: the Connection, the channel @muster_alerts and the name alerts](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/04-new-destination.png){ .screenshot }
 
-The Destination then shows the discussion group it found. Muster keeps sending to that channel and that group: when
-comments are moved to another group later, or the `@username` to another channel, the check fails with "The channel or
-its discussion group changed since the Destination was saved. Save the Destination again." until you save it. **Check** on the Destination page runs the same check at any
-time, and `muster doctor` prints one line per Telegram Destination with its result. When Telegram refuses the bot later
-— for example, someone removed its admin rights — the Destination becomes **Broken**; Muster runs the same check every
-few minutes while nothing waits for the Destination, and ends the Broken state once the check passes again.
+3. Select **Save**. Saving runs the **Destination check**:
+
+    - `getChat` on the channel: it exists and is a channel, and it names its discussion group;
+    - `getChatMember` for the bot in the channel: an admin allowed to post and to edit messages;
+    - `getChatMember` for the bot in the discussion group: an admin there.
+
+    A Destination that fails the check is not saved, and the check says what to fix:
+
+    - "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates
+      its discussion group."
+    - "The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post
+      messages."
+    - "The bot is not an admin of the channel.", "The bot may not post messages in the channel." or "The bot may not
+      edit messages in the channel."
+
+    The saved Destination shows the channel and the discussion group it found.
+
+    ![The saved Destination alerts: Telegram, Healthy, the channel Muster alerts and its discussion group](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**. A message marked 🧪 appears in the
+   channel; the result shows the request Muster sent, with the bot token as `bot[redacted]`, and Telegram's answer.
+   Links in the screenshot start with `http://localhost:8080`, the address of a development installation; yours start
+   with your `MUSTER_PUBLIC_URL`.
+
+    ![The result of the test message: Test passed, Message: Sent, with the request to the Bot API](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/telegram/06-test-message.png){ .screenshot }
+
+Muster keeps sending to that channel and that group: when comments are moved to another group later, or the
+`@username` to another channel, the check fails with "The channel or its discussion group changed since the
+Destination was saved. Save the Destination again." until you save it. **Check** on the Destination page runs the same
+check at any time, and `muster doctor` prints one line per Telegram Destination with its result. When Telegram refuses
+the bot later — for example, someone removed its admin rights — the Destination becomes **Broken**; Muster runs the
+same check every few minutes while nothing waits for the Destination, and ends the Broken state once the check passes
+again.
 
 ## Long polling or webhook
 
@@ -2832,16 +3079,28 @@ Muster stores all three secrets encrypted, never shows them again and writes the
 
 ## Create the Connection
 
-In Muster, create a **Connection** of type Slack. Enter a name, choose the event mode, and enter the bot token and, in
-Socket Mode, the app-level token, or over HTTP the Slack signing secret. A Slack Connection has no address field, since
-Slack's address is fixed. Then **Check connection**. The check runs in steps and shows the latency of each and whether
-it went through the proxy:
+1. In Muster, open **Connections**, select **Create connection** and choose **Slack**.
+2. Enter a **Name**, choose the **Event mode**, and enter the **Bot token** and, in Socket Mode, the **App-level
+   token**, or over HTTP the **Slack signing secret**, each after **Set a value**. A Slack Connection has no address
+   field, since Slack's address is fixed.
 
-1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not a
-   bot's;
-2. **Scopes**: every scope of the manifest is granted;
-3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
-   connection for it. The check opens no WebSocket.
+    ![The form of a new Slack Connection in Socket Mode, with the bot token and the app-level token](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**. The check runs in steps and shows the latency of each and whether it went through the
+   proxy:
+
+    1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not
+       a bot's;
+    2. **Scopes**: every scope of the manifest is granted;
+    3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
+       connection for it. The check opens no WebSocket.
+
+    ![The Connection check: the token, the scopes and the app-level token passed, with the bot and the workspace](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/02-check-connection.png){ .screenshot }
+
+4. Select **Save**. On the saved Connection, **Check connection** records the bot, the workspace and the app, which
+   the page then names.
+
+    ![The saved Connection Slack with its bot, workspace and app, in Socket Mode](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/03-saved-connection.png){ .screenshot }
 
 Over HTTP no request can show that Slack reaches the callback address or that the Slack signing secret is right, because
 a bot cannot press its own button. The first press does: see [The test message](https://muster-io.github.io/muster/latest/messengers/slack.md#the-test-message).
@@ -2859,10 +3118,28 @@ or private:
 /invite @Muster
 ```
 
-In Muster, create a **Destination** of type Slack with the Connection and the channel. The form lists the public and
-private channels the bot is a member of; for a channel that is not listed, type its id as Slack shows it in the
-channel's details, `C…` or `G…`. A direct chat or a person cannot be a Destination. Saving runs the **Destination
-check**, which asks Slack about the channel with `conversations.info` and refuses a Destination that fails:
+In Muster, create a **Destination** of type Slack with the Connection and the channel:
+
+1. Open **Destinations**, select **Create destination** and choose **Slack**.
+2. Choose the **Connection** and the **Channel**. The form lists the public and private channels the bot is a member
+   of; for a channel that is not listed, type its id as Slack shows it in the channel's details, `C…` or `G…`. A direct
+   chat or a person cannot be a Destination. Give the Destination a **Name**.
+
+    ![The form of a new Slack Destination: the Connection Slack, the channel #alerts and the name alerts](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/04-new-destination.png){ .screenshot }
+
+3. Select **Save**, which runs the Destination check below. The saved Destination shows the channel's name.
+
+    ![The saved Destination alerts: Slack, Healthy, the channel #alerts](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**: a message marked 🧪 appears in the
+   channel. In the screenshot the request line, which names a development server, is hidden, and links start with
+   `http://localhost:8080`, the address of a development installation; yours start with your `MUSTER_PUBLIC_URL`. See
+   [The test message](https://muster-io.github.io/muster/latest/messengers/slack.md#the-test-message).
+
+    ![The result of the test message: Test passed, Message: Sent](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/slack/06-test-message.png){ .screenshot }
+
+Saving runs the **Destination check**, which asks Slack about the channel with `conversations.info` and refuses a
+Destination that fails:
 
 - `channel_not_found`: no such channel, or a private channel the bot is not in;
 - `channel_archived`: the channel is archived;
@@ -3090,9 +3367,9 @@ To write a bridge, read [Write a bridge](https://muster-io.github.io/muster/late
 [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) reference.
 
 In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_INGEST_URL` is
-`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The examples use the
-[API](https://muster-io.github.io/muster/latest/reference/api.md), with a Personal access token of an Admin in `MUSTER_TOKEN`; the web UI has the same forms
-under **Connections** and **Destinations**.
+`https://ingest.muster.example.org` and the bridge listens on `https://bridge.example.org`. The steps use the web UI;
+the examples do the same with the [API](https://muster-io.github.io/muster/latest/reference/api.md), with a Personal access token of an Admin in
+`MUSTER_TOKEN`.
 
 ## Create the Connection
 
@@ -3117,6 +3394,24 @@ Choose how the bridge reports **events** — the presses of buttons and the mess
 A Connection also has a **proxy**, for a bridge that Muster reaches only through one, and a **limiter**: 10 requests
 per second by default, shared by all its Destinations. When the bridge answers that it is rate-limited, Muster waits
 as long as it asks, whatever the limiter allows.
+
+1. Open **Connections**, select **Create connection** and choose **Bridge**.
+2. Enter a **Name**, the **Base URL** and, after **Set a value**, the **Token**. Choose the event delivery mode,
+   **Polling** or **Push**; with push, also the push secret.
+
+    ![The form of a new Bridge Connection: the name Team chat, the base URL https://bridge.example.org, the token and polling](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/01-new-connection.png){ .screenshot }
+
+3. Select **Check connection**, below the form. It runs the steps of [What the check shows](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-the-check-shows)
+   against the values in the form and saves nothing.
+
+    ![The Connection check: the steps Bridge info and Event delivery passed](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/02-check-connection.png){ .screenshot }
+
+4. Select **Save**, then **Check connection** on the saved Connection: Muster keeps what the bridge offers, which the
+   page shows.
+
+    ![What the bridge offers, as the saved Connection shows it: the bridge, the messenger, the protocol version and its features](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/03-saved-connection.png){ .screenshot }
+
+With the API:
 
 ```sh
 curl -X POST https://muster.example.org/api/v1/connections \
@@ -3203,6 +3498,25 @@ A **Bridge Destination** is one channel of the messenger, named by its **channel
 names it, which the bridge's documentation explains how to find. Its **Mention settings** take nobody or chosen
 users; everyone in the chat and messenger groups are not available through a bridge. Its limiter allows 30 requests
 per minute by default, sends and edits together.
+
+1. Open **Destinations**, select **Create destination** and choose **Bridge**.
+2. Choose the **Connection**, enter the **Channel id** and a **Name**.
+
+    ![The form of a new Bridge Destination: the Connection Team chat, the channel id ch-alerts and the name alerts](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/04-new-destination.png){ .screenshot }
+
+3. Select **Save**, which runs the Destination check below. The saved Destination shows the channel's name as the
+   bridge reports it.
+
+    ![The saved Destination alerts: Bridge, Healthy, with the channel's name](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/05-saved-destination.png){ .screenshot }
+
+4. Under **Test and preview**, on the tab **Test**, select **Send test message**: the bridge posts a message marked 🧪,
+   and the result shows the envelope Muster sent. Links in the screenshot start with `http://localhost:8080`, the
+   address of a development installation; yours start with your `MUSTER_PUBLIC_URL`. See
+   [Test messages and previews](https://muster-io.github.io/muster/latest/messengers/bridge.md#test-messages-and-previews).
+
+    ![The result of the test message: Test passed, Message: Sent, with the envelope sent to the bridge](https://muster-io.github.io/muster/latest/assets/screenshots/messengers/bridge/06-test-message.png){ .screenshot }
+
+With the API:
 
 ```sh
 curl -X POST https://muster.example.org/api/v1/destinations \

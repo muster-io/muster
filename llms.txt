@@ -69,6 +69,7 @@
 
 - [Home](https://muster-io.github.io/muster/latest/index.md): Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager.
 - [Quick start](https://muster-io.github.io/muster/latest/quick-start.md): Run Muster with Docker Compose on one machine, sign in, connect Alertmanager and send a test alert.
+- [First alert in a messenger](https://muster-io.github.io/muster/latest/first-alert.md): This tutorial takes one alert from Alertmanager to a Telegram channel and back: you connect Alertmanager, connect a Telegram bot, send Alert Groups of one service to a channel, and acknowledge the Alert Group from Telegram.
 
 ### Install
 
@@ -164,4 +165,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 650456 bytes, about 162614 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 673290 bytes, about 168322 tokens.
