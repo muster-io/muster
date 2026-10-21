@@ -1578,24 +1578,62 @@ func TestIntegrationRequestLogSocketEnvelopes(t *testing.T) {
 	})
 }
 
+// TestIntegrationOIDCGroupsClaimSeenAt runs 0020 over configured OIDC settings that carry the warning: up adds the
+// nullable groups_claim_seen_at and keeps the row as it was; down drops the column; up again works.
+func TestIntegrationOIDCGroupsClaimSeenAt(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 19)
+		e.exec(t, `INSERT INTO oidc_settings (org_id, enabled, issuer_url, client_id, scopes, groups_claim,
+			group_mappings, unmatched_role, sync_role, skip_totp_with_idp_mfa, groups_claim_missing_since, updated_at)
+			SELECT id, true, 'https://idp.example.org', 'muster', '{}', 'groups', '[]', 'none', true, false,
+				'2026-10-05', '2026-10-05'
+			FROM organizations`)
+		column := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'oidc_settings' AND column_name = 'groups_claim_seen_at'`)
+		}
+		if got := column(t); got != 0 {
+			t.Fatal("before 0020: the column exists")
+		}
+
+		e.step(t, 1)
+		if got := e.count(t, `SELECT count(*) FROM oidc_settings
+			WHERE groups_claim_seen_at IS NULL AND groups_claim_missing_since IS NOT NULL AND version = 1`); got != 1 {
+			t.Errorf("after up: %d rows as they were, want 1", got)
+		}
+		e.exec(t, `UPDATE oidc_settings SET groups_claim_seen_at = '2026-10-06', groups_claim_missing_since = NULL`)
+
+		e.step(t, -1)
+		if got := column(t); got != 0 {
+			t.Error("after down: the column is left")
+		}
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 20 || column(t) != 1 {
+			t.Errorf("up again: version %d, dirty %v, %v", v, dirty, err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (19)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (20)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":19`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":20`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":19`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":20`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1611,10 +1649,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (19)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (20)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":19`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":20`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

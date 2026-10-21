@@ -330,6 +330,86 @@ func TestIntegrationSettings(t *testing.T) {
 	})
 }
 
+// TestIntegrationGroupsClaimSeen is C-03.FR-6 against PostgreSQL: a check of discovery without the groups claim warns
+// before any sign-in; a sign-in whose token carries the claim records groups_claim_seen_at and clears the warning, which
+// later checks do not raise again, without moving the version; saving another groups claim forgets the claim seen, so
+// the next check warns; a sign-in whose token lacks the claim raises the warning even after the claim was seen.
+func TestIntegrationGroupsClaimSeen(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		w := setup(t, s)
+		missing := func(ws []oidc.Warning) bool {
+			return slices.ContainsFunc(ws, func(x oidc.Warning) bool { return x.Kind == oidc.WarningGroupsClaimMissing })
+		}
+		check := func(t *testing.T) []oidc.Warning {
+			t.Helper()
+			res, err := w.svc.Check(t.Context())
+			if err != nil || !res.OK {
+				t.Fatalf("check = %+v, %v", res, err)
+			}
+			return res.Warnings
+		}
+		state := func(t *testing.T) string {
+			t.Helper()
+			return fmt.Sprint(w.scalar(t, `SELECT format('seen=%s missing=%s version=%s',
+				groups_claim_seen_at IS NOT NULL, groups_claim_missing_since IS NOT NULL, version) FROM oidc_settings`))
+		}
+		w.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+		if ws := check(t); !missing(ws) {
+			t.Fatalf("before any sign-in: %+v", ws)
+		}
+		if got := state(t); got != "seen=false missing=true version=1" {
+			t.Errorf("before any sign-in: %s", got)
+		}
+
+		if out := w.signIn(t, fakeoidc.User{Subject: "u-1", PreferredUsername: "ada", Groups: []string{"oncall"}},
+			""); out.Session == nil {
+			t.Fatalf("sign-in = %+v", out)
+		}
+		if got := state(t); got != "seen=true missing=false version=1" {
+			t.Errorf("after a sign-in with the claim: %s", got)
+		}
+		if ws := check(t); missing(ws) {
+			t.Errorf("a check after the claim was seen: %+v", ws)
+		}
+		if got := state(t); got != "seen=true missing=false version=1" {
+			t.Errorf("after the check: %s", got)
+		}
+
+		st, err := w.svc.Get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes := st.Scopes
+		if _, err := w.svc.Update(t.Context(), oidc.Requester{Actor: audit.System, Transport: audit.TransportUI},
+			&st.Version, oidc.Input{Enabled: st.Enabled, DisplayName: &st.DisplayName, IssuerURL: st.IssuerURL,
+				ClientID: st.ClientID, Scopes: &scopes, GroupsClaim: "roles", GroupMappings: st.GroupMappings,
+				UnmatchedRole: oidc.UnmatchedViewer, SyncRole: st.SyncRole}); err != nil {
+			t.Fatal(err)
+		}
+		if got := state(t); got != "seen=false missing=false version=2" {
+			t.Errorf("after another groups claim: %s", got)
+		}
+		if ws := check(t); !missing(ws) {
+			t.Errorf("a check after another groups claim: %+v", ws)
+		}
+
+		if _, err := w.d.Pool.Exec(t.Context(), `UPDATE oidc_settings
+			SET groups_claim_seen_at = $1, groups_claim_missing_since = NULL`, t0); err != nil {
+			t.Fatal(err)
+		}
+		if ws := check(t); missing(ws) {
+			t.Errorf("a check with the claim seen: %+v", ws)
+		}
+		w.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
+		if got := state(t); got != "seen=false missing=true version=2" {
+			t.Errorf("after a sign-in without the claim: %s", got)
+		}
+		if ws := check(t); !missing(ws) {
+			t.Errorf("a check after a sign-in without the claim: %+v", ws)
+		}
+	})
+}
+
 // TestIntegrationDemoRename: settings of an earlier `muster dev` that carry the demo's earlier display name get the
 // current one at start, once, with their secret and version kept apart from the rename; other settings stay.
 func TestIntegrationDemoRename(t *testing.T) {

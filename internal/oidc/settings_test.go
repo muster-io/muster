@@ -75,6 +75,8 @@ type memStore struct {
 	// that linked end before the link continues it.
 	capped      []dbgen.CapOIDCSessionsParams
 	sessionGone bool
+	// writes counts the records of the groups claim found or not in tokens.
+	writes int
 }
 
 func newMemStore() *memStore {
@@ -128,9 +130,9 @@ func (s *memStore) UpdateSettings(_ context.Context, a dbgen.UpdateSettingsParam
 	if s.settings == nil || s.settings.Version != a.Version {
 		return 0, nil
 	}
-	missing := s.settings.GroupsClaimMissingSince
-	if s.settings.GroupsClaim != a.GroupsClaim {
-		missing = pgtype.Timestamptz{}
+	missing, seen := s.settings.GroupsClaimMissingSince, s.settings.GroupsClaimSeenAt
+	if s.settings.GroupsClaim != a.GroupsClaim || s.settings.IssuerUrl != a.IssuerUrl {
+		missing, seen = pgtype.Timestamptz{}, pgtype.Timestamptz{}
 	}
 	s.settings = &dbgen.OidcSetting{OrgID: a.OrgID, Enabled: a.Enabled, DisplayName: a.DisplayName,
 		IssuerUrl: a.IssuerUrl, ClientID: a.ClientID, ClientSecretCiphertext: a.ClientSecretCiphertext,
@@ -139,15 +141,38 @@ func (s *memStore) UpdateSettings(_ context.Context, a dbgen.UpdateSettingsParam
 		GroupMappings: a.GroupMappings, UnmatchedRole: a.UnmatchedRole, SyncRole: a.SyncRole,
 		SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
 		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt,
-		GroupsClaimMissingSince: missing, Version: a.Version + 1, UpdatedAt: a.UpdatedAt}
+		GroupsClaimMissingSince: missing, GroupsClaimSeenAt: seen, Version: a.Version + 1, UpdatedAt: a.UpdatedAt}
 	return 1, nil
 }
 
-func (s *memStore) SetGroupsClaimMissing(_ context.Context, a dbgen.SetGroupsClaimMissingParams) error {
+func (s *memStore) RecordGroupsClaimInTokens(_ context.Context, a dbgen.RecordGroupsClaimInTokensParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.settings != nil && (!a.Since.Valid || !s.settings.GroupsClaimMissingSince.Valid) {
-		s.settings.GroupsClaimMissingSince = a.Since
+	s.writes++
+	if s.settings == nil {
+		return nil
+	}
+	if a.Found {
+		s.settings.GroupsClaimSeenAt = pgtype.Timestamptz{Time: a.At, Valid: true}
+		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
+		return nil
+	}
+	s.settings.GroupsClaimSeenAt = pgtype.Timestamptz{}
+	if !s.settings.GroupsClaimMissingSince.Valid {
+		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{Time: a.At, Valid: true}
+	}
+	return nil
+}
+
+func (s *memStore) RecordGroupsClaimAdvertised(_ context.Context, a dbgen.RecordGroupsClaimAdvertisedParams) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.settings == nil:
+	case a.Advertised:
+		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
+	case !s.settings.GroupsClaimSeenAt.Valid && !s.settings.GroupsClaimMissingSince.Valid:
+		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{Time: a.At, Valid: true}
 	}
 	return nil
 }

@@ -9,8 +9,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
-import { TriangleAlertIcon } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -26,7 +25,6 @@ import type {
   OidcSettings,
   OidcSettingsInput,
   OidcUnmatchedRole,
-  OidcWarning,
 } from "../api/gen/model";
 import { UpdateOidcSettingsBody } from "../api/gen/zod/oidc/oidc.zod";
 import { AccessLayout } from "../components/access-nav";
@@ -39,6 +37,7 @@ import {
   mappingRows,
   mappingsOf,
 } from "../components/group-mapping-editor";
+import { OidcWarnings } from "../components/oidc-warnings";
 import {
   CheckField,
   type ProxyField,
@@ -62,7 +61,6 @@ import { Label } from "../components/ui/label";
 import { NativeSelect, NativeSelectOption } from "../components/ui/native-select";
 import { roleLabel } from "../components/user-create-dialog";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
-import { useTimeFormat } from "../lib/time";
 
 export const Route = createFileRoute("/admin/oidc")({
   staticData: { shell: true },
@@ -155,105 +153,6 @@ function validate(input: OidcSettingsInput, values: OidcValues): FieldErrors {
   return errors;
 }
 
-function WarningAlert({
-  children,
-  fix,
-  testId,
-}: {
-  children: ReactNode;
-  /** The "How to fix" link after the text. */
-  fix?: ReactNode;
-  testId: string;
-}) {
-  return (
-    <div
-      className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm"
-      data-testid={testId}
-    >
-      <TriangleAlertIcon
-        aria-hidden="true"
-        className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
-      />
-      <p>
-        <span>{children}</span>
-        {fix !== undefined && <> {fix}</>}
-      </p>
-    </div>
-  );
-}
-
-/** The text of a warning and the guide that says how to fix it, if one does. */
-interface WarningShown {
-  text: string;
-  fix?: "fix.oidc_mapping" | "fix.oidc_secret";
-}
-
-function warningShown(
-  t: TFunction,
-  w: OidcWarning,
-  date: (d: string) => string,
-): WarningShown | null {
-  switch (w.kind) {
-    case "nobody_can_sign_in":
-    case "groups_claim_missing":
-      return { text: t("oidc.warnings.nobodyCanSignIn"), fix: "fix.oidc_mapping" };
-    case "secret_expiring":
-      return w.expires_on
-        ? {
-            text: t("oidc.warnings.secretExpiring", { date: date(w.expires_on) }),
-            fix: "fix.oidc_secret",
-          }
-        : null;
-    case "last_admin_kept":
-      // Its own text says what to do, in Muster: no guide (reference.md, Documentation links).
-      return w.user && w.role
-        ? {
-            text: t("oidc.warnings.lastAdminKept", {
-              user: w.user.name,
-              role: roleLabel(t, w.role),
-            }),
-          }
-        : null;
-    default:
-      return null;
-  }
-}
-
-function WarningFix({ to }: { to: "fix.oidc_mapping" | "fix.oidc_secret" }) {
-  const { t } = useTranslation();
-  return to === "fix.oidc_mapping" ? (
-    <DocsLink to={to} kind="how_to_fix" about={t("docs.fixes.oidcMapping")} />
-  ) : (
-    <DocsLink to={to} kind="how_to_fix" about={t("docs.fixes.oidcSecret")} />
-  );
-}
-
-/** The warnings of the settings, each text once: two kinds share "Nobody will be able to sign in through OIDC." */
-function Warnings({ warnings }: { warnings: readonly OidcWarning[] }) {
-  const { t } = useTranslation();
-  const { date } = useTimeFormat();
-  const shown = new Map<string, WarningShown>();
-  for (const w of warnings) {
-    const one = warningShown(t, w, date);
-    if (one !== null && !shown.has(one.text)) {
-      shown.set(one.text, one);
-    }
-  }
-  return (
-    <div role="status" aria-live="polite" className="flex flex-col gap-2 empty:hidden">
-      {[...shown.values()].map(({ text, fix }) => (
-        <WarningAlert
-          key={text}
-          testId="oidc-warning"
-          fix={fix === undefined ? undefined : <WarningFix to={fix} />}
-        >
-          {text}
-        </WarningAlert>
-      ))}
-    </div>
-  );
-}
-
 function checkText(t: TFunction, result: OidcCheckResult): string {
   const proxy = result.via === "proxy";
   if (result.ok) {
@@ -265,7 +164,7 @@ function checkText(t: TFunction, result: OidcCheckResult): string {
   return proxy ? t("oidc.check.failedProxy", { error }) : t("oidc.check.failedDirect", { error });
 }
 
-function ConnectionCheck({ dirty }: { dirty: boolean }) {
+function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: string }) {
   const { t } = useTranslation();
   const check = useCheckOidcSettings();
   const result = check.data;
@@ -319,7 +218,7 @@ function ConnectionCheck({ dirty }: { dirty: boolean }) {
                   ))}
                 </dl>
               )}
-              <Warnings warnings={result.warnings ?? []} />
+              <OidcWarnings warnings={result.warnings ?? []} groupsClaim={groupsClaim} />
             </>
           )}
         </div>
@@ -694,7 +593,7 @@ function OidcForm({ settings }: { settings: OidcSettings }) {
           </div>
         )}
       </form>
-      {canWrite && <ConnectionCheck dirty={isDirty} />}
+      {canWrite && <ConnectionCheck dirty={isDirty} groupsClaim={settings.groups_claim} />}
     </>
   );
 }
@@ -715,7 +614,7 @@ function OidcView() {
         </p>
       ) : (
         <>
-          <Warnings warnings={settings.warnings} />
+          <OidcWarnings warnings={settings.warnings} groupsClaim={settings.groups_claim} />
           <OidcForm settings={settings} />
         </>
       )}

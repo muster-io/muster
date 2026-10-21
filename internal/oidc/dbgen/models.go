@@ -33,4 +33,5 @@ type OidcSetting struct {
 	GroupsClaimMissingSince pgtype.Timestamptz
 	Version                 int64
 	UpdatedAt               time.Time
+	GroupsClaimSeenAt       pgtype.Timestamptz
 }

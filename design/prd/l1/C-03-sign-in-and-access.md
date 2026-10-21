@@ -55,9 +55,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   While the expiry date is less than `oidc.secret_expiry_lead` away, the OIDC settings page shows the expiry warning;
   the Internal alert for it is C-19.FR-5.
 - **C-03.FR-6** Saving OIDC settings with an empty mapping and no Role for unmatched users shows the warning
-  `nobody_can_sign_in`; when the connection check (FR-8) finds that discovery does not advertise the groups claim, or a
-  test sign-in shows that the token has none, the warning is `groups_claim_missing`. Both show "Nobody will be able to
-  sign in through OIDC" (the settings carry the warning kinds, with `secret_expiring` of FR-5).
+  `nobody_can_sign_in`, "Nobody will be able to sign in through OIDC". The warning `groups_claim_missing` says that no
+  sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: a
+  sign-in whose token and userinfo lack the claim raises it; a sign-in whose token carries the claim clears it; the
+  connection check (FR-8) clears it when discovery advertises the claim and raises it when discovery does not, but
+  only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed, because
+  discovery's list of claims is optional and some identity providers leave the claims of their mappers out of it, so
+  a later check does not raise it again. It has its own text, which names the groups claim (reference.md). The
+  settings carry the warning kinds, with `secret_expiring` of FR-5.
 - **C-03.FR-7** A refused OIDC sign-in shows "You have no access to Muster. Contact your administrator." and writes an
   Audit log entry with the groups from the claim.
 - **C-03.FR-8** OIDC needs the back channel: Muster fetches discovery and key sets and exchanges the code itself,

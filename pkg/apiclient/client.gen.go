@@ -5615,7 +5615,7 @@ type OidcUnmatchedRole string
 type OidcWarning struct {
 	ExpiresOn nullable.Nullable[openapi_types.Date] `json:"expires_on,omitempty"`
 
-	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: discovery does not advertise the groups claim, or a test sign-in carried no such claim. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: the last sign-in carried no such claim, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 	Kind OidcWarningKind `json:"kind"`
 
 	// Role For `last_admin_kept`, the Role the identity provider maps the user to.
@@ -5625,7 +5625,7 @@ type OidcWarning struct {
 	User *UserRef `json:"user,omitempty"`
 }
 
-// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: discovery does not advertise the groups claim, or a test sign-in carried no such claim. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has shown the groups claim, so group mappings cannot match and only the Role for unmatched users applies: the last sign-in carried no such claim, or discovery does not advertise it and no sign-in has seen it in a token since the groups claim or the issuer last changed. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 type OidcWarningKind string
 
 // Organization defines model for Organization.
@@ -11999,7 +11999,7 @@ type ClientInterface interface {
 
 	// CheckOidcSettings Check the connection to the identity provider
 	//
-	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
+	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
 	//
 	// Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 	CheckOidcSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -15083,7 +15083,7 @@ func (c *Client) UpdateOidcSettings(ctx context.Context, params *UpdateOidcSetti
 
 // CheckOidcSettings Check the connection to the identity provider
 //
-// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
+// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
 //
 // Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 func (c *Client) CheckOidcSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -25407,7 +25407,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckOidcSettingsWithResponse Check the connection to the identity provider
 	//
-	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
+	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -41268,7 +41268,7 @@ func (c *ClientWithResponses) UpdateOidcSettingsWithResponse(ctx context.Context
 
 // CheckOidcSettingsWithResponse Check the connection to the identity provider
 //
-// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
+// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. A claim discovery does not list raises the warning `groups_claim_missing` only while no sign-in has seen the claim in a token since the groups claim or the issuer last changed; a listed claim clears it.
 //
 // Returns a wrapper object for the known response body format(s).
 //

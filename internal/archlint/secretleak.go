@@ -895,7 +895,11 @@ func (s *probeOIDCStore) UpdateSettings(_ context.Context, a odb.UpdateSettingsP
 	return 1, nil
 }
 
-func (s *probeOIDCStore) SetGroupsClaimMissing(context.Context, odb.SetGroupsClaimMissingParams) error {
+func (s *probeOIDCStore) RecordGroupsClaimInTokens(context.Context, odb.RecordGroupsClaimInTokensParams) error {
+	return nil
+}
+
+func (s *probeOIDCStore) RecordGroupsClaimAdvertised(context.Context, odb.RecordGroupsClaimAdvertisedParams) error {
 	return nil
 }
 

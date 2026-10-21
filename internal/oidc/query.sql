@@ -6,7 +6,7 @@
 SELECT org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphertext, client_secret_key_id,
        client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, unmatched_role,
        sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
-       proxy_password_updated_at, groups_claim_missing_since, version, updated_at
+       proxy_password_updated_at, groups_claim_missing_since, version, updated_at, groups_claim_seen_at
 FROM oidc_settings
 WHERE org_id = @org_id;
 
@@ -51,16 +51,33 @@ SET enabled = @enabled, display_name = sqlc.narg('display_name'), issuer_url = @
     groups_claim_missing_since = CASE
         WHEN groups_claim = @groups_claim AND issuer_url = @issuer_url THEN groups_claim_missing_since
     END,
+    groups_claim_seen_at = CASE
+        WHEN groups_claim = @groups_claim AND issuer_url = @issuer_url THEN groups_claim_seen_at
+    END,
     version = version + 1, updated_at = @updated_at
 WHERE org_id = @org_id AND version = @version;
 
--- SetGroupsClaimMissing records since when the groups claim was found missing, or clears it with null; the warning is
--- not a configured value, so the version stays.
--- name: SetGroupsClaimMissing :exec
+-- RecordGroupsClaimInTokens records what a sign-in or a link found in the identity provider's tokens: with the claim,
+-- when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. The
+-- warning is not a configured value, so the version stays.
+-- name: RecordGroupsClaimInTokens :exec
+UPDATE oidc_settings
+SET groups_claim_seen_at = CASE WHEN @found::boolean THEN @at::timestamptz END,
+    groups_claim_missing_since = CASE
+        WHEN @found::boolean THEN NULL
+        ELSE coalesce(groups_claim_missing_since, @at::timestamptz)
+    END
+WHERE org_id = @org_id;
+
+-- RecordGroupsClaimAdvertised records what a check found in discovery: a listed claim clears the warning; an unlisted
+-- one raises it only while no sign-in has seen the claim in a token, since the list is optional and some identity
+-- providers leave the claims of their mappers out of it.
+-- name: RecordGroupsClaimAdvertised :exec
 UPDATE oidc_settings
 SET groups_claim_missing_since = CASE
-        WHEN sqlc.narg('since')::timestamptz IS NULL THEN NULL
-        ELSE coalesce(groups_claim_missing_since, sqlc.narg('since')::timestamptz)
+        WHEN @advertised::boolean THEN NULL
+        WHEN groups_claim_seen_at IS NOT NULL THEN groups_claim_missing_since
+        ELSE coalesce(groups_claim_missing_since, @at::timestamptz)
     END
 WHERE org_id = @org_id;
 

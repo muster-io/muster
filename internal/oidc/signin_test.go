@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/fakes/fakeoidc"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
@@ -365,6 +367,86 @@ func TestGroupsFromUserinfo(t *testing.T) {
 	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic", Groups: []string{"x"}}, "")
 	if st, _ := e.svc.Get(t.Context()); slices.Contains(kinds(st.Warnings), WarningGroupsClaimMissing) {
 		t.Error("a sign-in with the claim did not clear groups_claim_missing")
+	}
+}
+
+// TestGroupsClaimSeenOutranksDiscovery is C-03.FR-6: a check of discovery that does not list the groups claim raises
+// groups_claim_missing only while no sign-in has seen the claim in a token. A sign-in that carries it clears the
+// warning for good, which later checks leave alone and a listing check keeps cleared; a sign-in without it raises it
+// again; saving another groups claim forgets the claim seen, so the next check raises it. A sign-in that changes
+// nothing writes nothing.
+func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	missing := func(t *testing.T, ws []Warning) bool {
+		t.Helper()
+		return slices.Contains(kinds(ws), WarningGroupsClaimMissing)
+	}
+	check := func(t *testing.T) []Warning {
+		t.Helper()
+		res, err := e.svc.Check(t.Context())
+		if err != nil || !res.OK {
+			t.Fatalf("check = %+v, %v", res, err)
+		}
+		if st, _ := e.svc.Get(t.Context()); missing(t, st.Warnings) != missing(t, res.Warnings) {
+			t.Errorf("the check shows %v, the settings %v", kinds(res.Warnings), kinds(st.Warnings))
+		}
+		return res.Warnings
+	}
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
+	if !missing(t, check(t)) {
+		t.Fatal("before any sign-in a check without the advertised claim did not warn")
+	}
+
+	olga := fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}}
+	if out := e.signIn(t, olga, ""); out.Session == nil {
+		t.Fatalf("sign-in = %+v", out)
+	}
+	st, _ := e.svc.Get(t.Context())
+	if missing(t, st.Warnings) || !st.GroupsClaimSeen {
+		t.Fatalf("after a sign-in with the claim: seen %v, warnings %v", st.GroupsClaimSeen, kinds(st.Warnings))
+	}
+	for i := range 2 {
+		if ws := check(t); missing(t, ws) {
+			t.Fatalf("check %d after the claim was seen warns: %v", i+1, kinds(ws))
+		}
+	}
+	writes := e.store.writes
+	e.signIn(t, olga, "")
+	if e.store.writes != writes {
+		t.Error("a sign-in that changes nothing recorded the groups claim again")
+	}
+	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(false)})
+	if ws := check(t); missing(t, ws) {
+		t.Errorf("a check that finds the claim advertised warns: %v", kinds(ws))
+	}
+	if st, _ := e.svc.Get(t.Context()); !st.GroupsClaimSeen {
+		t.Error("a check forgot the claim seen")
+	}
+
+	// The fake issues no "roles" claim and discovery does not list it.
+	st = e.configure(t, func(in *Input) { in.GroupsClaim = "roles"; in.UnmatchedRole = UnmatchedViewer })
+	if st.GroupsClaimSeen || missing(t, st.Warnings) {
+		t.Fatalf("another groups claim kept the state: seen %v, warnings %v", st.GroupsClaimSeen, kinds(st.Warnings))
+	}
+	if ws := check(t); !missing(t, ws) {
+		t.Error("after another groups claim a check without it did not warn")
+	}
+	e.store.mu.Lock()
+	e.store.settings.GroupsClaimSeenAt = pgtype.Timestamptz{Time: t0, Valid: true}
+	e.store.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
+	e.store.mu.Unlock()
+	if ws := check(t); missing(t, ws) {
+		t.Errorf("a check with the claim seen warns: %v", kinds(ws))
+	}
+	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic"}, "")
+	st, _ = e.svc.Get(t.Context())
+	if !missing(t, st.Warnings) || st.GroupsClaimSeen {
+		t.Errorf("a sign-in without the claim after it was seen: seen %v, warnings %v", st.GroupsClaimSeen,
+			kinds(st.Warnings))
+	}
+	if ws := check(t); !missing(t, ws) {
+		t.Error("a check after a sign-in without the claim cleared the warning")
 	}
 }
 

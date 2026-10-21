@@ -413,7 +413,7 @@ const getSettings = `-- name: GetSettings :one
 SELECT org_id, enabled, display_name, issuer_url, client_id, client_secret_ciphertext, client_secret_key_id,
        client_secret_updated_at, client_secret_expires_on, scopes, groups_claim, group_mappings, unmatched_role,
        sync_role, skip_totp_with_idp_mfa, proxy, proxy_password_ciphertext, proxy_password_key_id,
-       proxy_password_updated_at, groups_claim_missing_since, version, updated_at
+       proxy_password_updated_at, groups_claim_missing_since, version, updated_at, groups_claim_seen_at
 FROM oidc_settings
 WHERE org_id = $1
 `
@@ -447,6 +447,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (OidcSetting, er
 		&i.GroupsClaimMissingSince,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.GroupsClaimSeenAt,
 	)
 	return i, err
 }
@@ -911,6 +912,54 @@ func (q *Queries) RecordContact(ctx context.Context, arg RecordContactParams) er
 	return err
 }
 
+const recordGroupsClaimAdvertised = `-- name: RecordGroupsClaimAdvertised :exec
+UPDATE oidc_settings
+SET groups_claim_missing_since = CASE
+        WHEN $1::boolean THEN NULL
+        WHEN groups_claim_seen_at IS NOT NULL THEN groups_claim_missing_since
+        ELSE coalesce(groups_claim_missing_since, $2::timestamptz)
+    END
+WHERE org_id = $3
+`
+
+type RecordGroupsClaimAdvertisedParams struct {
+	Advertised bool
+	At         time.Time
+	OrgID      int64
+}
+
+// RecordGroupsClaimAdvertised records what a check found in discovery: a listed claim clears the warning; an unlisted
+// one raises it only while no sign-in has seen the claim in a token, since the list is optional and some identity
+// providers leave the claims of their mappers out of it.
+func (q *Queries) RecordGroupsClaimAdvertised(ctx context.Context, arg RecordGroupsClaimAdvertisedParams) error {
+	_, err := q.db.Exec(ctx, recordGroupsClaimAdvertised, arg.Advertised, arg.At, arg.OrgID)
+	return err
+}
+
+const recordGroupsClaimInTokens = `-- name: RecordGroupsClaimInTokens :exec
+UPDATE oidc_settings
+SET groups_claim_seen_at = CASE WHEN $1::boolean THEN $2::timestamptz END,
+    groups_claim_missing_since = CASE
+        WHEN $1::boolean THEN NULL
+        ELSE coalesce(groups_claim_missing_since, $2::timestamptz)
+    END
+WHERE org_id = $3
+`
+
+type RecordGroupsClaimInTokensParams struct {
+	Found bool
+	At    time.Time
+	OrgID int64
+}
+
+// RecordGroupsClaimInTokens records what a sign-in or a link found in the identity provider's tokens: with the claim,
+// when it was seen, clearing the warning; without it, since when it is missing, forgetting that it was seen. The
+// warning is not a configured value, so the version stays.
+func (q *Queries) RecordGroupsClaimInTokens(ctx context.Context, arg RecordGroupsClaimInTokensParams) error {
+	_, err := q.db.Exec(ctx, recordGroupsClaimInTokens, arg.Found, arg.At, arg.OrgID)
+	return err
+}
+
 const refuseUser = `-- name: RefuseUser :exec
 UPDATE users
 SET oidc_refused_at = $1::timestamptz, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
@@ -982,27 +1031,6 @@ func (q *Queries) ScheduleCheck(ctx context.Context, arg ScheduleCheckParams) er
 		arg.Deadline,
 		arg.Now,
 	)
-	return err
-}
-
-const setGroupsClaimMissing = `-- name: SetGroupsClaimMissing :exec
-UPDATE oidc_settings
-SET groups_claim_missing_since = CASE
-        WHEN $1::timestamptz IS NULL THEN NULL
-        ELSE coalesce(groups_claim_missing_since, $1::timestamptz)
-    END
-WHERE org_id = $2
-`
-
-type SetGroupsClaimMissingParams struct {
-	Since pgtype.Timestamptz
-	OrgID int64
-}
-
-// SetGroupsClaimMissing records since when the groups claim was found missing, or clears it with null; the warning is
-// not a configured value, so the version stays.
-func (q *Queries) SetGroupsClaimMissing(ctx context.Context, arg SetGroupsClaimMissingParams) error {
-	_, err := q.db.Exec(ctx, setGroupsClaimMissing, arg.Since, arg.OrgID)
 	return err
 }
 
@@ -1154,6 +1182,9 @@ SET enabled = $1, display_name = $2, issuer_url = $3, client_id = $4,
     proxy_password_updated_at = $18,
     groups_claim_missing_since = CASE
         WHEN groups_claim = $10 AND issuer_url = $3 THEN groups_claim_missing_since
+    END,
+    groups_claim_seen_at = CASE
+        WHEN groups_claim = $10 AND issuer_url = $3 THEN groups_claim_seen_at
     END,
     version = version + 1, updated_at = $19
 WHERE org_id = $20 AND version = $21

@@ -120,9 +120,11 @@ Then press **Check connection**. The check fetches discovery through the saved s
 request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.
 
-Keycloak lists only standard claims in `claims_supported`, so the check shows the warning *Nobody will be able to sign
-in through OIDC* (`groups_claim_missing`) although the mapper of step 2 exists. The warning goes away at the first
-sign-in whose token carries the groups claim. If it stays, the mapper is missing or not added to the ID token.
+Keycloak lists only standard claims in `claims_supported`, so until the first sign-in the check shows the warning *No
+sign-in has shown the groups claim "groups" yet, so group mappings cannot match and only the Role for users without a
+matching group applies* (`groups_claim_missing`) although the mapper of step 2 exists. The warning goes away at the
+first sign-in whose token carries the groups claim, and a later check no longer raises it; changing the groups claim or
+the issuer starts over. If it stays after a sign-in, the mapper is missing or not added to the ID token.
 
 The settings also warn when the mapping is empty and users without a matching group get no Role
 (`nobody_can_sign_in`), and two weeks before the client secret expires.

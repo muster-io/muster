@@ -88,7 +88,8 @@ forwards Thread messages, and otherwise offers only the link to Muster (C-22.FR-
 |---|---|---|---|
 | UI, every page | recovering after downtime | "Muster is recovering after downtime. Data may be incomplete until HH:MM." | C-02, C-03 |
 | UI, Admins | no replica is leading | "No replica is leading: Telegram and Bridge polling, Slack's Socket Mode, Heartbeat and Stale checks are paused." | C-02, C-03, C-24 |
-| OIDC settings | mapping empty or no groups claim | "Nobody will be able to sign in through OIDC." | C-03 |
+| OIDC settings | mapping empty and no Role for unmatched users (`nobody_can_sign_in`) | "Nobody will be able to sign in through OIDC." | C-03 |
+| OIDC settings | no sign-in has shown the groups claim (`groups_claim_missing`) | "No sign-in has shown the groups claim "{claim}" yet, so group mappings cannot match and only the Role for users without a matching group applies." | C-03 |
 | OIDC settings | the client secret expires within `oidc.secret_expiry_lead` | "The client secret expires on {date}. Issue a new one in the identity provider and enter it here." | C-03 |
 | OIDC settings | Role sync would lower the last active Admin | "{user} stays Admin: they are the last active Admin, and the identity provider maps them to {role}. Make another user Admin first." | C-03 |
 | Token list | token without expiry | "This token never expires." | C-04 |
@@ -244,7 +245,7 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Route or Destination, a template keeps failing | `fix.template_error` | `operations/runbooks/MusterTemplateError.md` | S-109 |
 | Outgoing webhook Destination, a literal credential · the previous Signing secret not retired | `fix.webhook_credential` · `fix.webhook_signing_secret` | `outgoing-webhooks/events.md#secrets` · `outgoing-webhooks/events.md#regenerate-and-retire-the-signing-secret` | S-109 |
 | Every page, Admins: no replica is leading · recovering after downtime | `fix.no_leader` · `fix.after_downtime` | `operations/runbooks/MusterNoLeader.md` · `operations/high-availability.md#after-downtime` | S-110 |
-| OIDC settings, nobody can sign in · the client secret expires | `fix.oidc_mapping` · `fix.oidc_secret` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` · `operations/runbooks/MusterOIDCSecretExpiring.md` | S-110 |
+| OIDC settings, nobody can sign in or no sign-in has shown the groups claim · the client secret expires | `fix.oidc_mapping` · `fix.oidc_secret` | `sign-in/oidc-keycloak.md#2-add-the-groups-claim` · `operations/runbooks/MusterOIDCSecretExpiring.md` | S-110 |
 | System status, outgoing heartbeat not set | `fix.outgoing_heartbeat` | `operations/outgoing-heartbeat.md` | S-110 |
 | Keyring, a key that can be removed · a key missing on replicas ("Missing on {replicas}"), which cannot be activated until every replica holds it | `fix.keyring` | `operations/key-rotation.md` | S-110 |
 

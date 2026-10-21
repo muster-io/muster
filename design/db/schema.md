@@ -39,7 +39,9 @@
   [`0018_slack_presses_and_links`](../../internal/db/migrations/0018_slack_presses_and_links.up.sql)
   (the Transport `slack` and Slack Account links and requests, S-100) and
   [`0019_request_log_socket_envelopes`](../../internal/db/migrations/0019_request_log_socket_envelopes.up.sql)
-  (`request_log_answer_check` takes the answer of an inbound record without a status, S-101), in
+  (`request_log_answer_check` takes the answer of an inbound record without a status, S-101) and
+  [`0020_oidc_groups_claim_seen_at`](../../internal/db/migrations/0020_oidc_groups_claim_seen_at.up.sql)
+  (`oidc_settings.groups_claim_seen_at`, C-03.FR-6), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -696,7 +698,12 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   session, so an identity cannot be linked into someone else's account through a forged callback.
 - **`oidc_settings`** — one row once configured: issuer, client, client secret (Secret) and its optional expiry date
   (`MusterOIDCSecretExpiring`), scopes, groups claim, group-to-Role mappings, the unmatched Role, the switches, the
-  proxy, and the time since which the last check found no groups claim (warning `groups_claim_missing`).
+  proxy, the time since which no groups claim was found (warning `groups_claim_missing`: the last sign-in's tokens
+  lacked it, or a check found discovery not advertising it while `groups_claim_seen_at` was null), and
+  `groups_claim_seen_at`, when a sign-in or a link last found the claim in the tokens (migration 0020). A sign-in that
+  finds the claim sets `groups_claim_seen_at` and clears the warning, one that does not clears `groups_claim_seen_at`
+  and raises the warning, and saving another groups claim or issuer clears both, so that a check of discovery, whose
+  list of claims is optional, never overrules what a token showed.
 
 ### 4.4 Service accounts and API tokens
 
