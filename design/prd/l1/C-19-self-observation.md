@@ -50,7 +50,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   documentation links follow the same rule, C-21.FR-11) and `operations/runbooks/<alertname>`: chart rules take the
   chart value `alerting.runbookBaseURL` and the chart's `appVersion`, the version of Muster it deploys; Internal
   alerts take `MUSTER_RUNBOOK_BASE_URL`, which the chart sets from the same value, and the binary's version, so both
-  point at the documentation of the same release. CI checks that each has a page (C-21).
+  point at the documentation of the same release. A released chart that runs another image, such as `image.tag: edge`,
+  is the exception: its rules link to the chart's `X.Y` and the Internal alerts of the snapshot binary to `latest`;
+  both pages exist, and they may differ where the runbooks changed after the release. CI checks that each has a page
+  (C-21).
 - **C-19.FR-10** The System status page is for Admins and only reads; it offers no actions, only links to the entities
   it lists. It shows the Leader and every live replica with the key ids it holds; the recovery state after downtime;
   delivery queues per Destination; Broken Destinations with their reason; Integrations with Heartbeat lost or truncated

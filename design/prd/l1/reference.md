@@ -248,6 +248,11 @@ The codes of the checks without a link: `request_failed`, whose `message` names 
 `webhook_set`, a step that passed. A new code of `NullableConnectionCheckCode`, `NullableDestinationCheckCode` or the
 check's `warnings` gets a row here, or joins this list, in the story that adds it.
 
+The warnings and notices without a link, each because its own text or page already says what to do: the Severity
+levels' unmapped values seen (on the page whose Guide link opens `configure/organization.md#severity-levels`), the
+OIDC warning `last_admin_kept` ("Make another user Admin first", done in Muster), the token without expiry, the
+Snooze dialog's "no end", and the hints that ask for nothing.
+
 ## Roles and Permissions
 
 Permissions are named `<resource>:<verb>`. The list below is final and is the `Permission` schema of the API

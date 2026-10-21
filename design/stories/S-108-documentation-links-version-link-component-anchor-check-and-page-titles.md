@@ -15,6 +15,8 @@ files_touched:
   - internal/internalalerts/raise.go
   - internal/internalalerts/internalalerts_test.go
   - deploy/helm/muster/templates/_helpers.tpl
+  - deploy/helm/muster/values.schema.json
+  - internal/tools/refgen/main.go
   - internal/tools/chartcheck/chartcheck_test.go
   - internal/tools/docslinkcheck/main.go
   - internal/tools/docslinkcheck/docslinkcheck_test.go
@@ -48,7 +50,7 @@ acceptance:
   - "[C-21.FR-11, C-21.AC-7, C-19.FR-9] `Session` — the answer of `getCurrentSession`, `createSession` and `submitSessionTotp` — carries `docs_version`, computed from the binary's version by `internalalerts.RunbookVersion`: `0.1.0` and `0.1.7` give `0.1`, `1.12.3` gives `1.12`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234`, `0.2.0-rc.1`, `0.1.0+meta` and `main` give `latest` (`TestRunbookVersion`, `sessions_test.go`); the `runbook_url` of Internal alerts and the chart helper `muster.runbookVersion` follow the same rule (`chartcheck_test.go`), and a sign-in with `curl` on a binary built with `VERSION=0.1.0` shows `\"docs_version\":\"0.1\"`."
   - "[C-21.FR-11] `web/src/lib/docs.ts` builds every documentation URL from the build constant `https://muster-io.github.io/muster`, the session's `docs_version` (`latest` until the session has been read) and an entry of `docs-links.json` — `concepts/alert-groups.md` becomes `…/latest/concepts/alert-groups/`, `messengers/index.md#what-each-destination-type-can-do` becomes `…/latest/messengers/#what-each-destination-type-can-do` (`docs.test.ts`); no other file of `web/src` outside the generated client and tests names the site's address."
   - "[C-21.FR-11, C-21.AC-8] `DocsLink` renders a link with an icon and the text \"Guide\", \"Learn more\" or \"How to fix\", an accessible name that adds what it is about and \"(opens in a new tab)\", `target=\"_blank\"` and `rel=\"noopener noreferrer\"`; `PageTitle` renders the page's `h1` with its Guide link beside it, wrapping under the title at 360 px; the browser loads nothing from the site until the link is followed (`docs-link.test.tsx`)."
-  - "[C-21.FR-11, C-21.AC-8] The pages of the rows of reference.md's \"Next to page titles\" marked S-108 — Alert Groups, an Alert Group, Integrations and an Integration with its new, edit and Stored Snapshot pages, Routes, Connections and Destinations with their new and detail pages — show the Guide link to the row's target, a Connection or Destination page the one of its type or mode; the sign-in, password setup and TOTP pages show none; no empty state shows one; the links read «Руководство» with the language switched to Russian; and these pages keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links.spec.ts`)."
+  - "[C-21.FR-11, C-21.AC-8] The pages of the rows of reference.md's \"Next to page titles\" marked S-108 — Alert Groups, an Alert Group, Integrations and an Integration with its new, edit and Stored Snapshot pages, Routes, Connections and Destinations with their new and detail pages — show the Guide link to the row's target, a Connection or Destination page the one of its type or mode; the pages outside an active, full session show none — sign-in, password setup, the TOTP prompt and TOTP enrolment of a limited session, and the page that says the person lacks the Permission; no empty state shows one; the links read «Руководство» with the language switched to Russian; and these pages keep no horizontal scrollbar at 360 px wide (`web/e2e/docs-links.spec.ts`)."
   - "[C-21.FR-12, C-21.AC-9] `make docs` runs `internal/tools/docslinkcheck` after the build: it reads `web/src/lib/docs-links.json` and fails, naming the key and the target, when the built site has no page for an entry or the page has no element with the entry's anchor as its `id`; `docslinkcheck_test.go` covers a missing page, a missing anchor and a passing list, and an entry of `docs-links.json` changed to an anchor the page lacks makes `make docs-check` fail naming its key; a removed heading that the UI links to fails the build, naming the key or, when a page of the site links to the heading too, that page (the strict build checks it first)."
 verify: "make ci e2e docs-check"
 operator_attention: false
@@ -114,6 +116,11 @@ issue: 337
 - **End-to-end** (`web/e2e/docs-links.spec.ts`): the placement, texts and widths of the acceptance against `muster dev`;
   the site's address is answered by `context.route`, so the spec needs no network and checks that no `Referer` arrives.
 - **AGENTS.md**: the row of `make docs-check` names the check of linked anchors.
+- **Other statements of the rule**: the description of `alerting.runbookBaseURL` in
+  `deploy/helm/muster/values.schema.json` (and the generated `docs/reference/chart-values.md`) and the introduction of
+  the Internal alerts reference in `internal/tools/refgen/main.go` (and the generated
+  `docs/reference/internal-alerts.md`) say "`latest` for any version that is not a release `X.Y.Z`" instead of "for a
+  development build"; `make generate` rewrites the generated pages.
 
 ## Steps
 
@@ -155,8 +162,11 @@ Playwright at 1280 and 360 px, signed in as the Admin:
    their link; the sign-in page, signed out, shows no link to the site.
 4. Profile → Language → Russian: the link beside «Маршруты» reads «Руководство».
 5. At 360 px the Routes, Connection and Destination pages and the Alert Group page have
-   `document.documentElement.scrollWidth <= 360`. 6. With the release build of the commands above, the Routes page links
-   to `…/muster/0.1/concepts/routes-and-group-keys/`.
+   `document.documentElement.scrollWidth <= 360`.
+6. With the release build of the commands above, the Routes page links to
+   `…/muster/0.1/concepts/routes-and-group-keys/`.
+7. A user under a TOTP policy who has not enrolled signs in: the enrolment page shows no link to the site; a Viewer
+   opening an Admin's page sees the page about the missing Permission without one.
 
 ## Open questions
 
@@ -165,13 +175,15 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link page titles to the documentation of the running version`.
-- The version comes from the server, not from the bundle, because the SPA's files are served to anyone before sign-in
-  and nothing public names the version (C-03.FR-24); the address of the site stays a build constant (D419). A
+- The documentation version is carried by the session (D426): the SPA already reads the session on every page, while
+  the public API specification, which also carries the version in `info.version`, is about 15,000 lines to fetch for
+  one field; and the version segment (`X.Y` or `latest`) is derived on the server, where the build is known, by the
+  same function as the `runbook_url`. The address of the site stays a build constant (D419). A
   closed network without access to the site sees links that do not open; Muster has no setting for a mirror.
 - The rule changes what a snapshot image's Internal alerts link to; a release is unaffected.
 - The story has a small backend part — one field and the shared rule — in the same pull request, because the field is
   useless without the links and the links are wrong without the field; S-087 set the precedent.
-- With 37 files the story stays under the size signal; the links next to fields and problems are S-109 and S-110.
+- With 39 files the story stays under the size signal; the links next to fields and problems are S-109 and S-110.
 
 ## Coverage
 

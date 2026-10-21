@@ -21,6 +21,7 @@ files_touched:
   - web/src/components/organization-form.tsx
   - web/src/components/organization-nav.tsx
   - web/src/routes/admin.organization.security.tsx
+  - web/src/routes/admin.organization.outbound.tsx
   - web/src/routes/admin.organization.outgoing-heartbeat.tsx
   - web/src/routes/admin.organization.lookup-tables.index.tsx
   - web/src/routes/admin.organization.lookup-tables.new.tsx
@@ -72,9 +73,10 @@ issue: 339
   generated files and not listed. A spec that the new links break (a locator that now matches the link too) is fixed
   in the same pull request and added to `files_touched`.
 - **Placement**: the pages with their own `h1` use `PageTitle` of S-108; `organization-nav.tsx` gives each entry of the
-  Organization's sub-navigation its key, which `organization-form.tsx` reads for the pages it draws, so the seven
-  pages that use it change no route file; the Security page's form is its own route file. "Learn more" and "How to
-  fix" as in S-109; the banners of `notice-banners.tsx` show "How to fix" only to Admins, who see those banners.
+  Organization's sub-navigation its key, which `organization-form.tsx` reads for the pages it draws, so the seven pages
+  that use it change no route file; the Security and Outbound addresses pages hold the fields that get "Learn more" in
+  their own route files. "Learn more" and "How to fix" as in S-109; the banners of `notice-banners.tsx` show "How to
+  fix" only to Admins, who see those banners.
 - **Texts**: those of S-108, with accessible names in both languages.
 - **End-to-end** (`web/e2e/docs-links-admin.spec.ts`): the placement of the acceptance on `muster dev`. A banner or
   notice that `muster dev` cannot bring about within a spec — "No replica is leading", the recovery after downtime, the
@@ -120,7 +122,7 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): link the organization, access and profile pages to the documentation`.
-- With 32 files the story stays under the size signal.
+- With 33 files the story stays under the size signal.
 - It completes C-21.FR-11 and C-21.AC-8: after it every place of the table shows its link.
 
 ## Coverage

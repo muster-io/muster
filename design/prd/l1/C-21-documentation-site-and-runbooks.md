@@ -1,6 +1,6 @@
 # C-21. Documentation site and runbooks
 
-[L1 index](../L1.md) · Stage: Operations · UI: the documentation site · Depends on: C-19
+[L1 index](../L1.md) · Stage: Operations · UI: the documentation site, and links to it from the web UI · Depends on: C-19
 
 **Goal.** Users find versioned documentation for installing, configuring and operating Muster, and a runbook for every
 alert Muster can raise; AI agents find the same documentation in a form made for them. A new Admin is led step by step,
@@ -90,18 +90,19 @@ explains it.
   fails, naming the page and the image, when a page references an image that does not exist, when an image of
   `docs/assets/screenshots/` is referenced by no page, when an image has no alternative text, or when a page loads an
   image from another site.
-- **C-21.FR-11** Links from the web UI. The web UI links to the documentation of the version it runs: a release
-  `X.Y.Z` links under `https://muster-io.github.io/muster/X.Y/`, any other version — a development build (`0.0.0-dev`,
-  the `sha-…` and `edge` images, whose versions end in `-SNAPSHOT-<commit>`) or a pre-release — under
+- **C-21.FR-11** Links from the web UI. The web UI links to the documentation of the version it runs: a release `X.Y.Z`
+  links under `https://muster-io.github.io/muster/X.Y/`, any other version — a development build (`0.0.0-dev`, the
+  `sha-…` and `edge` images, whose versions end in `-SNAPSHOT-<commit>`) or a pre-release — under
   `https://muster-io.github.io/muster/latest/`. The address of the site is a build constant of the web UI with no
-  setting. The server tells a signed-in session the version segment (`X.Y` or `latest`) by the same rule that builds
-  the `runbook_url` of Internal alerts (C-19.FR-9); the pages before sign-in show no documentation link and nothing
-  public carries the version (C-03.FR-24). The links are placed as the table
-  [Documentation links](reference.md#documentation-links) says: a link to the page's guide next to the title of every
-  page after sign-in; "Learn more" next to complex fields of forms; "How to fix" next to the results of checks and the
-  warnings, banners and Broken states that need the person to act. Empty states have no link. A link opens in a new
-  tab, sends no `Referer` (`rel="noopener noreferrer"`), and its text is translated into English and Russian like any
-  other text of the UI, while the pages it opens are in English (C-21.FR-5).
+  setting. The server derives the version segment (`X.Y` or `latest`) from the build it runs, by the same rule that
+  builds the `runbook_url` of Internal alerts (C-19.FR-9), and the session carries it, since the web UI reads the
+  session on every page. Links appear only in an active, full session: the sign-in and password setup pages, the TOTP
+  prompt and TOTP enrolment of a limited session, and the page that says the person lacks a Permission have none. The
+  links are placed as the table [Documentation links](reference.md#documentation-links) says: a link to the page's guide
+  next to the title of every other page; "Learn more" next to complex fields of forms; "How to fix" next to the results
+  of checks and the warnings, banners and Broken states that need the person to act. Empty states have no link. A link
+  opens in a new tab, sends no `Referer` (`rel="noopener noreferrer"`), and its text is translated into English and
+  Russian like any other text of the UI, while the pages it opens are in English (C-21.FR-5).
 - **C-21.FR-12** Every page and anchor the web UI links to is listed once, in one file of the web UI that the links
   are built from; `make docs-check` fails, naming the entry, when the built site has no such page or no element with
   that anchor, so that renaming a heading cannot break a link of the UI unnoticed.
@@ -137,9 +138,10 @@ The API reference of the site is rendered from the same OpenAPI document that th
 - **C-21.AC-7** The documentation version follows the release rule: `0.1.0` and `0.1.7` link under `/muster/0.1/`,
   `1.12.3` under `/muster/1.12/`, and `0.0.0-dev`, `0.1.1-SNAPSHOT-abc1234` and `0.2.0-rc.1` under `/muster/latest/`;
   the `runbook_url` of an Internal alert raised by the same binary names the same segment.
-- **C-21.AC-8** Every page after sign-in has a documentation link next to its title, and every place of the table
-  [Documentation links](reference.md#documentation-links) shows its link, which opens the named page and section in a
-  new tab without a `Referer`; no empty state has one; the sign-in pages have none; the texts of the links exist in
+- **C-21.AC-8** Every page of an active, full session has a documentation link next to its title, and every place of the
+  table [Documentation links](reference.md#documentation-links) shows its link, which opens the named page and section
+  in a new tab without a `Referer`; no empty state has one; the sign-in and password setup pages, the TOTP prompt and
+  enrolment of a limited session and the page about a missing Permission have none; the texts of the links exist in
   English and Russian; and the pages with links keep no horizontal scrollbar at 360 px wide.
 - **C-21.AC-9** Changing a link of the UI to an anchor the site does not have makes `make docs-check` fail, naming the
   entry of the list and the page; removing from the site a heading that the web UI links to makes it fail too, naming
