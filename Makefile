@@ -49,11 +49,16 @@ PROMTOOL_PKG := github.com/prometheus/prometheus/cmd/promtool
 # renovate: datasource=go depName=github.com/prometheus/prometheus
 PROMTOOL_VERSION := v0.315.0
 PROMTOOL := $(TOOLS)/promtool-$(PROMTOOL_VERSION)
+# release.yml pushes the Artifact Hub metadata of the chart with oras, and builds it with make like helm.
+ORAS_PKG := oras.land/oras/cmd/oras
+# renovate: datasource=go depName=oras.land/oras
+ORAS_VERSION := v1.3.4
+ORAS := $(TOOLS)/oras-$(ORAS_VERSION)
 # The tools above, as their install rules name them; make licenses reports their licences.
 INSTALLED_TOOLS := $(GOLANGCI_LINT_PKG)@$(GOLANGCI_LINT_VERSION) $(GO_TEST_COVERAGE_PKG)@$(GO_TEST_COVERAGE_VERSION) \
 	$(GO_LICENSES_PKG)@$(GO_LICENSES_VERSION) $(GOVULNCHECK_PKG)@$(GOVULNCHECK_VERSION) \
 	$(GREMLINS_PKG)@$(GREMLINS_VERSION) $(HELM_PKG)@$(HELM_VERSION) $(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION) \
-	$(SQLC_PKG)@$(SQLC_VERSION) $(PROMTOOL_PKG)@$(PROMTOOL_VERSION)
+	$(SQLC_PKG)@$(SQLC_VERSION) $(PROMTOOL_PKG)@$(PROMTOOL_VERSION) $(ORAS_PKG)@$(ORAS_VERSION)
 
 VERSION ?= 0.0.0-dev
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -612,6 +617,9 @@ $(HELM):
 
 $(KUBECONFORM):
 	$(call go-install,$(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION),kubeconform)
+
+$(ORAS):
+	$(call go-install,$(ORAS_PKG)@$(ORAS_VERSION),oras)
 
 # Without cgo, sqlc parses SQL with the WebAssembly build of the PostgreSQL parser, so no C compiler is needed.
 $(SQLC): export CGO_ENABLED := 0

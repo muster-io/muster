@@ -7,6 +7,8 @@
 
 # Muster
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/muster)](https://artifacthub.io/packages/search?repo=muster)
+
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It turns Alertmanager's
 notifications into Alert Groups — one problem with a number, a status and an Owner — and shows each Alert Group as one
 editable message in Mattermost, in Slack, in Telegram, in any other messenger through a Bridge, or through an outgoing

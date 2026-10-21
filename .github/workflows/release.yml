@@ -3,7 +3,8 @@
 
 # A vX.Y.Z tag, created when release-please's release pull request merges, builds the release: goreleaser fills the
 # draft release with the archives, their SBOMs and the checksums, and pushes and signs the image; then the chart is
-# pushed, and the last step publishes the draft, so a published release always has every artifact.
+# annotated for Artifact Hub, pushed and signed, and the last step publishes the draft, so a published release always
+# has every artifact.
 name: release
 
 on:
@@ -37,6 +38,9 @@ jobs:
       # The Makefile's helm; `make` fails when the two versions differ.
       # renovate: datasource=go depName=helm.sh/helm/v4
       HELM_VERSION: v4.3.0
+      # The Makefile's oras; `make` fails when the two versions differ.
+      # renovate: datasource=go depName=oras.land/oras
+      ORAS_VERSION: v1.3.4
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,9 +75,22 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: build helm
-        run: make "bin/tools/helm-${HELM_VERSION}"
-      - name: package and push the chart
+      - name: build helm and oras
+        run: make "bin/tools/helm-${HELM_VERSION}" "bin/tools/oras-${ORAS_VERSION}"
+      # The Artifact Hub annotations of this release go into a copy of the chart: the image pinned to the digest that
+      # goreleaser pushed, with its platforms; the entries of this version in CHANGELOG.md; and the prerelease flag.
+      - name: annotate the chart
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/chart-src"
+          cp -R deploy/helm/muster "$RUNNER_TEMP/chart-src/muster"
+          docker buildx imagetools inspect "ghcr.io/muster-io/muster:$REF_NAME" --format '{{json .Manifest}}' \
+            >"$RUNNER_TEMP/image-index.json"
+          go run ./internal/tools/chartannotate -chart "$RUNNER_TEMP/chart-src/muster" -tag "$REF_NAME" \
+            -changelog CHANGELOG.md -image ghcr.io/muster-io/muster -index "$RUNNER_TEMP/image-index.json"
+      # The chart is signed keyless like the image, by the digest that helm push prints.
+      - name: package, push and sign the chart
         env:
           REF_NAME: ${{ github.ref_name }}
           ACTOR: ${{ github.actor }}
@@ -82,10 +99,46 @@ jobs:
           helm="bin/tools/helm-${HELM_VERSION}"
           version="${REF_NAME#v}"
           # appVersion is the tag: image tags carry the v, and image.tag defaults to appVersion.
-          "$helm" package deploy/helm/muster --version "$version" --app-version "$REF_NAME" \
+          "$helm" package "$RUNNER_TEMP/chart-src/muster" --version "$version" --app-version "$REF_NAME" \
             --destination "$RUNNER_TEMP/chart"
           printf '%s' "$GH_TOKEN" | "$helm" registry login ghcr.io -u "$ACTOR" --password-stdin
-          "$helm" push "$RUNNER_TEMP/chart/muster-$version.tgz" oci://ghcr.io/muster-io/charts
+          "$helm" push "$RUNNER_TEMP/chart/muster-$version.tgz" oci://ghcr.io/muster-io/charts \
+            >"$RUNNER_TEMP/push.log" 2>&1 || { cat "$RUNNER_TEMP/push.log"; exit 1; }
+          cat "$RUNNER_TEMP/push.log"
+          digest=$(sed -nE 's/^Digest: (sha256:[0-9a-f]{64})$/\1/p' "$RUNNER_TEMP/push.log" | head -n 1)
+          if [ -z "$digest" ]; then
+            echo "::error::helm push printed no digest of the chart, so it cannot be signed"
+            exit 1
+          fi
+          cosign sign --yes "ghcr.io/muster-io/charts/muster@$digest"
+      # Artifact Hub reads the repository metadata, which makes the repository a verified publisher, from the tag
+      # artifacthub.io; oras uses the registry login of docker/login-action. A failure here does not hold the release
+      # back: the chart is already pushed and signed. Repeat the push by hand, never by re-running this job, which
+      # would rebuild and move the release's images and replace its chart. The push is idempotent; after
+      # `oras login ghcr.io`, from deploy/helm:
+      #   oras push ghcr.io/muster-io/charts/muster:artifacthub.io
+      #     --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml
+      #     artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+      - name: push the Artifact Hub metadata
+        continue-on-error: true
+        run: |
+          oras="$PWD/bin/tools/oras-${ORAS_VERSION}"
+          metadata=artifacthub-repo.yml
+          cd deploy/helm
+          id=$(sed -nE 's/^repositoryID:[[:space:]]*"?([^"#[:space:]]*)"?.*$/\1/p' "$metadata")
+          if [ -z "$id" ]; then
+            echo "::error file=deploy/helm/$metadata::repositoryID is empty: the Artifact Hub metadata was not pushed"
+            exit 1
+          fi
+          "$oras" push ghcr.io/muster-io/charts/muster:artifacthub.io \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            "$metadata:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml" || {
+            echo "::error file=deploy/helm/$metadata::pushing the Artifact Hub metadata failed; do not re-run the job:" \
+              "after oras login ghcr.io, run from deploy/helm: oras push ghcr.io/muster-io/charts/muster:artifacthub.io" \
+              "--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml" \
+              "$metadata:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml"
+            exit 1
+          }
       - name: publish the release
         env:
           REF_NAME: ${{ github.ref_name }}
