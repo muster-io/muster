@@ -318,10 +318,23 @@ type socket struct {
 
 // signal tells the holder reason, unless it was told something it has not read yet.
 func (sc *socket) signal(reason string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 	select {
 	case sc.stop <- reason:
 	default:
 	}
+}
+
+// unread tells the holder again reason, which it read too early, ahead of anything told since.
+func (sc *socket) unread(reason string) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	select {
+	case <-sc.stop:
+	default:
+	}
+	sc.stop <- reason
 }
 
 // end notes why the socket ended, the first cause only, and tells the holder.
@@ -453,6 +466,12 @@ func (h *holder) connect(ctx context.Context) (*socket, socketFailure) {
 	case <-sc.hello:
 		return sc, socketFailure{}
 	case reason := <-sc.stop:
+		select {
+		case <-sc.hello: // the reader tells the hello first; a holder that looks late sees both and takes the hello
+			sc.unread(reason)
+			return sc, socketFailure{}
+		default:
+		}
 		h.closeNow(sc)
 		return nil, failureOf(reason, sc)
 	case <-timer:

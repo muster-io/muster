@@ -756,6 +756,61 @@ func TestSocketRefreshOverlap(t *testing.T) {
 	e.send(t, "events_api", `{}`)
 }
 
+// TestSocketHelloThenDisconnect covers C-24.FR-9: a refresh_requested that the reader takes right after the hello,
+// before the holder has looked for the hello, refreshes the connection and fails nothing. The holder then finds both at
+// once, which a select would take in either order, so the case runs several times.
+func TestSocketHelloThenDisconnect(t *testing.T) {
+	for range 8 {
+		e := newSocketEnv(t)
+		after := e.sockets.after
+		var once sync.Once
+		e.sockets.after = func(d time.Duration) (<-chan time.Time, func()) {
+			if d == HelloTimeout {
+				once.Do(func() { e.helloThenDisconnect(t) })
+			}
+			return after(d)
+		}
+		e.source.set(e.conn(t, 2, false))
+		e.start(t)
+		e.lines(t, "slack_socket_connected", 2)
+		if n := len(e.log.lines(t, "slack_socket_failed")); n != 0 || len(e.opens()) != 2 {
+			t.Fatalf("%d failures, %d opens: %s", n, len(e.opens()), e.log.String())
+		}
+		if err := e.stop(t); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// helloThenDisconnect waits, on the holder's goroutine before it looks for the hello, until the first socket's hello
+// is logged, sends refresh_requested and then an envelope through it, and waits for the envelope's confirmation: the
+// reader takes the frames in order, so it has told the holder the hello and the disconnect by then.
+func (e *socketEnv) helloThenDisconnect(t *testing.T) {
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(e.log.String(), `"event":"slack_socket_connected"`) {
+		if time.Now().After(deadline) {
+			t.Error("the hello was not logged")
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if err := e.fake.Script(t.Context(), fakeslack.SocketScript{App: fakeslack.AppB,
+		Disconnect: disconnectRefresh}); err != nil {
+		t.Error(err)
+		return
+	}
+	env, err := e.fake.SendEnvelope(t.Context(), fakeslack.AppB, "events_api", json.RawMessage(`{}`))
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if _, ok := e.fake.WaitConfirmed(ctx, env.EnvelopeID); !ok {
+		t.Error("the envelope after the disconnect was not confirmed")
+	}
+}
+
 // TestSocketRefreshOpenFails covers C-24.FR-9: a planned refresh whose next connection cannot be opened keeps the old
 // one, which still confirms envelopes, and tries again after the back-off.
 func TestSocketRefreshOpenFails(t *testing.T) {
@@ -1234,13 +1289,18 @@ func TestSocketHelloCounts(t *testing.T) {
 
 // TestSocketEnvelopeRecords covers C-24.FR-14, AC-17 and C-23.FR-1: each envelope with an envelope_id is recorded once
 // confirmed — its type as the operation, the socket's address without its query, the envelope as received and the
-// confirmation — and hello and disconnect are not.
+// confirmation — and hello and disconnect are not. Each record is written in the background, so the records are
+// matched to the envelopes by envelope_id, not by their order.
 func TestSocketEnvelopeRecords(t *testing.T) {
 	e := newSocketEnv(t)
 	e.source.set(e.conn(t, 2, false))
 	e.start(t)
 	e.lines(t, "slack_socket_connected", 1)
-	sent := []fakeslack.Envelope{e.send(t, typeInteractive, `{"type":"block_actions"}`), e.send(t, "events_api", `{}`)}
+	sent := map[string]fakeslack.Envelope{}
+	for _, env := range []fakeslack.Envelope{e.send(t, typeInteractive, `{"type":"block_actions"}`),
+		e.send(t, "events_api", `{}`)} {
+		sent[env.EnvelopeID] = env
+	}
 	eventually(t, "two records", func() bool { return len(e.records.got()) == 2 })
 	e.script(t, fakeslack.SocketScript{Disconnect: disconnectRefresh})
 	e.lines(t, "slack_socket_connected", 2)
@@ -1258,11 +1318,20 @@ func TestSocketEnvelopeRecords(t *testing.T) {
 		if err := json.Unmarshal(r.Envelope, &frame); err != nil {
 			t.Fatal(err)
 		}
-		if r.Operation != sent[i].Type || r.URL != wantURL || frame.EnvelopeID != sent[i].EnvelopeID ||
-			string(r.Confirmation) != `{"envelope_id":"`+sent[i].EnvelopeID+`"}` || r.Via != ViaDirect ||
+		want, ok := sent[frame.EnvelopeID]
+		if !ok {
+			t.Errorf("record %d of no envelope sent, or of one recorded twice: %+v", i, r)
+			continue
+		}
+		delete(sent, frame.EnvelopeID)
+		if r.Operation != want.Type || r.URL != wantURL ||
+			string(r.Confirmation) != `{"envelope_id":"`+want.EnvelopeID+`"}` || r.Via != ViaDirect ||
 			r.Links != (requestlog.Links{Connection: 2, ConnectionID: "CN0000000000K2"}) || r.Latency <= 0 {
 			t.Errorf("record %d: %+v", i, r)
 		}
+	}
+	if len(sent) != 0 {
+		t.Errorf("envelopes not recorded: %+v", sent)
 	}
 }
 
