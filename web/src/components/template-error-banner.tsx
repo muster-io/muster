@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The banner of a Route or a Destination whose template keeps failing (C-12.FR-6, C-15.FR-5; reference.md, banners):
+// The banner of a Route or a Destination whose template keeps failing (C-12.FR-6, C-15.FR-7; reference.md, banners):
 // "Template error since HH:MM: {error}." with "Messages use the fallback template." — or "Requests are not sent." for an
 // outgoing webhook, whose failed request is not sent — the time in the user's time zone and the error as untrusted text,
 // and "How to fix" to the runbook of the template error.

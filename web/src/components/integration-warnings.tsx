@@ -137,11 +137,15 @@ export function HeartbeatBanner({ warnings }: { warnings: readonly IntegrationWa
         />
         <span className="min-w-0">
           {waiting ? t("heartbeat.banner.waiting") : t("heartbeat.banner.notConfigured")}{" "}
-          <DocsLink
-            to="fix.heartbeat"
-            kind="how_to_fix"
-            about={waiting ? t("docs.fixes.heartbeatWaiting") : t("docs.fixes.heartbeatOff")}
-          />
+          {waiting ? (
+            <DocsLink
+              to="fix.heartbeat_waiting"
+              kind="how_to_fix"
+              about={t("docs.fixes.heartbeatWaiting")}
+            />
+          ) : (
+            <DocsLink to="fix.heartbeat" kind="how_to_fix" about={t("docs.fixes.heartbeatOff")} />
+          )}
         </span>
       </p>
     );

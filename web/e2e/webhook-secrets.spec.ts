@@ -127,7 +127,10 @@ test("adds a Secret, warns of a literal credential and rotates the Signing secre
   await header.fill("Bearer abc");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
-  await expect(events.getByTestId("literal-credential")).toHaveText(`${LITERAL} How to fix`);
+  await expect(events.getByTestId("literal-credential")).toContainText(LITERAL);
+  await expect(
+    events.getByTestId("literal-credential").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
   await expect(header).toHaveAccessibleDescription(LITERAL);
   await shot(page, "webhook-literal-credential");
   await header.fill(REFERENCE);

@@ -274,7 +274,7 @@ test("the Route editor has Learn more beside its complex fields", async ({ page,
       "#ack-timeouts-reminders-and-auto-unacknowledge",
     ],
     ["Snooze durations", "concepts/statuses-and-commands/", "#snooze-presets"],
-    ["Lifecycle of an Alert Group", "concepts/snapshot-semantics/", ""],
+    ["Lifecycle of an Alert Group", "concepts/alert-groups/", "#reopening"],
   ] as const) {
     await expectTarget(docsLink(page, "Learn more", about), path, hash);
   }

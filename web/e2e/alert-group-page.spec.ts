@@ -130,13 +130,16 @@ test("shows the header, notices, Alerts, labels, Timeline and previous Alert Gro
   await expect(page.getByTestId("fact-route")).toContainText("ag-db");
   await expect(page.getByTestId("fact-integrations")).toContainText("ag-page");
   await expect(page.getByTestId("fact-severity")).toContainText("warning");
-  await expect(page.getByTestId("notice-replacement")).toHaveText(`${REPLACEMENT} How to fix`);
+  await expect(page.getByTestId("notice-replacement")).toContainText(REPLACEMENT);
+  await expect(
+    page.getByTestId("notice-replacement").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
   const fix = page
     .getByTestId("notice-replacement")
     .getByRole("link", { name: "How to fix: Replacement (opens in a new tab)", exact: true });
   const href = new URL((await fix.getAttribute("href")) ?? "");
   expect(href.origin + href.pathname + href.hash).toBe(
-    "https://muster-io.github.io/muster/latest/concepts/alert-groups/#instance-labels",
+    "https://muster-io.github.io/muster/latest/integrations/alertmanager/#instance-labels-in-informational-alerts",
   );
   const replaced = entry(page, "Alert replaced");
   await expect(replaced).toHaveCount(1);

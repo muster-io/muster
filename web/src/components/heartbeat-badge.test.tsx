@@ -102,7 +102,7 @@ describe("HeartbeatBanner", () => {
       )
       .toHaveAttribute(
         "href",
-        "https://muster-io.github.io/muster/latest/integrations/heartbeat/#turn-it-on",
+        "https://muster-io.github.io/muster/latest/integrations/heartbeat/#the-snippet",
       );
   });
 

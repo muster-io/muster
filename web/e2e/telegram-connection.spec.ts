@@ -123,7 +123,10 @@ test("creates a Telegram Connection and checks it step by step, an unsaved path 
   await page.getByRole("radio", { name: "Telegram" }).check();
   const baseUrl = page.getByRole("textbox", { name: "Bot API base URL" });
   await expect(baseUrl).toHaveValue("https://api.telegram.org");
-  await expect(page.getByTestId("telegram-base-url-hint")).toHaveText(`${HINT} Learn more`);
+  await expect(page.getByTestId("telegram-base-url-hint")).toContainText(HINT);
+  await expect(
+    page.getByTestId("telegram-base-url-hint").getByRole("link", { name: /^Learn more: / }),
+  ).toHaveText("Learn more");
   await expect(page.getByTestId("telegram-http-warning")).toHaveCount(0);
   await expect(page.getByLabel("Update mode")).toHaveValue("long_polling");
   await expect(page.getByTestId("telegram-update-mode-hint")).toContainText(
@@ -144,7 +147,10 @@ test("creates a Telegram Connection and checks it step by step, an unsaved path 
   await expect(page).toHaveURL(/\/connections\/CN[0-9A-Z]+$/);
   connectionId = new URL(page.url()).pathname.split("/").pop() ?? "";
   await expect(page.getByRole("heading", { name: "tg", level: 1 })).toBeVisible();
-  await expect(page.getByTestId("telegram-http-warning")).toHaveText(`${HTTP_WARNING} How to fix`);
+  await expect(page.getByTestId("telegram-http-warning")).toContainText(HTTP_WARNING);
+  await expect(
+    page.getByTestId("telegram-http-warning").getByRole("link", { name: /^How to fix: / }),
+  ).toHaveText("How to fix");
   await expect(page.getByTestId("secret-connection-bot-token-status")).toHaveText(/^Set, changed /);
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.getByText(TOKEN)).toHaveCount(0);
@@ -272,10 +278,14 @@ async function russianAdmin(browser: Browser): Promise<void> {
     ),
   ).toBeVisible();
   await page.getByRole("link", { name: "tg", exact: true }).click();
-  await expect(page.getByTestId("telegram-base-url-hint")).toHaveText(`${HINT_RU} Подробнее`);
-  await expect(page.getByTestId("telegram-http-warning")).toHaveText(
-    `${HTTP_WARNING_RU} Как исправить`,
-  );
+  await expect(page.getByTestId("telegram-base-url-hint")).toContainText(HINT_RU);
+  await expect(
+    page.getByTestId("telegram-base-url-hint").getByRole("link", { name: /^Подробнее: / }),
+  ).toHaveText("Подробнее");
+  await expect(page.getByTestId("telegram-http-warning")).toContainText(HTTP_WARNING_RU);
+  await expect(
+    page.getByTestId("telegram-http-warning").getByRole("link", { name: /^Как исправить: / }),
+  ).toHaveText("Как исправить");
   await expect(page.getByLabel("Режим получения обновлений")).toHaveValue("long_polling");
   await page.getByRole("textbox", { name: "Базовый URL Bot API" }).fill(`${FTG}/other/`);
   await page.getByRole("button", { name: "Проверить подключение" }).click();

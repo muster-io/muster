@@ -12,8 +12,8 @@
 // nothing polls. A Destination shows its name; its full label (D309) is the name's tooltip and accessible description,
 // and a Destination the Destinations list does not show keeps its name alone. With destinations:read each row has
 // "Requests" (C-23.FR-6, AC-1): what was sent to the Destination for this Alert Group and what came back, in a dialog.
-// "Not delivered" and "Waiting: {Destination} is Broken" end with "How to fix", to the recovery of a Broken
-// Destination.
+// "Waiting: {Destination} is Broken" and "Not delivered" end with "How to fix": to the recovery of a Broken Destination
+// while the Destination is Broken, otherwise to what makes a Destination Broken and what does not.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -175,7 +175,11 @@ function Row({
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <State delivery={delivery} />
         {delivery.state === "not_delivered" && (
-          <DocsLink to="fix.broken" kind="how_to_fix" about={t("docs.fixes.notDelivered")} />
+          <DocsLink
+            to={delivery.destination.health.state === "broken" ? "fix.broken" : "fix.not_delivered"}
+            kind="how_to_fix"
+            about={t("docs.fixes.notDelivered")}
+          />
         )}
         {delivery.state === "waiting_for_broken_destination" && (
           <DocsLink to="fix.broken" kind="how_to_fix" about={t("docs.fixes.broken")} />

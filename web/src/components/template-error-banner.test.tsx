@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The banner of a template that keeps failing in a real browser (C-12.FR-6, C-15.FR-5, C-21.FR-11): since when in the
+// The banner of a template that keeps failing in a real browser (C-12.FR-6, C-15.FR-7, C-21.FR-11): since when in the
 // user's time zone, the error, what happens instead — the fallback template of a Route, or no request for an outgoing
 // webhook Destination — and "How to fix" to the runbook of MusterTemplateError, in English and Russian.
 

@@ -133,7 +133,8 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   const badge = page.getByTestId("heartbeat-badge");
   const banner = page.getByTestId("heartbeat-banner");
   await expect(badge).toHaveText("Heartbeat: Not configured");
-  await expect(banner).toHaveText(`${NOT_CONFIGURED} How to fix`);
+  await expect(banner).toContainText(NOT_CONFIGURED);
+  await expect(banner.getByRole("link", { name: /^How to fix: / })).toHaveText("How to fix");
   await shot(page, "heartbeat-not-configured");
   const integrationId = new URL(page.url()).pathname.split("/").pop() ?? "";
 
@@ -164,7 +165,8 @@ test("the Heartbeat from the form to live, lost and live again", async ({ page, 
   await shot(page, "heartbeat-form-edit");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(badge).toHaveText("Heartbeat: Waiting");
-  await expect(banner).toHaveText(`${WAITING} How to fix`);
+  await expect(banner).toContainText(WAITING);
+  await expect(banner.getByRole("link", { name: /^How to fix: / })).toHaveText("How to fix");
   await shot(page, "heartbeat-waiting");
   expect(await heartbeatOf(integrationId)).toMatchObject({ enabled: true, timeout_seconds: 600 });
 

@@ -3,11 +3,10 @@
 
 // The "How to fix" links of the Connection and Destination checks (C-21.FR-11): the entry of docs-links.json for each
 // code a step or a check can fail with and for each warning of a Connection check, as reference.md's "Next to problems"
-// lists them. A code is linked for every type, for some types, or for none: request_failed names an error no page can
-// foresee and webhook_set is a step that passed. A code that reference.md gives no row for a type has no link for it
-// until the maintainer settles it: Telegram unexpected_status; Bridge wrong_path_prefix and unexpected_status; Slack
-// unexpected_status. Each table names every code of its enum, so a code the API gains does not compile until it gets a
-// row or joins the codes without one.
+// lists them. Each messenger names every code of the enum explicitly, so the type checker refuses a table that misses
+// one: a key, null for the codes reference.md lists as having no link — request_failed, whose message names an error no
+// page can foresee, and webhook_set, a step that passed — or NOT_GIVEN for a code that the messenger's check never
+// gives. A code the API gains does not compile until every messenger names it.
 
 import type { TFunction } from "i18next";
 
@@ -26,66 +25,170 @@ export type ConnectionCheckCode = NonNullable<NullableConnectionCheckCode>;
 /** A code of a check of the Destination check. */
 export type DestinationCheckCode = NonNullable<NullableDestinationCheckCode>;
 
-/** The fix of a code: one key for every type, a key for some types, or null for a code without a link. */
-type Fix = DocsKey | Partial<Record<ConnectionType, DocsKey>> | null;
+/** A code that the check of a messenger never gives. */
+export const NOT_GIVEN = "not_given";
 
-/** The guide to a token for each messenger: where its bot, or a bridge's token, is made. */
-const TOKEN = {
-  mattermost: "fix.token.mattermost",
-  telegram: "fix.token.telegram",
-  slack: "fix.token.slack",
-  bridge: "fix.token.bridge",
-} as const satisfies Record<ConnectionType, DocsKey>;
+/** What a code of a messenger's check links to: a key, null for a code without a link, or NOT_GIVEN. */
+type Fix = DocsKey | null | typeof NOT_GIVEN;
 
-const CONNECTION_FIXES = {
-  token_invalid: TOKEN,
+/** The codes every check can give: an address that cannot be reached, the outbound address policy, any other error. */
+const SHARED = {
   dns_failed: "fix.network",
   connect_failed: "fix.network",
   tls_failed: "fix.network",
   timeout: "fix.network",
   proxy_refused: "fix.network",
   blocked: "fix.blocked",
-  not_bot_api: { telegram: "fix.telegram_base_url" },
-  wrong_path_prefix: { telegram: "fix.telegram_base_url", mattermost: "fix.mattermost_server" },
-  unexpected_status: { mattermost: "fix.mattermost_server" },
-  not_mattermost: { mattermost: "fix.mattermost_server" },
-  wrong_token_type: { slack: "fix.slack_tokens" },
-  app_mismatch: { slack: "fix.slack_tokens" },
-  not_slack: { slack: "fix.slack_tokens" },
-  missing_scope: { slack: "fix.slack_scopes" },
-  not_bridge: { bridge: "fix.bridge_check" },
-  protocol_version_unknown: { bridge: "fix.bridge_check" },
-  protocol_mismatch: { bridge: "fix.bridge_check" },
-  event_delivery_not_offered: { bridge: "fix.bridge_check" },
   request_failed: null,
-  webhook_set: null,
-} as const satisfies Record<ConnectionCheckCode, Fix>;
+} as const;
 
-const DESTINATION_FIXES = {
-  token_invalid: TOKEN,
-  dns_failed: "fix.network",
-  connect_failed: "fix.network",
-  tls_failed: "fix.network",
-  timeout: "fix.network",
-  proxy_refused: "fix.network",
-  blocked: "fix.blocked",
-  bot_not_in_channel: { mattermost: "fix.mattermost_destination", slack: "fix.slack_destination" },
-  channel_in_other_team: { mattermost: "fix.mattermost_destination" },
-  channel_archived: { mattermost: "fix.mattermost_destination", slack: "fix.slack_destination" },
-  channel_not_found: { telegram: "fix.telegram_destination", slack: "fix.slack_destination" },
-  not_a_channel: { telegram: "fix.telegram_destination" },
-  changed_since_saved: { telegram: "fix.telegram_destination" },
-  comments_disabled: { telegram: "fix.telegram_comments" },
-  bot_not_channel_admin: { telegram: "fix.telegram_admin" },
-  bot_may_not_post: { telegram: "fix.telegram_admin" },
-  bot_may_not_edit: { telegram: "fix.telegram_admin" },
-  bot_not_group_admin: { telegram: "fix.telegram_admin" },
-  missing_scope: { slack: "fix.slack_scopes" },
-  channel_forbidden: { bridge: "fix.bridge_destination" },
-  request_failed: null,
-} as const satisfies Record<DestinationCheckCode, Fix>;
+/** The guide of each code of the Connection check, by messenger. */
+export const CONNECTION_FIXES = {
+  mattermost: {
+    ...SHARED,
+    token_invalid: "fix.token.mattermost",
+    not_mattermost: "fix.mattermost_server",
+    wrong_path_prefix: "fix.mattermost_server",
+    unexpected_status: "fix.mattermost_server",
+    not_bot_api: NOT_GIVEN,
+    webhook_set: NOT_GIVEN,
+    not_bridge: NOT_GIVEN,
+    protocol_version_unknown: NOT_GIVEN,
+    protocol_mismatch: NOT_GIVEN,
+    event_delivery_not_offered: NOT_GIVEN,
+    wrong_token_type: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+    app_mismatch: NOT_GIVEN,
+    not_slack: NOT_GIVEN,
+  },
+  telegram: {
+    ...SHARED,
+    token_invalid: "fix.token.telegram",
+    not_bot_api: "fix.telegram_base_url",
+    wrong_path_prefix: "fix.telegram_base_url",
+    unexpected_status: "fix.telegram_base_url",
+    webhook_set: null,
+    not_mattermost: NOT_GIVEN,
+    not_bridge: NOT_GIVEN,
+    protocol_version_unknown: NOT_GIVEN,
+    protocol_mismatch: NOT_GIVEN,
+    event_delivery_not_offered: NOT_GIVEN,
+    wrong_token_type: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+    app_mismatch: NOT_GIVEN,
+    not_slack: NOT_GIVEN,
+  },
+  slack: {
+    ...SHARED,
+    token_invalid: "fix.token.slack",
+    wrong_token_type: "fix.slack_tokens",
+    app_mismatch: "fix.slack_tokens",
+    missing_scope: "fix.slack_scopes",
+    not_slack: "fix.slack_server",
+    unexpected_status: "fix.slack_server",
+    // Slack's address is fixed: its dry probe never names a path prefix.
+    wrong_path_prefix: NOT_GIVEN,
+    not_bot_api: NOT_GIVEN,
+    webhook_set: NOT_GIVEN,
+    not_mattermost: NOT_GIVEN,
+    not_bridge: NOT_GIVEN,
+    protocol_version_unknown: NOT_GIVEN,
+    protocol_mismatch: NOT_GIVEN,
+    event_delivery_not_offered: NOT_GIVEN,
+  },
+  bridge: {
+    ...SHARED,
+    token_invalid: "fix.token.bridge",
+    not_bridge: "fix.bridge_server",
+    wrong_path_prefix: "fix.bridge_server",
+    unexpected_status: "fix.bridge_server",
+    protocol_version_unknown: "fix.bridge_check",
+    protocol_mismatch: "fix.bridge_check",
+    event_delivery_not_offered: "fix.bridge_check",
+    not_bot_api: NOT_GIVEN,
+    webhook_set: NOT_GIVEN,
+    not_mattermost: NOT_GIVEN,
+    wrong_token_type: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+    app_mismatch: NOT_GIVEN,
+    not_slack: NOT_GIVEN,
+  },
+} as const satisfies Record<ConnectionType, Record<ConnectionCheckCode, Fix>>;
 
-const WARNING_FIXES = {
+/** The guide of each code of the Destination check, by messenger; the outgoing webhook has no Destination check. */
+export const DESTINATION_FIXES = {
+  mattermost: {
+    ...SHARED,
+    token_invalid: "fix.token.mattermost",
+    bot_not_in_channel: "fix.mattermost_destination",
+    channel_in_other_team: "fix.mattermost_destination",
+    channel_archived: "fix.mattermost_destination",
+    channel_not_found: NOT_GIVEN,
+    not_a_channel: NOT_GIVEN,
+    comments_disabled: NOT_GIVEN,
+    changed_since_saved: NOT_GIVEN,
+    bot_not_channel_admin: NOT_GIVEN,
+    bot_may_not_post: NOT_GIVEN,
+    bot_may_not_edit: NOT_GIVEN,
+    bot_not_group_admin: NOT_GIVEN,
+    channel_forbidden: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+  },
+  telegram: {
+    ...SHARED,
+    token_invalid: "fix.token.telegram",
+    channel_not_found: "fix.telegram_destination",
+    not_a_channel: "fix.telegram_destination",
+    changed_since_saved: "fix.telegram_destination",
+    comments_disabled: "fix.telegram_comments",
+    bot_not_channel_admin: "fix.telegram_admin",
+    bot_may_not_post: "fix.telegram_admin",
+    bot_may_not_edit: "fix.telegram_admin",
+    bot_not_group_admin: "fix.telegram_admin",
+    bot_not_in_channel: NOT_GIVEN,
+    channel_in_other_team: NOT_GIVEN,
+    channel_archived: NOT_GIVEN,
+    channel_forbidden: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+  },
+  slack: {
+    ...SHARED,
+    token_invalid: "fix.token.slack",
+    missing_scope: "fix.slack_scopes",
+    bot_not_in_channel: "fix.slack_destination",
+    channel_not_found: "fix.slack_destination",
+    channel_archived: "fix.slack_destination",
+    channel_in_other_team: NOT_GIVEN,
+    not_a_channel: NOT_GIVEN,
+    comments_disabled: NOT_GIVEN,
+    changed_since_saved: NOT_GIVEN,
+    bot_not_channel_admin: NOT_GIVEN,
+    bot_may_not_post: NOT_GIVEN,
+    bot_may_not_edit: NOT_GIVEN,
+    bot_not_group_admin: NOT_GIVEN,
+    channel_forbidden: NOT_GIVEN,
+  },
+  bridge: {
+    ...SHARED,
+    token_invalid: "fix.token.bridge",
+    channel_forbidden: "fix.bridge_destination",
+    bot_not_in_channel: NOT_GIVEN,
+    channel_in_other_team: NOT_GIVEN,
+    channel_archived: NOT_GIVEN,
+    channel_not_found: NOT_GIVEN,
+    not_a_channel: NOT_GIVEN,
+    comments_disabled: NOT_GIVEN,
+    changed_since_saved: NOT_GIVEN,
+    bot_not_channel_admin: NOT_GIVEN,
+    bot_may_not_post: NOT_GIVEN,
+    bot_may_not_edit: NOT_GIVEN,
+    bot_not_group_admin: NOT_GIVEN,
+    missing_scope: NOT_GIVEN,
+  },
+} as const satisfies Record<ConnectionType, Record<DestinationCheckCode, Fix>>;
+
+/** The guide of each warning of the Connection check. */
+export const WARNING_FIXES = {
   press_answers_in_thread: "fix.press_answers_in_thread",
   another_client_connected: "fix.another_client_connected",
 } as const satisfies Record<ConnectionCheckResultWarningsItem, DocsKey>;
@@ -93,14 +196,18 @@ const WARNING_FIXES = {
 /** The codes reference.md lists as having no link. */
 export const CODES_WITHOUT_LINK: readonly string[] = ["request_failed", "webhook_set"];
 
-function pick(
-  fix: CheckFixKey | Partial<Record<ConnectionType, CheckFixKey>> | null | undefined,
-  type: ConnectionType,
-): CheckFixKey | undefined {
-  if (fix === null || fix === undefined) {
-    return undefined;
-  }
-  return typeof fix === "string" ? fix : fix[type];
+type Values<T> = T[keyof T];
+
+/** A key of a guide that a check's code or warning links to. */
+export type CheckFixKey = Exclude<
+  | Values<Values<typeof CONNECTION_FIXES>>
+  | Values<Values<typeof DESTINATION_FIXES>>
+  | Values<typeof WARNING_FIXES>,
+  null | typeof NOT_GIVEN
+>;
+
+function linked(fix: CheckFixKey | null | typeof NOT_GIVEN): CheckFixKey | undefined {
+  return fix === null || fix === NOT_GIVEN ? undefined : fix;
 }
 
 /** The guide of a code of a Connection check of a type, or none. */
@@ -108,7 +215,7 @@ export function connectionCheckFix(
   type: ConnectionType,
   code: NullableConnectionCheckCode | undefined,
 ): CheckFixKey | undefined {
-  return code === null || code === undefined ? undefined : pick(CONNECTION_FIXES[code], type);
+  return code === null || code === undefined ? undefined : linked(CONNECTION_FIXES[type][code]);
 }
 
 /**
@@ -122,7 +229,7 @@ export function destinationCheckFix(
   if (type === "webhook" || code === null || code === undefined) {
     return undefined;
   }
-  return pick(DESTINATION_FIXES[code], type);
+  return linked(DESTINATION_FIXES[type][code]);
 }
 
 /** The guide of a warning of a Connection check. */
@@ -131,15 +238,6 @@ export function checkWarningFix(
 ): CheckFixKey | undefined {
   return WARNING_FIXES[warning];
 }
-
-type Leaf<V> = V extends string ? V : V extends Record<string, infer K> ? K : never;
-
-/** A key of a guide that a check's code or warning links to. */
-export type CheckFixKey = Leaf<
-  | (typeof CONNECTION_FIXES)[ConnectionCheckCode]
-  | (typeof DESTINATION_FIXES)[DestinationCheckCode]
-  | (typeof WARNING_FIXES)[ConnectionCheckResultWarningsItem]
->;
 
 /** What the guide of a check's code or warning is about, which the accessible name of its "How to fix" adds. */
 const CHECK_FIX_ABOUT = {
@@ -153,6 +251,8 @@ const CHECK_FIX_ABOUT = {
   "fix.mattermost_server": (t) => t("docs.fixes.mattermostServer"),
   "fix.slack_tokens": (t) => t("docs.fixes.slackTokens"),
   "fix.slack_scopes": (t) => t("docs.fixes.slackScopes"),
+  "fix.slack_server": (t) => t("docs.fixes.slackServer"),
+  "fix.bridge_server": (t) => t("docs.fixes.bridgeServer"),
   "fix.bridge_check": (t) => t("docs.fixes.bridgeCheck"),
   "fix.press_answers_in_thread": (t) => t("docs.fixes.pressAnswersInThread"),
   "fix.another_client_connected": (t) => t("docs.fixes.anotherClientConnected"),

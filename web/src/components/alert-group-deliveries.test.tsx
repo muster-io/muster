@@ -7,7 +7,8 @@
 // polling, and a Destination's name whose tooltip and accessible description are its full label with destinations:read
 // (a deleted Destination keeps its name alone). With destinations:read each row has "Requests", which opens the
 // requests of that Destination for that Alert Group in a dialog, and the row and the dialog's list, its status and
-// latency included, keep their layout at 360 px.
+// latency included, keep their layout at 360 px. "Not delivered" and "Waiting" end with "How to fix": the recovery of a
+// Broken Destination while it is Broken, otherwise what makes a Destination Broken (C-21.FR-11).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -136,6 +137,14 @@ function text(extra: Partial<AlertGroupDelivery>): string {
   return deliveryStateText(i18n.t, delivery(extra));
 }
 
+/** The "How to fix" link of a delivery row. */
+function fixOf(row: number) {
+  return page
+    .getByTestId("delivery-row")
+    .nth(row)
+    .getByRole("link", { name: /^How to fix: / });
+}
+
 describe("the Delivery section", () => {
   test("names every state as the reference does", () => {
     expect(text({ state: "delivered" })).toBe("Delivered");
@@ -207,6 +216,61 @@ describe("the Delivery section", () => {
       page.getByTestId("delivery-row").nth(1).element().querySelector("a[href^='javascript']"),
     ).toBeNull();
     await expect.element(page.getByTestId("destination-health").nth(1)).toHaveTextContent("Broken");
+  });
+
+  test("links a problem to How to fix: recovery while the Destination is Broken, what makes it Broken otherwise", async () => {
+    const broken = { state: "broken" as const, since: "2026-10-09T08:00:00Z", reason: "403" };
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            delivery({ state: "not_delivered", error: "answered 400" }),
+            delivery({
+              destination: {
+                id: "DS0000000000AB",
+                name: "prod",
+                type: "mattermost",
+                health: broken,
+              },
+              state: "not_delivered",
+              error: "answered 403",
+            }),
+            delivery({
+              destination: {
+                id: "DS0000000000AC",
+                name: "ops",
+                type: "mattermost",
+                health: broken,
+              },
+              state: "waiting_for_broken_destination",
+            }),
+            delivery({ destination: { ...delivery({}).destination, id: "DS0000000000AD" } }),
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />));
+    const site = "https://muster-io.github.io/muster/latest/concepts/broken-destinations/";
+    // Not delivered to a healthy Destination: what makes a Destination Broken, and what does not.
+    await expect
+      .element(page.getByTestId("delivery-state").nth(0))
+      .toHaveTextContent("Not delivered: answered 400");
+    await expect
+      .element(fixOf(0))
+      .toHaveAccessibleName("How to fix: Message not delivered (opens in a new tab)");
+    await expect
+      .element(fixOf(0))
+      .toHaveAttribute("href", `${site}#when-a-destination-becomes-broken`);
+    // Not delivered to a Broken Destination, and waiting for one: its recovery.
+    await expect.element(fixOf(1)).toHaveAttribute("href", `${site}#recovery`);
+    await expect
+      .element(fixOf(2))
+      .toHaveAccessibleName("How to fix: Broken Destination (opens in a new tab)");
+    await expect.element(fixOf(2)).toHaveAttribute("href", `${site}#recovery`);
+    // A delivery that is not a problem has none.
+    await expect.element(page.getByTestId("delivery-row").nth(3)).toBeVisible();
+    expect(fixOf(3).elements()).toHaveLength(0);
   });
 
   test("marks a delivery past the bridge's edit window beside its state, and nothing when it is not", async () => {
