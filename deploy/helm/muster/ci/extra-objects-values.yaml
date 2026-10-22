@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# existingSecret produced in the same release by an External Secrets Operator ExternalSecret, a map item, and a
+# SealedSecret, a string item; both name values through tpl. The ExternalSecret builds the database URL under
+# database.urlKey with a template of its own, whose {{ is escaped from tpl with a backtick string; its line is long
+# enough that toYaml breaks it inside the escape.
+existingSecret: muster
+
+database:
+  urlKey: database-url
+
+publicURL: https://muster.example.org
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password
+
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: '{{ .Values.existingSecret }}'
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: ClusterSecretStore
+        name: vault
+      target:
+        name: '{{ .Values.existingSecret }}'
+        template:
+          mergePolicy: Merge
+          data:
+            '{{ .Values.database.urlKey }}': 'postgresql://muster_prod:{{ `{{ .password | urlquery }}` }}@db.example.org:5432/muster?sslmode=require'
+      data:
+        - secretKey: '{{ .Values.masterKeysKey }}'
+          remoteRef:
+            key: muster/keys
+            property: secret-keys
+        - secretKey: '{{ .Values.bootstrapAdmin.passwordKey }}'
+          remoteRef:
+            key: muster/keys
+            property: bootstrap-password
+        - secretKey: password
+          remoteRef:
+            key: muster/database
+            property: password
+  - |
+    apiVersion: bitnami.com/v1alpha1
+    kind: SealedSecret
+    metadata:
+      name: {{ .Release.Name }}-sealed
+      namespace: {{ .Release.Namespace }}
+    spec:
+      encryptedData:
+        token: AgBy3i4OJSWK+PiTySYZZA==
+      template:
+        metadata:
+          name: {{ .Release.Name }}-sealed

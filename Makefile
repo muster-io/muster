@@ -84,7 +84,8 @@ MUTATION_PKGS ?= internal/groups internal/routing internal/delivery internal/tim
 MUTATION_DIR := $(BIN)/mutation
 
 # make helm-check renders the chart for this Kubernetes version and validates it against its schemas; the Gateway API,
-# ServiceMonitor, PrometheusRule, VMRule and GrafanaDashboard schemas come from a pinned commit of the CRDs catalog.
+# ServiceMonitor, PrometheusRule, VMRule, GrafanaDashboard, ExternalSecret and SealedSecret schemas come from a pinned
+# commit of the CRDs catalog.
 # It also packages the chart with a release appVersion, as release.yml does with the tag, to check its runbook_urls.
 CHART := deploy/helm/muster
 HELM_CHECK_VALUES := $(sort $(wildcard $(CHART)/ci/*-values.yaml))
@@ -331,9 +332,12 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 # rules and the dashboard of the all-options rendering, and of the chart packaged with a release appVersion, against
 # reference.md and the metric catalogue. The CloudNativePG values read the database URL, or the password, from the
 # Secret muster-db-app, the password through a volume of its own in both containers, and the master keys from
-# existingSecret. Rendering without existingSecret must fail with the master keys message, and a GrafanaDashboard
-# without its ConfigMap with its own. Every step runs even when an earlier one fails.
-helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules and dashboard; check the existingSecret error
+# existingSecret. The default values render no extra object; the extra-objects values render their ExternalSecret and
+# SealedSecret through tpl, each a document of its own, with the names and keys of the values, and keep the one escaped
+# {{ of the ExternalSecret's template as it is, although toYaml breaks its long line inside the escape. Rendering
+# without existingSecret must fail with the master keys message, and a GrafanaDashboard without its ConfigMap with its
+# own. Every step runs even when an earlier one fails.
+helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules, dashboard and extra objects; check the existingSecret error
 	@tmp=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	failed=0; \
@@ -369,6 +373,24 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 			failed=1; }; \
 	else \
 		echo "helm template failed with the CloudNativePG values"; failed=1; \
+	fi; \
+	echo "the extra objects of the extra-objects values, and none with the default values"; \
+	if $(HELM) template muster $(CHART) -f $(CHART)/ci/extra-objects-values.yaml >"$$tmp/extra.yaml"; then \
+		test -s "$$tmp/default.yaml" && \
+		! grep -qx '# Source: muster/templates/extra-objects.yaml' "$$tmp/default.yaml" && \
+		test "$$(grep -cx '# Source: muster/templates/extra-objects.yaml' "$$tmp/extra.yaml")" -eq 2 && \
+		grep -A3 -x 'kind: ExternalSecret' "$$tmp/extra.yaml" | grep -qx "  name: 'muster'" && \
+		grep -A1 -x '  target:' "$$tmp/extra.yaml" | grep -qx "    name: 'muster'" && \
+		grep -qx "    secretKey: 'secret-keys'" "$$tmp/extra.yaml" && \
+		grep -qx "    secretKey: 'bootstrap-password'" "$$tmp/extra.yaml" && \
+		grep -A1 -xF "        'database-url': postgresql://muster_prod:{{ .password" "$$tmp/extra.yaml" | tail -n 1 | \
+			grep -qxF '          | urlquery }}@db.example.org:5432/muster?sslmode=require' && \
+		grep -A3 -x 'kind: SealedSecret' "$$tmp/extra.yaml" | grep -qx '  name: muster-sealed' && \
+		test "$$(grep -cF '{{' "$$tmp/extra.yaml")" -eq 1 || \
+		{ echo "the extra objects do not render as two documents with their values resolved and the escaped {{ kept"; \
+			failed=1; }; \
+	else \
+		echo "helm template failed with the extra-objects values"; failed=1; \
 	fi; \
 	echo "chartcheck with the all-options values"; \
 	if $(HELM) template muster $(CHART) --kube-version $(HELM_CHECK_KUBE_VERSION) \

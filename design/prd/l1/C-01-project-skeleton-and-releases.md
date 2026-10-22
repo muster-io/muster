@@ -42,9 +42,10 @@ first story, so every later capability lands behind the same gates.
   cosign signatures and the Helm chart.
 - **C-01.FR-10** The Helm chart defaults `image.tag` to the chart's `appVersion` and `replicas` to 1; reads the database
   settings, master keys and the bootstrap admin password from an existing Secret, the database password or URL
-  optionally from a Secret of its own, such as the one CloudNativePG generates; renders objects that a cluster may lack
-  (monitoring CRDs, ServiceMonitor, NetworkPolicy, dashboard resources) only behind conditions or flags; offers a
-  PodDisruptionBudget and two replicas as options; and exposes the app and ingest listeners through optional
+  optionally from a Secret of its own, such as the one CloudNativePG generates; never generates the existing Secret, but
+  renders extra manifests given in `extraObjects`, such as the object that produces it; renders objects that a cluster
+  may lack (monitoring CRDs, ServiceMonitor, NetworkPolicy, dashboard resources) only behind conditions or flags; offers
+  a PodDisruptionBudget and two replicas as options; and exposes the app and ingest listeners through optional
   `ingress.*` and `httpRoute.*` values while always creating Services. CI renders the chart with `helm template` and
   validates it with kubeconform.
 - **C-01.FR-11** The repository contains `SECURITY.md` (private vulnerability reporting through GitHub; the latest minor
