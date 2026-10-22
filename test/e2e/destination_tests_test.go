@@ -103,7 +103,8 @@ func TestDestinationTests(t *testing.T) {
 		}
 		posts := e.posts()
 		last := posts[len(posts)-1]
-		if title := last.attachment(t).Title; !strings.HasPrefix(title, "🧪 Test message") || last.Message != "" {
+		if title := last.attachment(t).Title; !strings.HasPrefix(title, "🧪 Test message") || last.Message != "" ||
+			!strings.HasPrefix(last.attachment(t).Fallback, "🧪 Test message · 🔴 #") {
 			t.Errorf("title %q, message %q", title, last.Message)
 		}
 		for _, x := range e.ephemeral() {

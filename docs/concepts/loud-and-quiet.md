@@ -120,8 +120,9 @@ A few details:
 
 - **Mattermost.** A reply in a Thread notifies the Thread's followers by their own settings, and a Mention makes the
   person a follower. So Quiet means "without a Mention", not "nobody is notified". A Loud Root message has its Mentions
-  as the first line of its attachment, where a person's Mention, `@channel`, `@here` and `@all` notify with a
-  notification that shows no content; a Thread reply has them in its text. See [Who gets notified](../messengers/mattermost.md#who-gets-notified).
+  as the first line of its attachment, where a person's Mention, `@channel`, `@here` and `@all` notify; a push or
+  desktop notification shows the summary line of the Alert Group, and an email shows no content. A Thread reply has
+  its Mentions in its text. See [Who gets notified](../messengers/mattermost.md#who-gets-notified).
 - **Slack.** Slack cannot send a message without a notification: whom a new message notifies depends on each member's
   settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
   no Mention, so it drops the Mentions of the message it edits. See [Who gets

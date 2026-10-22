@@ -348,8 +348,10 @@ type props struct {
 	Attachments []attachment `json:"attachments"`
 }
 
-// attachment is a message attachment: its colour, title and link, text, footer and buttons.
+// attachment is a message attachment: the plain text that notifications show for it, which the channel does not draw
+// (F-115), its colour, title and link, text, footer and buttons.
 type attachment struct {
+	Fallback   string   `json:"fallback,omitempty"`
 	Color      string   `json:"color,omitempty"`
 	Title      string   `json:"title,omitempty"`
 	TitleLink  string   `json:"title_link,omitempty"`

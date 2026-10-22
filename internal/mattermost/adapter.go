@@ -89,7 +89,7 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 	if fail != nil {
 		return *fail
 	}
-	p := rootPost(m, a.look(c, t), "")
+	p := rootPost(m, a.look(c, t), nil)
 	_, r := t.Client.patchPost(ctx, c.Class, messageID, patch{Message: p.Message, Props: p.Props})
 	return edited(ctx, t.Client, c.Class, messageID, r)
 }
@@ -151,9 +151,9 @@ func (a *Adapter) look(c delivery.Call, t Target) look {
 
 // mentions are the targets of a Loud call and the template tokens in Mattermost's syntax; a Quiet call mentions
 // nobody.
-func (a *Adapter) mentions(c delivery.Call, l look, tokens []templates.Token) string {
+func (a *Adapter) mentions(c delivery.Call, l look, tokens []templates.Token) []string {
 	if c.Loudness != groups.Loud {
-		return ""
+		return nil
 	}
 	return mentionText(c.Targets, tokens, l.markup)
 }

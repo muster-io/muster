@@ -4566,7 +4566,7 @@ type DestinationPreviewItem struct {
 	// Request A request as it would be or was sent, with Secrets, the Signing secret and tokens masked.
 	Request *RenderedRequest `json:"request,omitempty"`
 
-	// Text The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.
+	// Text The rendered Root message text; for Mattermost, the post's `message`, which is empty, the attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.
 	Text nullable.Nullable[string] `json:"text,omitempty"`
 }
 

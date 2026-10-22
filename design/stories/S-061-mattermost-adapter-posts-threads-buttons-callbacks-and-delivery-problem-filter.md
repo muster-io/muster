@@ -151,9 +151,11 @@ issue: 61
   with a stable `id` (`ack`, `unack`, `resolve`, `unsnooze`, `snooze0`…) and `integration` `{url:
   <MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<connection public_id>, context: {action, key_id}}`. Mentions go
   nowhere else in the attachment than its first line; a user's, `@channel`, `@here` and `@all` notify there (F-056,
-  F-113; a group's was not checked), with a notification that shows no content, which is accepted. A Storm summary is
-  laid out the same way: `message` empty and one attachment of the Storm colour, without a title, whose text is its
-  Mentions line on a Loud one and then the summary. A trusted Mention token of a Route template shows in the
+  F-113; a group's was not checked). The attachment's `fallback` is the plain summary line — the status emoji, `#N`
+  and the title, neutral — without Mentions: the channel does not draw it, push under `full` and desktop notifications
+  show it, and an email of the post shows no content (F-056, F-115). A Storm summary is laid out the same way:
+  `message` empty and one attachment of the Storm colour, without a title, whose text is its Mentions line on a Loud
+  one and then the summary, and whose `fallback` is its first line. A trusted Mention token of a Route template shows in the
   attachment as text that notifies nobody, and on a Loud Publication its Mention joins the others in the Mentions line;
   the Owner token stays text, since the message carries no username of the Owner. The adapter declares `Markup()`
   `markdown` and `LengthLimit()` 16,383 characters, the server's `MaxPostSize` (F-057), which the layout applies to the

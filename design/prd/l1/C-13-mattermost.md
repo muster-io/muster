@@ -50,19 +50,25 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   `<MUSTER_PUBLIC_URL>/muster-mark-256.png`; and the buttons of [reference.md](reference.md#buttons-and-links-by-status)
   follow. The Mentions of a Loud post are one line, the first line of the attachment's text, directly under its title,
   and appear nowhere else in it: inside an attachment a user's Mention notifies (F-056), and so do `@channel`, `@here`
-  and `@all` (F-113); a group's Mention there was not checked. The notification of such a post shows no content, since
-  its `message` is empty (F-056); this is accepted, because the post itself shows everything once. An edit rewrites the
-  attachment and sets an empty `message`, which also clears the `message` of a Root message that an earlier version
-  posted with a summary line (F-114); like every edit it is Quiet and carries no Mention (F-029), so the Mentions line
-  goes. A Storm summary follows the same rule: an empty `message` and one attachment in the Storm colour, without a
-  title, whose text is the Mentions line of a Loud one and then the summary. Every top-level post Muster makes in the
-  channel — a Root message, a Storm summary and a test message (C-16.FR-1), whose mark "🧪 Test message · " starts the
-  attachment's title — has an empty `message`. Every link, "Open in Muster" included, is a link in the post, never a
-  button: the answer to a press cannot open a URL (F-024). The Thread is the post's replies: Muster posts them with the
-  Root message as `root_id`, with their text and Mentions in `message`, so they show in the Thread and raise its reply
-  count (F-027). The attachment text, the Mentions line included, and the `message` of a Thread reply each stay within
-  the server's post length limit of 16,383 characters (F-057): the adapter declares that limit, so a longer Root message
-  is shortened as C-12.FR-11 says — its Alert list is cut and ends with "…and N more" — and the Mentions, the link to
+  and `@all` (F-113); a group's Mention there was not checked. The attachment's `fallback`, which the channel does not
+  draw, is the summary line — the status emoji of C-12.FR-1 item 1, `#N` and the Alert Group's title — without the
+  Mentions. What a notification of the post shows follows from its empty `message`: an email shows no content (F-056,
+  measured), push under `PushNotificationContents` `full` and desktop notifications show the `fallback`, the summary
+  line, and push under `generic` shows a fixed text (F-115, read in the source); this is accepted, because the post
+  itself shows everything once. An edit rewrites the attachment, with the same `fallback`, and sets an empty
+  `message`, which also clears the `message` of a Root message that an earlier version posted with a summary line
+  (F-114); like every edit it is Quiet and carries no Mention (F-029), so the Mentions line goes. A Storm summary
+  follows the same rule: an empty `message` and one attachment in the Storm colour, without a title, whose text is the
+  Mentions line of a Loud one and then the summary, and whose `fallback` is the summary's first line. The posts that
+  show an Alert Group, a Storm or a test message — a Root message, a Storm summary and a test message (C-16.FR-1),
+  whose mark "🧪 Test message · " starts the attachment's title and its `fallback` — have an empty `message`; the other
+  posts keep their text in `message`: Thread replies, the ephemeral answers to a press (FR-4, AC-14) and the direct
+  messages of Account links (C-18). Every link, "Open in Muster" included, is a link in the post, never a button: the
+  answer to a press cannot open a URL (F-024). The Thread is the post's replies: Muster posts them with the Root
+  message as `root_id`, with their text and Mentions in `message`, so they show in the Thread and raise its reply count
+  (F-027). The attachment text, the Mentions line included, and the `message` of a Thread reply each stay within the
+  server's post length limit of 16,383 characters (F-057): the adapter declares that limit, so a longer Root message is
+  shortened as C-12.FR-11 says — its Alert list is cut and ends with "…and N more" — and the Mentions, the link to
   Muster and the footer always stay; a Mentions line too long to fit loses whole Mentions from its end.
 - **C-13.FR-4** Each button carries only an opaque action id signed with the button-signature key and its key id. A
   press arrives at `MUSTER_INGEST_URL` as a request from the Mattermost server (F-023); Muster verifies the signature

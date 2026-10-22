@@ -84,6 +84,7 @@ const TELEGRAM_ITEM: DestinationPreviewItem = {
   },
 };
 
+// An old-style post with a non-empty message, kept on purpose: the frame must still draw a message that has text.
 const MATTERMOST_ITEM: DestinationPreviewItem = {
   name: "message",
   format: "markdown",

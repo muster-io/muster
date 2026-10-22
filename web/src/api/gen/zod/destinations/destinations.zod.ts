@@ -2716,7 +2716,7 @@ export const PreviewDestinationResponse = zod.object({
   "items": zod.array(zod.object({
   "name": zod.enum(['message', 'event', 'create', 'update', 'open_thread', 'reply_in_thread']),
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('json'),zod.literal('plain'),zod.literal(null)]).nullish(),
-  "text": zod.string().nullish().describe('The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.'),
+  "text": zod.string().nullish().describe('The rendered Root message text; for Mattermost, the post\'s `message`, which is empty, the attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.'),
   "request": zod.object({
   "method": zod.string(),
   "url": zod.string(),

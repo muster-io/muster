@@ -51,9 +51,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   own text is empty and everything is one attachment in the colour of item 1, so the title shows once: its title is
   item 2, linked to the Alert Group page; the Mentions of a Loud post are the first line of its text, directly under the
   title, where a user's Mention ([F-056](../../facts.md#edits-and-notifications)) and `@channel`, `@here` and `@all`
-  ([F-113](../../facts.md#edits-and-notifications)) notify with a notification that shows no content, which is
-  accepted; the links of item 9 form one line under the Alerts that starts with "Open in Muster"; item 11 is the last
-  line of its text; the attachment's own footer shows "Muster v<version>" with the Muster logo; and the buttons follow
+  ([F-113](../../facts.md#edits-and-notifications)) notify; the attachment's `fallback`, which the channel does not
+  draw, is the summary line — the status emoji of item 1, `#N` and the title — so an email notification shows no
+  content ([F-056](../../facts.md#edits-and-notifications), measured) while push under `full` and desktop notifications
+  show that summary line ([F-115](../../facts.md#edits-and-notifications), read in the source), which is accepted; the
+  links of item 9 form one line under the Alerts that starts with "Open in Muster"; item 11 is the last line of its
+  text; the attachment's own footer shows "Muster v<version>" with the Muster logo; and the buttons follow
   (C-13.FR-3).
 - **C-12.FR-2** A Route's Root message template, if set, renders only the body — items 3 to 8; the status colour,
   heading, links, notices, footer and buttons always come from Muster, so no template can lose the buttons or the link

@@ -169,8 +169,12 @@ Muster edits a Root message for as long as its Alert Group is open, which can be
 - A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
   `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
   person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
-  notifies from an attachment has not been checked. The notification shows no content, because the post's own text is
-  empty: everything is in the attachment, so the post shows its title once. An edit removes that line. A reply in the
+  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  the post shows its title once. What a notification shows follows from that: an email notification shows no content;
+  a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
+  attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
+  not show; a push notification under `generic` shows a fixed text such as "… notified the channel." An edit removes
+  the line of Mentions. A reply in the
   Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
   as text and, on a Loud post, adds its Mention to the line of Mentions.
 - Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody. The footer of

@@ -283,6 +283,7 @@ type mmAction struct {
 }
 
 type mmAttachment struct {
+	Fallback   string     `json:"fallback"`
 	Color      string     `json:"color"`
 	Title      string     `json:"title"`
 	TitleLink  string     `json:"title_link"`
@@ -535,7 +536,8 @@ func TestMattermost(t *testing.T) {
 	att := root.attachment(t)
 	if mentions, _ := root.mentionsAndBody(); root.Message != "" || mentions != "" || att.Color != "#d32f2f" ||
 		att.Title != fmt.Sprintf("#%d DiskFull", n) || !strings.HasSuffix(att.TitleLink, "/alert-groups/"+g) ||
-		!strings.HasPrefix(att.Footer, "Muster v") || att.FooterIcon != devmode.PublicURL+"/muster-mark-256.png" {
+		!strings.HasPrefix(att.Footer, "Muster v") || att.FooterIcon != devmode.PublicURL+"/muster-mark-256.png" ||
+		att.Fallback != fmt.Sprintf("🔴 #%d DiskFull", n) {
 		t.Errorf("root message %q, attachment %+v", root.Message, att)
 	}
 	if !strings.Contains(att.Text, "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")") ||
@@ -570,7 +572,7 @@ func TestMattermost(t *testing.T) {
 	if ea.Color != "#f57c00" || !slices.Equal(actionNames(ea), []string{"Unack", "Resolve", "Snooze 1 h", "Snooze 4 h",
 		"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}) ||
 		!strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || edited.Message != "" ||
-		ea.Title != fmt.Sprintf("#%d DiskFull", n) {
+		ea.Title != fmt.Sprintf("#%d DiskFull", n) || ea.Fallback != fmt.Sprintf("🟠 #%d DiskFull", n) {
 		t.Errorf("edited post %q: %+v", edited.Message, ea)
 	}
 	e.alert("d1", "i2", `{"team":"db","cluster":"a","disk":"i2"}`, "")
@@ -959,7 +961,8 @@ func TestMattermostMessages(t *testing.T) {
 			}
 		}
 		if s := summary()[0]; published != 3 || s.Message != "" || s.attachment(t).Color != "#6a1b9a" ||
-			s.attachment(t).Title != "" || !strings.HasPrefix(s.body(), "⛈ Storm on storm: 3 Alert Groups, 0 urgent") {
+			s.attachment(t).Title != "" || !strings.HasPrefix(s.body(), "⛈ Storm on storm: 3 Alert Groups, 0 urgent") ||
+			!strings.HasPrefix(s.attachment(t).Fallback, "⛈ Storm on storm: 3 Alert Groups") {
 			t.Errorf("%d root messages and the summary %q: %+v", published, s.Message, s.Attachments)
 		}
 		held := []int{}
@@ -1197,7 +1200,8 @@ func TestMattermostBrokenRecovery(t *testing.T) {
 	e.waitHealth(dest, "healthy")
 	rootA := e.root(e.number(ga))
 	e.root(e.number(gz))
-	if mentions, _ := rootA.mentionsAndBody(); rootA.Message != "" || !strings.Contains(mentions, "@here") {
+	if mentions, _ := rootA.mentionsAndBody(); rootA.Message != "" || !strings.Contains(mentions, "@here") ||
+		strings.Contains(rootA.attachment(t).Fallback, "@") {
 		t.Errorf("A was published quietly: %q, %+v", rootA.Message, rootA.Attachments)
 	}
 	eventually(t, "the deliveries to settle", func() bool {

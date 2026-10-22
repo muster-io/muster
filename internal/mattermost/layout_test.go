@@ -72,7 +72,7 @@ func rootMessageOf(status string, durations int) messages.Message {
 // a Quiet post; the footer "Muster v<version>" with the mark; and the buttons with stable ids calling the Connection's
 // callback, the Snooze presets after the durations (C-10.FR-18, C-10.AC-23).
 func TestRootPost(t *testing.T) {
-	p := rootPost(rootMessage(messages.ColourFiring), testLook(), "")
+	p := rootPost(rootMessage(messages.ColourFiring), testLook(), nil)
 	if p.Message != "" || p.Props == nil || len(p.Props.Attachments) != 1 {
 		t.Fatalf("post = %+v", p)
 	}
@@ -81,7 +81,7 @@ func TestRootPost(t *testing.T) {
 	}
 	a := p.Props.Attachments[0]
 	if a.Color != "#d32f2f" || a.Title != "#1 DiskFull" || a.TitleLink != groupURL || a.Footer != "Muster v1.2.3" ||
-		a.FooterIcon != "http://localhost:8080/muster-mark-256.png" {
+		a.FooterIcon != "http://localhost:8080/muster-mark-256.png" || a.Fallback != "🔴 #1 DiskFull" {
 		t.Errorf("attachment = %+v", a)
 	}
 	lines := strings.Split(a.Text, "\n")
@@ -128,29 +128,30 @@ func TestRootPost(t *testing.T) {
 // Snooze durations offers neither Snooze nor the presets.
 func TestRootPostStatuses(t *testing.T) {
 	cases := []struct {
-		status, colour string
-		ids            []string
+		status, colour, emoji string
+		ids                   []string
 	}{
-		{messages.ColourAcknowledged, "#f57c00", []string{"unack", "resolve", "snooze0", "snooze1", "snooze2",
+		{messages.ColourAcknowledged, "#f57c00", "🟠", []string{"unack", "resolve", "snooze0", "snooze1", "snooze2",
 			"snoozetomorrow", "snoozeweek"}},
-		{messages.ColourSnoozed, "#9e9e9e", []string{"ack", "unsnooze", "resolve"}},
-		{messages.ColourResolved, "#388e3c", []string{}},
+		{messages.ColourSnoozed, "#9e9e9e", "⚪", []string{"ack", "unsnooze", "resolve"}},
+		{messages.ColourResolved, "#388e3c", "🟢", []string{}},
 	}
 	for _, c := range cases {
-		p := rootPost(rootMessage(c.status), testLook(), "")
+		p := rootPost(rootMessage(c.status), testLook(), nil)
 		a := p.Props.Attachments[0]
 		ids := []string{}
 		for _, ac := range a.Actions {
 			ids = append(ids, ac.ID)
 		}
-		if p.Message != "" || a.Title != "#1 DiskFull" || a.Color != c.colour || !slices.Equal(ids, c.ids) {
-			t.Errorf("%s: %q %q %s %v", c.status, p.Message, a.Title, a.Color, ids)
+		if p.Message != "" || a.Title != "#1 DiskFull" || a.Color != c.colour || !slices.Equal(ids, c.ids) ||
+			a.Fallback != c.emoji+" #1 DiskFull" {
+			t.Errorf("%s: %q %q %q %s %v", c.status, p.Message, a.Title, a.Fallback, a.Color, ids)
 		}
 	}
 	for status, want := range map[string][]string{messages.ColourFiring: {"ack", "resolve"},
 		messages.ColourAcknowledged: {"unack", "resolve"}} {
 		ids := []string{}
-		for _, ac := range rootPost(rootMessageOf(status, 0), testLook(), "").Props.Attachments[0].Actions {
+		for _, ac := range rootPost(rootMessageOf(status, 0), testLook(), nil).Props.Attachments[0].Actions {
 			ids = append(ids, ac.ID)
 		}
 		if !slices.Equal(ids, want) {
@@ -159,31 +160,40 @@ func TestRootPostStatuses(t *testing.T) {
 	}
 	m := rootMessage(messages.ColourFiring)
 	m.Colour = "unknown"
-	if p := rootPost(m, testLook(), ""); p.Message != "" || p.Props.Attachments[0].Color != "" ||
-		p.Props.Attachments[0].Title != "#1 DiskFull" {
+	if p := rootPost(m, testLook(), nil); p.Message != "" || p.Props.Attachments[0].Color != "" ||
+		p.Props.Attachments[0].Title != "#1 DiskFull" || p.Props.Attachments[0].Fallback != "#1 DiskFull" {
 		t.Errorf("an unknown colour = %+v", p)
 	}
 	m.Buttons = []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it"}}
-	if p := rootPost(m, testLook(), ""); p.Props.Attachments[0].Actions[0].ID != "stillonit" {
+	if p := rootPost(m, testLook(), nil); p.Props.Attachments[0].Actions[0].ID != "stillonit" {
 		t.Errorf("still on it = %+v", p.Props.Attachments[0].Actions)
 	}
 }
 
-// TestRootPostMentions is C-13.FR-3, C-13.FR-8, F-056 and F-113: the Mentions of a Loud post are the first line of
-// the attachment's text, under its title, and nowhere else; the message stays empty. An edit, laid out without
-// Mentions, has no Mentions line.
+// TestRootPostMentions is C-13.FR-3, C-13.FR-8, F-056, F-113 and F-115: the Mentions of a Loud post are the first
+// line of the attachment's text, under its title, and nowhere else, not in its fallback; the message stays empty. An
+// edit, laid out without Mentions, has no Mentions line and the same fallback. A title that tries to mention the
+// channel is neutral in the fallback.
 func TestRootPostMentions(t *testing.T) {
-	p := rootPost(rootMessage(messages.ColourFiring), testLook(), "@channel @bob")
+	p := rootPost(rootMessage(messages.ColourFiring), testLook(), []string{"@channel", "@bob"})
 	a := p.Props.Attachments[0]
 	line, rest, _ := strings.Cut(a.Text, "\n")
 	if p.Message != "" || line != "@channel @bob" || mentionPattern.MatchString(rest) || a.Title != "#1 DiskFull" ||
-		rest != rootPost(rootMessage(messages.ColourFiring), testLook(), "").Props.Attachments[0].Text {
-		t.Errorf("post = %q, %q", p.Message, a.Text)
+		rest != rootPost(rootMessage(messages.ColourFiring), testLook(), nil).Props.Attachments[0].Text ||
+		a.Fallback != "🔴 #1 DiskFull" {
+		t.Errorf("post = %q, %q, %q", p.Message, a.Text, a.Fallback)
 	}
-	edit := rootPost(rootMessage(messages.ColourAcknowledged), testLook(), "")
+	edit := rootPost(rootMessage(messages.ColourAcknowledged), testLook(), nil)
 	if edit.Message != "" || mentionPattern.MatchString(edit.Props.Attachments[0].Text) ||
-		!strings.HasPrefix(edit.Props.Attachments[0].Text, "a · Started") {
+		!strings.HasPrefix(edit.Props.Attachments[0].Text, "a · Started") ||
+		edit.Props.Attachments[0].Fallback != "🟠 #1 DiskFull" {
 		t.Errorf("edit = %q, %q", edit.Message, edit.Props.Attachments[0].Text)
+	}
+	m := rootMessage(messages.ColourFiring)
+	m.Heading.Title = messages.Value("@channel " + templates.MentionToken(templates.Token{Name: "here"}) + " down")
+	if f := rootPost(m, testLook(), nil).Props.Attachments[0].Fallback; f != "🔴 #1 @\u200bchannel here down" ||
+		mentionPattern.MatchString(f) {
+		t.Errorf("fallback = %q", f)
 	}
 }
 
@@ -203,10 +213,11 @@ func TestMentionText(t *testing.T) {
 	}, []templates.Token{{Name: templates.MentionChannel}, {Name: templates.MentionAll},
 		{Name: templates.MentionGroup, Group: "oncall"}, {Name: templates.MentionGroup, Group: "dba"},
 		{Name: templates.MentionGroup, Group: "bad group"}, {Name: templates.MentionOwner}}, messages.MarkupMarkdown)
-	if want := "@channel @here @oncall @bob Alice @\u200ball \\*A\\* @all @dba"; got != want {
+	if want := []string{"@channel", "@here", "@oncall", "@bob", "Alice @\u200ball \\*A\\*", "@all",
+		"@dba"}; !slices.Equal(got, want) {
 		t.Errorf("mentions = %q, want %q", got, want)
 	}
-	if got := mentionText(nil, nil, messages.MarkupMarkdown); got != "" {
+	if got := mentionText(nil, nil, messages.MarkupMarkdown); len(got) != 0 {
 		t.Errorf("no targets = %q", got)
 	}
 }
@@ -225,7 +236,7 @@ func TestTokens(t *testing.T) {
 		{Text: "line " + tok("here", ""), Markup: messages.MarkupMarkdown},
 		{Text: "neutral " + tok("all", "")},
 	}}
-	line, text, _ := strings.Cut(rootPost(m, testLook(), "@channel").Props.Attachments[0].Text, "\n")
+	line, text, _ := strings.Cut(rootPost(m, testLook(), []string{"@channel"}).Props.Attachments[0].Text, "\n")
 	if line != "@channel" {
 		t.Errorf("the Mentions line = %q", line)
 	}
@@ -248,7 +259,7 @@ func TestTokens(t *testing.T) {
 	}
 	storm := messages.Message{Kind: messages.KindStorm, Colour: messages.ColourStorm,
 		Body: &messages.Body{Text: "storm " + tok("all", ""), Markup: messages.MarkupMarkdown}}
-	if p := rootPost(storm, testLook(), ""); p.Message != "" || p.Props.Attachments[0].Text != "storm @\u200ball" {
+	if p := rootPost(storm, testLook(), nil); p.Message != "" || p.Props.Attachments[0].Text != "storm @\u200ball" {
 		t.Errorf("a Storm summary = %+v", p)
 	}
 }
@@ -271,7 +282,7 @@ func TestLengthLimit(t *testing.T) {
 	list.Distinct = []messages.Distinct{{Label: "pod", Values: values, More: 590}}
 	m.Alerts = list
 	m.Heading.Title = strings.Repeat("T", messages.ValueCap)
-	p := rootPost(m, testLook(), "@channel")
+	p := rootPost(m, testLook(), []string{"@channel"})
 	text := p.Props.Attachments[0].Text
 	if n := utf8.RuneCountInString(text); n > LengthLimit {
 		t.Errorf("the text has %d characters", n)
@@ -298,13 +309,13 @@ func TestTextCut(t *testing.T) {
 	l.limit = 160
 	m := rootMessage(messages.ColourFiring)
 	m.Summary = strings.Repeat("s", 300)
-	got := text(m, l, "")
+	got := text(m, l, nil)
 	if n := utf8.RuneCountInString(got); n > l.limit || !strings.Contains(got, "…\n[Open in Muster](") ||
 		!strings.HasSuffix(got, "Reopened 2 times\nAcknowledged by bob") {
 		t.Errorf("text (%d) = %q", n, got)
 	}
 	l.limit = 200
-	got = text(m, l, "@channel @bob")
+	got = text(m, l, []string{"@channel", "@bob"})
 	if n := utf8.RuneCountInString(got); n != l.limit || !strings.HasPrefix(got, "@channel @bob\n") ||
 		!strings.Contains(got, "…\n[Open in Muster](") || !strings.HasSuffix(got, "Reopened 2 times\nAcknowledged by bob") {
 		t.Errorf("text with mentions (%d) = %q", n, got)
@@ -313,7 +324,7 @@ func TestTextCut(t *testing.T) {
 	for i := range 30 {
 		many = append(many, fmt.Sprintf("@user%02d", i))
 	}
-	got = text(m, l, strings.Join(many, " "))
+	got = text(m, l, many)
 	line, _, _ := strings.Cut(got, "\n")
 	words := strings.Fields(line)
 	if n := utf8.RuneCountInString(got); n > l.limit || len(words) == 0 || len(words) == len(many) ||
@@ -322,23 +333,25 @@ func TestTextCut(t *testing.T) {
 		t.Errorf("a long Mentions line (%d) = %q", n, got)
 	}
 	for _, c := range []struct {
-		in   string
+		in   []string
 		n    int
 		want string
 	}{
-		{"@channel @alice", 15, "@channel @alice"},
-		{"@channel @alice", 14, "@channel"},
-		{"@channel @alice", 8, "@channel"},
-		{"@channel @alice", 7, ""},
-		{"@channel Alice Smith @bob", 20, "@channel Alice Smith"},
-		{"@channel", -1, ""},
+		{[]string{"@channel", "@alice"}, 15, "@channel @alice"},
+		{[]string{"@channel", "@alice"}, 14, "@channel"},
+		{[]string{"@channel", "@alice"}, 8, "@channel"},
+		{[]string{"@channel", "@alice"}, 7, ""},
+		{[]string{"@channel", "Alice Smith", "@bob"}, 20, "@channel Alice Smith"},
+		{[]string{"@channel", "Alice Smith", "@bob"}, 18, "@channel"},
+		{[]string{"@channel"}, -1, ""},
+		{nil, 10, ""},
 	} {
 		if got := fitMentions(c.in, c.n); got != c.want {
 			t.Errorf("fitMentions(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
 		}
 	}
 	l.limit = 40
-	if got := text(m, l, ""); utf8.RuneCountInString(got) != 40 || !strings.HasPrefix(got, "[Open in Muster](") ||
+	if got := text(m, l, nil); utf8.RuneCountInString(got) != 40 || !strings.HasPrefix(got, "[Open in Muster](") ||
 		!strings.HasSuffix(got, "…") {
 		t.Errorf("a long tail = %q", got)
 	}
@@ -352,7 +365,7 @@ func TestTextCut(t *testing.T) {
 
 // TestStormPost lays out a Storm summary, which has no heading, like a Root message: an empty message and one
 // attachment of the Storm colour, without a title, footer or buttons, whose text is the Mentions of a Loud post, then
-// its lines and the link; its Quiet edits have no Mentions line.
+// its lines and the link, and whose fallback is its first line without Mentions; its Quiet edits have no Mentions line.
 func TestStormPost(t *testing.T) {
 	m := messages.Message{Kind: messages.KindStorm, Language: "en", Colour: messages.ColourStorm,
 		Lines:   []string{"⛈ Storm on db_*: 12 Alert Groups"},
@@ -360,17 +373,19 @@ func TestStormPost(t *testing.T) {
 		Buttons: []messages.Button{}}
 	body := "⛈ Storm on db\\_\\*: 12 Alert Groups\n[Open in Muster](http://localhost:8080/alert-groups?route=RT1)"
 	for mentions, want := range map[string]string{"@channel": "@channel\n" + body, "": body} {
-		p := rootPost(m, testLook(), mentions)
+		p := rootPost(m, testLook(), strings.Fields(mentions))
 		if p.Message != "" || p.Props == nil || len(p.Props.Attachments) != 1 {
 			t.Fatalf("storm = %+v", p)
 		}
 		if a := p.Props.Attachments[0]; a.Text != want || a.Color != "#6a1b9a" || a.Title != "" ||
-			a.TitleLink != "" || a.Footer != "" || len(a.Actions) != 0 {
+			a.TitleLink != "" || a.Footer != "" || len(a.Actions) != 0 ||
+			a.Fallback != "⛈ Storm on db_*: 12 Alert Groups" {
 			t.Errorf("storm with %q = %+v", mentions, a)
 		}
 	}
-	if raw, err := json.Marshal(rootPost(m, testLook(), "")); err != nil ||
-		!strings.HasPrefix(string(raw), `{"message":"","props":{"attachments":[{"color":"#6a1b9a","text":"`) ||
+	if raw, err := json.Marshal(rootPost(m, testLook(), nil)); err != nil ||
+		!strings.HasPrefix(string(raw), `{"message":"","props":{"attachments":[{"fallback":"⛈ Storm on db_*: 12 Alert `+
+			`Groups","color":"#6a1b9a","text":"`) ||
 		strings.Contains(string(raw), `"actions"`) {
 		t.Errorf("storm JSON = %s %v", raw, err)
 	}
@@ -382,10 +397,10 @@ func TestStormPost(t *testing.T) {
 func TestReplyPost(t *testing.T) {
 	m := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourFiring,
 		Lines: []string{"New alerts (1):", "• pod: i_2"}, Buttons: []messages.Button{}}
-	if p := replyPost(m, testLook(), ""); p.Message != "New alerts (1):\n• pod: i\\_2" || p.Props != nil {
+	if p := replyPost(m, testLook(), nil); p.Message != "New alerts (1):\n• pod: i\\_2" || p.Props != nil {
 		t.Errorf("quiet reply = %+v", p)
 	}
-	if p := replyPost(m, testLook(), "@channel"); !strings.HasPrefix(p.Message, "@channel\nNew alerts (1):") {
+	if p := replyPost(m, testLook(), []string{"@channel"}); !strings.HasPrefix(p.Message, "@channel\nNew alerts (1):") {
 		t.Errorf("loud reply = %q", p.Message)
 	}
 	m = messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
@@ -393,7 +408,7 @@ func TestReplyPost(t *testing.T) {
 		Buttons: []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "x", KeyID: "k"},
 			{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "y", KeyID: "k"}}}
 	l := testLook()
-	p := replyPost(m, l, "@bob")
+	p := replyPost(m, l, []string{"@bob"})
 	if p.Message != "@bob" || p.Props == nil || len(p.Props.Attachments) != 1 {
 		t.Fatalf("reminder = %+v", p)
 	}
@@ -411,7 +426,7 @@ func TestReplyPost(t *testing.T) {
 			t.Errorf("action %d = %+v", i, att.Actions[i])
 		}
 	}
-	if p := replyPost(m, l, ""); p.Message != "" || len(p.Props.Attachments) != 1 {
+	if p := replyPost(m, l, nil); p.Message != "" || len(p.Props.Attachments) != 1 {
 		t.Errorf("quiet reminder = %+v", p)
 	}
 }
@@ -458,13 +473,13 @@ func TestActionStyles(t *testing.T) {
 		p    post
 		want string
 	}{
-		{"firing", rootPost(rootMessage(messages.ColourFiring), testLook(), ""),
+		{"firing", rootPost(rootMessage(messages.ColourFiring), testLook(), nil),
 			"ack:primary resolve:success snooze0:- snooze1:- snooze2:- snoozetomorrow:- snoozeweek:-"},
-		{"acknowledged", rootPost(rootMessage(messages.ColourAcknowledged), testLook(), ""),
+		{"acknowledged", rootPost(rootMessage(messages.ColourAcknowledged), testLook(), nil),
 			"unack:- resolve:success snooze0:- snooze1:- snooze2:- snoozetomorrow:- snoozeweek:-"},
-		{"snoozed", rootPost(rootMessage(messages.ColourSnoozed), testLook(), ""),
+		{"snoozed", rootPost(rootMessage(messages.ColourSnoozed), testLook(), nil),
 			"ack:primary unsnooze:- resolve:success"},
-		{"reminder", replyPost(reminder, testLook(), "@bob"), "stillonit:primary unack:-"},
+		{"reminder", replyPost(reminder, testLook(), []string{"@bob"}), "stillonit:primary unack:-"},
 	} {
 		if got := sentStyles(t, c.p); got != c.want {
 			t.Errorf("%s: actions %s, want %s", c.name, got, c.want)
@@ -479,7 +494,7 @@ func TestActionStyles(t *testing.T) {
 func TestPlain(t *testing.T) {
 	l := testLook()
 	l.markup = messages.MarkupPlain
-	p := rootPost(rootMessage(messages.ColourFiring), l, "")
+	p := rootPost(rootMessage(messages.ColourFiring), l, nil)
 	text := p.Props.Attachments[0].Text
 	if !strings.Contains(text, "Open in Muster "+groupURL) || !strings.Contains(text, "note: @\u200bchannel <b>x</b>") {
 		t.Errorf("plain text = %s", text)

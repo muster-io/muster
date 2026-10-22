@@ -256,7 +256,7 @@ func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery
 		return nil, errors.New(string(fail.Error))
 	}
 	m := t.Renderer.TestRoot(in.Source, messages.MarkupMarkdown, in.Destination.PublicID).Message
-	p := rootPost(m, t.Adapter.look(delivery.Call{}, tg), "")
+	p := rootPost(m, t.Adapter.look(delivery.Call{}, tg), nil)
 	p.ChannelID = tg.ChannelID
 	text := p.Message
 	return []delivery.PreviewItem{{Name: StepMessage, Format: string(messages.MarkupMarkdown), Text: &text,
@@ -264,14 +264,15 @@ func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery
 }
 
 // testPost lays out the test message m: the Root message of its source, Quiet, with its message empty, the mark of a
-// test before its attachment's title, and the nonce of the test in the context of its buttons.
+// test before its attachment's title and its fallback, and the nonce of the test in the context of its buttons.
 func testPost(m messages.Message, l look, nonce string) post {
-	p := rootPost(m, l, "")
+	p := rootPost(m, l, nil)
 	mark := messages.TestMark(m.Language)
 	for i := range p.Props.Attachments {
 		a := &p.Props.Attachments[i]
 		if i == 0 && a.Title != "" {
 			a.Title = mark + " · " + a.Title
+			a.Fallback = cutEnd(mark+" · "+a.Fallback, l.limit)
 		}
 		for j := range a.Actions {
 			a.Actions[j].Integration.Context.Test = nonce

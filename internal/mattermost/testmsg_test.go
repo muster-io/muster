@@ -177,8 +177,9 @@ func TestMattermostTest(t *testing.T) {
 	}
 	att := attachmentOf(t, posts[0])
 	if !strings.HasPrefix(att["title"].(string), "🧪 Test message · #7 disk full") || posts[0].Message != "" ||
-		strings.Contains(att["text"].(string), "🧪") {
-		t.Errorf("mark %q, message %q, text %q", att["title"], posts[0].Message, att["text"])
+		strings.Contains(att["text"].(string), "🧪") || att["fallback"] != "🧪 Test message · 🔴 #7 disk full" {
+		t.Errorf("mark %q, message %q, text %q, fallback %q", att["title"], posts[0].Message, att["text"],
+			att["fallback"])
 	}
 	actions := att["actions"].([]any)
 	ctx := actions[0].(map[string]any)["integration"].(map[string]any)["context"].(map[string]any)
@@ -313,6 +314,7 @@ func TestMattermostPreview(t *testing.T) {
 		items[0].Text == nil || *items[0].Text != "" || !strings.Contains(*items[0].Request.Body, `"attachments"`) ||
 		!strings.Contains(*items[0].Request.Body, `"message":""`) ||
 		!strings.Contains(*items[0].Request.Body, `"title":"#7 disk full"`) ||
+		!strings.Contains(*items[0].Request.Body, `"fallback":"🔴 #7 disk full"`) ||
 		strings.Contains(*items[0].Request.Body, "🧪") || strings.Contains(*items[0].Request.Body, token) {
 		t.Fatalf("preview %+v %v", items, err)
 	}

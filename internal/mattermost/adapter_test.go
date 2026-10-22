@@ -168,6 +168,7 @@ func TestPublishUpdateReply(t *testing.T) {
 	}
 	p = postByID(t, e.fake, out.MessageID)
 	if a := attachmentOf(t, p); a["color"] != "#f57c00" || a["title"] != "#1 DiskFull" || p.Message != "" ||
+		a["fallback"] != "🟠 #1 DiskFull" ||
 		p.EditAt == 0 {
 		t.Errorf("edited = %+v, %+v", p.Post, a)
 	}
@@ -196,7 +197,7 @@ func TestPublishUpdateReply(t *testing.T) {
 	}
 
 	// C-13.AC-6: a Loud Root message has an empty message and its Mentions as the first line of its attachment's text,
-	// which notify the channel (F-113) with a notification that shows no content (F-056).
+	// which notify the channel (F-113); a push or desktop notification shows the fallback, the summary line (F-115).
 	before := len(e.fake.Notifications())
 	lp := e.adapter.Publish(ctx, loud(channel), root(messages.ColourFiring))
 	l = postByID(t, e.fake, lp.MessageID)
@@ -204,7 +205,8 @@ func TestPublishUpdateReply(t *testing.T) {
 	line1, rest, _ := strings.Cut(lt, "\n")
 	ns = e.fake.Notifications()[before:]
 	if l.Message != "" || line1 != "@channel" || notifying.MatchString(rest) || len(ns) == 0 ||
-		ns[0].Kind != fakemattermost.KindChannel || ns[0].Preview != "" {
+		ns[0].Kind != fakemattermost.KindChannel || ns[0].Preview != "🔴 #1 DiskFull" ||
+		attachmentOf(t, l)["fallback"] != "🔴 #1 DiskFull" {
 		t.Errorf("loud root = %+v, notifications %+v", l.Post, ns)
 	}
 	for _, req := range e.fake.Requests() {
@@ -269,9 +271,9 @@ func TestStylesReachTheServer(t *testing.T) {
 
 // TestTemplateMentions is C-13.FR-8 with F-056 and F-113: the Mention tokens of a Route's templates never notify from
 // where they stand in the attachment. A Loud Root message adds the everyone and group ones to its Mentions, the first
-// line of its attachment's text, once each beside its targets', which notify with a notification that shows no
-// content; a Quiet one and every edit notify nobody and have no Mentions line; the Owner's token stays text that
-// notifies nobody; the post's message is always empty.
+// line of its attachment's text, once each beside its targets', which notify with a notification that shows the
+// fallback, the summary line without Mentions (F-115); a Quiet one and every edit notify nobody and have no Mentions
+// line; the Owner's token stays text that notifies nobody; the post's message is always empty.
 func TestTemplateMentions(t *testing.T) {
 	e := newAdapter(t)
 	ctx := t.Context()
@@ -311,8 +313,8 @@ func TestTemplateMentions(t *testing.T) {
 		t.Fatalf("loud = %+v, %+v; notifications %+v", out, p.Post, ns)
 	}
 	for _, n := range ns {
-		if n.Preview != "" || n.Kind != fakemattermost.KindChannel || n.PostID != out.MessageID {
-			t.Errorf("a notification with content or of another kind: %+v", n)
+		if n.Preview != "🔴 #1 DiskFull" || n.Kind != fakemattermost.KindChannel || n.PostID != out.MessageID {
+			t.Errorf("a notification without the summary line or of another kind: %+v", n)
 		}
 	}
 

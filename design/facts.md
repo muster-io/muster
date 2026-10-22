@@ -282,15 +282,31 @@ test user's `mention_count` was read with `GET /api/v4/channels/{channel_id}/mem
 attachment text with `@here` raised it from 0 to 1, with `@channel` from 1 to 2, with `@<username>` of the test user
 from 2 to 3, and a control post without a mention left it at 3; in a second run, the attachment text with `@all`
 raised it from 0 to 1. `@here` notifies only the members who are online, so the online status matters for it. A group
-mention (`@<group>`) inside an attachment was not checked. Email and push were not checked; the notification still
-shows no content (F-056). — _2026-10-22 · bot posts in one channel, the mention count read after each · Mattermost
-11.2.2_ · Used in C-12.FR-1, C-13.FR-3, C-13.FR-8.
+mention (`@<group>`) inside an attachment was not checked. What the notifications showed was not checked: an email of
+such a post shows no content (F-056), and push and desktop notifications show the attachment's `fallback` (F-115). —
+_2026-10-22 · bot posts in one channel, the mention count read after each · Mattermost 11.2.2_ · Used in C-12.FR-1,
+C-13.FR-3, C-13.FR-8.
 
 **F-114. An edit with an empty `message` clears the post's text.** A bot post created with `message` "🔴 #1 …" and an
 attachment was edited with `PUT /api/v4/posts/{id}/patch` and the body `{"message": "", "props": {"attachments":
 […]}}`; the server answered `200`, and `GET /api/v4/posts/{id}` then gave `message` "" with the new attachment text
 and an `edit_at` above 0. So the next edit of a Root message posted with a summary line in its `message` removes that
 line. — _2026-10-22 · one post created and edited by the bot, read back · Mattermost 11.2.2_ · Used in C-13.FR-3.
+
+**F-115. Notifications of a post with an empty `message` show the attachment's `fallback`, except email.** Read in
+the source of Mattermost v11.2.2, not measured. Push: `buildFullPushNotificationMessage`
+(`server/channels/app/notification_push.go:853-864`) starts from the post's `message` with its Markdown stripped and
+adds a new line and the `fallback` of every attachment that has one; under `PushNotificationContents` `full`,
+`getPushNotificationMessage` (`:269-274`) sends the sender's name, `: ` and that text, and under `generic`
+(`:276-310`) a fixed text such as "<sender> notified the channel." or "<sender> mentioned you.", with no content of the
+post either way. Desktop: `getNotificationBody` in the web app
+(`webapp/channels/src/actions/notification_actions.tsx:216-251`) shows the post's `message`, and when it is empty the
+first attachment's `fallback`, otherwise its `pretext`, otherwise its `text`; without a `fallback`, a Loud Root
+message's notification would show its Mentions line and the body. Email: the body of the email comes from the post's
+`message` (`server/channels/app/notification_email.go:97-101`), and the attachments are added only when that is not
+empty (`:355-369`), so an email of a post with an empty `message` has no content whatever its `fallback`, as F-056
+measured. The channel does not draw `fallback`. — _2026-10-22 · read in the source at tag v11.2.2 · Mattermost 11.2.2
+source_ · Used in C-12.FR-1, C-13.FR-3.
 
 **F-060. A username without `@` does not notify.** A bot post whose `message` and attachment text both ended with
 "Acknowledged by <username>" — the username of a channel member, written without `@` and mentioned nowhere else, as
@@ -877,8 +893,14 @@ API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
+  Whether a group Mention (`@<group>`) inside an attachment notifies, as a user's, `@channel`, `@here` and `@all` do
+  (F-113). What push (under `PushNotificationContents` `full` and `generic`) and desktop notifications of a post with
+  an empty `message` and an attachment with a `fallback` show, measured on the test stand: F-115 is read in the source
+  only, since the stand pins `PushNotificationContents` to `generic` by an environment variable.
 - **Mattermost 12.** Mattermost 12.0.0 draws message attachments as Mattermost Blocks; whether Root messages, their
   colour and the button styles of F-068 look the same is to be checked once the test stand is upgraded from 11.2.2.
+  Since a Root message, a Storm summary and a test message hold all their content in their one attachment (C-13.FR-3),
+  this covers the whole of what they show, their `fallback` in notifications included.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair
   (tested on the single instance only); `externalURL` of instances without `--web.external-url`; a resolve during a mute
   with vmalert as the source; how often tick races of an HA pair cause duplicates over hours of operation — none in

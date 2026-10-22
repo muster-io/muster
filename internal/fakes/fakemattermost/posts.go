@@ -58,8 +58,9 @@ const (
 	KindDirect  = "direct"
 )
 
-// Notification is what a person is notified of, as GET /_fake/notifications lists it. Preview is the text the
-// notification shows: the post's message, empty when only an attachment mentions the person (F-056).
+// Notification is what a person is notified of, as GET /_fake/notifications lists it. Preview is the text a push or
+// desktop notification shows: the post's message, or the fallback of its attachment when the message is empty (F-115),
+// and empty when there is neither, as an email of such a post shows nothing (F-056).
 type Notification struct {
 	AtMs      int64  `json:"at_ms"`
 	UserID    string `json:"user_id"`
@@ -117,10 +118,11 @@ func (f *Fake) Ephemeral() []Ephemeral {
 }
 
 type attachment struct {
-	Pretext string `json:"pretext"`
-	Title   string `json:"title"`
-	Text    string `json:"text"`
-	Fields  []struct {
+	Fallback string `json:"fallback"`
+	Pretext  string `json:"pretext"`
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	Fields   []struct {
 		Value any `json:"value"`
 	} `json:"fields"`
 	Actions []action `json:"actions"`
@@ -293,9 +295,23 @@ func (f *Fake) notifyLocked(p *post, c *Channel, thread *post) {
 			ChannelID: p.ChannelID,
 			RootID:    p.RootID,
 			Kind:      kind,
-			Preview:   p.Message,
+			Preview:   preview(p),
 		})
 	}
+}
+
+// preview is what a push or desktop notification of the post shows: its message, or, when that is empty, the
+// fallback of its first attachment that has one (F-115); empty when it has neither.
+func preview(p *post) string {
+	if p.Message != "" {
+		return p.Message
+	}
+	for _, a := range attachments(p.Props) {
+		if a.Fallback != "" {
+			return a.Fallback
+		}
+	}
+	return ""
 }
 
 // postTexts are the texts of a post that can mention people: its message and the texts of its attachments.

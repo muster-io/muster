@@ -13965,8 +13965,9 @@ components:
           type:
           - string
           - 'null'
-          description: The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of
-            `chat.postMessage`, as JSON.
+          description: The rendered Root message text; for Mattermost, the post's `message`, which is empty, the
+            attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`,
+            as JSON.
         request:
           $ref: '#/components/schemas/RenderedRequest'
     DestinationPreview:
