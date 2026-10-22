@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,9 @@ const (
 	connectionPublicID = "CN0000000000C1"
 	groupPage          = "http://localhost:8080/alert-groups/AG0000000000A1"
 )
+
+// notifying is a Mention that notifies: `@` and a name, as Mattermost finds them in a message and an attachment.
+var notifying = regexp.MustCompile(`(?i)(?:^|[^a-z0-9._-])@[a-z0-9._-]+`)
 
 // targets are the Targets of the tests by Destination id; err answers every lookup when set.
 type targets struct {
@@ -146,7 +150,7 @@ func TestPublishUpdateReply(t *testing.T) {
 	actions, _ := a["actions"].([]any)
 	first, _ := actions[0].(map[string]any)
 	integration, _ := first["integration"].(map[string]any)
-	if p.Message != "🔴 #1 DiskFull" || p.ChannelID != fakemattermost.ChannelAlerts || a["color"] != "#d32f2f" ||
+	if p.Message != "" || p.ChannelID != fakemattermost.ChannelAlerts || a["color"] != "#d32f2f" ||
 		a["title"] != "#1 DiskFull" || a["title_link"] != groupPage || a["footer"] != "Muster v1.2.3" ||
 		a["footer_icon"] != "http://localhost:8080/muster-mark-256.png" || len(actions) != 7 ||
 		integration["url"] != "http://localhost:8081/api/v1/callbacks/mattermost/"+connectionPublicID ||
@@ -163,11 +167,14 @@ func TestPublishUpdateReply(t *testing.T) {
 		t.Fatalf("update = %+v", up)
 	}
 	p = postByID(t, e.fake, out.MessageID)
-	if a := attachmentOf(t, p); a["color"] != "#f57c00" || p.Message != "🟠 #1 DiskFull" || p.EditAt == 0 {
+	if a := attachmentOf(t, p); a["color"] != "#f57c00" || a["title"] != "#1 DiskFull" || p.Message != "" ||
+		a["fallback"] != "🟠 #1 DiskFull" ||
+		p.EditAt == 0 {
 		t.Errorf("edited = %+v, %+v", p.Post, a)
 	}
 	if up := e.adapter.Update(ctx, loud(channel), out.MessageID, root(messages.ColourAcknowledged)); up.Kind !=
-		delivery.OutcomeOK || strings.Contains(postByID(t, e.fake, out.MessageID).Message, "@") {
+		delivery.OutcomeOK || postByID(t, e.fake, out.MessageID).Message != "" ||
+		notifying.MatchString(attachmentOf(t, postByID(t, e.fake, out.MessageID))["text"].(string)) {
 		t.Errorf("an edit carries no mention: %+v", up)
 	}
 
@@ -189,11 +196,18 @@ func TestPublishUpdateReply(t *testing.T) {
 		t.Errorf("loud reply = %+v, %+v", l.Post, ns)
 	}
 
-	// C-13.AC-6: a Loud Root message carries its Mentions in its message, never in its attachment.
+	// C-13.AC-6: a Loud Root message has an empty message and its Mentions as the first line of its attachment's text,
+	// which notify the channel (F-113); a push or desktop notification shows the fallback, the summary line (F-115).
+	before := len(e.fake.Notifications())
 	lp := e.adapter.Publish(ctx, loud(channel), root(messages.ColourFiring))
 	l = postByID(t, e.fake, lp.MessageID)
-	if l.Message != "🔴 #1 DiskFull\n@channel" || strings.Contains(attachmentOf(t, l)["text"].(string), "@channel") {
-		t.Errorf("loud root = %+v", l.Post)
+	lt, _ := attachmentOf(t, l)["text"].(string)
+	line1, rest, _ := strings.Cut(lt, "\n")
+	ns = e.fake.Notifications()[before:]
+	if l.Message != "" || line1 != "@channel" || notifying.MatchString(rest) || len(ns) == 0 ||
+		ns[0].Kind != fakemattermost.KindChannel || ns[0].Preview != "🔴 #1 DiskFull" ||
+		attachmentOf(t, l)["fallback"] != "🔴 #1 DiskFull" {
+		t.Errorf("loud root = %+v, notifications %+v", l.Post, ns)
 	}
 	for _, req := range e.fake.Requests() {
 		if req.Path == "/api/v4/posts" && req.Headers["Content-Type"][0] != "application/json" {
@@ -255,9 +269,11 @@ func TestStylesReachTheServer(t *testing.T) {
 	}
 }
 
-// TestTemplateMentions is C-13.FR-8 with F-056: the Mention tokens of a Route's templates never notify from the
-// attachment. A Loud Root message adds the everyone and group ones to the Mentions of its message, once each beside
-// its targets'; a Quiet one and every edit notify nobody; the Owner's token stays text that notifies nobody.
+// TestTemplateMentions is C-13.FR-8 with F-056 and F-113: the Mention tokens of a Route's templates never notify from
+// where they stand in the attachment. A Loud Root message adds the everyone and group ones to its Mentions, the first
+// line of its attachment's text, once each beside its targets', which notify with a notification that shows the
+// fallback, the summary line without Mentions (F-115); a Quiet one and every edit notify nobody and have no Mentions
+// line; the Owner's token stays text that notifies nobody; the post's message is always empty.
 func TestTemplateMentions(t *testing.T) {
 	e := newAdapter(t)
 	ctx := t.Context()
@@ -269,7 +285,9 @@ func TestTemplateMentions(t *testing.T) {
 		tok("owner", "") + " " + tok("channel", ""), Markup: messages.MarkupMarkdown}
 	m.Alerts = &messages.AlertList{Lines: []messages.AlertLine{{Text: "line " + tok("here", ""),
 		Markup: messages.MarkupMarkdown}}}
-	neutral := func(t *testing.T, p fakemattermost.RecordedPost) {
+	// neutral checks the tokens where they stand and returns the line of Mentions — the first line of the attachment's
+	// text when it notifies — while nothing else, the post's message included, notifies.
+	neutral := func(t *testing.T, p fakemattermost.RecordedPost) string {
 		t.Helper()
 		text, _ := attachmentOf(t, p)["text"].(string)
 		for _, want := range []string{"page @\u200bchannel @\u200boncall @\u200bowner @\u200bchannel",
@@ -278,25 +296,32 @@ func TestTemplateMentions(t *testing.T) {
 				t.Errorf("the attachment has no %q: %q", want, text)
 			}
 		}
+		line, rest, _ := strings.Cut(text, "\n")
+		if !notifying.MatchString(line) {
+			line, rest = "", text
+		}
+		if notifying.MatchString(rest) || p.Message != "" {
+			t.Errorf("a Mention outside the Mentions line: message %q, text %q", p.Message, text)
+		}
+		return line
 	}
 
 	out := e.adapter.Publish(ctx, loud(channel), m)
 	p := postByID(t, e.fake, out.MessageID)
-	neutral(t, p)
 	ns := e.fake.Notifications()
-	if out.Kind != delivery.OutcomeOK || p.Message != "🔴 #1 DiskFull\n@channel @oncall @here" || len(ns) == 0 {
+	if line := neutral(t, p); out.Kind != delivery.OutcomeOK || line != "@channel @oncall @here" || len(ns) == 0 {
 		t.Fatalf("loud = %+v, %+v; notifications %+v", out, p.Post, ns)
 	}
 	for _, n := range ns {
-		if n.Preview != p.Message || n.Kind != fakemattermost.KindChannel {
-			t.Errorf("a notification without its preview: %+v", n)
+		if n.Preview != "🔴 #1 DiskFull" || n.Kind != fakemattermost.KindChannel || n.PostID != out.MessageID {
+			t.Errorf("a notification without the summary line or of another kind: %+v", n)
 		}
 	}
 
 	quiet := e.adapter.Publish(ctx, call(1), m)
 	p = postByID(t, e.fake, quiet.MessageID)
-	neutral(t, p)
-	if quiet.Kind != delivery.OutcomeOK || p.Message != "🔴 #1 DiskFull" || len(e.fake.Notifications()) != len(ns) {
+	if line := neutral(t, p); quiet.Kind != delivery.OutcomeOK || line != "" ||
+		len(e.fake.Notifications()) != len(ns) {
 		t.Errorf("quiet = %+v, %+v; notifications %+v", quiet, p.Post, e.fake.Notifications())
 	}
 
@@ -304,14 +329,13 @@ func TestTemplateMentions(t *testing.T) {
 		t.Fatalf("update = %+v", up)
 	}
 	p = postByID(t, e.fake, out.MessageID)
-	neutral(t, p)
-	if p.Message != "🔴 #1 DiskFull" || p.EditAt == 0 {
+	if line := neutral(t, p); line != "" || p.EditAt == 0 || len(e.fake.Notifications()) != len(ns) {
 		t.Errorf("an edit mentions: %+v", p.Post)
 	}
 }
 
 // TestPublishWithoutTeamName links a post through the server's redirect when the team's name is unknown, and a Storm
-// summary is a post without an attachment.
+// summary is a post with an empty message and its text in one attachment of the Storm colour, without a title.
 func TestPublishWithoutTeamName(t *testing.T) {
 	e := newAdapter(t)
 	tg := e.targets.byID[1]
@@ -323,7 +347,8 @@ func TestPublishWithoutTeamName(t *testing.T) {
 	if out.Kind != delivery.OutcomeOK || out.MessageURL != e.fake.URL()+"/_redirect/pl/"+out.MessageID {
 		t.Errorf("publish = %+v", out)
 	}
-	if p := postByID(t, e.fake, out.MessageID); p.Message != "Storm" || string(p.Props) != `{"attachments":[]}` {
+	if p := postByID(t, e.fake, out.MessageID); p.Message != "" || attachmentOf(t, p)["text"] != "Storm" ||
+		attachmentOf(t, p)["color"] != "#6a1b9a" || attachmentOf(t, p)["title"] != nil {
 		t.Errorf("storm = %+v", p.Post)
 	}
 }

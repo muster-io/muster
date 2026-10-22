@@ -41,22 +41,35 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   answered: `not_mattermost` (an answer that is not that JSON), `wrong_path_prefix` (`404`), `unexpected_status`
   (another status with JSON) and the network codes of the other steps.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
-  limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is a short summary line — the
-  status emoji, `#N` and the Alert Group's title — with one attachment, coloured by status, that holds the details of
-  C-12.FR-1: the attachment's title is `#N` and the Alert Group's title, linked (`title_link`) to the Alert Group page;
-  its text is the body, and under the Alerts one line of links starts with "Open in Muster" and goes on with the links
-  of C-12.FR-9, such as the runbook when there is one; the footer of C-12.FR-1 (item 11) is the last line of the text;
-  the attachment's own `footer` is "Muster v<version>", with `footer_icon` set to the Muster mark that the server
-  serves at `<MUSTER_PUBLIC_URL>/muster-mark-256.png`; and the buttons of
-  [reference.md](reference.md#buttons-and-links-by-status) follow. The Mentions of a Loud post go into its `message`,
-  after the summary line, never into the attachment: a Mention inside an attachment notifies, but the notification
-  shows nothing when `message` is empty (F-056). An edit rewrites the summary line and the attachment; like every
-  edit it is Quiet and carries no Mention (F-029). Every link, "Open in Muster" included, is a link in the post, never
-  a button: the answer to a press cannot open a URL (F-024). The Thread is the post's replies: Muster posts them with
-  the Root message as `root_id`, with their text and Mentions in `message`, so they show in the Thread and raise its
-  reply count (F-027). A post's `message` and its attachment text each stay within the server's post length limit of
-  16,383 characters (F-057): the adapter declares that limit, so a longer Root message is shortened as C-12.FR-11 says —
-  its Alert list is cut and ends with "…and N more" — and the link to Muster always stays.
+  limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is empty, with one attachment,
+  coloured by status, that holds everything of C-12.FR-1, so the channel shows the title once: the attachment's title
+  is `#N` and the Alert Group's title, linked (`title_link`) to the Alert Group page; its text is the body, and under
+  the Alerts one line of links starts with "Open in Muster" and goes on with the links of C-12.FR-9, such as the
+  runbook when there is one; the footer of C-12.FR-1 (item 11) is the last line of the text; the attachment's own
+  `footer` is "Muster v<version>", with `footer_icon` set to the Muster mark that the server serves at
+  `<MUSTER_PUBLIC_URL>/muster-mark-256.png`; and the buttons of [reference.md](reference.md#buttons-and-links-by-status)
+  follow. The Mentions of a Loud post are one line, the first line of the attachment's text, directly under its title,
+  and appear nowhere else in it: inside an attachment a user's Mention notifies (F-056), and so do `@channel`, `@here`
+  and `@all` (F-113); a group's Mention there was not checked. The attachment's `fallback`, which the channel does not
+  draw, is the summary line — the status emoji of C-12.FR-1 item 1, `#N` and the Alert Group's title — without the
+  Mentions. What a notification of the post shows follows from its empty `message`: an email shows no content (F-056,
+  measured), push under `PushNotificationContents` `full` and desktop notifications show the `fallback`, the summary
+  line, and push under `generic` shows a fixed text (F-115, read in the source); this is accepted, because the post
+  itself shows everything once. An edit rewrites the attachment, with the same `fallback`, and sets an empty
+  `message`, which also clears the `message` of a Root message that an earlier version posted with a summary line
+  (F-114); like every edit it is Quiet and carries no Mention (F-029), so the Mentions line goes. A Storm summary
+  follows the same rule: an empty `message` and one attachment in the Storm colour, without a title, whose text is the
+  Mentions line of a Loud one and then the summary, and whose `fallback` is the summary's first line. The posts that
+  show an Alert Group, a Storm or a test message — a Root message, a Storm summary and a test message (C-16.FR-1),
+  whose mark "🧪 Test message · " starts the attachment's title and its `fallback` — have an empty `message`; the other
+  posts keep their text in `message`: Thread replies, the ephemeral answers to a press (FR-4, AC-14) and the direct
+  messages of Account links (C-18). Every link, "Open in Muster" included, is a link in the post, never a button: the
+  answer to a press cannot open a URL (F-024). The Thread is the post's replies: Muster posts them with the Root
+  message as `root_id`, with their text and Mentions in `message`, so they show in the Thread and raise its reply count
+  (F-027). The attachment text, the Mentions line included, and the `message` of a Thread reply each stay within the
+  server's post length limit of 16,383 characters (F-057): the adapter declares that limit, so a longer Root message is
+  shortened as C-12.FR-11 says — its Alert list is cut and ends with "…and N more" — and the Mentions, the link to
+  Muster and the footer always stay; a Mentions line too long to fit loses whole Mentions from its end.
 - **C-13.FR-4** Each button carries only an opaque action id signed with the button-signature key and its key id. A
   press arrives at `MUSTER_INGEST_URL` as a request from the Mattermost server (F-023); Muster verifies the signature
   with the key it names, checks that the press's `post_id` and `channel_id` belong to the Root message or Thread reply
@@ -110,7 +123,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   means "without a Mention".
 - **C-13.FR-8** The adapter escapes alert data for Mattermost Markdown (C-12.FR-7). A Loud event is a new post, because
   an edit notifies nobody, even one that adds a Mention (F-029). A Quiet new message carries no Mention; a Loud one
-  carries the Mentions the event asks for, in the post's `message` (FR-3, F-056).
+  carries the Mentions the event asks for: a Loud Root message or Storm summary as the first line of its attachment's
+  text, a Loud Thread reply in its `message` (FR-3, F-056, F-113).
 - **C-13.FR-9** The shared Destination pages, reused by C-14 and C-15: the Destinations list (all types, with health,
   Routes and the Broken banner), the Destination page with its health, its Routes, the Mention and limiter sections and,
   for types that have a Destination check, "Check"; and the delivery state per Destination on the Alert Group page
@@ -178,7 +192,8 @@ Checked against the fake Mattermost server.
   linked" reply with the profile link.
 - **C-13.AC-5** A label value `@channel <b>x</b>` arrives as literal text that mentions nobody.
 - **C-13.AC-6** A Quiet Thread reply carries no Mention; a Loud one carries the Mention configured for its event in
-  its `message`, and a Loud Root message carries it in its `message` after the summary line, not in the attachment.
+  its `message`, and a Loud Root message, whose `message` is empty, carries it as the first line of its attachment's
+  text, which an edit drops.
 - **C-13.AC-7** With an HTTP proxy on the Connection, every request reaches the fake server only through the fake
   proxy.
 - **C-13.AC-8** A new Alert Group meets a `403` because the bot was removed from the channel, and resolves while the
@@ -197,9 +212,9 @@ Checked against the fake Mattermost server.
   message was deleted — which the plain read `GET /api/v4/posts/{id}` shows by answering `404` — starts the deleted Root
   message flow instead and leaves the Destination healthy, and so does a reply refused with `400` for its `root_id`; an
   edit refused with `403` while that read answers `200` makes the Destination Broken.
-- **C-13.AC-13** A new Alert Group creates a post whose `message` is the summary line and which has one attachment
-  whose title links to the Alert Group page, whose text has a line of links under the Alerts that starts with "Open in
-  Muster", and whose `footer` is "Muster v<version>"; every link is in the attachment, none is a button.
+- **C-13.AC-13** A new Alert Group creates a post whose `message` is empty and which has one attachment whose title,
+  `#N` and the title, links to the Alert Group page, whose text has a line of links under the Alerts that starts with
+  "Open in Muster", and whose `footer` is "Muster v<version>"; every link is in the attachment, none is a button.
 - **C-13.AC-14** A press on a Root message is answered `200` with a JSON object that never carries `update`. When the
   press is refused and the bot has the system admin role in the fake server, the person gets a separate ephemeral post
   in the channel, without `root_id`, and the answer is empty; with the role Member, the fake server refuses that post

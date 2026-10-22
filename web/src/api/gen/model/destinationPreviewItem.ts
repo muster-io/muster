@@ -11,7 +11,7 @@ export interface DestinationPreviewItem {
   /** @nullable */
   format?: DestinationPreviewItemFormat;
   /**
-     * The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.
+     * The rendered Root message text; for Mattermost, the post's `message`, which is empty, the attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.
      * @nullable
      */
   text?: string | null;

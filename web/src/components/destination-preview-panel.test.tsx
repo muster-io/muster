@@ -84,6 +84,7 @@ const TELEGRAM_ITEM: DestinationPreviewItem = {
   },
 };
 
+// An old-style post with a non-empty message, kept on purpose: the frame must still draw a message that has text.
 const MATTERMOST_ITEM: DestinationPreviewItem = {
   name: "message",
   format: "markdown",
@@ -276,6 +277,29 @@ describe("frame documents", () => {
       "Resolve",
     ]);
     expect(body.textContent).toContain("Muster");
+  });
+
+  test("draw only the attachment of a Mattermost post whose message is empty, as Muster posts it", () => {
+    const body = (MATTERMOST_ITEM.request?.body ?? "").replace(
+      '"message":"🔴 #1 HighErrorRate"',
+      '"message":""',
+    );
+    expect(body).toContain('"message":""');
+    const item: DestinationPreviewItem = {
+      ...MATTERMOST_ITEM,
+      text: "",
+      request: {
+        method: "POST",
+        url: "http://127.0.0.1:18065/api/v4/posts",
+        headers: [],
+        body,
+      },
+    };
+    const frame = frameBody(frameDocument("en", [], (doc) => mattermostNodes(doc, item)));
+    expect(frame.children).toHaveLength(1);
+    expect(frame.children[0]?.className).toContain("border-l-4");
+    expect(frame.querySelector("b")?.textContent).toBe("#1 HighErrorRate");
+    expect(frame.textContent).not.toContain("🔴");
   });
 
   test("read no buttons from a body that is not JSON", () => {

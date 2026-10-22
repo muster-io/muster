@@ -149,8 +149,10 @@ issue: 39
     `GET /api/v4/config/client?format=old` reports `MaxPostSize` `16383` (F-057);
   - notifications (`GET /_fake/notifications`): a new post or reply with `@channel`, `@all`, `@here` or `@<user>` in its
     `message` notifies, a Mention makes the user a follower of the Thread (F-027); an edit never notifies, even one that
-    adds a Mention (F-029); a Mention inside an attachment's text notifies as well, recorded with an empty `preview`
-    when the post's `message` is empty (F-056);
+    adds a Mention (F-029); a Mention inside an attachment's text notifies as well — a user's (F-056) and `@channel`,
+    `@here` and `@all` (F-113) — recorded, when the post's `message` is empty, with the `fallback` of its first
+    attachment that has one as the `preview`, as push and desktop notifications show it (F-115), and otherwise with an
+    empty `preview`, as an email shows it (F-056);
   - presses (`POST /_fake/press` `{post_id, action_id, user_id}`): the server posts the press to the button's
     `integration.url` with `user_id`, `user_name`, `channel_id`, `channel_name`, `team_id`, `team_domain`, `post_id`,
     `trigger_id`, `type`, `data_source` and the button's `context` (F-023), waiting up to 30 s (F-032), and answers the

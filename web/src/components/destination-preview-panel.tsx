@@ -313,9 +313,14 @@ function block(doc: Document, className: string, nodes: Node[]): HTMLElement {
   return div;
 }
 
-/** A Mattermost Root message: the post's Markdown, then each attachment with its title, text, fields and buttons. */
+/**
+ * A Mattermost Root message: the post's Markdown, which Muster leaves empty and which then draws nothing, and each
+ * attachment with its title, text, fields and buttons.
+ */
 export function mattermostNodes(doc: Document, item: DestinationPreviewItem): Node[] {
-  const out: Node[] = [block(doc, "flex flex-col gap-1", markdownNodes(doc, item.text ?? ""))];
+  const message = item.text ?? "";
+  const out: Node[] =
+    message.trim() === "" ? [] : [block(doc, "flex flex-col gap-1", markdownNodes(doc, message))];
   for (const a of attachments(item.request?.body)) {
     const parts: Node[] = [];
     if (str(a.pretext) !== "") {
