@@ -165,4 +165,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/0.1/llms-full.txt): every page in one file, 713039 bytes, about 178259 tokens.
+- [Full text](https://muster-io.github.io/muster/0.1/llms-full.txt): every page in one file, 718750 bytes, about 179687 tokens.
