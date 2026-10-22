@@ -34,7 +34,8 @@ Every signed-in person also manages their own profile: password, TOTP, Account l
   (`auth.password_min_length`). Muster sends no email; the Admin hands the link over. The first Admin comes from
   `MUSTER_BOOTSTRAP_ADMIN_EMAIL` and its password at the first start, as the [Quick start](../quick-start.md) shows.
 - **OpenID Connect.** People sign in at your identity provider, and a mapping from the groups in their token to Roles
-  decides what they may do. [Sign-in with Keycloak](oidc-keycloak.md) is a complete walkthrough.
+  decides what they may do. [Sign-in with Keycloak](oidc-keycloak.md) and [Sign-in with GitLab](oidc-gitlab.md) are
+  complete walkthroughs.
 - **TOTP.** A second step with a one-time code from an authenticator app, for local and OIDC users alike; the
   Organization can require it. See [TOTP](totp.md).
 - **Personal access tokens.** A person creates them in the profile for scripts. A token acts as its User, with at most
@@ -48,10 +49,10 @@ Operations that change one's own account, such as the password, TOTP, tokens and
 token is refused there.
 
 A web session ends after 12 hours without a request (`auth.session_idle_timeout`), or 7 days after sign-in
-(`auth.session_lifetime`). Both are built in. A session of an OIDC user whose identity provider granted no offline token
-ends 12 hours after sign-in (`auth.oidc_fallback_session_lifetime`), and a background re-check asks the identity provider
-about every OIDC user who has an offline token and a live session or a usable Personal access token, every 15 minutes
-(`auth.oidc_recheck_interval`).
+(`auth.session_lifetime`). Both are built in. A session of an OIDC user whose identity provider granted no offline
+token — or, as GitLab, offers none — ends 12 hours after sign-in (`auth.oidc_fallback_session_lifetime`), and a
+background re-check asks the identity provider about every OIDC user who has an offline token and a live session or a
+usable Personal access token, every 15 minutes (`auth.oidc_recheck_interval`).
 
 When the identity provider is in a network that Muster cannot reach, see [Closed networks](closed-networks.md).
 

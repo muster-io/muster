@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: Muster API
-  version: 0.1.1 # x-release-please-version
+  version: 0.1.2 # x-release-please-version
   summary: Muster L1 API
   description: |-
     Spec-first contract of Muster L1: alert grouping and on-call after Alertmanager.
@@ -224,8 +224,9 @@ paths:
       - Sessions
       summary: Start OIDC sign-in
       description: Redirects the browser to the identity provider with PKCE (`S256`), `state` and `nonce`, all mandatory,
-        requesting `offline_access` besides the configured scopes; when the IdP grants it, the offline token is stored on
-        the user, encrypted, replacing the previous one.
+        requesting `openid` and the configured scopes, and `offline_access` when the IdP's discovery lists it in
+        `scopes_supported` or publishes no `scopes_supported`; when the IdP grants it, the offline token is stored on the
+        user, encrypted, replacing the previous one.
         Muster exchanges the code itself through the back channel. The redirect URI to register at the identity provider is
         `MUSTER_PUBLIC_URL/api/v1/sessions/oidc/callback`. `409` (`oidc_not_enabled`) while OIDC is off.
       x-permission: none
@@ -9339,9 +9340,11 @@ components:
           description: Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
         scopes:
           type: array
-          description: Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow
-            `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions
-            end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.
+          description: Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the
+            IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it,
+            allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in
+            the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens
+            follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.
           items:
             type: string
         groups_claim:
@@ -9457,6 +9460,21 @@ components:
           type:
           - string
           - 'null'
+        requested_scopes:
+          type: array
+          description: Present when discovery was read. The scopes a sign-in and a link request from this identity
+            provider, in order — `openid`, `offline_access` when `offline_access_offered`, then the configured scopes.
+          items:
+            type: string
+        offline_access_offered:
+          type: boolean
+          description: Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported`
+            or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are
+            re-checked in the background. False when the list lacks it (as GitLab's does) — Muster does not add it, and
+            unless the provider grants an offline token OIDC sessions end `auth.oidc_fallback_session_lifetime` after
+            sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`.
+            `offline_access` is also requested, whatever this value, when the Admin adds it to the configured scopes;
+            `requested_scopes` then lists it. Neither value is a warning.
         error:
           type:
           - string

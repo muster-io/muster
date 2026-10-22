@@ -17,7 +17,7 @@
         <link rel="prev" href="../">
       
       
-        <link rel="next" href="../totp/">
+        <link rel="next" href="../oidc-gitlab/">
       
       
         
@@ -1186,6 +1186,8 @@
       
         
       
+        
+      
     
     
     
@@ -1391,6 +1393,33 @@
   
 </nav>
       
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../oidc-gitlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with GitLab
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2889,7 +2918,8 @@
 <h1 id="sign-in-with-keycloak">Sign-in with Keycloak<a class="headerlink" href="#sign-in-with-keycloak" title="Permanent link">&para;</a></h1>
 <p>This page sets up sign-in through <a href="https://www.keycloak.org/">Keycloak</a> with OpenID Connect (OIDC). Other identity
 providers work the same way: Muster needs a confidential client with the authorization code flow, a claim that lists
-the person's groups, and, for the background re-checks, the scope <code>offline_access</code>.</p>
+the person's groups, and, for the background re-checks, the scope <code>offline_access</code> where the provider offers it.
+<a href="../oidc-gitlab/">Sign-in with GitLab</a> covers a provider that does not.</p>
 <p>Muster talks to Keycloak over the <strong>back channel</strong>: it fetches the provider metadata (discovery) and the signing keys,
 and exchanges the authorization code for tokens itself. Muster must therefore reach Keycloak over the network, directly
 or through the proxy of the OIDC settings. If it cannot — Keycloak sits in a closed network and Muster outside it — use
@@ -2953,11 +2983,15 @@ Muster warns two weeks before the date you enter (<code>oidc.secret_expiry_lead<
 userinfo answer must be plain JSON, not a signed JWT. The name of the claim is the <strong>Groups claim</strong> of the OIDC
 settings; it is <code>groups</code> unless you change both.</p>
 <h2 id="3-allow-offline_access">3. Allow <code>offline_access</code><a class="headerlink" href="#3-allow-offline_access" title="Permanent link">&para;</a></h2>
-<p>Muster asks for the scope <code>offline_access</code> at every sign-in, besides the scopes of the settings. With it, Keycloak
+<p>Muster asks for the scope <code>offline_access</code> at every sign-in, besides the scopes of the settings, from every identity
+provider whose discovery lists it in <code>scopes_supported</code> or lists no scopes at all; Keycloak lists it. With it, Keycloak
 returns an offline token, which Muster keeps encrypted and uses to <strong>re-check every OIDC user in the background</strong>
 every 15 minutes (<code>auth.oidc_recheck_interval</code>): a person disabled or removed in Keycloak loses their Muster sessions
 at the next re-check, without waiting for them to end.</p>
-<p>To allow it:</p>
+<p>Another identity provider may support <code>offline_access</code> without listing it in its discovery. Add <code>offline_access</code> to
+the <strong>Scopes</strong> of the settings for it, and Muster requests it too. Never do so for GitLab, which offers no
+<code>offline_access</code> and refuses such a sign-in with <code>invalid_scope</code> (<a href="../oidc-gitlab/">Sign-in with GitLab</a>).</p>
+<p>To allow it in Keycloak:</p>
 <ol>
 <li>Make sure the realm role <code>offline_access</code> is a default role of the realm (<strong>Realm settings → User registration →
    Default roles</strong>), which it is in a new realm, or give it to the groups that use Muster.</li>
@@ -3007,7 +3041,7 @@ background:</p>
 </tr>
 <tr>
 <td>Scopes</td>
-<td><code>profile email</code>; <code>openid</code> and <code>offline_access</code> are always added</td>
+<td><code>profile email</code>; <code>openid</code> is always added, and <code>offline_access</code> because Keycloak offers it</td>
 </tr>
 <tr>
 <td>Groups claim</td>
@@ -3056,7 +3090,8 @@ background:</p>
 </ol>
 <p>The screenshots show the form filled in, before <strong>Save</strong>.</p>
 <p>Then press <strong>Check connection</strong>. The check fetches discovery through the saved settings and proxy and shows how the
-request travelled (<code>direct</code> or <code>proxy</code>), how long it took and the endpoints Keycloak announced. When the outbound
+request travelled (<code>direct</code> or <code>proxy</code>), how long it took, the endpoints Keycloak announced, the <strong>Requested scopes</strong>
+of a sign-in (<code>openid offline_access profile email</code>) and that <strong>Offline access</strong> is offered. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.</p>
 <p>Keycloak lists only standard claims in <code>claims_supported</code>, so until the first sign-in the check shows the warning <em>No
 sign-in has carried the groups claim ‘groups’ yet, so group mappings have not matched anyone yet</em>

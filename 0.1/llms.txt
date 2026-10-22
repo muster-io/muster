@@ -111,6 +111,7 @@
 
 - [Sign-in](https://muster-io.github.io/muster/0.1/sign-in/index.md): Everything in the web UI and the API works only after sign-in.
 - [Sign-in with Keycloak](https://muster-io.github.io/muster/0.1/sign-in/oidc-keycloak.md): This page sets up sign-in through Keycloak with OpenID Connect (OIDC).
+- [Sign-in with GitLab](https://muster-io.github.io/muster/0.1/sign-in/oidc-gitlab.md): This page sets up sign-in through GitLab with OpenID Connect (OIDC), on `https://gitlab.com` or on GitLab self-managed.
 - [TOTP](https://muster-io.github.io/muster/0.1/sign-in/totp.md): TOTP is a second step in the sign-in: a six-digit code from an authenticator app, which changes every 30 seconds (RFC 6238).
 - [Closed networks](https://muster-io.github.io/muster/0.1/sign-in/closed-networks.md): OpenID Connect needs a **back channel**: Muster itself calls the identity provider, to read its configuration and keys, to exchange the code for tokens, and to check the sessions again later.
 
@@ -165,4 +166,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/0.1/llms-full.txt): every page in one file, 718750 bytes, about 179687 tokens.
+- [Full text](https://muster-io.github.io/muster/0.1/llms-full.txt): every page in one file, 728857 bytes, about 182214 tokens.
