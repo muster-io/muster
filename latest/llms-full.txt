@@ -513,6 +513,98 @@ database:
 A tool that manages Secrets, such as External Secrets or Sealed Secrets, works the same way: it only has to produce a
 Secret of that name with those keys.
 
+### Ship the Secret's source in the release
+
+With GitOps tools such as Argo CD or Flux, the object that produces the Secret can be part of the same
+release: `extraObjects` takes a list of extra manifests, and the chart renders each as a document of its own. An item
+is a map or a string that holds a YAML manifest; both go through `tpl`, so a manifest can name `.Values` and `.Release`
+and keeps the key names in one place. An `ExternalSecret` of External Secrets Operator that fills the Secret from a
+secret store:
+
+```yaml
+existingSecret: muster
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password
+
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: '{{ .Values.existingSecret }}'
+    spec:
+      refreshInterval: 1h
+      secretStoreRef: { kind: ClusterSecretStore, name: vault }
+      target: { name: '{{ .Values.existingSecret }}' }
+      data:
+        - secretKey: '{{ .Values.masterKeysKey }}'
+          remoteRef: { key: muster/keys, property: secret-keys }
+        - secretKey: '{{ .Values.bootstrapAdmin.passwordKey }}'
+          remoteRef: { key: muster/keys, property: bootstrap-password }
+        - secretKey: '{{ .Values.database.passwordKey }}'
+          remoteRef: { key: muster/database, property: password }
+```
+
+Quote a value that is only a template, as above, so that the item stays valid YAML. `bootstrapAdmin.passwordKey` has
+no default, so set it before naming it. With `database.existingSecret`, the database password comes from that Secret
+instead, and its line is left out.
+
+`tpl` renders every `{{` of an item, so one meant for another tool, such as the template of an `ExternalSecret`, is
+escaped as ``{{ `{{ .password | urlquery }}` }}``; unescaped, it renders empty. Write the strings inside `{{ }}` with
+backticks, not double quotes: the chart writes a map item back as YAML before `tpl` runs, which breaks a line longer
+than 80 characters at a space, and a backtick string may span that break, which YAML then joins again, while a
+double-quoted string fails with `unterminated quoted string`. A string item is used as it is written.
+
+With `database.urlKey`, a key named `{{ .Values.database.urlKey }}` takes the place of the `passwordKey` line, for
+example a database URL that External Secrets Operator builds from the password, which `urlquery` encodes for the URL.
+Add it to the values above, with `existingSecret` and `bootstrapAdmin`, in place of their `extraObjects`:
+
+```yaml
+database:
+  urlKey: database-url
+
+extraObjects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: '{{ .Values.existingSecret }}'
+    spec:
+      refreshInterval: 1h
+      secretStoreRef: { kind: ClusterSecretStore, name: vault }
+      target:
+        name: '{{ .Values.existingSecret }}'
+        template:
+          mergePolicy: Merge
+          data:
+            '{{ .Values.database.urlKey }}': 'postgresql://muster:{{ `{{ .password | urlquery }}` }}@muster-db-rw.muster.svc:5432/muster?sslmode=require'
+      data:
+        - secretKey: '{{ .Values.masterKeysKey }}'
+          remoteRef: { key: muster/keys, property: secret-keys }
+        - secretKey: '{{ .Values.bootstrapAdmin.passwordKey }}'
+          remoteRef: { key: muster/keys, property: bootstrap-password }
+        - secretKey: password
+          remoteRef: { key: muster/database, property: password }
+```
+
+On the first install the pods wait in `Init:0/1`, with `FailedMount` events, until External Secrets Operator has
+created the Secret; this is normal, and they start once it exists. A `SealedSecret` works the same way; a string item
+suits it, since the encrypted data is pasted as it is:
+
+```yaml
+extraObjects:
+  - |
+    apiVersion: bitnami.com/v1alpha1
+    kind: SealedSecret
+    metadata:
+      name: {{ .Values.existingSecret }}
+    spec:
+      encryptedData:
+        secret-keys: <the output of kubeseal>
+        database-password: <the output of kubeseal>
+        bootstrap-password: <the output of kubeseal>
+```
+
 ## Values
 
 A short `values.yaml` for an installation with an Ingress and an external database:
@@ -12565,6 +12657,12 @@ The Grafana folder of the dashboard; empty leaves it to the operator.
 boolean · default: `false`
 
 Lets Grafana instances in other namespaces import the dashboard.
+
+### `extraObjects`
+
+array · default: `[]`
+
+Extra manifests that the chart renders into the release, each a document of its own, such as the ExternalSecret or the SealedSecret that produces existingSecret. An item is a map, or a string that holds a YAML manifest; both go through tpl, so a manifest can name .Values.existingSecret and .Release.Namespace. A {{ meant for another tool, such as the template of an ExternalSecret, is escaped as ``{{ `{{ .password | urlquery }}` }}``; otherwise tpl renders it empty. Inside a map item, write the strings of an action with backticks: a map item is written back as YAML before tpl, which breaks lines longer than 80 characters at a space, and a double-quoted string cannot span that break.
 
 <!-- Source: https://muster-io.github.io/muster/latest/reference/api.md -->
 <!-- Code generated by internal/tools/refgen. DO NOT EDIT. -->

@@ -899,3 +899,9 @@ The Grafana folder of the dashboard; empty leaves it to the operator.
 boolean · default: `false`
 
 Lets Grafana instances in other namespaces import the dashboard.
+
+### `extraObjects`
+
+array · default: `[]`
+
+Extra manifests that the chart renders into the release, each a document of its own, such as the ExternalSecret or the SealedSecret that produces existingSecret. An item is a map, or a string that holds a YAML manifest; both go through tpl, so a manifest can name .Values.existingSecret and .Release.Namespace. A {{ meant for another tool, such as the template of an ExternalSecret, is escaped as ``{{ `{{ .password | urlquery }}` }}``; otherwise tpl renders it empty. Inside a map item, write the strings of an action with backticks: a map item is written back as YAML before tpl, which breaks lines longer than 80 characters at a space, and a double-quoted string cannot span that break.

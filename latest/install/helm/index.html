@@ -413,6 +413,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Create the Secret">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ship-the-secrets-source-in-the-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ship the Secret's source in the release
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2808,6 +2825,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Create the Secret">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ship-the-secrets-source-in-the-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ship the Secret's source in the release
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2966,6 +3000,86 @@ Keep a copy <strong>apart from the database backups</strong>: see <a href="../..
 </div>
 <p>A tool that manages Secrets, such as External Secrets or Sealed Secrets, works the same way: it only has to produce a
 Secret of that name with those keys.</p>
+<h3 id="ship-the-secrets-source-in-the-release">Ship the Secret's source in the release<a class="headerlink" href="#ship-the-secrets-source-in-the-release" title="Permanent link">&para;</a></h3>
+<p>With GitOps tools such as Argo CD or Flux, the object that produces the Secret can be part of the same
+release: <code>extraObjects</code> takes a list of extra manifests, and the chart renders each as a document of its own. An item
+is a map or a string that holds a YAML manifest; both go through <code>tpl</code>, so a manifest can name <code>.Values</code> and <code>.Release</code>
+and keeps the key names in one place. An <code>ExternalSecret</code> of External Secrets Operator that fills the Secret from a
+secret store:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
+
+<span class="nt">bootstrapAdmin</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">email</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">admin@example.org</span>
+<span class="w">  </span><span class="nt">passwordKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bootstrap-password</span>
+
+<span class="nt">extraObjects</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">external-secrets.io/v1</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ExternalSecret</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.existingSecret</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">refreshInterval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1h</span>
+<span class="w">      </span><span class="nt">secretStoreRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">ClusterSecretStore</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">vault</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.existingSecret</span><span class="nv"> </span><span class="s">}}'</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.masterKeysKey</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/keys</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">secret-keys</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.bootstrapAdmin.passwordKey</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/keys</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">bootstrap-password</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.database.passwordKey</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/database</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">password</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Quote a value that is only a template, as above, so that the item stays valid YAML. <code>bootstrapAdmin.passwordKey</code> has
+no default, so set it before naming it. With <code>database.existingSecret</code>, the database password comes from that Secret
+instead, and its line is left out.</p>
+<p><code>tpl</code> renders every <code>{{</code> of an item, so one meant for another tool, such as the template of an <code>ExternalSecret</code>, is
+escaped as <code>{{ `{{ .password | urlquery }}` }}</code>; unescaped, it renders empty. Write the strings inside <code>{{ }}</code> with
+backticks, not double quotes: the chart writes a map item back as YAML before <code>tpl</code> runs, which breaks a line longer
+than 80 characters at a space, and a backtick string may span that break, which YAML then joins again, while a
+double-quoted string fails with <code>unterminated quoted string</code>. A string item is used as it is written.</p>
+<p>With <code>database.urlKey</code>, a key named <code>{{ .Values.database.urlKey }}</code> takes the place of the <code>passwordKey</code> line, for
+example a database URL that External Secrets Operator builds from the password, which <code>urlquery</code> encodes for the URL.
+Add it to the values above, with <code>existingSecret</code> and <code>bootstrapAdmin</code>, in place of their <code>extraObjects</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">database</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">urlKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">database-url</span>
+
+<span class="nt">extraObjects</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">external-secrets.io/v1</span>
+<span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ExternalSecret</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.existingSecret</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">refreshInterval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1h</span>
+<span class="w">      </span><span class="nt">secretStoreRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> kind</span><span class="p">:</span><span class="w"> </span><span class="nv">ClusterSecretStore</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">vault</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">target</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.existingSecret</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">        </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">mergePolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Merge</span>
+<span class="w">          </span><span class="nt">data</span><span class="p">:</span>
+<span class="w">            </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.database.urlKey</span><span class="nv"> </span><span class="s">}}'</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">'postgresql://muster:{{</span><span class="nv"> </span><span class="s">`{{</span><span class="nv"> </span><span class="s">.password</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">urlquery</span><span class="nv"> </span><span class="s">}}`</span><span class="nv"> </span><span class="s">}}@muster-db-rw.muster.svc:5432/muster?sslmode=require'</span>
+<span class="w">      </span><span class="nt">data</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.masterKeysKey</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/keys</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">secret-keys</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">'{{</span><span class="nv"> </span><span class="s">.Values.bootstrapAdmin.passwordKey</span><span class="nv"> </span><span class="s">}}'</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/keys</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">bootstrap-password</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">password</span>
+<span class="w">          </span><span class="nt">remoteRef</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">muster/database</span><span class="p p-Indicator">,</span><span class="nt"> property</span><span class="p">:</span><span class="w"> </span><span class="nv">password</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>On the first install the pods wait in <code>Init:0/1</code>, with <code>FailedMount</code> events, until External Secrets Operator has
+created the Secret; this is normal, and they start once it exists. A <code>SealedSecret</code> works the same way; a string item
+suits it, since the encrypted data is pasted as it is:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">extraObjects</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">    </span><span class="no">apiVersion: bitnami.com/v1alpha1</span>
+<span class="w">    </span><span class="no">kind: SealedSecret</span>
+<span class="w">    </span><span class="no">metadata:</span>
+<span class="w">      </span><span class="no">name: {{ .Values.existingSecret }}</span>
+<span class="w">    </span><span class="no">spec:</span>
+<span class="w">      </span><span class="no">encryptedData:</span>
+<span class="w">        </span><span class="no">secret-keys: &lt;the output of kubeseal&gt;</span>
+<span class="w">        </span><span class="no">database-password: &lt;the output of kubeseal&gt;</span>
+<span class="w">        </span><span class="no">bootstrap-password: &lt;the output of kubeseal&gt;</span>
+</code></pre></div>
 <h2 id="values">Values<a class="headerlink" href="#values" title="Permanent link">&para;</a></h2>
 <p>A short <code>values.yaml</code> for an installation with an Ingress and an external database:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">existingSecret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">muster</span>
