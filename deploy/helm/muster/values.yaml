@@ -190,3 +190,5 @@ dashboard:
         dashboards: grafana
     folder: ""
     allowCrossNamespaceImport: false
+
+extraObjects: []

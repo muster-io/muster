@@ -96,6 +96,7 @@ issue: 3
   | `bootstrapAdmin.email`, `bootstrapAdmin.passwordKey` | unset | `MUSTER_BOOTSTRAP_ADMIN_EMAIL`, `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE` |
   | `ingress.*`, `httpRoute.*` | disabled | expose the app and ingest Services separately |
   | `serviceMonitor.enabled`, `networkPolicy.enabled`, `podDisruptionBudget.enabled` | false | objects a cluster may lack render only when enabled |
+  | `extraObjects` | `[]` | extra manifests rendered into the release through `tpl`, each a document of its own, such as the ExternalSecret or SealedSecret that produces `existingSecret` |
 
   The app, ingest and internal Services always exist. The chart has no chart dependencies and no PostgreSQL (ADR-0006).
 - **Chart checks**: `make helm-check` runs `helm lint`, `helm template` with the default values plus an

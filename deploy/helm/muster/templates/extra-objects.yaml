@@ -1,0 +1,10 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- /* Each item of extraObjects is a document of its own: a map, or a string that holds a YAML manifest, both rendered
+through tpl with the root context, so that a manifest can name .Values and .Release. */ -}}
+{{- range .Values.extraObjects }}
+---
+{{ if typeIs "string" . }}{{ tpl . $ }}{{ else }}{{ tpl (toYaml .) $ }}{{ end }}
+{{- end }}
