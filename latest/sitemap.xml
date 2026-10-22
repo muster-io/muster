@@ -190,6 +190,9 @@
         <loc>https://muster-io.github.io/muster/sign-in/closed-networks/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/sign-in/oidc-gitlab/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/sign-in/oidc-keycloak/</loc>
       </url>
       <url>
