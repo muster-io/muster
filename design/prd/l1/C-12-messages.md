@@ -48,12 +48,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
   Each adapter lays these sections out for its messenger: in Telegram, items 4 to 6 sit in an expandable blockquote and
   the Alerts stay a list, never a table, because tables break words on phones (C-14.FR-16). In Mattermost, the post's
-  own text is a short summary line — the status emoji of item 1, `#N` and the title — followed by the Mentions of a Loud
-  post, because a Mention inside an attachment notifies with an empty notification
-  ([F-056](../../facts.md#edits-and-notifications)); the details are one attachment in the colour of item 1: its title
-  is item 2, linked to the Alert Group page; the links of item 9 form one line under the Alerts that starts with "Open in
-  Muster"; item 11 is the last line of its text; the attachment's own footer shows "Muster v<version>" with the Muster
-  logo; and the buttons follow (C-13.FR-3).
+  own text is empty and everything is one attachment in the colour of item 1, so the title shows once: its title is
+  item 2, linked to the Alert Group page; the Mentions of a Loud post are the first line of its text, directly under the
+  title, where a user's Mention ([F-056](../../facts.md#edits-and-notifications)) and `@channel`, `@here` and `@all`
+  ([F-113](../../facts.md#edits-and-notifications)) notify with a notification that shows no content, which is
+  accepted; the links of item 9 form one line under the Alerts that starts with "Open in Muster"; item 11 is the last
+  line of its text; the attachment's own footer shows "Muster v<version>" with the Muster logo; and the buttons follow
+  (C-13.FR-3).
 - **C-12.FR-2** A Route's Root message template, if set, renders only the body — items 3 to 8; the status colour,
   heading, links, notices, footer and buttons always come from Muster, so no template can lose the buttons or the link
   to Muster. A Route's line template, if set, replaces the default line of each Alert in item 8.

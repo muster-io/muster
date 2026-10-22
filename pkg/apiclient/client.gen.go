@@ -11293,7 +11293,7 @@ type ClientInterface interface {
 
 	// PreviewDestinationWithBody Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -11302,7 +11302,7 @@ type ClientInterface interface {
 
 	// PreviewDestination Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -13477,7 +13477,7 @@ func (c *Client) CheckDestination(ctx context.Context, destinationId Destination
 
 // PreviewDestinationWithBody Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 //
 // Takes any type of body and a specified content type.
 //
@@ -13496,7 +13496,7 @@ func (c *Client) PreviewDestinationWithBody(ctx context.Context, destinationId D
 
 // PreviewDestination Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -24629,7 +24629,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithBodyWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -24638,7 +24638,7 @@ type ClientWithResponsesInterface interface {
 
 	// PreviewDestinationWithResponse Preview a message or request
 	//
-	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+	// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -39950,7 +39950,7 @@ func (c *ClientWithResponses) CheckDestinationWithResponse(ctx context.Context, 
 
 // PreviewDestinationWithBodyWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -39965,7 +39965,7 @@ func (c *ClientWithResponses) PreviewDestinationWithBodyWithResponse(ctx context
 
 // PreviewDestinationWithResponse Preview a message or request
 //
-// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+// Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

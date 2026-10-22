@@ -17,25 +17,21 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// The layout of posts (C-13.FR-3, C-12.FR-1): a Root message is a post whose message is the summary line — the status
-// emoji, #N and the title — followed on a Loud post by its Mentions, with one attachment coloured by status whose
-// title links to the Alert Group page and whose text holds the sections 3 to 8 of C-12.FR-1, the line of links that
-// starts with "Open in Muster", the notices and the footer, as its last line; its buttons follow. Mentions never go
-// into the attachment, where they would notify with an empty notification (F-056). A Thread reply carries its
-// Mentions and its text in its message; a Reminder, which has buttons, carries its Mentions in its message and its
-// text and buttons in one attachment (C-13.FR-4). Alert data are escaped for Mattermost Markdown and their `@`
+// The layout of posts (C-13.FR-3, C-12.FR-1): a Root message is a post whose message is empty, with one attachment
+// coloured by status whose title, #N and the title, links to the Alert Group page and whose text holds, on a Loud post,
+// its Mentions as its first line, then the sections 3 to 8 of C-12.FR-1, the line of links that starts with "Open in
+// Muster", the notices and the footer, as its last line; its buttons follow. A Storm summary, which has no heading, is
+// laid out the same way without a title, in the Storm colour. A user's Mention, `@channel`, `@here` and `@all` in the
+// attachment notify (F-056, F-113), though the notification shows no content (F-056); an edit is Quiet and has no
+// Mentions line (F-029) and clears the message of a post laid out with a summary line (F-114). A Thread reply
+// carries its Mentions and its text in its message; a Reminder, which has buttons, carries its Mentions in its message
+// and its text and buttons in one attachment (C-13.FR-4). Alert data are escaped for Mattermost Markdown and their `@`
 // neutralized by the escaper of internal/messages. The trusted Mention tokens of template output are written where
 // they stand without notifying; a Loud Publish adds the everyone and group ones to its Mentions (C-13.FR-8).
 
 // LengthLimit is the longest post message, and the longest attachment text, in characters: the server's MaxPostSize
 // (F-057).
 const LengthLimit = 16_383
-
-// statusEmoji starts the summary line, by the colour of the message (C-12.FR-1 item 1).
-var statusEmoji = map[string]string{
-	messages.ColourFiring: "🔴", messages.ColourAcknowledged: "🟠", messages.ColourResolved: "🟢",
-	messages.ColourSnoozed: "⚪", messages.ColourStorm: "⛈",
-}
 
 // actionIDs are the stable ids of the buttons by Command; Mattermost takes letters and digits only, and a Snooze
 // button is "snooze" with the index of its duration, or with the name of its Snooze preset (presetActionIDs).
@@ -72,20 +68,23 @@ type look struct {
 	limit    int
 }
 
-// rootPost lays out a Root message, or a Storm summary, which has no heading; mentions are the rendered Mentions of a
-// Loud post, empty for a Quiet one and for every edit. A message longer than the limit is shortened first
-// (C-12.FR-11).
+// rootPost lays out a Root message, or a Storm summary, which has no heading and so no title: an empty message and
+// one attachment that holds everything. mentions are the rendered Mentions of a Loud post, the first line of the
+// attachment's text, empty for a Quiet one and for every edit. A message longer than the limit, its Mentions line
+// counted, is shortened first (C-12.FR-11).
 func rootPost(m messages.Message, l look, mentions string) post {
-	m, _ = messages.Shorten(m, l.limit, l.markup)
-	h := m.Heading
-	if h == nil {
-		return post{Message: cutEnd(joinLines(text(m, l), mentions), l.limit), Props: buttonsOnly(m, l)}
+	limit := l.limit
+	if mentions != "" {
+		limit -= utf8.RuneCountInString(mentions) + 1
 	}
-	att := attachment{Color: messages.StatusColour(m.Colour), Title: "#" + strconv.FormatInt(h.Number, 10) + " " +
-		templates.StripTokens(h.Title), TitleLink: h.URL, Text: text(m, l), Footer: l.footer, FooterIcon: l.icon,
+	m, _ = messages.Shorten(m, max(limit, 1), l.markup)
+	att := attachment{Color: messages.StatusColour(m.Colour), Text: text(m, l, mentions),
 		Actions: actions(m.Buttons, l.callback)}
-	return post{Message: cutEnd(joinLines(summaryLine(m, l.markup), mentions), l.limit),
-		Props: &props{Attachments: []attachment{att}}}
+	if h := m.Heading; h != nil {
+		att.Title = "#" + strconv.FormatInt(h.Number, 10) + " " + templates.StripTokens(h.Title)
+		att.TitleLink, att.Footer, att.FooterIcon = h.URL, l.footer, l.icon
+	}
+	return post{Props: &props{Attachments: []attachment{att}}}
 }
 
 // replyPost lays out a Thread reply: its Mentions first, then its text. A reply with buttons — a Reminder's "Still on
@@ -93,33 +92,18 @@ func rootPost(m messages.Message, l look, mentions string) post {
 func replyPost(m messages.Message, l look, mentions string) post {
 	m, _ = messages.Shorten(m, l.limit, l.markup)
 	if len(m.Buttons) == 0 {
-		return post{Message: cutEnd(joinLines(mentions, text(m, l)), l.limit)}
+		return post{Message: cutEnd(joinLines(mentions, text(m, l, "")), l.limit)}
 	}
 	return post{Message: cutEnd(mentions, l.limit), Props: &props{Attachments: []attachment{{
-		Color: messages.StatusColour(m.Colour), Text: text(m, l), Actions: actions(m.Buttons, l.callback)}}}}
+		Color: messages.StatusColour(m.Colour), Text: text(m, l, ""), Actions: actions(m.Buttons, l.callback)}}}}
 }
 
-// buttonsOnly are the props of a post without a heading: one attachment with its buttons, or none.
-func buttonsOnly(m messages.Message, l look) *props {
-	if len(m.Buttons) == 0 {
-		return &props{Attachments: []attachment{}}
-	}
-	return &props{Attachments: []attachment{{Color: messages.StatusColour(m.Colour),
-		Actions: actions(m.Buttons, l.callback)}}}
-}
-
-// summaryLine is the status emoji, #N and the title, escaped like alert data.
-func summaryLine(m messages.Message, markup messages.Markup) string {
-	h := m.Heading
-	title := messages.Escaper(markup)(templates.StripTokens(h.Title))
-	return strings.TrimSpace(statusEmoji[m.Colour] + " #" + strconv.FormatInt(h.Number, 10) + " " + title)
-}
-
-// text is the text of m without its heading and buttons, as messages.Layout lays it out for the markup, with the
-// footer of the Destination's identity space as its last line and the trusted Mention tokens as text that notifies
-// nobody.
-// A text still longer than the limit loses its middle, so that the line of links, the notices and the footer stay.
-func text(m messages.Message, l look) string {
+// text is the text of m without its heading and buttons, as messages.Layout lays it out for the markup, after the
+// line of mentions when there is one, with the footer of the Destination's identity space as its last line and the
+// trusted Mention tokens as text that notifies nobody.
+// A text still longer than the limit loses its middle, so that the Mentions, the line of links, the notices and the
+// footer stay; a Mentions line too long for that loses whole Mentions from its end.
+func text(m messages.Message, l look, mentions string) string {
 	cp := m
 	cp.Heading, cp.Buttons, cp.Footer, cp.Footers = nil, nil, m.FooterIn(l.space), nil
 	if m.Body != nil {
@@ -135,13 +119,33 @@ func text(m messages.Message, l look) string {
 		}
 		cp.Alerts = &a
 	}
-	full := messages.Layout(cp, l.markup)
+	full := joinLines(mentions, messages.Layout(cp, l.markup))
 	if utf8.RuneCountInString(full) <= l.limit {
 		return full
 	}
 	tail := messages.Layout(messages.Message{Links: cp.Links, Notices: cp.Notices, Footer: cp.Footer}, l.markup)
 	cp.Links, cp.Notices, cp.Footer = nil, nil, ""
-	return cutMiddle(messages.Layout(cp, l.markup), tail, l.limit)
+	// The head keeps limit - tail - 2 characters (cutMiddle): the Mentions line and its new line fit in it whole.
+	mentions = fitMentions(mentions, l.limit-utf8.RuneCountInString(tail)-3)
+	return cutMiddle(joinLines(mentions, messages.Layout(cp, l.markup)), tail, l.limit)
+}
+
+// fitMentions keeps the Mentions of the line s, separated by spaces, that fit in n characters, dropping whole Mentions
+// from its end, so that no `@name` is ever cut.
+func fitMentions(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	var out []string
+	size := -1
+	for w := range strings.SplitSeq(s, " ") {
+		size += 1 + utf8.RuneCountInString(w)
+		if size > n {
+			break
+		}
+		out = append(out, w)
+	}
+	return strings.Join(out, " ")
 }
 
 // tokenText is a trusted Mention token as text that notifies nobody: `@`, a zero-width space and its word or group.

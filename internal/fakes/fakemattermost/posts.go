@@ -243,9 +243,9 @@ var mentionPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9._-])@([a-z0-9._-]+)`)
 var kindRank = map[string]int{KindMention: 3, KindDirect: 2, KindChannel: 1, KindAll: 1, KindHere: 1}
 
 // notifyLocked records the notifications of a new post: the post's message and the texts of its attachments are
-// searched for Mentions (F-056), a Mention makes the user a follower of the Thread (F-027), and everyone else in a
-// direct channel is notified of every post (F-028). Each person gets one notification, of the strongest kind; a bot
-// gets none. f.mu is held.
+// searched for Mentions, `@channel`, `@all` and `@here` included (F-056, F-113), a Mention makes the user a follower
+// of the Thread (F-027), and everyone else in a direct channel is notified of every post (F-028). Each person gets one
+// notification, of the strongest kind; a bot gets none. f.mu is held.
 func (f *Fake) notifyLocked(p *post, c *Channel, thread *post) {
 	members := f.st.members[c.ID]
 	kinds := map[string]string{}

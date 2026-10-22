@@ -152,7 +152,7 @@ func TestWebhookEvents(t *testing.T) {
 				if p.ChannelID != fakemattermost.ChannelAlertsProd || p.RootID != "" {
 					continue
 				}
-				if strings.HasPrefix(p.Message, "⛈ Storm on") || strings.HasPrefix(p.Message, "Storm over") {
+				if strings.HasPrefix(p.body(), "⛈ Storm on") || strings.HasPrefix(p.body(), "Storm over") {
 					summaries++
 				} else {
 					published++

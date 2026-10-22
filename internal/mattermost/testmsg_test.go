@@ -176,9 +176,9 @@ func TestMattermostTest(t *testing.T) {
 		t.Fatalf("posts %+v", posts)
 	}
 	att := attachmentOf(t, posts[0])
-	if !strings.HasPrefix(att["title"].(string), "🧪 Test message · #7 disk full") ||
-		!strings.HasPrefix(posts[0].Message, "🧪 Test message · 🔴 #7 disk full") {
-		t.Errorf("mark %q %q", att["title"], posts[0].Message)
+	if !strings.HasPrefix(att["title"].(string), "🧪 Test message · #7 disk full") || posts[0].Message != "" ||
+		strings.Contains(att["text"].(string), "🧪") {
+		t.Errorf("mark %q, message %q, text %q", att["title"], posts[0].Message, att["text"])
 	}
 	actions := att["actions"].([]any)
 	ctx := actions[0].(map[string]any)["integration"].(map[string]any)["context"].(map[string]any)
@@ -303,13 +303,16 @@ func (p *pressFails) Do(ctx context.Context, s delivery.Subject, op delivery.Op)
 	return p.inner.Do(ctx, s, op)
 }
 
-// TestMattermostPreview is C-16.FR-4: the Root message as the Destination would receive it, in Markdown, its request
-// the post with the attachment and its buttons, unmarked; nothing is sent.
+// TestMattermostPreview is C-16.FR-4: the Root message as the Destination would receive it, in Markdown, its text the
+// post's empty message and its request the post with the attachment, titled #N and the title, and its buttons,
+// unmarked; nothing is sent.
 func TestMattermostPreview(t *testing.T) {
 	e := newTester(t)
 	items, err := e.tester.Preview(t.Context(), delivery.TestInput{Destination: destA, Source: e.src})
 	if err != nil || len(items) != 1 || items[0].Name != "message" || items[0].Format != "markdown" ||
-		*items[0].Text != "🔴 #7 disk full" || !strings.Contains(*items[0].Request.Body, `"attachments"`) ||
+		items[0].Text == nil || *items[0].Text != "" || !strings.Contains(*items[0].Request.Body, `"attachments"`) ||
+		!strings.Contains(*items[0].Request.Body, `"message":""`) ||
+		!strings.Contains(*items[0].Request.Body, `"title":"#7 disk full"`) ||
 		strings.Contains(*items[0].Request.Body, "🧪") || strings.Contains(*items[0].Request.Body, token) {
 		t.Fatalf("preview %+v %v", items, err)
 	}

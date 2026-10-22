@@ -769,6 +769,29 @@ func TestFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("F-113", func(t *testing.T) {
+		fx := start(t)
+		for _, word := range []string{"here", "channel"} {
+			before := len(fx.fake.Notifications())
+			fx.post(fakemattermost.ChannelAlerts, "", "", `{"attachments":[{"title":"#1 DiskFull","text":"@`+word+
+				`\ndetails"}]}`)
+			n := fx.fake.Notifications()[before:]
+			if len(n) == 0 {
+				t.Fatalf("@%s in an attachment notified nobody", word)
+			}
+			for _, x := range n {
+				if x.Kind != word || x.Preview != "" {
+					t.Errorf("@%s in an attachment = %+v, want kind %s with an empty preview", word, x, word)
+				}
+			}
+		}
+		before := len(fx.fake.Notifications())
+		fx.post(fakemattermost.ChannelAlerts, "", "", `{"attachments":[{"text":"no mention"}]}`)
+		if n := fx.fake.Notifications()[before:]; len(n) != 0 {
+			t.Errorf("an attachment without a Mention notified %+v", n)
+		}
+	})
+
 	t.Run("F-057", func(t *testing.T) {
 		fx := start(t)
 		r := fx.api(http.MethodGet, "/api/v4/config/client?format=old", "")

@@ -247,8 +247,9 @@ func (t *Tester) real() clock.Clock {
 }
 
 // Preview renders, without sending anything, the Root message of the source of in as the Mattermost Destination would
-// receive it (C-16.FR-4): the item message in Markdown, its text the post's message and its request the post, with the
-// attachment, as it would be created, with the buttons a test message would carry, whose presses change nothing.
+// receive it (C-16.FR-4): the item message in Markdown, its text the post's message, which is empty, and its request
+// the post, whose attachment holds everything the channel shows, as it would be created, with the buttons a test
+// message would carry, whose presses change nothing.
 func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery.PreviewItem, error) {
 	tg, fail := t.Adapter.target(ctx, delivery.Call{Destination: in.Destination})
 	if fail != nil {
@@ -262,15 +263,11 @@ func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery
 		Request: postRequest(tg, http.MethodPost, "/api/v4/posts", p)}}, nil
 }
 
-// testPost lays out the test message m: the Root message of its source, Quiet, with the mark of a test before its
-// summary line and its attachment's title, and the nonce of the test in the context of its buttons.
+// testPost lays out the test message m: the Root message of its source, Quiet, with its message empty, the mark of a
+// test before its attachment's title, and the nonce of the test in the context of its buttons.
 func testPost(m messages.Message, l look, nonce string) post {
 	p := rootPost(m, l, "")
 	mark := messages.TestMark(m.Language)
-	p.Message = cutEnd(mark+" · "+p.Message, l.limit)
-	if p.Props == nil {
-		return p
-	}
 	for i := range p.Props.Attachments {
 		a := &p.Props.Attachments[i]
 		if i == 0 && a.Title != "" {

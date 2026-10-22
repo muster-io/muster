@@ -166,10 +166,13 @@ Muster edits a Root message for as long as its Alert Group is open, which can be
   message, or a reply in the Thread.
 - **Thread replies notify the Thread's followers** by their own notification settings, and a Mention makes the person
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".
-- A Loud post carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's `@username` through
-  their Account link — in the post's text, never in the attachment, so that the notification shows what happened. A
-  `{{ mention "channel" }}` in a Route's template shows in the attachment as text and, on a Loud post, adds its Mention
-  to the post's text.
+- A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
+  `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
+  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
+  notifies from an attachment has not been checked. The notification shows no content, because the post's own text is
+  empty: everything is in the attachment, so the post shows its title once. An edit removes that line. A reply in the
+  Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
+  as text and, on a Loud post, adds its Mention to the line of Mentions.
 - Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody. The footer of
   a Root message names a person by their username without `@`, which does not notify them either.
 

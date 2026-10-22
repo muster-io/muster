@@ -305,6 +305,41 @@ func (p mmPost) attachment(t *testing.T) mmAttachment {
 	return p.Attachments[0]
 }
 
+// title is the title of the post's first attachment, which names the Alert Group of a Root message; empty without one.
+func (p mmPost) title() string {
+	if len(p.Attachments) == 0 {
+		return ""
+	}
+	return p.Attachments[0].Title
+}
+
+// mentionsAndBody split the text of the post's first attachment into the Mentions line of a Loud Root message or
+// Storm summary — its first line when every word of it is a Mention — and the rest. A Mentions line that holds a
+// display name, written for a user without an Account link as plain text, is not recognised and is read as body; the
+// tests that use it mention only `@channel`, `@here` and usernames.
+func (p mmPost) mentionsAndBody() (string, string) {
+	if len(p.Attachments) == 0 {
+		return "", ""
+	}
+	text := p.Attachments[0].Text
+	line, rest, _ := strings.Cut(text, "\n")
+	for _, w := range strings.Fields(line) {
+		if !strings.HasPrefix(w, "@") || strings.HasPrefix(w, "@\u200b") {
+			return "", text
+		}
+	}
+	if line == "" {
+		return "", text
+	}
+	return line, rest
+}
+
+// body is the text of the post's first attachment without its Mentions line.
+func (p mmPost) body() string {
+	_, b := p.mentionsAndBody()
+	return b
+}
+
 func parseProps(raw json.RawMessage) []mmAttachment {
 	var props struct {
 		Attachments []mmAttachment `json:"attachments"`
@@ -340,7 +375,7 @@ func (e *mm) roots(n int) []mmPost {
 	e.t.Helper()
 	var out []mmPost
 	for _, p := range e.posts() {
-		if p.RootID == "" && strings.Contains(p.Message+" ", fmt.Sprintf(" #%d ", n)) {
+		if p.RootID == "" && strings.HasPrefix(p.title()+" ", fmt.Sprintf("#%d ", n)) {
 			out = append(out, p)
 		}
 	}
@@ -498,7 +533,7 @@ func TestMattermost(t *testing.T) {
 	n := e.number(g)
 	root := e.root(n)
 	att := root.attachment(t)
-	if root.Message != fmt.Sprintf("🔴 #%d DiskFull", n) || att.Color != "#d32f2f" ||
+	if mentions, _ := root.mentionsAndBody(); root.Message != "" || mentions != "" || att.Color != "#d32f2f" ||
 		att.Title != fmt.Sprintf("#%d DiskFull", n) || !strings.HasSuffix(att.TitleLink, "/alert-groups/"+g) ||
 		!strings.HasPrefix(att.Footer, "Muster v") || att.FooterIcon != devmode.PublicURL+"/muster-mark-256.png" {
 		t.Errorf("root message %q, attachment %+v", root.Message, att)
@@ -534,7 +569,8 @@ func TestMattermost(t *testing.T) {
 	ea := edited.attachment(t)
 	if ea.Color != "#f57c00" || !slices.Equal(actionNames(ea), []string{"Unack", "Resolve", "Snooze 1 h", "Snooze 4 h",
 		"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}) ||
-		!strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || strings.Contains(edited.Message, "@") {
+		!strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || edited.Message != "" ||
+		ea.Title != fmt.Sprintf("#%d DiskFull", n) {
 		t.Errorf("edited post %q: %+v", edited.Message, ea)
 	}
 	e.alert("d1", "i2", `{"team":"db","cluster":"a","disk":"i2"}`, "")
@@ -909,7 +945,7 @@ func TestMattermostMessages(t *testing.T) {
 			var out []mmPost
 			for _, p := range e.posts() {
 				if p.ChannelID == fakemattermost.ChannelAlertsProd && p.RootID == "" &&
-					(strings.HasPrefix(p.Message, "⛈ Storm on") || strings.HasPrefix(p.Message, "Storm over")) {
+					(strings.HasPrefix(p.body(), "⛈ Storm on") || strings.HasPrefix(p.body(), "Storm over")) {
 					out = append(out, p)
 				}
 			}
@@ -922,8 +958,9 @@ func TestMattermostMessages(t *testing.T) {
 				published++
 			}
 		}
-		if s := summary()[0].Message; published != 3 || !strings.HasPrefix(s, "⛈ Storm on storm: 3 Alert Groups, 0 urgent") {
-			t.Errorf("%d root messages and the summary %q", published, s)
+		if s := summary()[0]; published != 3 || s.Message != "" || s.attachment(t).Color != "#6a1b9a" ||
+			s.attachment(t).Title != "" || !strings.HasPrefix(s.body(), "⛈ Storm on storm: 3 Alert Groups, 0 urgent") {
+			t.Errorf("%d root messages and the summary %q: %+v", published, s.Message, s.Attachments)
 		}
 		held := []int{}
 		for i := 1; i <= 6; i++ {
@@ -939,7 +976,9 @@ func TestMattermostMessages(t *testing.T) {
 		e.notify("s1", "some alerts resolved")
 		advance(t, r, 360)
 		eventually(t, "the storm to end", func() bool {
-			return strings.HasPrefix(summary()[0].Message, "Storm over: 2 Alert Groups still open")
+			s := summary()[0]
+			mentions, body := s.mentionsAndBody()
+			return s.Message == "" && mentions == "" && strings.HasPrefix(body, "Storm over: 2 Alert Groups still open")
 		})
 		e.root(numbers[held[0]])
 		e.root(numbers[held[1]])
@@ -1008,8 +1047,7 @@ func TestMattermostMessages(t *testing.T) {
 		g := e.groupOf("big")
 		root := e.root(e.number(g))
 		text := root.attachment(t).Text
-		if utf8.RuneCountInString(root.Message) > fakemattermost.MaxPostSize ||
-			utf8.RuneCountInString(text) > fakemattermost.MaxPostSize || !regexp.MustCompile(`\+[0-9]+ more`).MatchString(text) ||
+		if root.Message != "" || utf8.RuneCountInString(text) > fakemattermost.MaxPostSize || !regexp.MustCompile(`\+[0-9]+ more`).MatchString(text) ||
 			!strings.Contains(text, "+590 more") || !strings.Contains(text, "+27 more") ||
 			!strings.Contains(text, "Full list in Muster") || strings.Contains(text, common) ||
 			!strings.Contains(text, "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")") {
@@ -1159,8 +1197,8 @@ func TestMattermostBrokenRecovery(t *testing.T) {
 	e.waitHealth(dest, "healthy")
 	rootA := e.root(e.number(ga))
 	e.root(e.number(gz))
-	if !strings.Contains(rootA.Message, "@here") {
-		t.Errorf("A was published quietly: %q", rootA.Message)
+	if mentions, _ := rootA.mentionsAndBody(); rootA.Message != "" || !strings.Contains(mentions, "@here") {
+		t.Errorf("A was published quietly: %q, %+v", rootA.Message, rootA.Attachments)
 	}
 	eventually(t, "the deliveries to settle", func() bool {
 		return h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`) == 0
@@ -1176,6 +1214,18 @@ func TestMattermostBrokenRecovery(t *testing.T) {
 	}
 	if got := e.roots(e.number(gc)); len(got) != 0 {
 		t.Errorf("C was published: %+v", got)
+	}
+	// An edit of A's Loud Root message is Quiet: it drops the Mentions line, and the message stays empty.
+	if out := e.command(ga, "acknowledge"); out != "done" {
+		t.Fatalf("acknowledge A = %s", out)
+	}
+	eventually(t, "the edit of A", func() bool {
+		return len(e.calls(http.MethodPut, "/api/v4/posts/"+rootA.ID+"/patch")) == 1
+	})
+	if a := e.post(rootA.ID); a.Message != "" || a.attachment(t).Color != "#f57c00" {
+		t.Errorf("A after the edit: %q, %+v", a.Message, a.Attachments)
+	} else if mentions, _ := a.mentionsAndBody(); mentions != "" {
+		t.Errorf("A kept its Mentions line %q after the edit", mentions)
 	}
 	eventually(t, "MusterDestinationBroken to resolve", func() bool {
 		return !slices.Contains(e.internalAlerts(), "MusterDestinationBroken")

@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-19
+- Date: 2026-10-22
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
@@ -275,6 +275,22 @@ you"), but the notification showed no content. A post with the same mention in i
 notified with the text and the attachment shown. Phone push was not checked. — _2026-10-04 · two posts, the
 notifications received by email by the mentioned user · Mattermost 11.2.2_ · Used in C-12.FR-1, C-13.FR-3,
 C-13.FR-8.
+
+**F-113. `@here`, `@channel`, `@all` and a user mention inside an attachment all notify.** In a channel with the bot
+and a test user whose status was online, the bot made posts, each with an empty `message` and one attachment, and the
+test user's `mention_count` was read with `GET /api/v4/channels/{channel_id}/members/{user_id}` after each: the
+attachment text with `@here` raised it from 0 to 1, with `@channel` from 1 to 2, with `@<username>` of the test user
+from 2 to 3, and a control post without a mention left it at 3; in a second run, the attachment text with `@all`
+raised it from 0 to 1. `@here` notifies only the members who are online, so the online status matters for it. A group
+mention (`@<group>`) inside an attachment was not checked. Email and push were not checked; the notification still
+shows no content (F-056). — _2026-10-22 · bot posts in one channel, the mention count read after each · Mattermost
+11.2.2_ · Used in C-12.FR-1, C-13.FR-3, C-13.FR-8.
+
+**F-114. An edit with an empty `message` clears the post's text.** A bot post created with `message` "🔴 #1 …" and an
+attachment was edited with `PUT /api/v4/posts/{id}/patch` and the body `{"message": "", "props": {"attachments":
+[…]}}`; the server answered `200`, and `GET /api/v4/posts/{id}` then gave `message` "" with the new attachment text
+and an `edit_at` above 0. So the next edit of a Root message posted with a summary line in its `message` removes that
+line. — _2026-10-22 · one post created and edited by the bot, read back · Mattermost 11.2.2_ · Used in C-13.FR-3.
 
 **F-060. A username without `@` does not notify.** A bot post whose `message` and attachment text both ended with
 "Acknowledged by <username>" — the username of a channel member, written without `@` and mentioned nowhere else, as
