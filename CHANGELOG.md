@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/muster-io/muster/compare/v0.1.1...v0.1.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **oidc:** request offline access only from providers that offer it ([#361](https://github.com/muster-io/muster/issues/361)) ([ac1af33](https://github.com/muster-io/muster/commit/ac1af33ef3152467d276072ce9d54a154d75c0ea))
+
 ## [0.1.1](https://github.com/muster-io/muster/compare/v0.1.0...v0.1.1) (2026-10-22)
 
 
