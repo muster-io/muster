@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/muster-io/muster/compare/v0.1.0...v0.1.1) (2026-10-22)
+
+
+### Features
+
+* **helm:** render extra objects such as an external secret with the release ([#357](https://github.com/muster-io/muster/issues/357)) ([e58d6ab](https://github.com/muster-io/muster/commit/e58d6ab39d38b56e19773ece3fd25ee8cdcf1665))
+
+
+### Bug Fixes
+
+* **oidc:** keep the groups claim seen at sign-in when the check finds it not advertised ([#354](https://github.com/muster-io/muster/issues/354)) ([40e83c2](https://github.com/muster-io/muster/commit/40e83c257c634e085ce942b7837b03d07e84ab83))
+
 ## 0.1.0 (2026-10-21)
 
 
