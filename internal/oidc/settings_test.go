@@ -470,6 +470,23 @@ type env struct {
 	rc       *clock.Manual
 	log      *bytes.Buffer
 	keyring  *keyring.Keyring
+	// gitLab is set while the fake IdP behaves as GitLab, which offers no offline_access.
+	gitLab bool
+}
+
+// useGitLab makes the fake IdP behave as GitLab.
+func (e *env) useGitLab() {
+	e.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorGitLab)})
+	e.gitLab = true
+}
+
+// requestsWanted reports whether an authorization request carries the scopes of the rule (C-03.FR-30): openid, then
+// offline_access unless the fake IdP behaves as GitLab.
+func (e *env) requestsWanted(scope string) bool {
+	if e.gitLab {
+		return strings.HasPrefix(scope, "openid ") && !slices.Contains(strings.Fields(scope), "offline_access")
+	}
+	return strings.HasPrefix(scope, "openid offline_access")
 }
 
 func network(t *testing.T, rc clock.Clock, log *logging.Logger) Network {
@@ -710,6 +727,18 @@ func TestCheck(t *testing.T) {
 	if slices.Contains(kinds(res.Warnings), WarningGroupsClaimMissing) {
 		t.Error("the groups claim is advertised but warned about")
 	}
+	if !res.OfflineAccess || strings.Join(res.RequestedScopes, " ") != "openid offline_access profile email" {
+		t.Errorf("a provider that offers offline_access: %v, scopes %v", res.OfflineAccess, res.RequestedScopes)
+	}
+	// A provider without offline_access, as GitLab, is shown as such and is no problem.
+	e.useGitLab()
+	res, err = e.svc.Check(t.Context())
+	if err != nil || !res.OK || res.OfflineAccess || strings.Join(res.RequestedScopes, " ") != "openid profile email" ||
+		len(res.Warnings) != 0 {
+		t.Errorf("a provider without offline_access = %+v, %v", res, err)
+	}
+	e.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorKeycloak)})
+	e.gitLab = false
 	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(true)})
 	if res, err = e.svc.Check(t.Context()); err != nil || !slices.Contains(kinds(res.Warnings), WarningGroupsClaimMissing) {
 		t.Fatalf("without the groups claim = %+v, %v", res, err)

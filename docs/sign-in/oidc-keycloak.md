@@ -2,7 +2,8 @@
 
 This page sets up sign-in through [Keycloak](https://www.keycloak.org/) with OpenID Connect (OIDC). Other identity
 providers work the same way: Muster needs a confidential client with the authorization code flow, a claim that lists
-the person's groups, and, for the background re-checks, the scope `offline_access`.
+the person's groups, and, for the background re-checks, the scope `offline_access` where the provider offers it.
+[Sign-in with GitLab](oidc-gitlab.md) covers a provider that does not.
 
 Muster talks to Keycloak over the **back channel**: it fetches the provider metadata (discovery) and the signing keys,
 and exchanges the authorization code for tokens itself. Muster must therefore reach Keycloak over the network, directly
@@ -52,7 +53,8 @@ settings; it is `groups` unless you change both.
 
 ## 3. Allow `offline_access`
 
-Muster asks for the scope `offline_access` at every sign-in, besides the scopes of the settings. With it, Keycloak
+Muster asks for the scope `offline_access` at every sign-in, besides the scopes of the settings, from every identity
+provider whose discovery lists it in `scopes_supported` or lists no scopes at all; Keycloak lists it. With it, Keycloak
 returns an offline token, which Muster keeps encrypted and uses to **re-check every OIDC user in the background**
 every 15 minutes (`auth.oidc_recheck_interval`): a person disabled or removed in Keycloak loses their Muster sessions
 at the next re-check, without waiting for them to end.
@@ -87,7 +89,7 @@ Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oi
 | Client secret | the secret of step 1; it is write-only: Muster shows only whether it is set and when it changed |
 | Client secret expires on | the expiry date of the secret, if it has one |
 | Display name | the name on the button "Sign in with {name}"; by default the host of the issuer URL |
-| Scopes | `profile email`; `openid` and `offline_access` are always added |
+| Scopes | `profile email`; `openid` is always added, and `offline_access` because Keycloak offers it |
 | Groups claim | `groups` |
 | Group mapping | for example `muster-admins` → Admin, `oncall` → Responder; when a person's groups map to several Roles, the highest wins |
 | Role for users without a matching group | none (the default) refuses their sign-in; Viewer or Responder lets them in |
@@ -117,7 +119,8 @@ In the web UI:
 The screenshots show the form filled in, before **Save**.
 
 Then press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
-request travelled (`direct` or `proxy`), how long it took and the endpoints Keycloak announced. When the outbound
+request travelled (`direct` or `proxy`), how long it took, the endpoints Keycloak announced, the **Requested scopes**
+of a sign-in (`openid offline_access profile email`) and that **Offline access** is offered. When the outbound
 address policy blocks Keycloak or the proxy, the error names the rule.
 
 Keycloak lists only standard claims in `claims_supported`, so until the first sign-in the check shows the warning *No

@@ -112,6 +112,7 @@ nav:
   - Sign-in:
       - sign-in/index.md
       - sign-in/oidc-keycloak.md
+      - sign-in/oidc-gitlab.md
       - sign-in/totp.md
       - sign-in/closed-networks.md
   - Concepts:

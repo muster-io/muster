@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,17 +223,30 @@ func TestCheckOidcSettings(t *testing.T) {
 	x, f := newOIDCAPI(t)
 	f.check = oidc.CheckResult{OK: true, ViaProxy: true, Latency: 12 * time.Millisecond,
 		Discovery: oidc.Discovery{Issuer: "http://i", AuthorizationEndpoint: "http://i/a", TokenEndpoint: "http://i/t",
-			JWKSURI: "http://i/k"}}
+			JWKSURI: "http://i/k"}, RequestedScopes: []string{"openid", "profile", "email"}}
 	a := x.mutate(t, adminCookie, http.MethodPost, "/api/v1/oidc-settings/checks", "")
 	m := a.json(t)
 	if a.status != http.StatusOK || m["ok"] != true || m["via"] != "proxy" || m["latency_ms"] != 12.0 ||
-		m["token_endpoint"] != "http://i/t" || m["error"] != nil {
+		m["token_endpoint"] != "http://i/t" || m["error"] != nil || m["offline_access_offered"] != false ||
+		fmt.Sprint(m["requested_scopes"]) != "[openid profile email]" {
 		t.Fatalf("= %d %s", a.status, a.body)
+	}
+	f.check.OfflineAccess = true
+	f.check.RequestedScopes = []string{"openid", "offline_access", "profile"}
+	m = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/oidc-settings/checks", "").json(t)
+	if m["offline_access_offered"] != true || fmt.Sprint(m["requested_scopes"]) != "[openid offline_access profile]" {
+		t.Errorf("a provider that offers offline_access = %v", m)
 	}
 	f.check = oidc.CheckResult{Error: "blocked by the outbound address policy: proxy 169.254.169.254 is link-local (always blocked)"}
 	m = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/oidc-settings/checks", "").json(t)
 	if m["ok"] != false || m["via"] != "direct" || !strings.Contains(m["error"].(string), "link-local") {
 		t.Errorf("a failed check = %v", m)
+	}
+	if _, ok := m["requested_scopes"]; ok {
+		t.Errorf("a failed check names requested scopes: %v", m)
+	}
+	if _, ok := m["offline_access_offered"]; ok {
+		t.Errorf("a failed check says whether offline access is offered: %v", m)
 	}
 	f.err = errors.New("db down")
 	if a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/oidc-settings/checks", ""); a.status != http.StatusInternalServerError {

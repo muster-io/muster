@@ -599,17 +599,22 @@ func TestRefusedBy(t *testing.T) {
 }
 
 func TestOfflineTokenOfAnswer(t *testing.T) {
+	offline, plain := []string{"openid", "offline_access", "email"}, []string{"openid", "profile", "email"}
 	for _, c := range []struct {
-		t    Tokens
-		want logging.Secret
+		t         Tokens
+		requested []string
+		want      logging.Secret
 	}{
-		{Tokens{RefreshToken: "r", Scope: []string{"openid", "offline_access"}}, "r"},
-		{Tokens{RefreshToken: "r"}, "r"},
-		{Tokens{RefreshToken: "r", Scope: []string{"openid"}}, ""},
-		{Tokens{Scope: []string{"offline_access"}}, ""},
+		{Tokens{RefreshToken: "r", Scope: []string{"openid", "offline_access"}}, offline, "r"},
+		{Tokens{RefreshToken: "r"}, offline, "r"},
+		{Tokens{RefreshToken: "r", Scope: []string{"openid"}}, offline, ""},
+		{Tokens{Scope: []string{"offline_access"}}, offline, ""},
+		// A provider that offers no offline_access, as GitLab, returns a refresh token all the same: it is none.
+		{Tokens{RefreshToken: "r", Scope: plain}, plain, ""},
+		{Tokens{RefreshToken: "r"}, plain, ""},
 	} {
-		if got := offlineToken(c.t); got != c.want {
-			t.Errorf("offlineToken(%+v) = %q, want %q", c.t, got, c.want)
+		if got := offlineToken(c.t, c.requested); got != c.want {
+			t.Errorf("offlineToken(%+v, %v) = %q, want %q", c.t, c.requested, got, c.want)
 		}
 	}
 }

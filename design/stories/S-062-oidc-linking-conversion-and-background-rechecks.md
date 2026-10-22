@@ -81,7 +81,8 @@ issue: 114
   `changePassword` and `createPasswordSetupLink` gain their OIDC refusals. Schemas: `OidcLinkStart`, `UserCreated`.
 - **Linking and conversion** (C-03.FR-29, FR-11, FR-9): `startOidcLink` (web session, an account with a password;
   `409 oidc_already_linked`, `409 oidc_not_enabled`) returns `OidcLinkStart` for a request with purpose `link`,
-  `link_user_id` and `link_session_id`, with the PKCE, state and nonce of S-013 and `offline_access` requested.
+  `link_user_id` and `link_session_id`, with the PKCE, state and nonce of S-013 and `offline_access` requested under
+  the rule of a sign-in (only from an IdP that offers it, C-03.FR-30).
   `completeOidcLink` is accepted only in the session that started it (`invalid_request` otherwise); an identity held by
   another user ends with `identity_linked_elsewhere` (Audit `user.oidc_link_refused`), and groups that map to no Role,
   with no Role for unmatched users, with `no_access` (the same entry, with the groups); success sets the identity and
@@ -213,7 +214,8 @@ None. Where the groups claim is read was settled in S-013 (D247).
     as `role_locked` says.
   - A refresh whose ID token does not verify, or names another subject, decides nothing: the check is
     `unavailable`, and a rotated refresh token of the user is still stored, so the next check can refresh.
-  - A token answer without `scope` granted the scope requested (RFC 6749 §5.1), which includes `offline_access`.
+  - A token answer without `scope` granted the scope requested (RFC 6749 §5.1), which includes `offline_access` when
+    the IdP offers it; a refresh token from an IdP that does not offer it, such as GitLab, is no offline token.
   - A sign-in without an offline token wipes the previous one and its re-check, as "each new OIDC sign-in replaces
     it" says, and bounds the user's open OIDC sessions to `auth.oidc_fallback_session_lifetime`, since nothing
     re-checks them any more.

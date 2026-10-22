@@ -249,6 +249,39 @@ func TestIntegrationSignIn(t *testing.T) {
 	})
 }
 
+// TestIntegrationGitLabSignIn is C-03.FR-30 and C-03.AC-24 against a fake IdP that behaves as GitLab: the sign-in
+// does not request offline_access, the groups claim comes from userinfo, the refresh token GitLab returns is not
+// stored, no re-check exists and the session lives auth.oidc_fallback_session_lifetime.
+func TestIntegrationGitLabSignIn(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		w := setup(t, s)
+		w.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorGitLab)})
+		out := w.signIn(t, fakeoidc.User{Subject: "42", PreferredUsername: "sam", Groups: []string{"oncall"}}, "")
+		if out.Session == nil {
+			t.Fatalf("sign-in through GitLab = %+v", out)
+		}
+		var scope string
+		for _, r := range w.idp.Requests() {
+			if r.Path == "/authorize" {
+				q, _ := url.ParseQuery(r.Query)
+				scope = q.Get("scope")
+			}
+		}
+		if scope != "openid profile email" {
+			t.Errorf("the authorization request asked for %q", scope)
+		}
+		if got := w.scalar(t, `SELECT role || '/' || (oidc_offline_token_ciphertext IS NULL)::text || '/' ||
+			(SELECT count(*) FROM oidc_checks c WHERE c.user_id = u.id)::text FROM users u WHERE login = 'sam'`); got !=
+			"responder/true/0" {
+			t.Errorf("sam = %v", got)
+		}
+		if got := w.scalar(t, `SELECT (extract(epoch FROM expires_at - created_at) / 3600)::int FROM sessions
+			WHERE public_id = $1`, out.Session.PublicID); got != int32(12) && got != int64(12) {
+			t.Errorf("the session lives %v hours", got)
+		}
+	})
+}
+
 // TestIntegrationLastAdminKept is C-03.FR-32 and AC-26 at a sign-in, with the LatestKeptAdmin query.
 func TestIntegrationLastAdminKept(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {

@@ -5487,12 +5487,18 @@ type OidcCheckResult struct {
 	AuthorizationEndpoint nullable.Nullable[string] `json:"authorization_endpoint,omitempty"`
 
 	// Error What failed; names the blocking rule when the outbound address policy refused the target. Secrets and tokens are masked.
-	Error         nullable.Nullable[string] `json:"error,omitempty"`
-	Issuer        nullable.Nullable[string] `json:"issuer,omitempty"`
-	JwksUri       nullable.Nullable[string] `json:"jwks_uri,omitempty"`
-	LatencyMs     *int                      `json:"latency_ms,omitempty"`
-	Ok            bool                      `json:"ok"`
-	TokenEndpoint nullable.Nullable[string] `json:"token_endpoint,omitempty"`
+	Error     nullable.Nullable[string] `json:"error,omitempty"`
+	Issuer    nullable.Nullable[string] `json:"issuer,omitempty"`
+	JwksUri   nullable.Nullable[string] `json:"jwks_uri,omitempty"`
+	LatencyMs *int                      `json:"latency_ms,omitempty"`
+
+	// OfflineAccessOffered Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab's does) — Muster does not request it, OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. Neither value is a warning.
+	OfflineAccessOffered *bool `json:"offline_access_offered,omitempty"`
+	Ok                   bool  `json:"ok"`
+
+	// RequestedScopes Present when discovery was read. The scopes a sign-in and a link request from this identity provider, in order — `openid`, `offline_access` when `offline_access_offered`, then the configured scopes.
+	RequestedScopes *[]string                 `json:"requested_scopes,omitempty"`
+	TokenEndpoint   nullable.Nullable[string] `json:"token_endpoint,omitempty"`
 
 	// Via How the request travelled.
 	Via      ConnectionPath `json:"via"`
@@ -5537,7 +5543,7 @@ type OidcSettings struct {
 	// Proxy Per-client proxy as read. The password is a Secret.
 	Proxy ProxyConfig `json:"proxy"`
 
-	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.
+	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.
 	Scopes             *[]string `json:"scopes,omitempty"`
 	SkipTotpWithIdpMfa bool      `json:"skip_totp_with_idp_mfa"`
 
@@ -5564,7 +5570,7 @@ type OidcSettingsBase struct {
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
 
-	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.
+	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.
 	Scopes             *[]string `json:"scopes,omitempty"`
 	SkipTotpWithIdpMfa bool      `json:"skip_totp_with_idp_mfa"`
 
@@ -5595,7 +5601,7 @@ type OidcSettingsInput struct {
 	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
 	Proxy ProxyConfigInput `json:"proxy"`
 
-	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.
+	// Scopes Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.
 	Scopes             *[]string `json:"scopes,omitempty"`
 	SkipTotpWithIdpMfa bool      `json:"skip_totp_with_idp_mfa"`
 

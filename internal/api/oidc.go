@@ -126,6 +126,8 @@ func (s *Server) CheckOidcSettings(ctx context.Context, _ gen.CheckOidcSettingsR
 		out.AuthorizationEndpoint.Set(d.AuthorizationEndpoint)
 		out.TokenEndpoint.Set(d.TokenEndpoint)
 		out.JwksUri.Set(d.JWKSURI)
+		scopes, offline := res.RequestedScopes, res.OfflineAccess
+		out.RequestedScopes, out.OfflineAccessOffered = &scopes, &offline
 		out.Error.SetNull()
 	} else {
 		out.Error.Set(res.Error)

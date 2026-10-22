@@ -19,7 +19,7 @@ export const GetOidcSettingsResponse = zod.object({
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),
-  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.'),
+  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
   "group": zod.string().min(1),
@@ -75,7 +75,7 @@ export const UpdateOidcSettingsBody = zod.object({
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),
-  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.'),
+  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
   "group": zod.string().min(1),
@@ -105,7 +105,7 @@ export const UpdateOidcSettingsResponse = zod.object({
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),
-  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`.'),
+  "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
   "group": zod.string().min(1),
@@ -159,6 +159,8 @@ export const CheckOidcSettingsResponse = zod.object({
   "authorization_endpoint": zod.string().nullish(),
   "token_endpoint": zod.string().nullish(),
   "jwks_uri": zod.string().nullish(),
+  "requested_scopes": zod.array(zod.string()).optional().describe('Present when discovery was read. The scopes a sign-in and a link request from this identity provider, in order — `openid`, `offline_access` when `offline_access_offered`, then the configured scopes.'),
+  "offline_access_offered": zod.boolean().optional().describe('Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab\'s does) — Muster does not request it, OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. Neither value is a warning.'),
   "error": zod.string().nullish().describe('What failed; names the blocking rule when the outbound address policy refused the target. Secrets and tokens are masked.'),
   "warnings": zod.array(zod.object({
   "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),

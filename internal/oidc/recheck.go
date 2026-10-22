@@ -465,11 +465,16 @@ func refusedBy(err error) (string, bool) {
 	return "http_" + strconv.Itoa(be.Status), true
 }
 
-// offlineToken is the offline token of a token answer: its refresh token when the granted scope includes
-// offline_access — an answer without a scope granted the scope requested (RFC 6749 §5.1), which includes it — and
-// none otherwise.
-func offlineToken(t Tokens) logging.Secret {
-	if t.RefreshToken == "" || (len(t.Scope) > 0 && !slices.Contains(t.Scope, offlineAccess)) {
+// offlineToken is the offline token of a token answer to a request for the scopes requested: its refresh token when
+// the granted scope includes offline_access — an answer without a scope granted the scope requested (RFC 6749 §5.1)
+// — and none otherwise, so that the refresh token of a provider that offers no offline_access, such as GitLab's, is
+// never taken for one.
+func offlineToken(t Tokens, requested []string) logging.Secret {
+	granted := t.Scope
+	if len(granted) == 0 {
+		granted = requested
+	}
+	if t.RefreshToken == "" || !slices.Contains(granted, offlineAccess) {
 		return ""
 	}
 	return t.RefreshToken

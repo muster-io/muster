@@ -254,7 +254,8 @@ func (s *Service) complete(ctx context.Context, cb Callback) (Outcome, string, e
 	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
 		return Outcome{}, "settings", err
 	}
-	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens)), req.ReturnTo.String)
+	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens, d.RequestedScopes(st.Scopes))),
+		req.ReturnTo.String)
 }
 
 // identity is what a verified callback says about the person: the identity, its claims, its groups and the offline

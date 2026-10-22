@@ -529,7 +529,7 @@ export const useSubmitSessionTotp = <TError = BadRequestResponse | UnauthorizedR
 }
 
 /**
- * Redirects the browser to the identity provider with PKCE (`S256`), `state` and `nonce`, all mandatory, requesting `offline_access` besides the configured scopes; when the IdP grants it, the offline token is stored on the user, encrypted, replacing the previous one. Muster exchanges the code itself through the back channel. The redirect URI to register at the identity provider is `MUSTER_PUBLIC_URL/api/v1/sessions/oidc/callback`. `409` (`oidc_not_enabled`) while OIDC is off.
+ * Redirects the browser to the identity provider with PKCE (`S256`), `state` and `nonce`, all mandatory, requesting `openid` and the configured scopes, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when the IdP grants it, the offline token is stored on the user, encrypted, replacing the previous one. Muster exchanges the code itself through the back channel. The redirect URI to register at the identity provider is `MUSTER_PUBLIC_URL/api/v1/sessions/oidc/callback`. `409` (`oidc_not_enabled`) while OIDC is off.
  * @summary Start OIDC sign-in
  */
 export const startOidcSignIn = async (params?: StartOidcSignInParams, options?: Parameters<typeof apiFetch>[1]): Promise<unknown> => {

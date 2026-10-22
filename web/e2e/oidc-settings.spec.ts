@@ -114,6 +114,13 @@ test("edits the OIDC settings: secret expiry, an empty mapping, the proxy and th
     /^Connected through the proxy in \d+ ms\.$/,
   );
   await expect(page.getByText("http://127.0.0.1:18090", { exact: true })).toBeVisible();
+  // The fake IdP of `muster dev` offers offline_access, so a sign-in requests it.
+  await expect(
+    page.getByText("openid offline_access profile email", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId("oidc-check-offline-access")).toHaveText(
+    "Offered by the provider: Muster requests it, and users who are granted it are re-checked in the background.",
+  );
   await shot(page, "oidc-check-proxy");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);

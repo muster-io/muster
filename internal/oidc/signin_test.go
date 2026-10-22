@@ -34,7 +34,7 @@ func (e *env) authorize(t *testing.T, start Start) Callback {
 	q := u.Query()
 	if q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") == "" || q.Get("state") != start.State ||
 		q.Get("nonce") == "" || q.Get("redirect_uri") != "http://localhost:8080/"+CallbackPath ||
-		!strings.HasPrefix(q.Get("scope"), "openid offline_access") {
+		!e.requestsWanted(q.Get("scope")) {
 		t.Fatalf("the authorization URL = %s", start.URL)
 	}
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, start.URL, nil)
@@ -669,5 +669,92 @@ func TestPruner(t *testing.T) {
 	n, err := NewPruner(q).AuthRequests(t.Context(), 7, t0, 100)
 	if err != nil || n != 3 || q.got.OrgID != 7 || !q.got.Before.Equal(t0.Add(-time.Hour)) || q.got.BatchSize != 100 {
 		t.Errorf("prune = %d, %v, %+v", n, err, q.got)
+	}
+}
+
+// TestGitLabSignIn is C-03.FR-30 and C-03.AC-24 against a provider that behaves as GitLab: discovery offers no
+// offline_access, so the sign-in does not request it, which GitLab would refuse with invalid_scope; the refresh token
+// GitLab returns all the same is no offline token, so nothing is stored, no re-check is scheduled and the session ends
+// auth.oidc_fallback_session_lifetime after sign-in. The groups claims groups_direct (in the ID token) and groups (in
+// userinfo) both map a GitLab group path to a Role.
+func TestGitLabSignIn(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) {
+		in.GroupsClaim = "groups_direct"
+		in.GroupMappings = []GroupMapping{{Group: "platform/sre", Role: auth.RoleResponder},
+			{Group: "platform", Role: auth.RoleViewer}}
+	})
+	e.useGitLab()
+	start, err := e.svc.StartSignIn(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := url.Parse(start.URL); u.Query().Get("scope") != "openid profile email" {
+		t.Fatalf("the authorization URL requests %q", u.Query().Get("scope"))
+	}
+	e.idp.SetNextUser(fakeoidc.User{Subject: "42", PreferredUsername: "sam", Email: "sam@example.org",
+		Groups: []string{"platform", "platform/sre"}, GroupsDirect: []string{"platform/sre"}})
+	out := e.svc.CompleteSignIn(t.Context(), e.authorize(t, start))
+	sam := e.user("sam")
+	if out.Session == nil || sam == nil || sam.role != auth.RoleResponder {
+		t.Fatalf("outcome %+v, sam %+v; log %s", out, sam, e.log)
+	}
+	if sam.token != nil || e.store.checks[sam.id] != nil {
+		t.Errorf("GitLab's refresh token was kept as an offline token: %+v", sam)
+	}
+	if got := e.sessions.opened[0].Lifetime; got != FallbackSessionLifetime {
+		t.Errorf("the session lifetime = %v, want %v", got, FallbackSessionLifetime)
+	}
+
+	// groups_direct names only direct memberships: a direct member of platform is no member of platform/sre there.
+	out = e.signIn(t, fakeoidc.User{Subject: "43", PreferredUsername: "pat",
+		Groups: []string{"platform", "platform/sre"}, GroupsDirect: []string{"platform"}}, "")
+	if pat := e.user("pat"); out.Session == nil || pat == nil || pat.role != auth.RoleViewer {
+		t.Fatalf("pat with groups_direct: outcome %+v, pat %+v", out, pat)
+	}
+	// groups, which GitLab puts in userinfo only, names the inherited platform/sre too.
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = []GroupMapping{{Group: "platform/sre", Role: auth.RoleResponder}}
+	})
+	out = e.signIn(t, fakeoidc.User{Subject: "44", PreferredUsername: "lee",
+		Groups: []string{"platform", "platform/sre"}, GroupsDirect: []string{"platform"}}, "")
+	if lee := e.user("lee"); out.Session == nil || lee == nil || lee.role != auth.RoleResponder {
+		t.Fatalf("lee with groups: outcome %+v, lee %+v; log %s", out, lee, e.log)
+	}
+	if s, _ := e.svc.Get(t.Context()); slices.Contains(kinds(s.Warnings), WarningGroupsClaimMissing) {
+		t.Error("the groups claim from userinfo is warned about")
+	}
+}
+
+// TestGitLabRefusesConfiguredOfflineAccess: configured scopes stay as the Admin set them, so offline_access put among
+// them is requested from GitLab too, which answers invalid_scope — the failure every sign-in through GitLab had
+// while Muster requested offline_access from every provider.
+func TestGitLabRefusesConfiguredOfflineAccess(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) { in.Scopes = &[]string{"profile", "offline_access"} })
+	e.useGitLab()
+	e.idp.SetNextUser(fakeoidc.User{Subject: "42", PreferredUsername: "sam", Groups: []string{"oncall"}})
+	start, err := e.svc.StartSignIn(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(start.URL)
+	if u.Query().Get("scope") != "openid profile offline_access" {
+		t.Fatalf("the authorization URL requests %q", u.Query().Get("scope"))
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, start.URL, nil)
+	resp, err := browser.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	back, _ := url.Parse(resp.Header.Get("Location"))
+	if back.Query().Get("error") != "invalid_scope" {
+		t.Fatalf("GitLab answered %s", back)
+	}
+	out := e.svc.CompleteSignIn(t.Context(), Callback{Error: back.Query().Get("error"),
+		State: back.Query().Get("state"), CookieState: start.State})
+	if out.Error != ErrorIDPError || !strings.Contains(e.log.String(), "invalid_scope") {
+		t.Errorf("outcome %+v; log %s", out, e.log)
 	}
 }

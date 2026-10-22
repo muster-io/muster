@@ -16,7 +16,7 @@ export interface OidcSettingsBase {
      * @nullable
      */
   client_secret_expires_on?: string | null;
-  /** Scopes requested at sign-in and linking. Muster always adds `openid` and `offline_access`; allow `offline_access` for the Muster client at the IdP, or users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. */
+  /** Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests. */
   scopes?: string[];
   groups_claim: string;
   group_mappings: OidcGroupMapping[];

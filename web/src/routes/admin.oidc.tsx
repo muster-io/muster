@@ -209,6 +209,7 @@ function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: 
                       [t("oidc.check.authorizationEndpoint"), result.authorization_endpoint],
                       [t("oidc.check.tokenEndpoint"), result.token_endpoint],
                       [t("oidc.check.jwksUri"), result.jwks_uri],
+                      [t("oidc.check.requestedScopes"), result.requested_scopes?.join(" ")],
                     ] as const
                   ).map(([label, value]) => (
                     <div key={label} className="contents">
@@ -216,6 +217,16 @@ function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: 
                       <dd className="min-w-0 font-mono text-xs break-all">{value ?? "—"}</dd>
                     </div>
                   ))}
+                  {result.offline_access_offered !== undefined && (
+                    <div className="contents">
+                      <dt className="text-muted-foreground">{t("oidc.check.offlineAccess")}</dt>
+                      <dd className="min-w-0" data-testid="oidc-check-offline-access">
+                        {result.offline_access_offered
+                          ? t("oidc.check.offlineAccessOffered")
+                          : t("oidc.check.offlineAccessNotOffered")}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               )}
               <OidcWarnings warnings={result.warnings ?? []} groupsClaim={groupsClaim} />

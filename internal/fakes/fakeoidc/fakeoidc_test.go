@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -235,6 +236,78 @@ func TestNoGroupsClaim(t *testing.T) {
 	_ = resp.Body.Close()
 	if _, ok := info["groups"]; ok || info["sub"] != "u-3" {
 		t.Errorf("userinfo = %v", info)
+	}
+}
+
+// TestGitLabFlavor: discovery offers no offline_access and lists groups and groups_direct; a request for a scope it
+// does not offer is invalid_scope; the exchange returns a refresh token with the granted scope, the ID token carries
+// groups_direct and userinfo groups; the flavor switches back to keycloak.
+func TestGitLabFlavor(t *testing.T) {
+	f := start(t)
+	if code, _ := post(t, f.URL()+"/_fake/config", nil, `{"flavor":"other"}`); code != http.StatusBadRequest {
+		t.Fatalf("an unknown flavor = %d", code)
+	}
+	if code, _ := post(t, f.URL()+"/_fake/config", nil, `{"flavor":"gitlab"}`); code != http.StatusNoContent {
+		t.Fatalf("config = %d", code)
+	}
+	var d map[string]any
+	getJSON(t, f.URL()+"/.well-known/openid-configuration", &d)
+	scopes, claims := d["scopes_supported"].([]any), d["claims_supported"].([]any)
+	if slices.Contains(scopes, any("offline_access")) || !slices.Contains(scopes, any("read_user")) ||
+		!slices.Contains(claims, any(GroupsClaim)) || !slices.Contains(claims, any(GroupsDirectClaim)) {
+		t.Fatalf("discovery = %v", d)
+	}
+	f.SetNextUser(User{Subject: "42", PreferredUsername: "sam", Groups: []string{"platform", "platform/sre"},
+		GroupsDirect: []string{"platform"}})
+	q := authorize(t, f, "openid offline_access profile")
+	if q.Get("error") != "invalid_scope" || q.Get("code") != "" {
+		t.Fatalf("offline_access from GitLab = %v", q)
+	}
+	q = authorize(t, f, "openid profile email")
+	status, body := post(t, f.URL()+"/token", url.Values{"grant_type": {"authorization_code"}, "code": {q.Get("code")},
+		"redirect_uri": {redirectURI}, "code_verifier": {verifier}, "client_id": {"muster"}}, "")
+	if status != http.StatusOK || body["refresh_token"] == nil || body["scope"] != "openid profile email" {
+		t.Fatalf("exchange = %d %v", status, body)
+	}
+	idt := verify(t, f, body["id_token"].(string))
+	if _, ok := idt[GroupsClaim]; ok || fmt.Sprint(idt[GroupsDirectClaim]) != "[platform]" {
+		t.Errorf("ID token = %v", idt)
+	}
+	var info map[string]any
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+body["access_token"].(string))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	_ = resp.Body.Close()
+	if _, ok := info[GroupsDirectClaim]; ok || fmt.Sprint(info[GroupsClaim]) != "[platform platform/sre]" {
+		t.Errorf("userinfo = %v", info)
+	}
+	refresh := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {body["refresh_token"].(string)},
+		"client_id": {"muster"}}
+	if status, rotated := post(t, f.URL()+"/token", refresh, ""); status != http.StatusOK ||
+		rotated["refresh_token"] == nil {
+		t.Errorf("refresh = %d %v", status, rotated)
+	}
+	// Without GroupsDirect, groups_direct is the groups.
+	f.SetNextUser(User{Subject: "43", Groups: []string{"oncall"}})
+	q = authorize(t, f, "openid")
+	_, body = post(t, f.URL()+"/token", url.Values{"grant_type": {"authorization_code"}, "code": {q.Get("code")},
+		"redirect_uri": {redirectURI}, "code_verifier": {verifier}, "client_id": {"muster"}}, "")
+	if g := verify(t, f, body["id_token"].(string))[GroupsDirectClaim]; fmt.Sprint(g) != "[oncall]" {
+		t.Errorf("groups_direct without GroupsDirect = %v", g)
+	}
+
+	f.Configure(Config{Flavor: new(FlavorKeycloak)})
+	getJSON(t, f.URL()+"/.well-known/openid-configuration", &d)
+	if !slices.Contains(d["scopes_supported"].([]any), any("offline_access")) ||
+		slices.Contains(d["claims_supported"].([]any), any(GroupsDirectClaim)) {
+		t.Errorf("discovery after keycloak = %v", d)
+	}
+	if q := authorize(t, f, "openid offline_access"); q.Get("code") == "" {
+		t.Errorf("offline_access from keycloak = %v", q)
 	}
 }
 
