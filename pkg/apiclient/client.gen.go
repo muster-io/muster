@@ -5494,7 +5494,7 @@ type OidcCheckResult struct {
 	JwksUri   nullable.Nullable[string] `json:"jwks_uri,omitempty"`
 	LatencyMs *int                      `json:"latency_ms,omitempty"`
 
-	// OfflineAccessOffered Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab's does) — Muster does not request it, OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. Neither value is a warning.
+	// OfflineAccessOffered Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab's does) — Muster does not add it, and unless the provider grants an offline token OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. `offline_access` is also requested, whatever this value, when the Admin adds it to the configured scopes; `requested_scopes` then lists it. Neither value is a warning.
 	OfflineAccessOffered *bool `json:"offline_access_offered,omitempty"`
 	Ok                   bool  `json:"ok"`
 

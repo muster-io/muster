@@ -21,13 +21,20 @@ In the examples, GitLab self-managed runs at `https://gitlab.example.org`, and `
 
 ## 1. Create the application
 
-Muster is an OAuth application in GitLab. Create it where it suits who may sign in:
+Muster is an OAuth application in GitLab. Create it where it suits you; in recent GitLab versions the pages are:
 
-- **instance-wide**, on GitLab self-managed: **Admin area → Applications → Add new application**;
+- **instance-wide**, on GitLab self-managed: **Admin → Applications → New application**;
 - **for a group**: the group's **Settings → Applications → Add new application**;
-- **for a user**: **Edit profile → Applications → Add new application**.
+- **for a user**: **Edit profile → Access → Applications → Add new application**.
 
-Any of them lets every GitLab user sign in; the Role mapping of [step 3](#3-map-groups-to-roles) decides who gets in.
+Whoever owns the application, every user of that GitLab can authorize it; the Role mapping of
+[step 3](#3-map-groups-to-roles) decides who gets in.
+
+!!! warning "Every GitLab account can reach the sign-in"
+    On `https://gitlab.com`, any gitlab.com account can authorize Muster's application. Keep **Role for users without
+    a matching group** at **None** and map only groups of your own, so that a stranger's sign-in is refused. On GitLab
+    self-managed the same applies to every user of the instance.
+
 Fill in the form:
 
 <!-- tablecheck: allow the names fit; the long values are URLs to copy, longer than a phone line in any layout -->
@@ -64,8 +71,9 @@ Sign in to Muster as an Admin and open **Access → OIDC**, or use `PUT /api/v1/
 | Group mapping | group paths to Roles, see [step 3](#3-map-groups-to-roles) |
 
 Every scope in the list must be one of the application's scopes: GitLab refuses a sign-in that asks for any other
-scope. The other settings — the Role for users without a matching group, Role sync, skipping TOTP and the proxy —
-work as on the [Keycloak page](oidc-keycloak.md#4-configure-muster).
+scope with `invalid_scope`, so never add `offline_access` to the list for GitLab. The **Role for users without a
+matching group** stays **None**, as the warning in [step 1](#1-create-the-application) says. The other settings — Role
+sync, skipping TOTP and the proxy — work as on the [Keycloak page](oidc-keycloak.md#4-configure-muster).
 
 ## 3. Map groups to Roles
 

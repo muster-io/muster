@@ -1692,6 +1692,7 @@
       "issuer": "Issuer",
       "jwksUri": "Key set (JWKS)",
       "offlineAccess": "Offline access",
+      "offlineAccessConfigured": "Not listed by the provider; requested because it is in Scopes. Users are re-checked in the background if the provider grants it.",
       "offlineAccessNotOffered": "Not offered by the provider, so Muster does not request it: OIDC sessions end 12 hours after sign-in and users are not re-checked in the background.",
       "offlineAccessOffered": "Offered by the provider: Muster requests it, and users who are granted it are re-checked in the background.",
       "okDirect": "Connected directly in {{ms}} ms.",

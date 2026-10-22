@@ -59,7 +59,11 @@ returns an offline token, which Muster keeps encrypted and uses to **re-check ev
 every 15 minutes (`auth.oidc_recheck_interval`): a person disabled or removed in Keycloak loses their Muster sessions
 at the next re-check, without waiting for them to end.
 
-To allow it:
+Another identity provider may support `offline_access` without listing it in its discovery. Add `offline_access` to
+the **Scopes** of the settings for it, and Muster requests it too. Never do so for GitLab, which offers no
+`offline_access` and refuses such a sign-in with `invalid_scope` ([Sign-in with GitLab](oidc-gitlab.md)).
+
+To allow it in Keycloak:
 
 1. Make sure the realm role `offline_access` is a default role of the realm (**Realm settings → User registration →
    Default roles**), which it is in a new realm, or give it to the groups that use Muster.

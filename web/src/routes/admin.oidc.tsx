@@ -164,6 +164,18 @@ function checkText(t: TFunction, result: OidcCheckResult): string {
   return proxy ? t("oidc.check.failedProxy", { error }) : t("oidc.check.failedDirect", { error });
 }
 
+// offlineAccessText says whether a sign-in requests offline_access: offered by the provider, added to the scopes by
+// the Admin although the provider does not list it, or neither.
+function offlineAccessText(t: TFunction, result: OidcCheckResult): string {
+  if (result.offline_access_offered) {
+    return t("oidc.check.offlineAccessOffered");
+  }
+  if (result.requested_scopes?.includes("offline_access")) {
+    return t("oidc.check.offlineAccessConfigured");
+  }
+  return t("oidc.check.offlineAccessNotOffered");
+}
+
 function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: string }) {
   const { t } = useTranslation();
   const check = useCheckOidcSettings();
@@ -221,9 +233,7 @@ function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: 
                     <div className="contents">
                       <dt className="text-muted-foreground">{t("oidc.check.offlineAccess")}</dt>
                       <dd className="min-w-0" data-testid="oidc-check-offline-access">
-                        {result.offline_access_offered
-                          ? t("oidc.check.offlineAccessOffered")
-                          : t("oidc.check.offlineAccessNotOffered")}
+                        {offlineAccessText(t, result)}
                       </dd>
                     </div>
                   )}

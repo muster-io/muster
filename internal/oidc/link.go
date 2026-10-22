@@ -183,6 +183,7 @@ func (s *Service) completeLink(ctx context.Context, sess auth.Session, cb Callba
 	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
 		return Outcome{}, "settings", err
 	}
+	// Recomputed as at a sign-in: the requested scopes matter only for an answer that names no scope (see complete).
 	id := identityOf(d.Issuer, idt, groups, offlineToken(tokens, d.RequestedScopes(st.Scopes)))
 	// An identity whose groups map to no Role could not sign in afterwards, so the link is refused as a sign-in is.
 	if _, mapped := MapRole(groups, st.GroupMappings, st.UnmatchedRole); !mapped {

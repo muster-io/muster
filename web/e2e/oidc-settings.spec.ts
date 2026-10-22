@@ -12,6 +12,7 @@ import {
   APP,
   adminApi,
   expectNoHorizontalScroll,
+  FAKE_IDP,
   nextIdpUser,
   shot,
   signInAdmin,
@@ -274,4 +275,40 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   await expect(ada.getByRole("cell").nth(1)).toHaveText("Responder");
   await admin.close();
   expect(csp).toEqual([]);
+});
+
+// The check against a provider that behaves as GitLab, which does not list offline_access: Muster does not request it;
+// with offline_access put into Scopes it is requested all the same, and the check says why.
+function flavor(name: string): Promise<Response> {
+  return fetch(`${FAKE_IDP}/_fake/config`, {
+    method: "POST",
+    body: JSON.stringify({ flavor: name }),
+  });
+}
+
+test("the check says whether a sign-in requests offline_access", async ({ page }) => {
+  expect((await flavor("gitlab")).ok).toBe(true);
+  try {
+    await signInAdmin(page);
+    await page.goto("/admin/oidc");
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect(page.getByText("openid profile email", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("oidc-check-offline-access")).toHaveText(
+      "Not offered by the provider, so Muster does not request it: OIDC sessions end 12 hours after sign-in and users are not re-checked in the background.",
+    );
+
+    await page.getByLabel("Scopes", { exact: true }).fill("profile email offline_access");
+    await save(page);
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect(
+      page.getByText("openid profile email offline_access", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("oidc-check-offline-access")).toHaveText(
+      "Not listed by the provider; requested because it is in Scopes. Users are re-checked in the background if the provider grants it.",
+    );
+    await page.getByLabel("Scopes", { exact: true }).fill("profile email");
+    await save(page);
+  } finally {
+    await flavor("keycloak");
+  }
 });
