@@ -3,7 +3,8 @@
 
 # existingSecret produced in the same release by an External Secrets Operator ExternalSecret, a map item, and a
 # SealedSecret, a string item; both name values through tpl. The ExternalSecret builds the database URL under
-# database.urlKey with a template of its own, whose {{ is escaped from tpl.
+# database.urlKey with a template of its own, whose {{ is escaped from tpl with a backtick string; its line is long
+# enough that toYaml breaks it inside the escape.
 existingSecret: muster
 
 database:
@@ -30,7 +31,7 @@ extraObjects:
         template:
           mergePolicy: Merge
           data:
-            '{{ .Values.database.urlKey }}': 'postgres://muster:{{ "{{ .password }}" }}@db.example.org:5432/muster'
+            '{{ .Values.database.urlKey }}': 'postgresql://muster_prod:{{ `{{ .password | urlquery }}` }}@db.example.org:5432/muster?sslmode=require'
       data:
         - secretKey: '{{ .Values.masterKeysKey }}'
           remoteRef:

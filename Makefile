@@ -334,9 +334,9 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 # Secret muster-db-app, the password through a volume of its own in both containers, and the master keys from
 # existingSecret. The default values render no extra object; the extra-objects values render their ExternalSecret and
 # SealedSecret through tpl, each a document of its own, with the names and keys of the values, and keep the one escaped
-# {{ of the ExternalSecret's template as it is. Rendering without
-# existingSecret must fail with the master keys message, and a GrafanaDashboard without its ConfigMap with its own.
-# Every step runs even when an earlier one fails.
+# {{ of the ExternalSecret's template as it is, although toYaml breaks its long line inside the escape. Rendering
+# without existingSecret must fail with the master keys message, and a GrafanaDashboard without its ConfigMap with its
+# own. Every step runs even when an earlier one fails.
 helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules, dashboard and extra objects; check the existingSecret error
 	@tmp=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT; \
@@ -383,7 +383,8 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 		grep -A1 -x '  target:' "$$tmp/extra.yaml" | grep -qx "    name: 'muster'" && \
 		grep -qx "    secretKey: 'secret-keys'" "$$tmp/extra.yaml" && \
 		grep -qx "    secretKey: 'bootstrap-password'" "$$tmp/extra.yaml" && \
-		grep -qxF "        'database-url': postgres://muster:{{ .password }}@db.example.org:5432/muster" "$$tmp/extra.yaml" && \
+		grep -A1 -xF "        'database-url': postgresql://muster_prod:{{ .password" "$$tmp/extra.yaml" | tail -n 1 | \
+			grep -qxF '          | urlquery }}@db.example.org:5432/muster?sslmode=require' && \
 		grep -A3 -x 'kind: SealedSecret' "$$tmp/extra.yaml" | grep -qx '  name: muster-sealed' && \
 		test "$$(grep -cF '{{' "$$tmp/extra.yaml")" -eq 1 || \
 		{ echo "the extra objects do not render as two documents with their values resolved and the escaped {{ kept"; \

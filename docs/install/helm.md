@@ -124,9 +124,14 @@ no default, so set it before naming it. With `database.existingSecret`, the data
 instead, and its line is left out.
 
 `tpl` renders every `{{` of an item, so one meant for another tool, such as the template of an `ExternalSecret`, is
-escaped as `{{ "{{ .password }}" }}`; unescaped, it renders empty. With `database.urlKey`, a key named
-`{{ .Values.database.urlKey }}` takes the place of the `passwordKey` line, for example a database URL that External
-Secrets Operator builds from the password:
+escaped as ``{{ `{{ .password | urlquery }}` }}``; unescaped, it renders empty. Write the strings inside `{{ }}` with
+backticks, not double quotes: the chart writes a map item back as YAML before `tpl` runs, which breaks a line longer
+than 80 characters at a space, and a backtick string may span that break, which YAML then joins again, while a
+double-quoted string fails with `unterminated quoted string`. A string item is used as it is written.
+
+With `database.urlKey`, a key named `{{ .Values.database.urlKey }}` takes the place of the `passwordKey` line, for
+example a database URL that External Secrets Operator builds from the password, which `urlquery` encodes for the URL.
+Add it to the values above, with `existingSecret` and `bootstrapAdmin`, in place of their `extraObjects`:
 
 ```yaml
 database:
@@ -145,7 +150,7 @@ extraObjects:
         template:
           mergePolicy: Merge
           data:
-            '{{ .Values.database.urlKey }}': 'postgres://muster:{{ "{{ .password }}" }}@muster-db-rw.muster.svc:5432/muster?sslmode=require'
+            '{{ .Values.database.urlKey }}': 'postgresql://muster:{{ `{{ .password | urlquery }}` }}@muster-db-rw.muster.svc:5432/muster?sslmode=require'
       data:
         - secretKey: '{{ .Values.masterKeysKey }}'
           remoteRef: { key: muster/keys, property: secret-keys }
