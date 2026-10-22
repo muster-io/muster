@@ -50,7 +50,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   IdP refuses the owner at a background re-check, the token gets `401` with the code `oidc_recheck_required` and the
   text "Sign in through OIDC to make your tokens work again." until the owner's next successful OIDC sign-in. While
   Muster holds an offline token for the owner, there is no other limit: the background re-checks stand in for the
-  owner's activity. Only for an owner without an offline token — the IdP did not grant `offline_access` — does the grace
+  owner's activity. Only for an owner without an offline token — the IdP did not grant `offline_access` or does not
+  offer it — does the grace
   rule apply: the token is refused the same way once the owner's last OIDC sign-in is older than
   `auth.oidc_token_grace`. In both cases the tokens are not revoked and work again after the owner's next OIDC sign-in.
   Service account tokens are not affected. The grace period is an Organization setting, edited on the Security page from

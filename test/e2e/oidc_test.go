@@ -8,6 +8,7 @@ package e2e
 import (
 	"encoding/base32"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -345,5 +346,54 @@ func TestOIDCFallbackLifetime(t *testing.T) {
 	}
 	if v := userField(t, admin, "nora", "oidc_offline_access"); v != true {
 		t.Errorf("nora's oidc_offline_access = %v", v)
+	}
+}
+
+// TestOIDCGitLabWithoutOfflineAccess is C-03.FR-30, FR-8 and AC-24 against `muster dev` with the fake IdP behaving as
+// GitLab, which offers no offline_access and refuses a scope it does not offer: the connection check shows that, the
+// sign-in does not request offline_access and succeeds, the session ends auth.oidc_fallback_session_lifetime (12 h)
+// after sign-in and no re-check exists, although GitLab returned a refresh token.
+func TestOIDCGitLabWithoutOfflineAccess(t *testing.T) {
+	h := Start(t, DevProcess)
+	base := h.Replicas[0].App
+	config := "http://" + devmode.OIDCAddr + "/_fake/config"
+	if a := call(t, http.MethodPost, config, `{"flavor":"gitlab"}`); a.status != http.StatusNoContent {
+		t.Fatalf("config = %d %s", a.status, a.body)
+	}
+	t.Cleanup(func() { restore(t, http.MethodPost, config, `{"flavor":"keycloak"}`) })
+	admin := newAgent(t, base)
+	if a := admin.signIn(devAdmin, devAdminPassword); a.status != http.StatusCreated {
+		t.Fatalf("the Admin's sign-in = %d %s", a.status, a.body)
+	}
+	check := admin.json(http.MethodPost, "/api/v1/oidc-settings/checks", "", http.StatusOK)
+	if check["ok"] != true || check["offline_access_offered"] != false ||
+		fmt.Sprint(check["requested_scopes"]) != "[openid profile email]" || len(check["warnings"].([]any)) != 0 {
+		t.Fatalf("the check = %v", check)
+	}
+
+	nextUser(t, "42", "sam", "oncall")
+	sam := newAgent(t, base)
+	start := sam.do(http.MethodGet, "/api/v1/sessions/oidc/start", "")
+	authorization, err := url.Parse(start.header.Get("Location"))
+	if err != nil || authorization.Query().Get("scope") != "openid profile email" {
+		t.Fatalf("the authorization URL = %s", start.header.Get("Location"))
+	}
+	before := time.Now()
+	if to := sam.follow(start); to != "/" {
+		t.Fatalf("sam's sign-in ended at %s", to)
+	}
+	cur := sam.json(http.MethodGet, "/api/v1/sessions/current", "", http.StatusOK)
+	expires, _ := time.Parse(time.RFC3339, cur["expires_at"].(string))
+	if d := expires.Sub(before); d < 12*time.Hour-time.Minute || d > 12*time.Hour+time.Minute {
+		t.Errorf("the session ends %v after sign-in, want 12h", d)
+	}
+	if n := h.count(t, `SELECT count(*) FROM oidc_checks`); n != 0 {
+		t.Errorf("%d re-checks without an offline token", n)
+	}
+	if n := h.count(t, `SELECT count(*) FROM users WHERE oidc_offline_token_ciphertext IS NOT NULL`); n != 0 {
+		t.Errorf("%d users hold an offline token", n)
+	}
+	if v := userField(t, admin, "sam", "oidc_offline_access"); v != false {
+		t.Errorf("sam's oidc_offline_access = %v", v)
 	}
 }

@@ -56,8 +56,8 @@ const (
 	maxGroups      = 500
 )
 
-// DefaultScopes are the configured scopes before an Admin saves the settings; openid and offline_access are always
-// added.
+// DefaultScopes are the configured scopes before an Admin saves the settings; openid is always added, and
+// offline_access when the provider offers it (Discovery.OffersOfflineAccess).
 var DefaultScopes = []string{"profile", "email"}
 
 // The Audit log actions and resource type of OIDC.
@@ -639,13 +639,18 @@ type CheckResult struct {
 	ViaProxy  bool
 	Latency   time.Duration
 	Discovery Discovery
+	// RequestedScopes are the scopes a sign-in requests from this provider; OfflineAccess is whether it offers
+	// offline_access, so that users are re-checked in the background. Both are set when discovery was read.
+	RequestedScopes []string
+	OfflineAccess   bool
 	// Error is what failed, masked; it names the blocking rule when the outbound address policy refused the call.
 	Error    string
 	Warnings []Warning
 }
 
-// Check fetches discovery with the saved settings through the interactive class and the OIDC proxy, and records
-// whether discovery advertises the groups claim: while no sign-in has seen the claim, a claim it does not list raises
+// Check fetches discovery with the saved settings through the interactive class and the OIDC proxy, says which scopes
+// a sign-in requests and whether the provider offers offline_access — neither is a warning — and records whether
+// discovery advertises the groups claim: while no sign-in has seen the claim, a claim it does not list raises
 // groups_claim_missing and a listed one clears it; once a sign-in has seen it, discovery's list, which is optional,
 // changes nothing.
 func (s *Service) Check(ctx context.Context) (CheckResult, error) {
@@ -672,6 +677,7 @@ func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 		return res, s.finishCheck(ctx, &res)
 	}
 	res.OK, res.Discovery = true, d
+	res.RequestedScopes, res.OfflineAccess = d.RequestedScopes(st.Scopes), d.OffersOfflineAccess()
 	if _, err := s.cfg.Store.RecordGroupsClaimAdvertised(ctx, dbgen.RecordGroupsClaimAdvertisedParams{
 		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
 		Scopes: st.Scopes, Advertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),

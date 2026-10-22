@@ -17,6 +17,10 @@ export interface OidcCheckResult {
   token_endpoint?: string | null;
   /** @nullable */
   jwks_uri?: string | null;
+  /** Present when discovery was read. The scopes a sign-in and a link request from this identity provider, in order — `openid`, `offline_access` when `offline_access_offered`, then the configured scopes. */
+  requested_scopes?: string[];
+  /** Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab's does) — Muster does not add it, and unless the provider grants an offline token OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. `offline_access` is also requested, whatever this value, when the Admin adds it to the configured scopes; `requested_scopes` then lists it. Neither value is a warning. */
+  offline_access_offered?: boolean;
   /**
      * What failed; names the blocking rule when the outbound address policy refused the target. Secrets and tokens are masked.
      * @nullable

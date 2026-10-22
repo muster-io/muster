@@ -54,7 +54,7 @@ acceptance:
   - "[C-03.FR-28] A first OIDC sign-in whose `preferred_username` is `alice` while a local user `Alice` exists is refused to `/sign-in?error=login_taken`, creates no user, changes nothing on `Alice` and writes an Audit log entry."
   - "[C-03.FR-25] A callback without the state of its start, with a state used before, or from a browser that did not start it ends at `/sign-in?error=invalid_request`; an ID token whose signature, issuer, audience, nonce or times do not verify ends at `/sign-in?error=idp_error` or `invalid_request` and opens no session."
   - "[C-03.FR-10, C-03.AC-13] After an OIDC sign-in a user with TOTP gets a session in the state `totp_required`, unless `oidc.skip_totp_with_idp_mfa` is on and the IdP asserted multi-factor authentication in `amr`."
-  - "[C-03.FR-30] Sign-in requests `offline_access` besides the configured scopes; until S-062 stores the offline token, every OIDC session ends at most `auth.oidc_fallback_session_lifetime` after sign-in."
+  - "[C-03.FR-30] Sign-in requests `offline_access` from an IdP whose discovery offers it (lists it in `scopes_supported` or publishes no list); until S-062 stores the offline token, every OIDC session ends at most `auth.oidc_fallback_session_lifetime` after sign-in."
   - "[C-03.FR-24, C-03.AC-18] `GET /api/v1/sign-in-options` without credentials returns the OIDC button with its `display_name` and nothing about the version."
   - "[C-03.FR-32, C-03.AC-26] With `oidc.sync_role` on, when the fake IdP maps the last active Admin to a lower Role at an OIDC sign-in, the Role stays Admin and the session opens, the Audit log records `user.role_sync_kept_admin` with the mapped Role, and the OIDC settings carry the warning `last_admin_kept` naming the user and that Role; once a second Admin is active, the next sign-in applies the lower Role and the warning is gone."
   - "[C-01.FR-13] `muster dev` also starts the fake IdP on `127.0.0.1:18090` and the fake HTTP and SOCKS5 proxies on `127.0.0.1:18091` and `127.0.0.1:18092`, and the demo OIDC configuration \"Dev IdP\" signs a scripted user in through the fake IdP."
@@ -127,8 +127,9 @@ issue: 13
   starting with a single `/`; the parameter carries no `pattern` in the spec, so anything else is ignored rather than
   refused) and purpose `sign_in`, valid for `oidc.auth_request_ttl`; it sets the cookie `muster_oidc_state` (HttpOnly,
   Secure, SameSite=Lax, path `/api/v1/`) to the state, which binds the callback to the browser that started it, and
-  redirects with the configured scopes plus `openid` and `offline_access` (`409 oidc_not_enabled` when OIDC is off;
-  `429` while 10 000 requests of the Organization are in flight, since a start needs no credentials and writes a row).
+  redirects with the configured scopes plus `openid` and `offline_access` (`offline_access` only when the IdP offers
+  it, C-03.FR-30) (`409 oidc_not_enabled` when OIDC is off; `429` while 10 000 requests of the Organization are in
+  flight, since a start needs no credentials and writes a row).
   The story adds `oidc_auth_requests` to the `short_lived_pruning` Leader task (a `PruneOIDC` field of `leader.Work`
   and the table in `metrics.ShortLivedTables`): a request is deleted once its `expires_at` is more than 1 h past; a
   link request also goes with its web session, by the cascade from `sessions`.
@@ -150,9 +151,9 @@ issue: 13
   `oidc.skip_totp_with_idp_mfa` is on and the IdP asserted multi-factor authentication in `amr` (`mfa`, or a knowledge
   factor with a possession factor, RFC 8176); the policy `everyone` makes it `totp_enrolment_required` for a user
   without TOTP. The sign-in sets `oidc_last_contact_at` and clears `oidc_refused_at`.
-- **Offline access** (C-03.FR-30, in part): sign-in requests `offline_access`; storing the offline token and the
-  re-checks are S-062. Until then no user holds an offline token, so every OIDC session gets `expires_at` at most
-  `auth.oidc_fallback_session_lifetime` after sign-in.
+- **Offline access** (C-03.FR-30, in part): sign-in requests `offline_access` from an IdP that offers it; storing the
+  offline token and the re-checks are S-062. Until then no user holds an offline token, so every OIDC session gets
+  `expires_at` at most `auth.oidc_fallback_session_lifetime` after sign-in.
 - **The last active Admin** (C-03.FR-32, C-03.FR-31): when Role sync at a sign-in would give the last active Admin a
   lower Role, the Role stays Admin under the lock of S-011's `last_admin` check, the session opens, and
   `user.role_sync_kept_admin` records the mapped Role in `details.mapped_role`; the next sync after another Admin
@@ -167,7 +168,9 @@ issue: 13
   userinfo or with no groups claim at all), a token endpoint that checks PKCE and rotates refresh tokens, userinfo, and control endpoints under
   `/_fake/`: the next user (`POST /_fake/next-user`), disabling and enabling a user (`POST
   /_fake/users/{sub}/disable`, `enable`; refresh then answers `invalid_grant`), `POST /_fake/config` with
-  `grant_offline_access` and `omit_groups_claim` (from discovery), `POST /_fake/rotate-keys`, and the faults of the
+  `grant_offline_access`, `omit_groups_claim` (from discovery) and `flavor` (`keycloak`, the default, or `gitlab`:
+  no `offline_access` in discovery, `invalid_scope` for a scope it does not offer, a refresh token at every exchange,
+  `groups_direct` in the ID token and `groups` in userinfo), `POST /_fake/rotate-keys`, and the faults of the
   harness.
 - **Fake proxies**: the fake HTTP and SOCKS5 proxies of S-009 also answer `GET /_fake/requests` on their own port with
   the targets they connected to, so that a live check can see what went through them.

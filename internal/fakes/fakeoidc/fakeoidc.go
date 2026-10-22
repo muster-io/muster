@@ -6,8 +6,12 @@
 // A refresh answers with the person as last scripted for the subject, so that a test can change the groups of a user
 // who holds a refresh token.
 // Control endpoints under /_fake/ script the next user, disable and enable users, grant or withhold offline_access,
-// leave the groups claim out of discovery and rotate the signing key. The same server runs in Go tests and in
-// `muster dev`. It is a test double: it accepts any client secret and keeps everything in memory.
+// leave the groups claim out of discovery, switch the flavor and rotate the signing key. The flavor keycloak, the
+// default, offers and grants offline_access; the flavor gitlab behaves as GitLab does: discovery does not offer
+// offline_access, an authorization request with a scope it does not offer is answered invalid_scope, every code
+// exchange returns a refresh token with the granted scope, the ID token carries groups_direct and userinfo carries
+// groups. The same server runs in Go tests and in `muster dev`. It is a test double: it accepts any client secret and
+// keeps everything in memory.
 package fakeoidc
 
 import (
@@ -31,9 +35,31 @@ import (
 const (
 	// GroupsClaim is the name of the groups claim the fake issues.
 	GroupsClaim = "groups"
+	// GroupsDirectClaim is the claim of the flavor gitlab with the groups the user is a direct member of.
+	GroupsDirectClaim = "groups_direct"
 	// tokenLifetime is how long the ID tokens and access tokens the fake issues are valid.
 	tokenLifetime = 5 * time.Minute
 	keyBits       = 2048
+)
+
+// Flavor is the identity provider the fake behaves as.
+type Flavor string
+
+// The flavors of the fake.
+const (
+	// FlavorKeycloak offers and grants offline_access and carries the groups claim in the ID token and userinfo.
+	FlavorKeycloak Flavor = "keycloak"
+	// FlavorGitLab behaves as GitLab: no offline_access, invalid_scope for a scope it does not offer, a refresh token
+	// at every code exchange, groups_direct in the ID token and groups in userinfo.
+	FlavorGitLab Flavor = "gitlab"
+)
+
+// keycloakScopes and gitLabScopes are the scopes_supported of each flavor.
+var (
+	keycloakScopes = []string{"openid", "offline_access", "profile", "email"}
+	gitLabScopes   = []string{"api", "read_api", "read_user", "create_runner", "k8s_proxy", "read_repository",
+		"write_repository", "read_registry", "write_registry", "ai_features", "sudo", "admin_mode", "openid", "profile",
+		"email"}
 )
 
 // User is a person at the fake identity provider.
@@ -43,7 +69,10 @@ type User struct {
 	Email             string   `json:"email,omitempty"`
 	Name              string   `json:"name,omitempty"`
 	Groups            []string `json:"groups,omitempty"`
-	AMR               []string `json:"amr,omitempty"`
+	// GroupsDirect is the groups_direct claim of the flavor gitlab: the groups the user is a direct member of, with
+	// Groups being every group, inherited ones included; nil is Groups.
+	GroupsDirect []string `json:"groups_direct,omitempty"`
+	AMR          []string `json:"amr,omitempty"`
 	// GroupsInUserinfoOnly leaves the groups claim out of the ID token; userinfo still carries it.
 	GroupsInUserinfoOnly bool `json:"groups_in_userinfo_only,omitempty"`
 	// NoGroupsClaim leaves the groups claim out of the ID token and userinfo, as identity providers do for a user in
@@ -57,6 +86,8 @@ type Config struct {
 	GrantOfflineAccess *bool `json:"grant_offline_access,omitempty"`
 	// OmitGroupsClaim leaves the groups claim out of claims_supported in discovery.
 	OmitGroupsClaim *bool `json:"omit_groups_claim,omitempty"`
+	// Flavor is the identity provider the fake behaves as: keycloak or gitlab.
+	Flavor *Flavor `json:"flavor,omitempty"`
 }
 
 // grant is what an authorization code or a refresh token stands for.
@@ -83,6 +114,7 @@ type Fake struct {
 	disabled map[string]bool
 	offline  bool
 	omit     bool
+	flavor   Flavor
 	codes    map[string]grant
 	refresh  map[string]grant
 	access   map[string]User
@@ -91,8 +123,8 @@ type Fake struct {
 
 // New returns a fake identity provider with a fresh signing key; it grants offline_access by default.
 func New() *Fake {
-	f := &Fake{disabled: map[string]bool{}, offline: true, codes: map[string]grant{}, refresh: map[string]grant{},
-		access: map[string]User{}, profiles: map[string]User{}, now: time.Now}
+	f := &Fake{disabled: map[string]bool{}, offline: true, flavor: FlavorKeycloak, codes: map[string]grant{},
+		refresh: map[string]grant{}, access: map[string]User{}, profiles: map[string]User{}, now: time.Now}
 	f.rotate()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", f.discovery)
@@ -145,6 +177,9 @@ func (f *Fake) Configure(c Config) {
 	if c.OmitGroupsClaim != nil {
 		f.omit = *c.OmitGroupsClaim
 	}
+	if c.Flavor != nil {
+		f.flavor = *c.Flavor
+	}
 }
 
 // SetClock makes the fake issue tokens at the times now gives, for tests that check token times.
@@ -194,10 +229,18 @@ func (f *Fake) discovery(w http.ResponseWriter, r *http.Request) {
 	iss := f.issuer(r)
 	claims := []string{"sub", "iss", "aud", "exp", "iat", "nonce", "preferred_username", "email", "name", "amr"}
 	f.mu.Lock()
+	gitLab := f.flavor == FlavorGitLab
 	if !f.omit {
 		claims = append(claims, GroupsClaim)
+		if gitLab {
+			claims = append(claims, GroupsDirectClaim)
+		}
 	}
 	f.mu.Unlock()
+	scopes := keycloakScopes
+	if gitLab {
+		scopes = gitLabScopes
+	}
 	fakeserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"issuer": iss, "authorization_endpoint": iss + "/authorize", "token_endpoint": iss + "/token",
 		"userinfo_endpoint": iss + "/userinfo", "jwks_uri": iss + "/jwks",
@@ -206,7 +249,7 @@ func (f *Fake) discovery(w http.ResponseWriter, r *http.Request) {
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-		"scopes_supported":                      []string{"openid", "offline_access", "profile", "email"},
+		"scopes_supported":                      scopes,
 		"claims_supported":                      claims,
 	})
 }
@@ -249,6 +292,16 @@ func (f *Fake) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	case !slices.Contains(strings.Fields(q.Get("scope")), "openid"):
 		back(url.Values{"error": {"invalid_scope"}})
+		return
+	}
+	f.mu.Lock()
+	gitLab := f.flavor == FlavorGitLab
+	f.mu.Unlock()
+	if gitLab && slices.ContainsFunc(strings.Fields(q.Get("scope")), func(s string) bool {
+		return !slices.Contains(gitLabScopes, s)
+	}) {
+		back(url.Values{"error": {"invalid_scope"},
+			"error_description": {"The requested scope is invalid, unknown, or malformed."}})
 		return
 	}
 	f.mu.Lock()
@@ -335,10 +388,12 @@ func (f *Fake) refreshTokens(w http.ResponseWriter, r *http.Request, clientID st
 	f.issue(w, r, g, false)
 }
 
-// issue answers the tokens of g: an ID token, an access token and, when offline_access is granted, a refresh token.
+// issue answers the tokens of g: an ID token, an access token and, when offline_access is granted or the flavor is
+// gitlab, a refresh token.
 func (f *Fake) issue(w http.ResponseWriter, r *http.Request, g grant, withNonce bool) {
 	f.mu.Lock()
 	now := f.now()
+	gitLab := f.flavor == FlavorGitLab
 	granted := slices.DeleteFunc(slices.Clone(g.scopes), func(s string) bool { return s == "offline_access" && !f.offline })
 	f.mu.Unlock()
 	claims := map[string]any{
@@ -357,7 +412,11 @@ func (f *Fake) issue(w http.ResponseWriter, r *http.Request, g grant, withNonce 
 	if len(g.user.AMR) > 0 {
 		claims["amr"] = g.user.AMR
 	}
-	if !g.user.GroupsInUserinfoOnly && !g.user.NoGroupsClaim {
+	switch {
+	case g.user.NoGroupsClaim:
+	case gitLab:
+		claims[GroupsDirectClaim] = groupsDirect(g.user)
+	case !g.user.GroupsInUserinfoOnly:
 		claims[GroupsClaim] = groups(g.user)
 	}
 	idToken, err := f.Sign(claims)
@@ -370,7 +429,7 @@ func (f *Fake) issue(w http.ResponseWriter, r *http.Request, g grant, withNonce 
 		"id_token": idToken, "scope": strings.Join(granted, " ")}
 	f.mu.Lock()
 	f.access[access] = g.user
-	if slices.Contains(granted, "offline_access") {
+	if gitLab || slices.Contains(granted, "offline_access") {
 		refresh := rand.Text()
 		f.refresh[refresh] = g
 		answer["refresh_token"] = refresh
@@ -385,6 +444,13 @@ func groups(u User) []string {
 		return []string{}
 	}
 	return u.Groups
+}
+
+func groupsDirect(u User) []string {
+	if u.GroupsDirect == nil {
+		return groups(u)
+	}
+	return u.GroupsDirect
 }
 
 func (f *Fake) userinfo(w http.ResponseWriter, r *http.Request) {
@@ -427,6 +493,10 @@ func (f *Fake) setConfig(w http.ResponseWriter, r *http.Request) {
 	var c Config
 	if err := fakeserver.DecodeJSON(w, r, &c); err != nil {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if c.Flavor != nil && *c.Flavor != FlavorKeycloak && *c.Flavor != FlavorGitLab {
+		fakeserver.WriteError(w, http.StatusBadRequest, "flavor is keycloak or gitlab")
 		return
 	}
 	f.Configure(c)

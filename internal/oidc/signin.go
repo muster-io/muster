@@ -254,7 +254,11 @@ func (s *Service) complete(ctx context.Context, cb Callback) (Outcome, string, e
 	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
 		return Outcome{}, "settings", err
 	}
-	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens)), req.ReturnTo.String)
+	// The scopes of the start are not stored, so they are recomputed: offlineToken reads them only for an answer that
+	// names no scope (GitLab and Keycloak name one), and they differ only when the settings or discovery changed during
+	// the redirect, which can drop an offline token or, for an answer without a scope, keep a refresh token as one.
+	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens, d.RequestedScopes(st.Scopes))),
+		req.ReturnTo.String)
 }
 
 // identity is what a verified callback says about the person: the identity, its claims, its groups and the offline

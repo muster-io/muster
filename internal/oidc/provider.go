@@ -77,12 +77,25 @@ type Discovery struct {
 	UserinfoEndpoint      string   `json:"userinfo_endpoint"`
 	JWKSURI               string   `json:"jwks_uri"`
 	ClaimsSupported       []string `json:"claims_supported"`
+	ScopesSupported       []string `json:"scopes_supported"`
 	TokenAuthMethods      []string `json:"token_endpoint_auth_methods_supported"`
 }
 
 // AdvertisesClaim reports whether discovery lists claim; a provider that lists no claims advertises none.
 func (d Discovery) AdvertisesClaim(claim string) bool {
 	return slices.Contains(d.ClaimsSupported, claim)
+}
+
+// OffersOfflineAccess reports whether sign-in and linking request offline_access (C-03.FR-30): when discovery lists
+// it in scopes_supported, or lists no scopes, since that list is optional. A provider whose list lacks it, as GitLab's
+// does, refuses an authorization request that names it.
+func (d Discovery) OffersOfflineAccess() bool {
+	return len(d.ScopesSupported) == 0 || slices.Contains(d.ScopesSupported, offlineAccess)
+}
+
+// RequestedScopes are the scopes a sign-in or a link requests from the provider of d.
+func (d Discovery) RequestedScopes(configured []string) []string {
+	return Scopes(configured, d.OffersOfflineAccess())
 }
 
 // errBackChannel is a failure of the identity provider or of the way to it.
@@ -221,7 +234,7 @@ type AuthRequest struct {
 }
 
 // AuthURL is the authorization endpoint with the request: the authorization code flow with PKCE S256, state and
-// nonce, and the scopes openid and offline_access before the configured ones.
+// nonce, and the scopes openid and, when the provider offers it, offline_access before the configured ones.
 func (p *Provider) AuthURL(d Discovery, r AuthRequest) (string, error) {
 	u, err := url.Parse(d.AuthorizationEndpoint)
 	if err != nil {
@@ -231,7 +244,7 @@ func (p *Provider) AuthURL(d Discovery, r AuthRequest) (string, error) {
 	q.Set("response_type", "code")
 	q.Set("client_id", p.clientID)
 	q.Set("redirect_uri", r.RedirectURI)
-	q.Set("scope", strings.Join(Scopes(r.Scopes), " "))
+	q.Set("scope", strings.Join(d.RequestedScopes(r.Scopes), " "))
 	q.Set("state", r.State)
 	q.Set("nonce", r.Nonce)
 	q.Set("code_challenge", Challenge(r.Verifier))
@@ -240,9 +253,13 @@ func (p *Provider) AuthURL(d Discovery, r AuthRequest) (string, error) {
 	return u.String(), nil
 }
 
-// Scopes are the scopes a sign-in requests: openid and offline_access, then the configured ones without repeats.
-func Scopes(configured []string) []string {
-	out := []string{"openid", "offline_access"}
+// Scopes are the scopes a sign-in requests: openid, offline_access when offline, then the configured ones, as the
+// Admin set them, without repeats.
+func Scopes(configured []string, offline bool) []string {
+	out := []string{"openid"}
+	if offline {
+		out = append(out, offlineAccess)
+	}
 	for _, s := range configured {
 		if s = strings.TrimSpace(s); s != "" && !slices.Contains(out, s) {
 			out = append(out, s)

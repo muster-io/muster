@@ -39,7 +39,7 @@ func (e *env) startLink(t *testing.T, sess auth.Session, who fakeoidc.User) Call
 	}
 	q := u.Query()
 	if q.Get("redirect_uri") != "http://localhost:8080/"+LinkCallbackPath ||
-		!strings.HasPrefix(q.Get("scope"), "openid offline_access") || q.Get("code_challenge_method") != "S256" ||
+		!e.requestsWanted(q.Get("scope")) || q.Get("code_challenge_method") != "S256" ||
 		!start.ExpiresAt.Equal(e.business.Now().Add(AuthRequestTTL)) {
 		t.Fatalf("the link start = %+v", start)
 	}
@@ -148,6 +148,28 @@ func TestLinkWithoutOfflineAccess(t *testing.T) {
 		PreferredUsername: "erin", Groups: []string{"oncall"}}))
 	if out.Redirect != ProfilePage || erin.token != nil || e.store.checks[erin.id] != nil {
 		t.Fatalf("outcome %+v, erin %+v", out, erin)
+	}
+	if c := e.store.continued; len(c) != 1 || !c[0].ExpiresAt.Equal(e.business.Now().Add(FallbackSessionLifetime)) {
+		t.Errorf("the session continues as %+v", c)
+	}
+}
+
+// TestLinkGitLab is C-03.FR-30 for a link: GitLab offers no offline_access, so the link does not request it, and the
+// refresh token GitLab returns is no offline token — no re-check, and the session that linked has the fallback
+// lifetime.
+func TestLinkGitLab(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) {
+		in.GroupsClaim = "groups_direct"
+		in.GroupMappings = []GroupMapping{{Group: "platform/sre", Role: auth.RoleResponder}}
+	})
+	e.useGitLab()
+	gina, sess := e.local(6, "Gina")
+	out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, fakeoidc.User{Subject: "42",
+		PreferredUsername: "gina", Groups: []string{"platform/sre"}}))
+	if out.Redirect != ProfilePage || out.Error != "" || gina.subject != "42" || gina.token != nil ||
+		e.store.checks[gina.id] != nil {
+		t.Fatalf("outcome %+v, gina %+v; log %s", out, gina, e.log)
 	}
 	if c := e.store.continued; len(c) != 1 || !c[0].ExpiresAt.Equal(e.business.Now().Add(FallbackSessionLifetime)) {
 		t.Errorf("the session continues as %+v", c)

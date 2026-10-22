@@ -44,8 +44,9 @@ type LinkStart struct {
 
 // StartLink starts linking the account of the web session sess to an identity at the identity provider
 // (C-03.FR-29): it stores a link request bound to the account and to the session — with the state, the nonce, the
-// PKCE verifier encrypted and offline_access requested, as a sign-in — and returns the authorization URL. OIDC that is
-// off is ErrNotEnabled; an account that signs in through OIDC already, or has no password, is ErrAlreadyLinked.
+// PKCE verifier encrypted and the scopes of a sign-in requested, offline_access when the provider offers it — and
+// returns the authorization URL. OIDC that is off is ErrNotEnabled; an account that signs in through OIDC already, or
+// has no password, is ErrAlreadyLinked.
 func (s *Service) StartLink(ctx context.Context, sess auth.Session) (LinkStart, error) {
 	st, row, err := s.read(ctx, s.cfg.Store)
 	if err != nil {
@@ -182,7 +183,8 @@ func (s *Service) completeLink(ctx context.Context, sess auth.Session, cb Callba
 	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
 		return Outcome{}, "settings", err
 	}
-	id := identityOf(d.Issuer, idt, groups, offlineToken(tokens))
+	// Recomputed as at a sign-in: the requested scopes matter only for an answer that names no scope (see complete).
+	id := identityOf(d.Issuer, idt, groups, offlineToken(tokens, d.RequestedScopes(st.Scopes)))
 	// An identity whose groups map to no Role could not sign in afterwards, so the link is refused as a sign-in is.
 	if _, mapped := MapRole(groups, st.GroupMappings, st.UnmatchedRole); !mapped {
 		return s.refuseLink(ctx, sess, cb, id, ErrorNoAccess)

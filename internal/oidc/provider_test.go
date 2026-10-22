@@ -346,6 +346,33 @@ func TestAuthURLAndScopes(t *testing.T) {
 		got.Get("code_challenge") != Challenge("v") || got.Get("response_type") != "code" || got.Get("client_id") != "muster" {
 		t.Errorf("auth URL = %s", u)
 	}
+	// offline_access only from a provider that offers it: listed in scopes_supported, or no list at all.
+	for _, c := range []struct {
+		supported []string
+		offers    bool
+		scope     string
+	}{
+		{nil, true, "openid offline_access profile email"},
+		{[]string{}, true, "openid offline_access profile email"},
+		{[]string{"openid", "offline_access", "profile", "email"}, true, "openid offline_access profile email"},
+		{[]string{"api", "read_user", "openid", "profile", "email"}, false, "openid profile email"},
+	} {
+		d := Discovery{AuthorizationEndpoint: "https://i/auth", ScopesSupported: c.supported}
+		u, err := p.AuthURL(d, AuthRequest{Scopes: []string{"profile", "email"}})
+		q, _ := url.Parse(u)
+		if err != nil || d.OffersOfflineAccess() != c.offers || q.Query().Get("scope") != c.scope {
+			t.Errorf("scopes_supported %v: offers %v, scope %q, %v", c.supported, d.OffersOfflineAccess(),
+				q.Query().Get("scope"), err)
+		}
+	}
+	// Configured scopes are the Admin's choice and stay as configured, offline_access included.
+	if got := Scopes([]string{"offline_access", "read_user"}, false); strings.Join(got, " ") !=
+		"openid offline_access read_user" {
+		t.Errorf("configured offline_access = %v", got)
+	}
+	if got := Scopes([]string{"email", "offline_access"}, true); strings.Join(got, " ") != "openid offline_access email" {
+		t.Errorf("offline_access twice = %v", got)
+	}
 	// RFC 7636, appendix B.
 	if Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") != "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" {
 		t.Error("the S256 challenge does not match RFC 7636")

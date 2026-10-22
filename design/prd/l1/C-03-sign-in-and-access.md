@@ -68,7 +68,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Audit log entry with the groups from the claim.
 - **C-03.FR-8** OIDC needs the back channel: Muster fetches discovery and key sets and exchanges the code itself,
   through the outbound HTTP package (C-02.FR-20). The OIDC settings page offers a connection check that fetches
-  discovery.
+  discovery and shows the scopes a sign-in requests and whether the IdP offers `offline_access` (FR-30); an IdP that
+  does not offer it is shown as such, not as a problem.
 - **C-03.FR-9** Sessions are stored in PostgreSQL and carried in a cookie with `HttpOnly; Secure; SameSite=Lax`; every
   mutating request needs a CSRF token or the mandatory header. A session ends after `auth.session_idle_timeout` idle or
   `auth.session_lifetime` in total. Disabling a user or changing a Role ends all of that user's sessions, and so does
@@ -122,7 +123,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback`, and allowing the `offline_access` scope for the Muster client),
   says what happens without `offline_access` (FR-30: no background re-checks, OIDC sessions end after
   `auth.oidc_fallback_session_lifetime`, Personal access tokens follow `auth.oidc_token_grace`), and states that
-  installations whose IdP Muster cannot reach use local users with TOTP.
+  installations whose IdP Muster cannot reach use local users with TOTP. The documentation also contains a GitLab
+  walkthrough (the application and its redirect URIs, the groups claim `groups` or `groups_direct` with group paths,
+  and that GitLab offers no `offline_access`, so its users follow the rules without an offline token).
 - **C-03.FR-18** The application shell: navigation that shows only what the user's Permissions allow, the language and
   time zone of the profile, and a banner area for Organization-wide notices (C-02.FR-24) — "recovering after downtime"
   for every signed-in user, "no replica is leading" for Admins — with the texts of
@@ -185,14 +188,18 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   your password will be removed." The link callback is accepted only from the session that started it, and an identity
   that already belongs to another user is refused (`identity_linked_elsewhere`). A successful link removes the password;
   the TOTP enrolment stays (FR-10), and `oidc.skip_totp_with_idp_mfa` and "sync Role at sign-in" (`oidc.sync_role`,
-  FR-5) apply as to any OIDC account. A link requests `offline_access` like a sign-in (FR-30); the session that linked
-  continues as an OIDC session, and the user's other sessions end. Users cannot unlink an identity themselves. An Admin
-  converts an OIDC account — created through OIDC or linked — back to local: the identity is removed, the account's
-  sessions end, and the Admin receives a password setup link as at user creation (FR-3); `muster admin reset-password`
-  (FR-11) does the same from the CLI with a password instead of a link. Links, refusals and conversions are recorded in
-  the Audit log.
-- **C-03.FR-30** OIDC sign-in and linking request the standard scope `offline_access` (OIDC Core §11) besides the
-  configured scopes. When the IdP grants it — the granted scope includes `offline_access` and a refresh token is
+  FR-5) apply as to any OIDC account. A link requests `offline_access` under the same rule as a sign-in (FR-30); the
+  session that linked continues as an OIDC session, and the user's other sessions end. Users cannot unlink an identity
+  themselves. An Admin converts an OIDC account — created through OIDC or linked — back to local: the identity is
+  removed, the account's sessions end, and the Admin receives a password setup link as at user creation (FR-3);
+  `muster admin reset-password` (FR-11) does the same from the CLI with a password instead of a link. Links, refusals
+  and conversions are recorded in the Audit log.
+- **C-03.FR-30** OIDC sign-in and linking request the standard scope `offline_access` (OIDC Core §11) besides
+  `openid` and the configured scopes when the IdP's discovery lists it in `scopes_supported` or publishes no
+  `scopes_supported` (the list is optional). An IdP whose list lacks it — GitLab, which refuses an authorization request
+  with a scope it does not offer (`invalid_scope`) — is never asked for it, and its users follow the rules without an
+  offline token below, even when it returns a refresh token. The configured scopes are requested as the Admin set
+  them. When the IdP grants it — the granted scope includes `offline_access` and a refresh token is
   returned — Muster stores that offline token on the user, encrypted as a Secret with the Keyring (ADR-0011); each new
   OIDC sign-in replaces it. The token never appears in an API response, is listed for key rotation, and is wiped when
   the user is disabled, deleted or converted to local (FR-29). Every `auth.oidc_recheck_interval` a background job
@@ -214,7 +221,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
     follows the groups in the refreshed tokens when they carry the groups claim: a changed Role ends the user's sessions
     as FR-9 says, and groups that map to no Role, with no Role for unmatched users, count as a refusal.
 
-  Without an offline token — the IdP did not grant `offline_access` — the user cannot be re-checked in the background:
+  Without an offline token — the IdP did not grant `offline_access`, or does not offer it — the user cannot be
+  re-checked in the background:
   an OIDC session ends at most `auth.oidc_fallback_session_lifetime` after sign-in, and the user's Personal access
   tokens follow the grace rule of C-04.FR-8, which applies only to such users.
 - **C-03.FR-31** The Organization always keeps an active Admin: disabling, deleting or giving a lower Role to the last
@@ -309,7 +317,10 @@ Permissions); `oidc-settings` (read, update); `oidc-settings/checks` (create →
   grows and `oidc_check_failed` is logged; after the server recovers, the next check succeeds.
 - **C-03.AC-24** When the fake OIDC server does not grant `offline_access`, an OIDC session ends
   `auth.oidc_fallback_session_lifetime` after sign-in although it is in use, no background check runs for the user, and
-  the user's Personal access tokens follow the grace rule of C-04.FR-8.
+  the user's Personal access tokens follow the grace rule of C-04.FR-8. The same holds when the fake behaves as GitLab —
+  its discovery does not list `offline_access`, it refuses a scope it does not offer and returns a refresh token all the
+  same: the sign-in does not request `offline_access` and succeeds, and the connection check shows that offline access
+  is not offered.
 - **C-03.AC-25** With a single active Admin, disabling or deleting that Admin or giving them a lower Role gets `409`
   with `last_admin` and changes nothing; once a second Admin is active, the same change succeeds.
 - **C-03.AC-26** With `oidc.sync_role` on and a single active Admin who signs in through OIDC, the fake OIDC server
