@@ -3142,10 +3142,17 @@ request of the Connection, to any of its Destinations, for the seconds of its <c
   message, or a reply in the Thread.</li>
 <li><strong>Thread replies notify the Thread's followers</strong> by their own notification settings, and a Mention makes the person
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".</li>
-<li>A Loud post carries its Mentions — <code>@channel</code>, <code>@here</code>, <code>@all</code>, a Mattermost group, or a person's <code>@username</code> through
-  their Account link — in the post's text, never in the attachment, so that the notification shows what happened. A
-  <code>{{ mention "channel" }}</code> in a Route's template shows in the attachment as text and, on a Loud post, adds its Mention
-  to the post's text.</li>
+<li>A Loud Root message carries its Mentions — <code>@channel</code>, <code>@here</code>, <code>@all</code>, a Mattermost group, or a person's
+  <code>@username</code> through their Account link — as one line at the top of the attachment, directly under its title. There a
+  person's <code>@username</code>, <code>@channel</code>, <code>@here</code> and <code>@all</code> notify as they do anywhere in a post; whether a group's Mention
+  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  the post shows its title once. What a notification shows follows from that: an email notification shows no content;
+  a push notification, when the server's <strong>PushNotificationContents</strong> is <code>full</code>, and a desktop notification show the
+  attachment's summary line — the status, <code>#N</code> and the title — which Muster sets as its <code>fallback</code> and the channel does
+  not show; a push notification under <code>generic</code> shows a fixed text such as "… notified the channel." An edit removes
+  the line of Mentions. A reply in the
+  Thread carries its Mentions in its own text. A <code>{{ mention "channel" }}</code> in a Route's template shows in the attachment
+  as text and, on a Loud post, adds its Mention to the line of Mentions.</li>
 <li>Alert data never mention anyone: an <code>@</code> in a label or annotation is shown as text and notifies nobody. The footer of
   a Root message names a person by their username without <code>@</code>, which does not notify them either.</li>
 </ul>
