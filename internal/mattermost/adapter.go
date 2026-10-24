@@ -68,8 +68,8 @@ func (a *Adapter) LengthLimit() int { return LengthLimit }
 // Markup is the markup of Mattermost posts.
 func (a *Adapter) Markup() messages.Markup { return messages.MarkupMarkdown }
 
-// Publish creates the Root message m, with the Mentions of a Loud call, its targets' and those of the template
-// tokens of m, in its message.
+// Publish creates the Root message m: an empty message and one attachment whose text starts, on a Loud call, with the
+// Mentions of its targets and of the template tokens of m.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {
@@ -82,13 +82,14 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 	return created(r, out, permalink(t, out.ID))
 }
 
-// Update edits the Root message messageID to m: its summary line without Mentions and its attachment.
+// Update edits the Root message messageID to m: an empty message, which also clears the message of a post laid out
+// before the message moved into the attachment, and the attachment without Mentions.
 func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {
 		return *fail
 	}
-	p := rootPost(m, a.look(c, t), "")
+	p := rootPost(m, a.look(c, t), nil)
 	_, r := t.Client.patchPost(ctx, c.Class, messageID, patch{Message: p.Message, Props: p.Props})
 	return edited(ctx, t.Client, c.Class, messageID, r)
 }
@@ -150,9 +151,9 @@ func (a *Adapter) look(c delivery.Call, t Target) look {
 
 // mentions are the targets of a Loud call and the template tokens in Mattermost's syntax; a Quiet call mentions
 // nobody.
-func (a *Adapter) mentions(c delivery.Call, l look, tokens []templates.Token) string {
+func (a *Adapter) mentions(c delivery.Call, l look, tokens []templates.Token) []string {
 	if c.Loudness != groups.Loud {
-		return ""
+		return nil
 	}
 	return mentionText(c.Targets, tokens, l.markup)
 }

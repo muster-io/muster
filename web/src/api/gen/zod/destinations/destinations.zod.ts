@@ -2692,7 +2692,7 @@ export const TestDestinationResponse = zod.object({
 })
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`), and its `request` that call with the bot token masked.
  * @summary Preview a message or request
  */
 export const previewDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2716,7 +2716,7 @@ export const PreviewDestinationResponse = zod.object({
   "items": zod.array(zod.object({
   "name": zod.enum(['message', 'event', 'create', 'update', 'open_thread', 'reply_in_thread']),
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('json'),zod.literal('plain'),zod.literal(null)]).nullish(),
-  "text": zod.string().nullish().describe('The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.'),
+  "text": zod.string().nullish().describe('The rendered Root message text; for Mattermost, the post\'s `message`, which is empty, the attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`, as JSON.'),
   "request": zod.object({
   "method": zod.string(),
   "url": zod.string(),

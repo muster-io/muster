@@ -79,10 +79,10 @@ files_touched:
   - test/e2e/mattermost_test.go
   - test/load/main.go
 acceptance:
-  - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is the summary line — the status emoji, `#N` and the title — with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its `message` and its attachment text within 16,383 characters, its Alert list is cut to the distinct values of S-036, each label ending with \"+N more\", with \"Full list in Muster\", and the link to Muster stays."
+  - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is empty, with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its attachment text within 16,383 characters, its Alert list is cut to the distinct values of S-036, each label ending with \"+N more\", with \"Full list in Muster\", and the link to Muster stays."
   - "[C-13.AC-1] Acknowledge through the API edits that post in place to the acknowledged colour, footer and buttons; a new Alert creates a reply with the post as `root_id`, which raises its reply count."
   - "[C-13.AC-5, C-13.FR-8, C-12.FR-7] A label value `@channel <b>x</b>` arrives as literal text and the fake server records no notification for it."
-  - "[C-13.AC-6, C-13.FR-8, C-11.FR-7, C-12.FR-8] A Quiet Thread reply carries no Mention; a Loud one carries the Mention configured for its event — `@channel` for `new_alerts` — in the post's message, and the fake server records the notification; a Loud Root message carries its Mentions in its `message` after the summary line, never in the attachment; an edit never notifies."
+  - "[C-13.AC-6, C-13.FR-8, C-11.FR-7, C-12.FR-8] A Quiet Thread reply carries no Mention; a Loud one carries the Mention configured for its event — `@channel` for `new_alerts` — in the post's message, and the fake server records the notification; a Loud Root message, whose `message` is empty, carries its Mentions as the first line of its attachment's text and nowhere else, and its `@channel` notifies; an edit never notifies and drops that line."
   - "[C-13.AC-14, C-13.FR-4, C-11.FR-2] A press on a Root message is answered 200 with a JSON object that never carries `update`, `{}` when the Command ran. A refused press first gets one ephemeral post through `POST /api/v4/posts/ephemeral` in the channel, without `root_id`, through the interactive path: with `bot_system_admin` on the fake server it is made and the answer is `{}`; by default the fake refuses it with `403` `api.context.permissions.app_error` (F-063) and the answer is `{\"ephemeral_text\": <text>, \"skip_slack_parsing\": true}`, which the fake shows to the person alone, from System, in the Thread of the Root message (F-025, F-062); a failed post of an admin bot — `5xx`, no limiter token, slower than `delivery.interactive_budget` — falls back the same way (D284)."
   - "[C-13.AC-4, C-10.FR-11] A press from a Mattermost account without an Account link changes nothing and gets the ephemeral \"Your Mattermost account is not linked to Muster. Link it in your profile: {link}\", as a post in the channel or as the answer's `ephemeral_text`."
   - "[C-13.FR-4, C-10.FR-3, C-10.FR-6] A press from an account linked to a Responder (link rows set up directly; S-051 creates them) runs Acknowledge, Resolve or a Snooze for the pressed duration as that User with the Transport `mattermost`; the delivery worker, not the answer, edits the post."
@@ -142,23 +142,30 @@ issue: 61
   client of S-039 and called in the **delivery** client class: `Publish`, `Update` and `Reply` from the delivery
   worker, and `Check` — the Destination check of S-039 — from the Broken probe of S-035, never on the interactive path.
 - **Root message layout** (C-12.FR-1, C-13.FR-3; `layout.go`, Markdown): `POST /api/v4/posts` with `channel_id`,
-  `message` — the summary line: the status emoji, `#N` and the title, escaped like alert data, followed on a Loud post by
-  its Mentions — and `props.attachments` of exactly one attachment: `color` by status (firing `#d32f2f`, acknowledged
+  `message` empty (#364: a summary line in `message` repeated the attachment's title) and `props.attachments` of exactly
+  one attachment, which holds everything: `color` by status (firing `#d32f2f`, acknowledged
   `#f57c00`, resolved `#388e3c`, snoozed `#9e9e9e`), `title` `#N` and the title, `title_link` the Alert Group page,
-  `text` the sections 3 to 8 of S-036, then one line of links starting with "[Open in Muster](…)" followed by the links
+  `text` the Mentions of a Loud post as its first line, then the sections 3 to 8 of S-036, then one line of links starting with "[Open in Muster](…)" followed by the links
   of S-037, then the notices, then the footer line as the last line; `footer` "Muster v<version>", `footer_icon`
   `<MUSTER_PUBLIC_URL>/muster-mark-256.png` (the mark in `web/public/`); `actions` the buttons of the status, each `type: button`
   with a stable `id` (`ack`, `unack`, `resolve`, `unsnooze`, `snooze0`…) and `integration` `{url:
-  <MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<connection public_id>, context: {action, key_id}}`. Mentions never
-  go into the attachment: there they would notify with an empty notification (F-056). A trusted Mention token of a
-  Route template shows in the attachment as text that notifies nobody, and on a Loud Publication its Mention joins the
-  others in `message`; the Owner token stays text, since the message carries no username of the Owner. The adapter declares `Markup()`
+  <MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<connection public_id>, context: {action, key_id}}`. Mentions go
+  nowhere else in the attachment than its first line; a user's, `@channel`, `@here` and `@all` notify there (F-056,
+  F-113; a group's was not checked). The attachment's `fallback` is the plain summary line — the status emoji, `#N`
+  and the title, neutral — without Mentions: the channel does not draw it, push under `full` and desktop notifications
+  show it, and an email of the post shows no content (F-056, F-115). A Storm summary is laid out the same way:
+  `message` empty and one attachment of the Storm colour, without a title, whose text is its Mentions line on a Loud
+  one and then the summary, and whose `fallback` is its first line. A trusted Mention token of a Route template shows in the
+  attachment as text that notifies nobody, and on a Loud Publication its Mention joins the others in the Mentions line;
+  the Owner token stays text, since the message carries no username of the Owner. The adapter declares `Markup()`
   `markdown` and `LengthLimit()` 16,383 characters, the server's `MaxPostSize` (F-057), which the layout applies to the
-  `message` and to the attachment text; a longer Root message is shortened by S-036 — its Alert list is cut and ends
-  with the distinct values of the labels that differ, each ending with "+N more", and "Full list in Muster" — and
-  the link to Muster stays.
-- **Edits and replies** (C-13.FR-3, FR-8): an update is `PUT /api/v4/posts/{id}/patch` with `message` the current
-  summary line, without Mentions, and the new `props`; a Thread reply is `POST /api/v4/posts` with `root_id` the Root
+  attachment text, its Mentions line included, and to a reply's `message`; a longer Root message is shortened by S-036
+  — its Alert list is cut and ends with the distinct values of the labels that differ, each ending with "+N more", and
+  "Full list in Muster" — and the Mentions and the link to Muster stay; a Mentions line too long to fit loses whole
+  Mentions from its end.
+- **Edits and replies** (C-13.FR-3, FR-8): an update is `PUT /api/v4/posts/{id}/patch` with `message` empty, which
+  clears the summary line of a post made before #364 (F-114), and the
+  new `props`, whose attachment has no Mentions line; a Thread reply is `POST /api/v4/posts` with `root_id` the Root
   message and the reply text (S-036) in `message`. A Quiet new message carries no Mention; a Loud one carries the
   resolved targets of S-037 — `@channel`, `@all`, `@here`, `@<group>`, or `@<username>` of a user's Account link in
   `mattermost:<connection>` (otherwise the display name as plain text). Edits are always Quiet.
@@ -309,7 +316,7 @@ NOTIFY d1 '{"reason":"first notification"}'; sleep 1; G=$(AG 'pod%3D%22i1%22')
 POSTS '[.[] | select(.root_id == "") | .props.attachments[0] | {n: (.actions | length), title, tl: (.title_link | test("/alert-groups/AG")), footer, color,
   open: (.text | test("\\[Open in Muster\\]")), lit: (.text | test("@​channel \\\\<b\\\\>x"))}]'
 # [{"n":5,"title":"#1 DiskFull","tl":true,"footer":"Muster v…","color":"#d32f2f","open":true,"lit":true}]
-POSTS '[.[] | select(.root_id == "") | .message] | first'                    # "🔴 #1 DiskFull"
+POSTS '[.[] | select(.root_id == "") | .message] | first'                    # ""
 curl -s $FMM/notifications | jq length                                      # 0
 
 # C-13.AC-1, AC-6: Acknowledge edits; a new Alert is a Thread reply — Quiet now, since the Alert Group is acknowledged
@@ -326,6 +333,17 @@ curl -s -X PUT $FAM/groups/d1/alerts/i3 -d '{"labels":{"team":"db","cluster":"a"
 NOTIFY d1 '{"reason":"new alerts added"}'; ADV 60; sleep 1                  # past the Thread batching window
 POSTS '[.[] | select(.root_id != "") | .message | startswith("@channel")] | last'   # true
 curl -s $FMM/notifications | jq -c '[.[] | .kind] | unique'                # ["channel"]
+# a Loud Root message: the Destination "loud" on ch-alerts-prod (DL), made as D with new_alert_group set to @channel,
+# and a Route "loud" to it; its Mentions are the first line of the attachment's text, and an edit drops them
+curl -s "${H[@]}" $API/routes -d "{\"name\":\"loud\",\"matchers\":[{\"label\":\"team\",\"op\":\"=\",\"value\":\"loud\"}],\"urgent\":false,
+  \"group_key\":[\"alertname\",\"cluster\"],\"destination_ids\":[\"$DL\"],\"policy\":$P}" > /dev/null
+curl -s -X PUT $FAM/groups/l1 -d '{"receiver":"lab","route":"{}","labels":{"alertname":"LoudDisk"}}' > /dev/null
+curl -s -X PUT $FAM/groups/l1/alerts/l1 -d '{"labels":{"team":"loud","cluster":"l"}}' > /dev/null
+NOTIFY l1 '{"reason":"first notification"}'; sleep 1; GL=$(AG 'team%3D%22loud%22')
+LOUD='[.[] | select(.root_id == "" and .channel_id == "ch-alerts-prod") | {m: .message, first: (.props.attachments[0].text | split("\n")[0])}] | last'
+POSTS "$LOUD"                                                                # {"m":"","first":"@channel"}
+curl -s "${H[@]}" -X POST $API/alert-groups/$GL/acknowledge > /dev/null; sleep 1
+POSTS "$LOUD" | jq '.first | startswith("@")'                                # false
 
 # C-13.AC-4, AC-14: a press from an account without an Account link
 ROOT=$(POSTS '[.[] | select(.root_id == "")][0].id' | tr -d '"')
@@ -442,8 +460,8 @@ the Destination Broken.
 system admin role and a channel, create the Connection and a Destination through the API, send one Alert Group from the
 fake Alertmanager, and confirm by eye that the post shows the attachment, the links and the buttons; that Acknowledge
 in Muster edits it; that a press from an unlinked account shows the ephemeral message from System in the Thread of the Root message; that a Loud reply
-with `@channel` notifies while an edit does not; that a Loud Root message with a Mention notifies with the summary line
-shown (F-056); and that after the Root message is deleted in the client, the next edit republishes it with the note
+with `@channel` notifies while an edit does not; that a Loud Root message with a Mention in the first line of its
+attachment notifies (F-056, F-113); and that after the Root message is deleted in the client, the next edit republishes it with the note
 (F-058), which also answers the Mattermost entry of the facts' Pending list for a bot without that role.
 
 ## Open questions
