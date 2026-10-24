@@ -174,7 +174,7 @@ importers:
         version: 1.5.0
       '@hookform/resolvers':
         specifier: 5.9.1
-        version: 5.9.1(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.5)
+        version: 5.9.1(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.6)
       '@tanstack/react-query':
         specifier: 5.104.3
         version: 5.104.3(react@19.3.1)
@@ -218,8 +218,8 @@ importers:
         specifier: 3.7.0
         version: 3.7.0
       zod:
-        specifier: 4.6.5
-        version: 4.6.5
+        specifier: 4.6.6
+        version: 4.6.6
     devDependencies:
       '@faker-js/faker':
         specifier: 10.6.0
@@ -268,7 +268,7 @@ importers:
         version: 2.15.0(@types/node@26.6.4)(typescript@7.0.2)
       orval:
         specifier: 8.39.0
-        version: 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.3(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.5)
+        version: 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.3(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6)
       oxfmt:
         specifier: 0.71.0
         version: 0.71.0
@@ -3063,6 +3063,9 @@ packages:
   zod@4.6.5:
     resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
+
 snapshots:
 
   '@babel/code-frame@7.29.7':
@@ -3303,13 +3306,13 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hookform/resolvers@5.9.1(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.5)':
+  '@hookform/resolvers@5.9.1(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.6)':
     dependencies:
       '@standard-schema/utils': 0.3.0
       react-hook-form: 7.89.0(@types/react@19.3.0)(react@19.3.1)
     optionalDependencies:
       ajv: 8.20.0
-      zod: 4.6.5
+      zod: 4.6.6
 
   '@inquirer/ansi@2.0.8': {}
 
@@ -3531,21 +3534,21 @@ snapshots:
     transitivePeerDependencies:
       - '@faker-js/faker'
 
-  '@orval/hono@8.39.0(@faker-js/faker@10.6.0)(typescript@7.0.2)(zod@4.6.5)':
+  '@orval/hono@8.39.0(@faker-js/faker@10.6.0)(typescript@7.0.2)(zod@4.6.6)':
     dependencies:
       '@orval/core': 8.39.0(@faker-js/faker@10.6.0)
-      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)
+      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
     optionalDependencies:
       typescript: 7.0.2
     transitivePeerDependencies:
       - '@faker-js/faker'
       - zod
 
-  '@orval/mcp@8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)':
+  '@orval/mcp@8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)':
     dependencies:
       '@orval/core': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/fetch': 8.39.0(@faker-js/faker@10.6.0)
-      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)
+      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - zod
@@ -3587,12 +3590,12 @@ snapshots:
     transitivePeerDependencies:
       - '@faker-js/faker'
 
-  '@orval/zod@8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)':
+  '@orval/zod@8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)':
     dependencies:
       '@orval/core': 8.39.0(@faker-js/faker@10.6.0)
       jsesc: 3.1.0
     optionalDependencies:
-      zod: 4.6.5
+      zod: 4.6.6
     transitivePeerDependencies:
       - '@faker-js/faker'
 
@@ -4025,7 +4028,7 @@ snapshots:
       jiti: 2.7.0
       magic-string: 0.30.21
       prettier: 3.9.9
-      zod: 4.6.5
+      zod: 4.6.6
     transitivePeerDependencies:
       - supports-color
 
@@ -4039,7 +4042,7 @@ snapshots:
       '@tanstack/router-utils': 1.162.4
       chokidar: 5.0.0
       unplugin: 3.4.0(esbuild@0.28.2)(rolldown@1.2.12)(vite@8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
-      zod: 4.6.5
+      zod: 4.6.6
     optionalDependencies:
       '@tanstack/react-router': 1.170.44(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       vite: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
@@ -4780,7 +4783,7 @@ snapshots:
       stdin-discarder: 0.3.2
       string-width: 8.3.0
 
-  orval@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.3(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.5):
+  orval@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.3(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
       '@orval/angular': 8.39.0(@faker-js/faker@10.6.0)
@@ -4788,14 +4791,14 @@ snapshots:
       '@orval/core': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/effect': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/fetch': 8.39.0(@faker-js/faker@10.6.0)
-      '@orval/hono': 8.39.0(@faker-js/faker@10.6.0)(typescript@7.0.2)(zod@4.6.5)
-      '@orval/mcp': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)
+      '@orval/hono': 8.39.0(@faker-js/faker@10.6.0)(typescript@7.0.2)(zod@4.6.6)
+      '@orval/mcp': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
       '@orval/mock': 8.39.0(@faker-js/faker@10.6.0)(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))
       '@orval/pinia-colada': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/query': 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.3(react@19.3.1))
       '@orval/solid-start': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/swr': 8.39.0(@faker-js/faker@10.6.0)
-      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.5)
+      '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
       '@scalar/json-magic': 0.15.4
       '@scalar/openapi-parser': 0.29.10
       '@scalar/openapi-types': 0.9.7
@@ -5268,3 +5271,5 @@ snapshots:
   yoctocolors@2.2.0: {}
 
   zod@4.6.5: {}
+
+  zod@4.6.6: {}
