@@ -243,13 +243,16 @@ func (e *timersEnv) ownerOf(id string) (string, any) {
 	return g["status"].(string), g["owner"]
 }
 
-// timerFired are the timer_fired log lines of the Alert Group.
+// timerFired are the timer_fired log lines of the Alert Group from every replica: the replica that claims a timer
+// fires it.
 func (e *timersEnv) timerFired(id string) []map[string]any {
 	var out []map[string]any
-	for line := range strings.Lines(e.r.Output()) {
-		var m map[string]any
-		if json.Unmarshal([]byte(line), &m) == nil && m["event"] == "timer_fired" && m["group"] == id {
-			out = append(out, m)
+	for _, r := range e.h.Replicas {
+		for line := range strings.Lines(r.Output()) {
+			var m map[string]any
+			if json.Unmarshal([]byte(line), &m) == nil && m["event"] == "timer_fired" && m["group"] == id {
+				out = append(out, m)
+			}
 		}
 	}
 	return out
