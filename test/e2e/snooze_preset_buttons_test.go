@@ -378,9 +378,15 @@ func TestSnoozePresetButtons(t *testing.T) {
 			c.Buttons.MaxPerMessage = n
 			caps, _ := json.Marshal(c)
 			b.configure(`{"capabilities":` + string(caps) + `}`)
-			if check := b.api.json(http.MethodPost, "/api/v1/connections/"+b.conn+"/checks", "",
-				http.StatusOK); check["ok"] != true {
-				t.Fatalf("the connection check with max_per_message %d: %v", n, check)
+			// A Connection check reads the bridge's info again only on the replica that runs it, and another replica
+			// keeps its copy until bridge.info_max_age (the Notes of S-086), so with more than one replica the check
+			// runs on each of them.
+			for _, rep := range h.Replicas {
+				api := patClient{t: t, base: rep.App, token: b.api.token}
+				if check := api.json(http.MethodPost, "/api/v1/connections/"+b.conn+"/checks", "",
+					http.StatusOK); check["ok"] != true {
+					t.Fatalf("the connection check with max_per_message %d on %s: %v", n, rep.name(), check)
+				}
 			}
 		}
 
