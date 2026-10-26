@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/muster-io/muster/compare/v0.1.3...v0.1.4) (2026-10-26)
+
+
+### Bug Fixes
+
+* **config:** keep the database URL query intact when adding the default sslmode ([#394](https://github.com/muster-io/muster/issues/394)) ([9ea91a7](https://github.com/muster-io/muster/commit/9ea91a7bf19a08162f6566644c66a23fee207bd1))
+* **db:** drop pool settings from the session connection derived from MUSTER_DATABASE_URL ([#392](https://github.com/muster-io/muster/issues/392)) ([dfcf563](https://github.com/muster-io/muster/commit/dfcf563b5060473d316fa9abe82a0d4108e1c119))
+
 ## [0.1.3](https://github.com/muster-io/muster/compare/v0.1.2...v0.1.3) (2026-10-26)
 
 
