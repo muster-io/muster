@@ -995,7 +995,10 @@ type CheckResult struct {
 	Steps   []Step
 	BotName string
 	// Warnings are hints that do not fail the check, such as WarningPressAnswersInThread.
-	Warnings       []string
+	Warnings []string
+	// BotRoles are the system roles of a Mattermost bot that Muster read, set only with WarningPressAnswersInThread:
+	// none of them grants ephemeral posts; empty, not nil, when the bot has none.
+	BotRoles       []string
 	WebhookSet     *bool
 	PendingUpdates *int64
 	Bridge         bool
@@ -1016,9 +1019,9 @@ const WarningPressAnswersInThread = "press_answers_in_thread"
 // username and user id on the Connection; a 401 fails with "The bot token is not valid." and
 // mattermost.CodeTokenInvalid, any other failure with the code of mattermost.Result.FailureCode. No limiter token
 // within the budget is a *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether it may
-// make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a failed read
-// adds nothing. Its requests are recorded as the kind connection_check under one check run, which the result names
-// (C-23.FR-2, FR-5).
+// make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread and the roles it read
+// (D284, F-064); a failed read adds nothing. Its requests are recorded as the kind connection_check under one check
+// run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
 	ctx, run := outbound.StartCheck(ctx, outbound.CheckConnection, 0)
 	res, err := s.check(ctx, publicID, baseURL)
@@ -1068,8 +1071,8 @@ func (s *Service) check(ctx context.Context, publicID string, baseURL *string) (
 	}); err != nil {
 		return CheckResult{}, err
 	}
-	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username,
-		Warnings: pressWarnings(ctx, c, run, user)}, nil
+	warnings, roles := pressWarnings(ctx, c, run, user)
+	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username, Warnings: warnings, BotRoles: roles}, nil
 }
 
 // mattermostToken is the step token of a Mattermost check: GET /api/v4/users/me with the bot token of c through run,
@@ -1099,17 +1102,18 @@ func (s *Service) mattermostToken(ctx context.Context, c *mattermost.Client, run
 }
 
 // pressWarnings reads the roles of the bot through run: when they do not grant ephemeral posts it warns with
-// WarningPressAnswersInThread (D284, F-064); a failed read adds nothing.
-func pressWarnings(ctx context.Context, c *mattermost.Client, run mattermost.Runner, bot mattermost.User) []string {
+// WarningPressAnswersInThread and returns the roles it read (D284, F-064); a failed read adds nothing.
+func pressWarnings(ctx context.Context, c *mattermost.Client, run mattermost.Runner, bot mattermost.User) ([]string,
+	[]string) {
 	var granted bool
 	var r mattermost.Result
 	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
 		granted, r = c.Grants(ctx, call.Class, bot, mattermost.PermissionEphemeralPosts)
 		return r.Outcome
 	}); err == nil && r.OK() && !granted {
-		return []string{WarningPressAnswersInThread}
+		return []string{WarningPressAnswersInThread}, append([]string{}, bot.RoleNames()...)
 	}
-	return nil
+	return nil, nil
 }
 
 // Channel is a channel the bot of a Mattermost Connection is a member of, with its team.

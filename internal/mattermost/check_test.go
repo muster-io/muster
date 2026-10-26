@@ -153,6 +153,32 @@ func TestClientReads(t *testing.T) {
 	}
 }
 
+// TestHintPressAnswersInThread is the hint of D284 (C-13.FR-2, F-064): it names the bot and the system role, or roles,
+// read from its user, split as Grants splits them, or says that it has none, so that the operator sees which account
+// the token belongs to.
+func TestHintPressAnswersInThread(t *testing.T) {
+	u := mattermost.User{Username: "alerts-bot", Roles: " system_user  custom_role "}
+	if got := u.RoleNames(); len(got) != 2 || got[0] != "system_user" || got[1] != "custom_role" {
+		t.Errorf("RoleNames = %q", got)
+	}
+	want := "the bot @alerts-bot has the roles system_user, custom_role, none of which grants create_post_ephemeral: " +
+		"it may not make ephemeral messages, so answers to button presses show in the Thread of the Root message; " +
+		"give the bot account itself that permission, for example the system admin role, to show them in the channel"
+	if got := mattermost.HintPressAnswersInThread(u.Username, u.RoleNames()); got != want {
+		t.Errorf("hint = %q", got)
+	}
+	one := mattermost.User{Username: "alerts-bot", Roles: "system_user"}
+	if got := mattermost.HintPressAnswersInThread(one.Username, one.RoleNames()); !strings.HasPrefix(got,
+		"the bot @alerts-bot has the role system_user, which does not grant create_post_ephemeral: it may not make") {
+		t.Errorf("hint with one role = %q", got)
+	}
+	none := mattermost.User{Username: "alerts-bot"}
+	if got := mattermost.HintPressAnswersInThread(none.Username, none.RoleNames()); !strings.HasPrefix(got,
+		"the bot @alerts-bot has no roles, so it lacks create_post_ephemeral: it may not make ephemeral messages") {
+		t.Errorf("hint without roles = %q", got)
+	}
+}
+
 // TestCheckDestination is the Destination check of C-13.FR-10 against the fake server: a channel with the bot passes
 // with the names of its team and channel; a revoked token fails the token step with "The bot token is not valid.";
 // the bot removed from the channel, an unknown channel, a channel of another team and an archived one fail

@@ -3,9 +3,10 @@
 
 // The Mattermost Connection pages against `muster dev` and its fake Mattermost server: Verification steps 1 to 5 of
 // their story. The Admin creates "mm", sees the bot token as set and the callback address with its hint, checks the
-// Connection, with the hint about answers in the Thread while the fake's bot is not a system admin and without it once
-// it is, cannot delete "mm" while the Destination "alerts" uses it, and replaces the bot token, which the Audit log
-// shows as a changed Secret. An Admin reading Russian sees the same at phone width; a Viewer sees the pages read-only.
+// Connection, with the hint about answers in the Thread, naming the bot and its roles, while the fake's bot is not a
+// system admin and without it once it is, cannot delete "mm" while the Destination "alerts" uses it, and replaces the
+// bot token, which the Audit log shows as a changed Secret. An Admin reading Russian sees the same at phone width; a
+// Viewer sees the pages read-only.
 // No page scrolls sideways at 360 px; no Content Security Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
@@ -27,9 +28,9 @@ const FMM = "http://127.0.0.1:18065/_fake";
 const SERVER_URL = "http://127.0.0.1:18065";
 const CALLBACK = /^http:\/\/localhost:8081\/api\/v1\/callbacks\/mattermost\/CN[0-9A-Z]+$/;
 const WARNING =
-  "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
+  "The bot @muster-dev-bot has the role system_user, which does not grant the create_post_ephemeral permission, so it may not make ephemeral messages and answers to button presses show in the Thread of the Root message. Give the bot account itself that permission, for example the system admin role, to show them in the channel.";
 const WARNING_RU =
-  "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.";
+  "У бота @muster-dev-bot роль system_user, и она не даёт права create_post_ephemeral, поэтому боту нельзя создавать эфемерные сообщения и ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте это право самой учётной записи бота, например роль системного администратора.";
 const IN_USE = "This Connection is used by 1 Destination. Delete it first.";
 const IN_USE_RU = "Это подключение используется в 1 месте доставки. Сначала удалите его.";
 

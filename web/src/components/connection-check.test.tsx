@@ -987,16 +987,22 @@ describe("How to fix", () => {
     ).toHaveLength(0);
   });
 
-  test("the Mattermost warning links to where answers to presses show, in Russian too", async () => {
+  test("the Mattermost warning names the bot and the roles read, and links to where answers to presses show, in Russian too", async () => {
     await i18n.changeLanguage("ru");
     answer(() =>
       json(200, {
         ...CONNECTED,
         warnings: ["press_answers_in_thread"],
+        bot_roles: ["system_user", "custom_role"],
       } satisfies ConnectionCheckResult),
     );
     await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
     await page.getByRole("button", { name: "Проверить подключение" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-warning"))
+      .toHaveTextContent(
+        "У бота @muster-dev-bot-b роли system_user, custom_role, и ни одна из них не даёт права create_post_ephemeral, поэтому боту нельзя создавать эфемерные сообщения и ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте это право самой учётной записи бота, например роль системного администратора. Как исправить",
+      );
     const link = page.getByTestId("connection-check-warning").getByRole("link", {
       name: "Как исправить: Ответы на нажатия кнопок появляются в треде (откроется в новой вкладке)",
     });
@@ -1004,5 +1010,71 @@ describe("How to fix", () => {
     await expect
       .element(link)
       .toHaveAttribute("href", `${SITE}/messengers/mattermost/#where-answers-to-presses-show`);
+  });
+
+  test("the Mattermost warning names several roles in the plural, in English and in Russian's many form", async () => {
+    answer(() =>
+      json(200, {
+        ...CONNECTED,
+        warnings: ["press_answers_in_thread"],
+        bot_roles: ["system_user", "custom_a", "custom_b", "custom_c", "custom_d"],
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    const warning = page.getByTestId("connection-check-warning");
+    await expect
+      .element(warning)
+      .toHaveTextContent(
+        "The bot @muster-dev-bot-b has the roles system_user, custom_a, custom_b, custom_c, custom_d, none of which grants the create_post_ephemeral permission, so it may not make ephemeral messages and answers to button presses show in the Thread of the Root message. Give the bot account itself that permission, for example the system admin role, to show them in the channel. How to fix",
+      );
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(warning)
+      .toHaveTextContent(
+        "У бота @muster-dev-bot-b роли system_user, custom_a, custom_b, custom_c, custom_d, и ни одна из них не даёт права create_post_ephemeral, поэтому боту нельзя создавать эфемерные сообщения и ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте это право самой учётной записи бота, например роль системного администратора. Как исправить",
+      );
+  });
+
+  test("the Mattermost warning says when the bot has no roles, and shows a name as text, never as markup", async () => {
+    answer(() =>
+      json(200, {
+        ...CONNECTED,
+        bot_name: "<b>bot</b>",
+        warnings: ["press_answers_in_thread"],
+        bot_roles: [],
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    const warning = page.getByTestId("connection-check-warning");
+    await expect
+      .element(warning)
+      .toHaveTextContent(
+        "The bot @<b>bot</b> has no roles, so it lacks the create_post_ephemeral permission: it may not make ephemeral messages, and answers to button presses show in the Thread of the Root message. Give the bot account itself that permission, for example the system admin role, to show them in the channel. How to fix",
+      );
+    expect(warning.element().querySelector("b")).toBeNull();
+  });
+
+  test("the Mattermost warning without bot_roles names neither the bot nor its roles, in Russian too", async () => {
+    answer(() =>
+      json(200, {
+        ...CONNECTED,
+        warnings: ["press_answers_in_thread"],
+      } satisfies ConnectionCheckResult),
+    );
+    await renderCheck({ connectionId: SAVED_ID, type: "mattermost" });
+    await page.getByRole("button", { name: "Check connection" }).click();
+    await expect
+      .element(page.getByTestId("connection-check-warning"))
+      .toHaveTextContent(
+        "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot account itself the create_post_ephemeral permission, for example the system admin role, to show them in the channel. How to fix",
+      );
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(page.getByTestId("connection-check-warning"))
+      .toHaveTextContent(
+        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте самой учётной записи бота право create_post_ephemeral, например роль системного администратора. Как исправить",
+      );
   });
 });
