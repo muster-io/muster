@@ -77,7 +77,7 @@ issue: null
 - The Minimum severity on the Route form and the retired urgent mark and "critical is Urgent" on the pages: S-112.
 - Severity conditions of Destinations, and the Quiet publication of the Alert Groups that a raised Minimum severity
   brings into a Destination's condition (the second half of C-26.FR-9 and of C-26.AC-11): S-121.
-- Escalation chains, which a change of the Minimum severity never starts: S-154. The page "What critical changes":
+- Escalation chains, which a change of the Minimum severity never starts: S-169. The page "What critical changes":
   S-124.
 - 0.3.0 removes `urgent`, `critical_is_urgent` and their columns; not in 0.2.x.
 - Interim state until S-112: the Route form still shows the urgent switch, whose value the server now ignores, and the
@@ -252,8 +252,8 @@ None.
 | C-26.AC-11 | partial | the Quiet `urgency_raised` without removing the acknowledgement; the Quiet publication in critical Destinations is S-121 |
 | C-08.FR-1 | partial | revised for L2: the Minimum severity replaces the urgent mark; Destination entries, Teams, chains, owner and labels follow in S-115, S-121, S-125 and later stories |
 | C-08.FR-6 | full | revised for L2 |
-| C-09.FR-1 | partial | revised for L2: urgency from the Severity level; the Teams are S-118, the chains and Assignees S-154 and S-155 |
-| C-09.FR-9 | partial | revised for L2: a rise to critical; chains that start over are S-154 |
+| C-09.FR-1 | partial | revised for L2: urgency from the Severity level; the Teams are S-118, the running chains S-169 and the Assignees S-168 |
+| C-09.FR-9 | partial | revised for L2: a rise to critical; chains that start over are S-169 |
 | C-09.AC-8 | full | revised for L2 |
 | C-11.FR-3 | full | revised for L2 |
 | C-20.FR-1 | partial | revised for L2: "critical is Urgent" read-only; the page is S-112, the Team label S-118, Working hours S-115, the button set S-113 |

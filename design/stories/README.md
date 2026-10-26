@@ -10,10 +10,11 @@ CLI commands — which files it touches, how its acceptance is checked and what 
 code: the implementation writes the code in the repository against compiler and test feedback, and the contract is what
 the review checks the code against.
 
-Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24`. Every functional requirement
-(`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the
-[coverage table](coverage.md) shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the
-reasons behind technical choices are in the [ADRs](../adr/README.md).
+Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-24` and the [core of
+L2](../prd/L2.md#14-capability-map), `C-25`…`C-32`. Every functional requirement (`C-NN.FR-n`) and acceptance statement
+(`C-NN.AC-n`) of a capability is covered by its stories; the [coverage table](coverage.md) shows which story covers
+which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the reasons behind technical choices are in the
+[ADRs](../adr/README.md).
 
 Contents: [1. File format](#1-file-format) · [2. Repository layout](#2-repository-layout) ·
 [3. Sizing and slicing](#3-sizing-and-slicing) · [4. Shared contracts](#4-shared-contracts) ·
@@ -53,10 +54,10 @@ issue: null
 | `title` | What the story delivers, in a few words; ends with `(BE)` or `(FE)` for backend and frontend stories. |
 | `capability` | The capability `C-NN` the story belongs to. |
 | `kind` | `be` (backend: Go, SQL, OpenAPI), `fe` (the web UI), `infra` (build, CI, release, deployment) or `docs` (the documentation site). |
-| `layer` | `L1` for every story of the first release. |
+| `layer` | `L1` or `L2`: the layer of the PRD the story implements. |
 | `repository` | Optional, after `layer`: the GitHub repository, `OWNER/NAME`, of a story whose pull request goes to another repository than this one — the bridge libraries of ADR-0017. Its `files_touched` are paths in that repository, its `verify` runs that repository's Makefile, and its pull request there says `Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is closed by hand once that pull request merges. The contract and the issue stay in this repository. Without the key the story is for this repository. |
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
-| `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions). |
+| `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions) and those of [L2](../prd/L2.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
 | `acceptance` | Testable statements. Each starts with the FR or AC IDs it proves, in brackets, and is checked by a test or by the live checks of the body. A story whose `covers` is empty, because no requirement speaks about what it changes, says why in its Notes, and its statements name no IDs. |
 | `verify` | The automated check of the story; it always starts with `make`. |
@@ -133,15 +134,19 @@ under `docs/assets/screenshots/` — are generated and checked in too, and never
   (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22), the
   check of a Connection before saving it (S-087), the Request log (C-23) and the last documentation stories, S-060 and
   S-091, then the pre-release stories S-092 to S-096, then the Slack stories S-097 to S-105, and last the guides with
-  screenshots and the documentation links of the web UI, S-106 to S-110. The architecture lints of ADR-0016 exist from
-  the first story that contains code.
+  screenshots and the documentation links of the web UI, S-106 to S-110. After the phases of L1, the L2 core follows
+  in the three stages of its adoption ([L2 §1.3](../prd/L2.md#13-adoption)): "L2 Teams" (C-25, C-26, the buttons of
+  C-28 and C-29), "L2 On call" (C-27, Team mentions and the Mention entries) and "L2 Paging" (C-30 – C-32). The
+  architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
 
 - **Database schema.** The designed schema of L1 is one initial migration (`0001_init`, explained in
   [`design/db/schema.md`](../db/schema.md)). The first database story moves it into `internal/db/migrations/`
   unchanged; later stories write queries against it. A story that has to change the schema adds a new expand/contract
-  migration and updates `schema.md` in the same pull request. Rows that must exist from the first start — the
+  migration and updates `schema.md` in the same pull request. Migration numbers follow the story map; a story merged
+  out of that order renumbers its migration to the next free number in its own pull request, with its tests and
+  `schema.md`. Rows that must exist from the first start — the
   Organization, its Default route, the built-in Integration and Link rule, the Keyring state, the bootstrap Admin — are
   created by idempotent start-up steps that each capability adds, never by a migration.
 - **API specification.** `api/openapi.yaml` already describes all of L1. A story implements the operations it names;
@@ -215,10 +220,10 @@ unused and the story map says what replaced it. The slug in the file name may ch
 
 `scripts/stories-sync` is the script of step 2, and it keeps the issues in step with the files afterwards. It needs
 Python 3 (standard library only) and an authenticated `gh`. It reads the frontmatter of every `S-NNN` file and the
-title of every capability in `design/prd/l1/`, then:
+title of every capability in `design/prd/l1/` and `design/prd/l2/`, then:
 
-- creates the labels `story`, `capability`, `be`, `fe`, `infra`, `docs` and `operator-attention` and the milestone
-  `L1` when they are missing;
+- creates the labels `story`, `capability`, `be`, `fe`, `infra`, `docs` and `operator-attention`, and the milestone of
+  each story's layer (`L1`, `L2`), when they are missing; each issue gets the milestone of its layer;
 - keeps one issue per capability, `C-NN: <title>`, and one per story, `S-NNN: <title>`, labelled with its kind and, when
   set, `operator-attention`, with the acceptance statements as a task list and `verify`, and the repository of a story
   that names one; each issue links to its file at the HEAD commit, each story issue is a sub-issue of its capability
@@ -241,9 +246,9 @@ stays ticked while its statement is unchanged. Edit the files, not the issues.
 
 ## 8. Story map
 
-All of L1, in phase order. Contracts were written in batches, and every story of the map now has its contract file; a
-later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` frontend, `infra` build and deployment,
-`docs` documentation. A story for another repository names it after its title.
+All of L1 and the core of L2, in phase order. Contracts were written in batches, and every story of the map now has its
+contract file; a later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` frontend, `infra` build and
+deployment, `docs` documentation. A story for another repository names it after its title.
 
 | Phase | Capabilities | Stories | Count |
 |---|---|---|---|
@@ -257,6 +262,13 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Slack | C-24 | S-097 – S-105 | 9 |
 | Guides | S-106 – S-110 of C-21 | S-106 – S-110 | 5 |
 | **L1** | 24 | | **110** |
+
+| Phase | Capabilities | Stories | Count |
+|---|---|---|---|
+| L2 Teams | C-25, C-26, the buttons of C-28, C-29 | S-111 – S-130, S-162, S-163, S-166 | 23 |
+| L2 On call | C-27, the Team mentions of C-25, the Mention entries of C-28 | S-131 – S-144, S-164, S-165 | 16 |
+| L2 Paging | C-30 – C-32 | S-145 – S-161, S-167 – S-169 | 20 |
+| **L2 core** | 8 | | **59** |
 
 ### Foundation
 
@@ -537,6 +549,108 @@ link pages of every earlier phase. S-108 needs only S-106, whose sections its li
 S-107; S-109 links only to sections that exist after S-106, and S-110 needs S-107's sections and follows S-109, since
 both change the list of links and the translations. S-110 ends by taking every screenshot again, so that the guides
 show the links.
+
+### L2 Teams
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-166](S-166-shared-fixtures-of-destination-and-connection-reads-in-the-web-tests.md) | C-28 | Shared fixtures of Destination and Connection reads in the web tests | infra | — |
+| [S-111](S-111-minimum-severity-and-urgent-as-critical.md) | C-26 | Minimum severity, Urgent as critical, and the expand step of the urgent mark and of "critical is Urgent" (BE) | be | — |
+| [S-162](S-162-the-route-profile-paging.md) | C-26 | The Route profile Paging, formerly On-call, with the id paging in the API, the UI and every client (BE) | be | S-111 |
+| [S-112](S-112-minimum-severity-on-the-route-form.md) | C-26 | Minimum severity on the Route form, and the urgent mark and "critical is Urgent" taken off the pages (FE) | fe | S-111, S-162 |
+| [S-113](S-113-button-sets-of-the-organization-and-the-destinations.md) | C-28 | Button sets of the Organization and the Destinations (BE) | be | S-111, S-166 |
+| [S-114](S-114-buttons-section-of-the-destination-form-and-the-organization-button-set.md) | C-28 | The Buttons section of the Destination form with its preview, and the Organization's button set (FE) | fe | S-113, S-112 |
+| [S-115](S-115-teams-people-owning-team-filters-and-working-hours.md) | C-25 | Teams, people added by hand, the owning Team of Routes and Destinations, the filters by Team, and Working hours (BE) | be | S-166 |
+| [S-116](S-116-spike-gitlab-role-claims.md) | C-25 | Spike: GitLab's role claims — which token carries them, inherited memberships and discovery | docs | — |
+| [S-117](S-117-claims-of-mapping-entries-subtrees-and-membership-from-the-identity-provider.md) | C-25 | The claim of every mapping entry and subtrees for Roles and Teams, and Team membership from the identity provider (BE) | be | S-115, S-116 |
+| [S-118](S-118-team-label-team-matchers-and-the-teams-of-alerts-and-alert-groups.md) | C-25 | The Team label and Team matchers, the Teams of Alerts and Alert Groups with team_joined, and unknown values (BE) | be | S-115 |
+| [S-163](S-163-team-label-values-and-the-evaluation-of-open-alert-groups-on-save.md) | C-25 | Values of the Team label without a Team, and the evaluation of open Alert Groups when a Team or the Team label is saved (BE) | be | S-118, S-111 |
+| [S-121](S-121-severity-conditions-delivery-to-teams-and-destination-joined.md) | C-26 | Severity conditions on the Destinations of Routes and Teams, delivery to the Teams of an Alert Group, and destination_joined (BE) | be | S-111, S-118, S-163 |
+| [S-122](S-122-the-preview-where-alerts-go.md) | C-26 | The preview "Where alerts go" for the unsaved settings of a Route (BE) | be | S-121 |
+| [S-119](S-119-teams-list-and-team-page-people-identity-provider-groups-and-working-hours.md) | C-25 | Teams list and Team page with people, identity provider groups and Working hours, the claims of the Role mapping, and the filters by Team (FE) | fe | S-115, S-117, S-118, S-121, S-112 |
+| [S-120](S-120-which-alerts-belong-unknown-values-team-label-and-teams-of-alert-groups.md) | C-25 | "Which Alerts belong" on the Team page, unknown values with "Create Team", the Team label setting, and the Teams of Alert Groups and Alerts on their pages (FE) | fe | S-118, S-163, S-119 |
+| [S-123](S-123-route-form-destinations-teams-preview-and-delivery-state-by-entry.md) | C-26 | The Route form with Destination conditions, the Teams from the label and the preview, the Destinations of a Team, and the delivery state by entry (FE) | fe | S-112, S-120, S-122 |
+| [S-124](S-124-documentation-teams-routing-to-teams-and-what-critical-changes.md) | C-26 | Documentation: Teams with a worked example, Routing to Teams, and "What critical changes" | docs | S-123 |
+| [S-125](S-125-compact-layout-in-mattermost-slack-and-telegram-with-labels-in-the-message.md) | C-29 | The compact message layout in Mattermost, Slack and Telegram, with "Labels in the message" (BE) | be | S-113, S-118 |
+| [S-126](S-126-layout-in-the-bridge-protocol-the-bridge-adapter-and-the-fake-bridge.md) | C-29 | The structured layout in the Bridge protocol, the Bridge adapter, muster bridge check and the fake bridge (BE) | be | S-125 |
+| [S-127](S-127-go-bridge-library-types-for-layout.md) | C-29 | Types for the message layout in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-126 |
+| [S-128](S-128-python-bridge-library-types-for-layout.md) | C-29 | Types for the message layout in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-126 |
+| [S-129](S-129-labels-in-the-message-and-the-preview-for-every-markup.md) | C-29 | "Labels in the message" on the Route form, and the preview of the compact layout for every markup (FE) | fe | S-126 |
+| [S-130](S-130-documentation-message-layout-per-messenger-and-layout-for-bridge-authors.md) | C-29 | Documentation: the message layout in each messenger, "Labels in the message", and layout for bridge authors | docs | S-129, S-127, S-128 |
+
+### L2 On call
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-131](S-131-schedules-rotation-layers-overrides-the-on-call-and-the-result.md) | C-27 | Schedules, Rotation layers, Overrides with their Permission and precondition, the On-call and the Result (BE) | be | S-115 |
+| [S-132](S-132-spike-telegram-muted-discussion-groups-and-getchatmember.md) | C-27 | Spike: Telegram's muted discussion groups and getChatMember for people | docs | — |
+| [S-133](S-133-gaps-the-leader-gap-scan-musterschedulegap-and-on-call-now.md) | C-27 | Gaps of Schedules, the Leader's gap scan with MusterScheduleGap, its chart rule and runbook, and On call now (BE) | be | S-118, S-131 |
+| [S-164](S-164-warnings-about-unreachable-on-calls.md) | C-27 | Warnings about unreachable On-calls, with the members of a Telegram discussion group (BE) | be | S-121, S-132, S-133 |
+| [S-134](S-134-the-personal-ical-feed-with-its-token.md) | C-27 | The personal iCal feed of On-call times with its token (BE) | be | S-131 |
+| [S-135](S-135-schedule-page-two-week-view-rotation-layers-overrides-and-warnings.md) | C-27 | The Schedule page with its two-week view, Rotation layers, Overrides with the Override form, and warnings (FE) | fe | S-119, S-133, S-164 |
+| [S-136](S-136-schedules-on-the-team-page-on-call-now-and-the-ical-section.md) | C-27 | Schedules on the Team page, On call now on the Home page, the Team page and the Teams list, and the iCal section (FE) | fe | S-134, S-135 |
+| [S-137](S-137-documentation-schedules.md) | C-27 | Documentation: Schedules with Rotation layers, several Schedules, Overrides, gaps and the iCal feed | docs | S-136 |
+| [S-138](S-138-spike-mattermost-groups-and-slack-user-groups.md) | C-25 | Spike: Mattermost groups and Slack user groups — reading them, mentioning them, and everyone from a bot | docs | — |
+| [S-139](S-139-team-mentions-with-the-connections-checks-and-connection-groups.md) | C-25 | Team mentions per Connection, with the groups a Connection reads and the group mentions a bridge declares (BE) | be | S-115, S-119, S-126, S-138 |
+| [S-140](S-140-mention-entries-their-resolution-the-migration-of-the-l1-settings-and-storm-started.md) | C-28 | Mention entries with their Loud events and their resolution, the migration of the L1 Mention settings, and storm_started (BE) | be | S-121, S-131, S-139 |
+| [S-165](S-165-undelivered-mentions-in-the-timeline-and-the-destination-warnings.md) | C-28 | Undelivered Mentions in the Timeline and the warnings of a Destination (BE) | be | S-140 |
+| [S-141](S-141-go-bridge-library-group-and-everyone-mentions.md) | C-28 | Group mentions and mentions of everyone in the chat in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-140, S-127 |
+| [S-142](S-142-python-bridge-library-group-and-everyone-mentions.md) | C-28 | Group mentions and mentions of everyone in the chat in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-140, S-128 |
+| [S-143](S-143-mentions-grid-of-the-destination-form-and-how-to-mention-the-team.md) | C-28 | The Mentions grid of the Destination form with its warnings and What each messenger supports, and How to mention the Team (FE) | fe | S-114, S-119, S-140, S-165 |
+| [S-144](S-144-documentation-whom-a-message-mentions-and-team-mentions.md) | C-28 | Documentation: whom a message mentions, with the entries, what each messenger supports and Team mentions | docs | S-132, S-143 |
+
+### L2 Paging
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-145](S-145-the-role-gateway-in-the-bridge-protocol-the-check-and-the-fake-gateway.md) | C-30 | The role gateway in the Bridge protocol, sendNotification and notification_acknowledged, the check of the role and the fake gateway (BE) | be | S-166 |
+| [S-167](S-167-contacts-at-notification-gateways-confirmed-by-a-code.md) | C-30 | Contacts at Notification gateways confirmed by a code, erased with their User and masked in the Request log (BE) | be | S-136, S-145 |
+| [S-146](S-146-go-bridge-library-the-role-gateway.md) | C-30 | The role gateway in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-145, S-141 |
+| [S-147](S-147-python-bridge-library-the-role-gateway.md) | C-30 | The role gateway in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-145, S-142 |
+| [S-148](S-148-the-queue-of-calls-with-combining-and-the-acknowledge-of-the-transport-gateway.md) | C-30 | The queue of calls through Notification gateways with combining and retries, and the Acknowledge of the Transport gateway (BE) | be | S-167 |
+| [S-149](S-149-broken-notification-gateways-with-their-internal-alert-chart-rule-and-runbook.md) | C-30 | Broken Notification gateways with MusterNotificationGatewayBroken, its chart rule and runbook, and the probe (BE) | be | S-148 |
+| [S-150](S-150-contact-for-calls-in-the-profile-roles-and-health-of-a-gateway-and-a-users-contacts.md) | C-30 | The contact for calls and SMS in the profile, the roles and health of a Notification gateway, and a User's contacts (FE) | fe | S-136, S-149 |
+| [S-151](S-151-documentation-connecting-a-notification-gateway-and-writing-a-gateway-bridge.md) | C-30 | Documentation: connecting a Notification gateway, confirming a contact and writing a gateway bridge | docs | S-130, S-146, S-147, S-150 |
+| [S-152](S-152-notification-rules-their-defaults-and-the-switch.md) | C-31 | Notification rules, the Organization's defaults, the four states and the switch that adds a call (BE) | be | S-167 |
+| [S-153](S-153-notification-rules-in-the-profile-on-a-users-page-and-the-organizations-defaults.md) | C-31 | Notification rules in the profile with the switch, on a User's page, and the Organization's defaults (FE) | fe | S-150, S-152 |
+| [S-154](S-154-escalation-chains-and-steps-and-naming-them-on-routes-and-teams.md) | C-32 | Escalation chains and their steps, naming them on Routes and Teams with Severity conditions, and the refusals that protect them (BE) | be | S-140, S-145 |
+| [S-169](S-169-the-lifecycle-of-escalation-chains-with-the-ack-timeout-unclaimed-and-skipped-steps.md) | C-32 | The lifecycle of Escalation chains on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps (BE) | be | S-154 |
+| [S-155](S-155-pages-by-mention-in-the-threads-of-their-chains-notification-rule-runs-and-undelivered-pages.md) | C-32 | Pages by Mention in the Threads of their own chains, the runs of Notification rules, and undelivered Pages (BE) | be | S-152, S-164, S-165, S-169 |
+| [S-168](S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md) | C-32 | Assignees — the people the chains Paged last — in the Root message and the layout, the Owner's Team, and the Assignee filter (BE) | be | S-126, S-155 |
+| [S-156](S-156-the-step-send-to-an-outgoing-webhook-and-escalation-webhook.md) | C-32 | The step "Send to an outgoing webhook" and the event escalation_webhook (BE) | be | S-169 |
+| [S-157](S-157-pages-through-a-notification-gateway-from-escalation-steps-and-notification-rules.md) | C-32 | Pages through a Notification gateway from Escalation steps and Notification rules, queued as calls (BE) | be | S-149, S-156, S-168 |
+| [S-158](S-158-the-chain-page-with-how-it-went-and-the-chains-on-the-route-form-and-the-team-page.md) | C-32 | The Escalation chain page with its steps and "How it went", and the chains on the Route form and the Team page (FE) | fe | S-123, S-150, S-157 |
+| [S-159](S-159-running-chains-and-assignees-on-the-alert-group-page-the-assignee-filter-and-i-am-an-assignee.md) | C-32 | Running chains and Assignees on the Alert Group page at phone width, the Assignee filter, and "I am an Assignee" on the Home page (FE) | fe | S-158, S-168 |
+| [S-160](S-160-spike-push-of-mentions-in-thread-replies.md) | C-32 | Spike: push of Mentions in Thread replies to a phone in Mattermost, Slack and Telegram | docs | — |
+| [S-161](S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md) | C-32 | Documentation: Escalation chains, Notification rules and How an alert reaches people | docs | S-124, S-137, S-151, S-153, S-157, S-159, S-160 |
+
+S-162, S-163 and S-166 were split or added when the contracts of the stage "L2 Teams" were written and reviewed.
+S-162, the Route profile Paging, was split from S-111, because the profile's id appears in thirteen web end-to-end
+specs and together with the Minimum severity the story touched about 55 files; it follows S-111, and S-112 depends on
+it. S-163 was split from S-118, which with it touched about 50 files: S-118 keeps the Team label, the Team matchers and
+the Teams of Alerts and Alert Groups, and S-163 takes the values of the Team label seen without a Team and the
+evaluation of open Alert Groups when a Team is saved; it follows S-118, and S-121 and S-120 depend on it. S-121 and
+S-122 come before S-119, whose Team page shows the Destinations of a Team. S-166 was added by the review of those
+contracts: the web tests build Destination and Connection reads by hand, so every backend story that adds a required
+field to them would break the TypeScript check of its own pull request; S-166 moves those reads into shared builders
+that later stories extend, and it comes first. In the stage "L2 On call", S-164 was split from S-133 at the contract
+boundary of C-27.FR-8 — the gaps, the gap scan and "On call now" need no messenger, while the warnings about
+unreachable On-calls need every Destination type — and S-165 from S-140, at the boundary between whom a message
+mentions and what is recorded when it cannot; each follows the story it was split from.
+
+In the stage "L2 Paging", S-167, S-168 and S-169 were split when the contracts were written, each because its story
+would have touched about 45 to 50 files. S-167 was split from S-145: S-145 keeps the protocol of the role `gateway`,
+its check and the fake gateway, which the bridge libraries need, and S-167 takes the contacts with their code, their
+limits, their erasure with a User and their masking in the Request log; it follows S-145 and comes before the
+libraries, S-146 and S-147, which need only S-145. S-169 was split from S-154: S-154 keeps the chains as
+configuration — their steps, naming them on Routes and Teams and the refusals that protect them — and S-169 takes
+their lifecycle on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps; it follows S-154.
+S-168 was split from S-155: S-155 keeps the Pages by Mention, the runs of Notification rules and undelivered Pages, and
+S-168 takes the Assignees, item 7 of the Root message and `layout`, the Owner's Team and the Assignee filter; it
+follows S-155, and S-157 and S-159 depend on it. The runs of Notification rules, which the first plan gave
+S-152, moved to S-155 (Mentions) and S-157 (calls), because a run only Pages people once Escalation steps Page them;
+S-152 keeps the rules, their defaults and their states. The spike on the push of Mentions, S-160, depends on nothing
+and may run at any time; only the documentation of S-161 waits for it.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

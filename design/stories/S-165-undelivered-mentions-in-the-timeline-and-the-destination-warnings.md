@@ -159,5 +159,5 @@ None.
 | C-28.AC-3 | partial | the record for a bridge without `native_mentions` |
 | C-28.AC-4 | full | |
 | C-11.FR-21 | full | revised for L2: "Mention not delivered" |
-| C-12.FR-12 | partial | revised for L2: the record and the warning of an unlinked person; the Assignees are S-155 |
+| C-12.FR-12 | partial | revised for L2: the record and the warning of an unlinked person; the Assignees are S-168 |
 | C-22.FR-16 | partial | revised for L2: the record of a linked person named by the plain name |

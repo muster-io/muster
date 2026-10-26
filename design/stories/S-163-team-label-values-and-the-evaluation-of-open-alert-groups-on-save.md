@@ -55,7 +55,7 @@ issue: null
 
 - The Destinations that a Team brings, which receive the Alert Group Quietly (the second half of C-25.FR-13 and of
   C-25.AC-13): S-121.
-- Escalation chains, which the evaluation never starts: S-154 keeps it so.
+- Escalation chains, which the evaluation never starts: S-169 keeps it so.
 - The Teams page with "Unknown values of {team label}" and "Create Team": S-120.
 
 ## Contracts

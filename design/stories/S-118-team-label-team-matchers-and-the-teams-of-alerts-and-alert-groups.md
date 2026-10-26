@@ -58,7 +58,7 @@ acceptance:
   - "[C-25.FR-6, C-06.FR-19, C-09.FR-11, C-09.FR-13] `getAlertGroup` and `listAlertGroups` carry `teams` — each with the Team, the rule, the matcher and when it joined, a deleted Team marked `deleted` with its name; `listAlertGroupAlerts` and `listIntegrationAlerts` carry the `teams` of each Alert; `listAlertGroups` and `getAlertGroupCounts` take `team` (a Team's `public_id` or `mine`) and match the Alert Groups that have it among their Teams (`alertgroups_test.go`)."
   - "[C-25.FR-2, C-25.AC-11] With `team=mine`, a User in \"payments\" and not in \"search\" lists the Alert Groups that have \"payments\" among their Teams and not those of \"search\"."
   - "[C-25.FR-10, C-25.AC-9] After a Team is deleted, an Alert Group that had it among its Teams still lists it by name, with `deleted` true, and its slug no longer gives Alerts that Team (`teams_integration_test.go`)."
-  - "[C-15.FR-2, C-09.FR-22] Outgoing webhooks in events mode receive `team_joined` and `unknown_team_value` one to one, and the `alert_group` of every event carries `teams` with the id, name and slug of each Team (`body_test.go`)."
+  - "[C-15.FR-2, C-09.FR-22] Outgoing webhooks in events mode receive `team_joined` and `unknown_team_value` one to one — `webhook_events_event_v2_check` accepts both — and the `alert_group` of every event carries `teams` with the id, name and slug of each Team (`body_test.go`, `db_test.go`)."
   - "[C-25.FR-12] Concepts → Teams has the sections \"Which Alerts belong to a Team\" — the Team label, Team matchers on any label, test clusters with one shared namespace — and \"Values without a Team\", and the page on outgoing webhook events names the new events and `teams`; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -119,6 +119,9 @@ issue: null
     system events and the system rule are replaced by `_v2` ones with `team_joined` (kind `alerts`) and
     `unknown_team_value` (kind `system`, with the same `system_event`), each `NOT VALID` and validated in a second
     transaction, the old ones dropped in a third, as `0018` does for its transport CHECKs.
+  - `webhook_events`: the CHECK of `event` from `0001` is replaced by `webhook_events_event_v2_check` with
+    `team_joined` and `unknown_team_value`, in the same three transactions, so that events mode can store them; the
+    down migration restores it after deleting the rows of the two events.
 - **Teams** (`internal/teams`): the matchers in the Team's input, view and diff, compiled with `internal/matchers`;
   `classify.go` — the Organization's Team label, the slugs of the Teams that are not deleted and their matchers,
   compiled and cached per replica under `teams_version` — answers for a set of labels the Teams with their rules and
@@ -250,6 +253,6 @@ None.
 | C-09.FR-11 | partial | revised for L2: `team_joined` and `unknown_team_value` in the Timeline; the page is S-120 |
 | C-09.FR-13 | partial | revised for L2: the Teams filter in the API; the column and filter on the page are S-120 |
 | C-09.FR-22 | partial | revised for L2: `team_joined`, `unknown_team_value`; `destination_joined` is S-121, the events of C-32 later |
-| C-11.FR-20 | partial | revised for L2: delivery turns `team_joined` into a Root message update and `unknown_team_value` into nothing; the entries' Mentions are S-140, the events of C-32 S-155 |
+| C-11.FR-20 | partial | revised for L2: delivery turns `team_joined` into a Root message update and `unknown_team_value` into nothing; the entries' Mentions are S-140, the events of C-30 and C-32 S-148, S-169, S-155, S-168 and S-156 |
 | C-15.FR-2 | partial | revised for L2: the Teams and the two events; `destination_joined` S-121, Assignees and `escalation_webhook` later |
 | C-20.FR-1 | partial | revised for L2: the Team label in the API; the General page is S-120 |

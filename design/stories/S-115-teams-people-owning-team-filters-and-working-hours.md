@@ -142,7 +142,7 @@ issue: null
   and Destinations in the same transaction (each with its own Audit log entry `route.updated` and
   `destination.updated` by the system) and, until S-131 and S-154, refuses nothing. `workinghours.go` holds
   `WorkingHours`, the validation, `Effective(team, org)` — the Team's own or the Organization's — and `Contains(t)`,
-  which the Escalation steps of S-154 use. "My Teams" is resolved from `team_users` of the caller's User.
+  which the Escalation steps of S-154 and S-169 use. "My Teams" is resolved from `team_users` of the caller's User.
 - **Routing and Destinations**: `owning_team_id` in their inputs, views, Audit log diffs and list filters; neither adds
   delivery (C-26.FR-7).
 - **Organization** (`internal/organization`): `working_days` and `workday_end` in the read, update, validation,
@@ -257,7 +257,7 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
 | C-25.FR-1 | partial | the Team, its people by hand and Working hours; identity provider entries S-117, Team matchers S-118, Team mentions S-139 |
 | C-25.FR-2 | partial | the owning Team of Routes and Destinations and their filters; the Alert Group list S-118, the pages S-119, chains S-154 |
 | C-25.FR-3 | partial | the API; the page is S-119 |
-| C-25.FR-9 | partial | the API; the pages are S-119, the Escalation steps S-154 |
+| C-25.FR-9 | partial | the API; the pages are S-119, the Escalation steps S-154 and S-169 |
 | C-25.FR-10 | partial | deletion and the owned objects; Alert Groups that had the Team S-118, the refusal for Schedules S-131 and chains S-154 |
 | C-25.FR-11 | partial | locking, the Audit log and `muster_team_info`; identity provider entries S-117, Team matchers S-118, Team mentions S-139 |
 | C-25.FR-12 | partial | the first sections of the page; S-117, S-118, S-124 and S-144 complete it |
@@ -266,7 +266,7 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
 | C-25.AC-9 | partial | deletion and the Route without owner; the Alert Group S-118, the Schedule S-131 |
 | C-25.AC-11 | partial | Routes and Destinations in the API; Alert Groups S-118, the pages S-119 and S-120 |
 | C-25.AC-12 | full | |
-| C-03.FR-13 | partial | revised for L2: out of every Team; gateway contacts are S-145 |
+| C-03.FR-13 | partial | revised for L2: out of every Team; gateway contacts are S-167 |
 | C-08.FR-1 | partial | revised for L2: the owning Team |
 | C-20.FR-1 | partial | revised for L2: the Working hours in the API; the General page is S-119 |
 | C-20.FR-9 | partial | revised for L2: the start of the working day starts the Organization's Working hours; the General page is S-119 |

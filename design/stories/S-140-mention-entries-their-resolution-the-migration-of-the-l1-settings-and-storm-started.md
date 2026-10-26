@@ -91,7 +91,7 @@ issue: null
 - The Mentions grid of the Destination form, "What each messenger supports" and "How to mention the Team": S-143. The
   documentation's completion: S-144.
 - The libraries' types for `Mention.kind` and the new `info` fields: S-141, S-142.
-- The `paged` people of Escalation steps in webhook data and the Assignees named in the layout: S-155.
+- The `paged` people of Escalation steps in webhook data: S-155; the Assignees named in the layout: S-168.
 
 ## Contracts
 
@@ -279,9 +279,9 @@ of C-28.AC-5 is checked by `make test-integration`, which migrates a database fr
 | C-26.FR-1 | partial | the Mention entry that naming a Destination of the Team adds |
 | C-26.FR-5 | partial | the Mentions of the entries for `new_alert_group` in `destination_joined` |
 | C-11.FR-6 | partial | revised for L2: `storm_started` |
-| C-11.FR-20 | partial | revised for L2: the Mentions of the entries; the lifecycle events of C-32 come with S-155 |
+| C-11.FR-20 | partial | revised for L2: the Mentions of the entries; the lifecycle events of C-32 come with S-155, S-156, S-168 and S-169 |
 | C-12.FR-8 | partial | revised for L2: the entries; the form is S-143 |
-| C-12.FR-12 | partial | revised for L2: an unlinked person left out; the record is S-165, the Assignees S-155 |
+| C-12.FR-12 | partial | revised for L2: an unlinked person left out; the record is S-165, the Assignees S-168 |
 | C-13.FR-8 | full | revised for L2: Mattermost groups and Team mentions |
 | C-15.FR-11 | partial | revised for L2: Teams and the On-call as targets; the people of `paged` are S-155 |
 | C-17.FR-2 | full | revised for L2 |

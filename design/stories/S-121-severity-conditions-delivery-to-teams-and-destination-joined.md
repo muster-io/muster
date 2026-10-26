@@ -56,7 +56,7 @@ acceptance:
   - "[C-26.FR-6, C-26.AC-6, C-11.FR-14, C-25.FR-10] Changing a Route Destination's condition from `critical` to `any` publishes the Route's open warning Alert Groups there Quietly, within its limiters, and records no `destination_joined`; changing it back removes none; naming a Destination of a Team or turning `deliver_to_teams` on publishes the open Alert Groups it now reaches Quietly through an `open_group_updates` row of the kind `team_destinations` or the Route's membership hook; a Destination taken off a Route or a Team, or reached no longer because `deliver_to_teams` was turned off, gets the final edit \"No longer updated here\" for each open Alert Group for which no entry that still exists — of its Route or, with `deliver_to_teams`, of its Teams — names that Destination, met or not; deleting a Team does the same for the Team's Destinations; a Destination whose remaining entry is named but not met now keeps its Root message, current until the final state (`membership_test.go`, `updates_test.go`)."
   - "[C-26.FR-7, C-26.AC-10] A Route owned by \"payments\" without `deliver_to_teams` delivers an Alert Group of `team=\"payments\"` only to its own Destinations (`reach_test.go`)."
   - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined` (`updates_test.go`, `routing_teams_test.go`)."
-  - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined."
+  - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined; `webhook_events_event_v3_check` accepts it (`db_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-13] The documentation has the page Concepts → Routing to Teams with the operations and team channels by Severity, the note that the feature is optional, one status in every channel, the Team label in the Group key for teams that want their own Alert Groups, and a Route for test clusters; the upgrade notes of 0.2.0 say that `destination_ids` is derived from `destination_entries` until 0.3.0; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -71,7 +71,7 @@ issue: null
 
 - Destination entries with a Severity condition on Routes and on Teams (the Destinations of a Team), and the Route
   options "Also to the Teams from the label" (`route.deliver_to_teams`) and "Run the Teams' Escalation chains"
-  (`route.run_team_chains`, stored; it acts from S-154) (C-26.FR-1, FR-2).
+  (`route.run_team_chains`, stored; it acts from S-169) (C-26.FR-1, FR-2).
 - The Destinations an Alert Group reaches: one Root message per Destination, Destinations that only grow, and the
   lifecycle event `destination_joined` (C-26.FR-3 to FR-5, C-09.FR-22 revised).
 - Storms per Route and Destination, Team Destinations included (C-11.FR-6, revised).
@@ -87,7 +87,7 @@ issue: null
 - The Route form with the entries, the option and the preview; the Destinations of the Team on its page; the delivery
   state by entry on the Alert Group page: S-123. The preview "Where alerts go": S-122.
 - The Mention entry "Team {Team}" that naming a Destination of the Team adds (C-28.FR-6): S-140.
-- The Escalation chains of Teams and `run_team_chains` acting on them: S-154.
+- The Escalation chains of Teams: S-154; `run_team_chains` acting on them: S-169.
 - How a Maintenance window delays `destination_joined`: specified later in L2.
 
 ## Contracts
@@ -116,6 +116,8 @@ issue: null
     `{"kind": "route"}` or `{"kind": "team", "team_id": N}`, with the condition at that time.
   - `timeline_entries.destination_id`; the CHECKs of events, event kinds, system events and the system rule are
     replaced by `_v3` ones with `destination_joined` (kind `system`, the same `system_event`), as S-118's `_v2`.
+  - `webhook_events_event_v3_check` adds `destination_joined` to S-118's `_v2`, `NOT VALID`, validated, the old one
+    dropped, so that events mode can store it.
   - The CHECK of `open_group_updates.kind` gains `team_destinations` (with the Team); `NOT VALID`, then validated.
 - **Reach** (`internal/groups/reach.go`): the Destinations an Alert Group reaches now — its Route's entries whose
   condition its Severity level meets and, with `deliver_to_teams`, the entries of each of its Teams (C-25.FR-6) whose
@@ -240,7 +242,7 @@ None.
   event, and delivery follows it.
 - `deliveries.entries` keeps the entries that once reached a Destination, so the delivery state can say why an Alert
   Group is in a channel after its Severity level fell or its Team's Alerts resolved.
-- `run_team_chains` is stored and returned now and acts once Escalation chains exist (S-154).
+- `run_team_chains` is stored and returned now and acts once Escalation chains run (S-169).
 - `destination_ids` stays in the API until 0.3.0 (L2.md §2 "Expand and contract").
 
 ## Coverage
@@ -248,7 +250,7 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-26.FR-1 | partial | the entries in the API; the forms are S-123, the Mention entry of a Team Destination S-140 |
-| C-26.FR-2 | partial | delivery to the Teams; the form is S-123, the chains S-154 |
+| C-26.FR-2 | partial | delivery to the Teams; the form is S-123, the chains S-169 |
 | C-26.FR-3 | full | |
 | C-26.FR-4 | full | |
 | C-26.FR-5 | partial | `destination_joined` and Storms; the Mentions of the entries for `new_alert_group` are S-140 |

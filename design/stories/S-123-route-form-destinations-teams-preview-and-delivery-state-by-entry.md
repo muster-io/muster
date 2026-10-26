@@ -146,7 +146,7 @@ None.
 - Suggested commit: `feat(web): route to the teams from the label with severity conditions and a delivery preview`.
 - The approved Route mockup chooses one Escalation chain; that part is S-158's and follows C-32.FR-2 (L2.md §5.2).
 - "Run the Teams' Escalation chains" is on the form from now on, as the API stores it (S-121); it acts once chains
-  exist (S-154).
+  run (S-169).
 
 ## Coverage
 

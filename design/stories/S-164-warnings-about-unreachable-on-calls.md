@@ -57,7 +57,7 @@ issue: null
 **OUT**
 
 - The Destinations in whose Threads the Escalation chains that Page a Schedule write (C-32.FR-8), which the warning
-  covers from S-155; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-145.
+  covers from S-155; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-167.
 - The pages that show the warnings: S-135 and S-136.
 
 ## Contracts
@@ -161,7 +161,7 @@ thread" (`webhook_no_thread_reply`), and a Telegram Destination of the Team with
 
 | ID | Covered | Note |
 |---|---|---|
-| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-155, gateway calls S-145, the pages S-135 and S-136 |
+| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-155, gateway calls S-167, the pages S-135 and S-136 |
 | C-27.FR-9 | partial | the unreachable marks in the API; the pages are S-136 |
 | C-27.FR-14 | partial | "Unreachable On-calls" |
 | C-27.AC-6 | partial | the API; the marks on the Schedule page S-135 and in "On call now" S-136 |

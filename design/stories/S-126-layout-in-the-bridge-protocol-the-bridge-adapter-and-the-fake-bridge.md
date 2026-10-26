@@ -51,7 +51,7 @@ issue: null
 
 - The types for `layout` in the Go and Python bridge libraries: S-127, S-128 (in their repositories).
 - The guide for bridge authors with an example of rendering `layout` natively: S-130.
-- The Assignees, which appear from S-155; until then `assignees` is empty and `owner` is set while the Alert Group is
+- The Assignees, which appear from S-168; until then `assignees` is empty and `owner` is set while the Alert Group is
   acknowledged.
 
 ## Contracts
@@ -128,7 +128,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-29.FR-1 | partial | the layout through a Bridge; the Assignees are S-155 |
+| C-29.FR-1 | partial | the layout through a Bridge; the Assignees are S-168 |
 | C-29.FR-4 | partial | the Bridge envelope |
 | C-29.FR-6 | partial | the cut of `layout` with the body |
 | C-29.FR-8 | partial | the protocol, the adapter and the check; the libraries are S-127 and S-128 |
