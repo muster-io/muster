@@ -9,6 +9,10 @@
   account found by its handle, as Mattermost does; their Identity space is one Bridge Connection
 - Amended: 2026-10-19 — Slack Connections (journal D382) link by a code that the bot sends by direct message to the
   account found by its email or name, as Mattermost does; their Identity space is one Slack Connection
+- Amended: 2026-10-26 — for L2 (journal D485, D517, D518): the contact of a person at a Notification gateway is guarded
+  like an Account link: only that person sets it, from their signed-in web session, and confirms it with a code that
+  Muster sends through the gateway itself; an Admin sees and removes contacts but never sets one; an acknowledgement
+  through a gateway acts as the person the Page was for, taken from Muster's signature, not from the contact
 
 ## Context
 
@@ -60,6 +64,15 @@ the owner of the messenger account — never the other way round.
    tracked in the first release.
 7. The Audit log records `link`, `unlink` (by whom, from where) and `link_rejected` (conflict, expired token, wrong
    code), with the User, the messenger, the external id and username, and the Connection.
+
+**Notification gateway contacts (L2).** A person can be Paged through a Notification gateway (ADR-0018) at a contact,
+such as a phone number, and an acknowledgement given there acts as that person, so the contact is guarded like an
+Account link. Only the person sets it, from their signed-in web session, and confirms it with a code that Muster sends
+through the gateway itself, as a test call or message through the same request that Pages people; the code travels from
+Muster to the contact and is typed back into the session that asked for it, on the interactive path (ADR-0005). An Admin
+sees and removes contacts but never sets one, so nobody can tie their own number to someone else's User. Muster takes
+the actor of an acknowledgement from the action data it signed for the Page, never from the number the answer came from,
+so contacts form no Identity space (ADR-0017; journal D485, D517, D518).
 
 **Presses from unlinked accounts** do nothing except answer privately — in Mattermost with an ephemeral message, in
 Telegram with `answerCallbackQuery` — that the account is not linked, with a link to the Muster profile. The link

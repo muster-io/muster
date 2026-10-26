@@ -11,6 +11,10 @@
 - Amended: 2026-10-17 — the example bridge moves out of this repository: it lives, with the bridge libraries for Go and
   Python, in repositories of their own under MIT without a CLA, and `NOTICE` names only `api/bridge.yaml` as an MIT
   part of this repository ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
+- Amended: 2026-10-26 — for L2 (journal D492, D506, D535): the API specification `api/openapi.yaml` becomes MIT as well,
+  like `api/bridge.yaml`, with the L2 change of the specification, so that the Terraform provider — MIT, in a repository
+  of its own — generates its client from a copy of it; the cost is that anyone may generate a closed server compatible
+  with Muster's API from it; until that change, its `info.license`, `api/README.md` and `NOTICE` still say AGPL-3.0-only
 
 ## Context
 
@@ -44,6 +48,15 @@ storing signatures in a branch of the repository.
 **No copied copyleft code.** Code is never copied from copyleft projects, Grafana OnCall included; such projects may
 only be read as a source of ideas. Code from permissively licensed projects (for example the MIT-licensed parts of
 KeepHQ) may be ported with attribution in `NOTICE`.
+
+**Specifications under MIT.** The Bridge protocol specification `api/bridge.yaml` (ADR-0017) is licensed MIT, as an
+exception to the product license, and the API specification `api/openapi.yaml` becomes MIT with the L2 change of the
+specification, which changes its `info.license`, `NOTICE` and `api/README.md` at the same time; until then they say
+AGPL-3.0-only. Both are MIT so that bridges, the Terraform provider and any other client generated from them may carry
+any license (journal D506). Contributions to them fall under the CLA like any other file, which is what allows the
+change. The Terraform provider lives in a repository of its own, `muster-io/terraform-provider-muster`, under MIT
+without a CLA, like the bridge libraries: it keeps a copy of the specification that its CI compares with Muster's,
+generates its client from that copy, and states which versions of Muster it works with (journal D492, D535).
 
 **Dependencies of shipped artifacts.** Everything Muster distributes — the binary, the container image, the embedded
 SPA bundle and the Helm chart — may depend, directly or transitively, only on these licenses:
@@ -85,6 +98,8 @@ OSI-approved license**. Packages that contain only data and no code (for example
   comes from `caniuse-lite` (CC-BY-4.0, a data-only package). All three are allowed as tooling.
 - Adding a dependency is a reviewed decision: the pull request states its license, latest release date and maintenance
   status.
+- From L2 anyone may generate a closed server compatible with Muster's API from its MIT specification; what such a
+  server would have to rebuild — the behaviour behind the API — stays under the AGPL (journal D535).
 
 ## Alternatives considered
 
