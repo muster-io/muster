@@ -5,11 +5,12 @@
 - Amended: 2026-10-03 — Unclaimed ends when the Alert Group stops being firing: acknowledged, snoozed or resolved; a
   Reopen is keyed by the Route and the Group key values, so any Alert with the same key reopens the Alert Group;
   the Owner is always a User — a Service account cannot acknowledge
-- Amended: 2026-10-26 — for L2 (journal D487, D507, D508, D518, D528, D535, D546, D547): Escalation chains start, start
-  over and stop where the ack timeout does and replace its notices where they run, and an Alert Group is Unclaimed once
-  every chain started on it has run out; Acknowledge, Snooze and Resolve clear the Assignees; an acknowledgement through
-  a Notification gateway applies only while nobody owns the Alert Group; a Route may let new Alerts remove the
-  acknowledgement; an Alert Group attached to another follows its status; Urgent means critical (ADR-0003)
+- Amended: 2026-10-26 — for L2 (journal D487, D507, D508, D518, D528, D535, D546, D547, D555, D556): Escalation chains
+  start, start over and stop where the ack timeout does and replace its notices where they run, and an Alert Group is
+  Unclaimed once every chain started on it has run out; Acknowledge, Snooze and Resolve clear the Assignees; an
+  acknowledgement through a Notification gateway applies only while nobody owns the Alert Group; a Route may let new
+  Alerts remove the acknowledgement; an Alert Group attached to another follows its status; Urgent means critical
+  (ADR-0003)
 
 ## Context
 
@@ -103,24 +104,26 @@ an acknowledgement or a Snooze.
 
 **Timers.** The ack timeout runs only while the Alert Group is firing. It starts at the Alert Group's publication and
 starts over whenever the Alert Group becomes firing again — a Reopen into firing, Unacknowledge, Unsnooze, Unresolve, a
-Snooze ending, a rise to Urgent; Acknowledge, Snooze and Resolve stop it. Its notices come at doubling intervals — 15,
-30 and 60 minutes, that is 15, 45 and 105 minutes after the timer started — and there are at most three; after that the
-Alert Group is shown as Unclaimed until it stops being firing — acknowledged, snoozed or resolved. Reminders to the
-Owner start after 4 hours and double up to 24 hours; when the Owner answers a Reminder, the interval does not reset; a
-Takeover starts them over for the new Owner; snoozed Alert Groups get no Reminders. Timers are rows with deadlines that
-any replica may claim (ADR-0006, ADR-0007).
+Snooze ending, a rise to Urgent and, from L2, new Alerts that remove the acknowledgement where the Route allows it;
+Acknowledge, Snooze and Resolve stop it. Its notices come at doubling intervals — 15, 30 and 60 minutes, that is 15, 45
+and 105 minutes after the timer started — and there are at most three; after that the Alert Group is shown as Unclaimed
+until it stops being firing — acknowledged, snoozed or resolved. Reminders to the Owner start after 4 hours and double
+up to 24 hours; when the Owner answers a Reminder, the interval does not reset; a Takeover starts them over for the new
+Owner; snoozed Alert Groups get no Reminders. Timers are rows with deadlines that any replica may claim (ADR-0006,
+ADR-0007).
 
 **Escalation chains (L2).** An Escalation chain (ADR-0018) runs only while the Alert Group is firing and shares the ack
 timeout's points: it starts at the Alert Group's Publication — or when the Alert Group is created, if no Destination can
 publish it because there is none or all are Broken — starts over whenever the Alert Group becomes firing again, on the
 same events as the ack timeout, and stops on Acknowledge, Snooze and Resolve; so when a Snooze ends on a firing Alert
 Group that nobody owns, its chains start again (journal D487, D507, D528). In a Storm, a chain waits for its Alert
-Group's own Publication, and a Maintenance window holds it. A rise in Severity level of a firing Alert Group restarts no
-running chain; it starts the chains whose Severity condition it now meets, and a Team that joins starts its own. When
-the first chain starts, a running ack timeout stops and sends no more notices; an Alert Group without a chain keeps the
-ack timeout. The Alert Group is Unclaimed once every chain started on it has run out without an acknowledgement (journal
-D535). Steps are timer rows like the ack timeout. The **Assignees** — the people the running chains Paged last — are
-cleared by Acknowledge, Snooze and Resolve and change only through system transitions (ADR-0016; journal D508).
+Group's own Publication, and a Maintenance window keeps it waiting. A rise in Severity level of a firing Alert Group
+that nobody owns restarts no running chain; it only starts the chains whose Severity condition it now meets, such as
+those for critical only (journal D555), and a Team that joins starts its own where the Route runs the chains of Teams.
+When the first chain starts, a running ack timeout stops and sends no more notices; an Alert Group without a chain keeps
+the ack timeout. The Alert Group is Unclaimed once every chain started on it has run out without an acknowledgement
+(journal D535). Steps are timer rows like the ack timeout. The **Assignees** — the people the running chains Paged last
+— are cleared by Acknowledge, Snooze and Resolve and change only through system transitions (ADR-0016; journal D508).
 
 **Auto-unacknowledge.** A Route setting, off by default, takes an Alert Group back from an Owner who has stopped
 responding. The Owner answers a Reminder by pressing "Still on it", by running any command on the Alert Group or by
@@ -129,13 +132,15 @@ the next Reminder is not sent; instead the system unacknowledges the Alert Group
 without an Owner, a Loud Thread reply gives the reason and mentions the Owner, and the ack timeout starts over. Like
 every transition Muster starts itself, it goes through the dispatcher with the Transport `system`.
 
-**Attaching (L2).** A person may attach an Alert Group to another one that stands for the same problem, and detach it
-again at any time, from the UI or through the API. The attached Alert Group follows the other one: Acknowledge, Snooze
-and Resolve of the main Alert Group apply to it too, its own Escalation chains and timers stop, its Root messages shrink
-to a line that names the main Alert Group with a link and carry no buttons, and its Alerts are shown on the main Alert
-Group's page. Once detached, it lives on its own again with the current state of its own Alerts. Following the main
-Alert Group is a system transition (ADR-0016); the preconditions are in the L2 PRD. Several teams working on one problem
-together is a matter for Incidents in L3 (journal D547).
+**Attaching (L2).** With the commands Attach and Detach, a person puts an Alert Group under another one that stands for
+the same problem, its main Alert Group, and lets it live on its own again at any time, from the UI or through the API.
+The attached Alert Group follows the main one: Acknowledge, Snooze and Resolve of the main Alert Group apply to it too,
+its own Escalation chains and timers stop, its Root messages shrink to a line that names the main Alert Group with a
+link and carry no buttons, and its Alerts are shown on the main Alert Group's page. Once detached, it lives on its own
+again with the current state of its own Alerts. Following the main Alert Group is a system transition (ADR-0016). The
+preconditions of Attach and Detach, and what happens to the Assignees, the ack timeout, the Escalation chains and
+Unclaimed when an Alert Group is attached and after it is detached, are set in the L2 PRD. Several teams working on one
+problem together is a matter for Incidents in L3 (journal D547, D556).
 
 **Reasons are visible.** Every automatic status change carries its reason in the message or Thread and in the Timeline.
 

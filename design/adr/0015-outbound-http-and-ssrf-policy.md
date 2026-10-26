@@ -13,9 +13,11 @@
   CONNECT or SOCKS5; Slack's addresses are fixed, so its tokens go only to `https://slack.com/api/`, its socket only
   to a `wss` address under `slack.com` and an answer to a press only to a `response_url` on `hooks.slack.com`; the
   one-time `ticket` in the address of a socket is a secret in a URL
-- Amended: 2026-10-26 — for L2 (journal D502, D524): the client class `telemetry` sends the opt-in telemetry report
-  (ADR-0019) with one attempt per daily run and a proxy setting of its own; polling Alertmanager in the `pull` mode runs
-  in the background class and creating an Alertmanager silence, which a person waits for, in the interactive class
+- Amended: 2026-10-26 — for L2 (journal D502, D505, D524, D532, D555): the client class `telemetry` sends the opt-in
+  telemetry report (ADR-0019) with one attempt per daily run and a proxy setting of its own; polling Alertmanager in the
+  `pull` mode runs in the background class and creating an Alertmanager silence, which a person waits for, in the
+  interactive class; calls through a Notification gateway are delivery work, the test call and the confirmation code of
+  a contact interactive, and the Leader's refresh of Bridge `info` background work
 
 ## Context
 
@@ -56,9 +58,9 @@ target so that an admin can correct the configured URL.
 
 | Class | Who waits | Policy |
 |---|---|---|
-| Delivery — messenger send and edit, outgoing webhook requests, the Broken probe with the Destination check it runs when no delivery waits | the Desired state, not a person | one attempt per call; the result is classified as `RetryAfter`, `Transient`, `Fatal` or unknown, and the delivery row schedules the next attempt within its attempt and time budgets (ADR-0005); a failed probe is retried by the next one |
-| Interactive — callback answers, ephemeral replies, account-link messages, test messages, connection and Destination checks started from the UI, the OIDC code exchange | a person | one attempt within a time budget of a few seconds; messenger calls take their limiter tokens ahead of deliveries and never queue (ADR-0005); a failure is shown to that person |
-| Background — Telegram `getUpdates`, Bridge polling, Slack's Socket Mode connection, OIDC discovery and key sets | a loop | exponential backoff with jitter and a cap between attempts; polling keeps going, and a `409 Conflict` from a second poller only makes it back off (ADR-0007); a key-set refresh keeps the last good keys |
+| Delivery — messenger send and edit, outgoing webhook requests, the Broken probe with the Destination check it runs when no delivery waits, and from L2 calls through a Notification gateway | the Desired state, not a person | one attempt per call; the result is classified as `RetryAfter`, `Transient`, `Fatal` or unknown, and the delivery row schedules the next attempt within its attempt and time budgets (ADR-0005); a failed probe is retried by the next one |
+| Interactive — callback answers, ephemeral replies, account-link messages, test messages, connection and Destination checks started from the UI, the OIDC code exchange, and from L2 the test call and the confirmation code of a gateway contact | a person | one attempt within a time budget of a few seconds; messenger calls take their limiter tokens ahead of deliveries and never queue (ADR-0005); a failure is shown to that person |
+| Background — Telegram `getUpdates`, Bridge polling, Slack's Socket Mode connection, OIDC discovery and key sets, and from L2 the Leader's refresh of Bridge `info` | a loop | exponential backoff with jitter and a cap between attempts; polling keeps going, and a `409 Conflict` from a second poller only makes it back off (ADR-0007); a key-set refresh keeps the last good keys |
 | Heartbeat — Muster's outgoing heartbeat (ADR-0014) | an external dead man's switch | one attempt per tick with a short timeout; a failure is counted and logged, and the next tick is the retry |
 | Telemetry — the daily telemetry report (ADR-0019), from L2 | nobody: the report is statistical | one attempt per daily run with a short timeout; a failure is counted and logged, and the next day's run is the retry |
 | Alertmanager — polling in the `pull` Connection mode and creating Alertmanager silences, from L2 | a poller, or a person who creates a silence | polling in the background class and creating a silence in the interactive class, which follow who waits; their budgets are set in the L2 PRD |

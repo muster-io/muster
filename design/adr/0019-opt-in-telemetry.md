@@ -27,8 +27,8 @@ off (ADR-0010; journal D497, D502).
 
 **Categories** (journal D498), each with its own switch:
 
-- **Basic** — a random installation id, the version, the operating system and architecture, the way Muster was
-  installed, the major version of PostgreSQL and the number of replicas.
+- **Basic** — the version, the operating system and architecture, the way Muster was installed, the major version of
+  PostgreSQL and the number of replicas.
 - **Scale** — orders of magnitude, never exact numbers, of Users, Teams, Routes, and Alerts and Alert Groups per day;
   the types of Integrations and Destinations in use.
 - **Features** — whether OIDC sign-in, Schedules, Escalation chains, Maintenance windows and Notification gateways are
@@ -36,10 +36,11 @@ off (ADR-0010; journal D497, D502).
 - **Quality** — percentiles of delivery latency, the share of failed deliveries by type, and which Internal alerts
   fired.
 
-Every report carries the random installation id, whichever categories are on, so that the collector can tell reports
-apart; the id identifies nothing outside the collector. A report never contains labels, names, URLs, addresses, texts or
-anything else taken from Alerts, messages or configuration, and the collector keeps no IP addresses. The UI says so next
-to the switches, and a public page of the documentation lists every field and how it is collected (journal D497, D498).
+Every report carries a random installation id, which belongs to no category and goes with whichever categories are on
+(journal D555), so that the collector can tell reports apart; the id identifies nothing outside the collector. A report
+never contains labels, names, URLs, addresses, texts or anything else taken from Alerts, messages or configuration, and
+the collector keeps no IP addresses. The UI says so next to the switches, and a public page of the documentation lists
+every field and how it is collected (journal D497, D498).
 
 **A preview, not a confirmation.** The settings page shows the next report exactly as it will be sent. A daily send asks
 for no confirmation: a question every day would be answered out of habit or not at all (journal D502).
@@ -53,8 +54,8 @@ a short timeout; a failure is counted and logged, and the next day's run is the 
 **A daily Leader task.** Sending the report is a Leader task (ADR-0007; journal D502). It is safe to run twice: each
 report carries the installation id and the day it covers, and the collector keeps one report per installation and day.
 
-**Never email.** Telemetry is the only thing Muster sends about itself, and only with consent; Muster never sends email.
-NFR-7 and the rule for contributors say so from L2 on (journal D502).
+**Never email.** Telemetry is the only thing Muster sends to the project, and only with consent; Muster never sends
+email. NFR-7 and the rule for contributors say so from L2 on (journal D502).
 
 **Development mode and tests.** `muster dev` and the end-to-end suites never show the consent dialog. In development
 mode, reports go to a fake collector among the fake servers, so the path is tested without reaching the project's

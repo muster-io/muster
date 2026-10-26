@@ -20,9 +20,10 @@
   (F-110; D383)
 - Amended: 2026-10-26 — for L2 (journal D494, D500, D520, D524, D532): the Inbound webhook, an Integration for senders
   without Alertmanager, takes the body of Alertmanager's `POST /api/v2/alerts` as single Alert reports rather than
-  Snapshots; each Alert stays open until its `endsAt`, measured against the real time of receipt, or for a set time
-  without one, and then closes as Stale, with or without a Heartbeat; an Integration in the `pull` mode may let a person
-  create an Alertmanager silence
+  Snapshots; a report whose `endsAt` has passed resolves the Alert as resolved by its sender, and otherwise the Alert
+  stays open until its `endsAt`, measured against the real time of receipt, or for a set time without one, and then
+  closes as Stale, with or without a Heartbeat; an Integration in the `pull` mode may let a person create an
+  Alertmanager silence
 
 ## Context
 
@@ -169,10 +170,11 @@ the worst moment. After a bug fix, `muster ingest replay --since <duration>` rep
 - A resolved Alert with no open Alert Group is applied to the latest Alert Group in which that fingerprint is still
   firing, otherwise dropped and counted. Resolved Alerts never create Alert Groups.
 
-**Staleness.** Each pair of Alert and `groupKey` has a `last_seen_at`, updated by every Snapshot of that `groupKey`
-that lists the Alert. An Alert not seen for longer than `stale_after` is **Stale** in that Alertmanager group; once it is
-Stale or Gone in all its Alertmanager groups, the system resolves it with a reason saying that Alertmanager stopped
-reporting it (silenced or inhibited in Alertmanager, or the Alertmanager routing changed).
+**Staleness.** For Integrations that receive Snapshots, each pair of Alert and `groupKey` has a `last_seen_at`, updated
+by every Snapshot of that `groupKey` that lists the Alert. An Alert not seen for longer than `stale_after` is **Stale**
+in that Alertmanager group; once it is Stale or Gone in all its Alertmanager groups, the system resolves it with a
+reason saying that Alertmanager stopped reporting it (silenced or inhibited in Alertmanager, or the Alertmanager routing
+changed).
 
 - `stale_after` is 3 × the repeat interval **learned per Alertmanager route** (taken from `groupKey`). The interval is
   learned from the gaps between Snapshots whose `notification_reason` marks a repeat; for Alertmanager versions without
@@ -233,12 +235,14 @@ has no Connection mode. The handler stores the body as received, as a Stored Sna
 Alert. Each reported Alert has a deadline: its time to live is its `endsAt` minus the real time at which the request
 arrived or, without `endsAt`, a setting of the Integration, 5 minutes by default like Alertmanager's `resolve_timeout`,
 and the deadline lies that long after the receipt on the business clock, as a timer row. A new report of the Alert moves
-its deadline without a Timeline entry; when the deadline passes without one, the system resolves the Alert as Stale, so
-a sender resolves an Alert by reporting it with an `endsAt` that has passed. The liveness guard of Stale does not apply
-here, because the deadline is the sender's own statement of how long the Alert holds. Comparing `endsAt` with the
-business clock would resolve everything whenever the development clock moves, and comparing it with the time of
-processing would let `muster ingest replay` close Alerts that still fire (journal D532). What Prometheus, vmalert and
-other senders send and accept is verified before the stories, as it was for Alertmanager.
+its deadline without a Timeline entry; when the deadline passes without one, the system resolves the Alert as Stale,
+with a reason saying that its sender stopped reporting it. A report whose `endsAt` is not later than the time it arrived
+resolves the Alert at once, as resolved by its sender, the way a `resolved` from Alertmanager does (journal D520, D532).
+The liveness guard of Stale does not apply here, because the deadline is the sender's own statement of how long the
+Alert holds. Comparing `endsAt` with the business clock would resolve everything whenever the development clock moves,
+and comparing it with the time of processing would let `muster ingest replay` close Alerts that still fire (journal
+D532). What Prometheus, vmalert and other senders send and accept is verified before the stories, as it was for
+Alertmanager.
 
 **Deferred.** Two more Connection modes come later as one module: `pull` (Muster polls the Alertmanager API) and `agent`
 (a small `muster agent` next to Alertmanager polls locally and pushes Snapshots over outbound HTTPS). They would add
@@ -258,8 +262,9 @@ Snapshot, `{}` when the route sets none, and not part of `groupKey` (F-050) — 
   notifications act immediately, and a resolved Alertmanager group does so for all its Alerts.
 - A resolve that Alertmanager loses in a restart leaves no Alert firing: it is caught by the group's
   `all alerts resolved`, or by Gone while other Alerts of the group still fire.
-- Without a Heartbeat there is no Stale: an Alert Group whose Alertmanager group was silenced as a whole stays Firing
-  until a person resolves it. The Heartbeat is therefore part of the recommended setup, not an option.
+- Without a Heartbeat there is no Stale for an Integration that receives Snapshots: an Alert Group whose Alertmanager
+  group was silenced as a whole stays Firing until a person resolves it. The Heartbeat is therefore part of the
+  recommended setup, not an option.
 - A loss of contact never resolves anything by itself: while the Heartbeat is lost, staleness stands still, and once it
   returns Alertmanager has the rest of `stale_after` to report each Alert again.
 - Muster cannot tell "silenced in Alertmanager" from "resolved without notice"; the reason says so. A nightly mute
@@ -305,7 +310,8 @@ Snapshot, `{}` when the route sets none, and not part of `groupKey` (F-050) — 
   deferred together with the agent.
 - **A rate limit on ingestion.** Alertmanager would retry exactly during a Storm.
 - **A generic inbound webhook in L1.** Needs parsing templates, preview, parse-error handling and its own automatic
-  resolution (staleness does not apply to event streams); Alertmanager already offers a universal entry point.
+  resolution (the staleness of Snapshots does not apply to event streams); Alertmanager already offers a universal entry
+  point.
 - **An Inbound webhook with a JSON format of Muster's own, or with parsing templates and presets for any JSON** (L2). A
   format of its own makes every sender write a converter anyway, while scripts, CI jobs and rule evaluators already
   speak the Alertmanager API; templates need previews, parse errors and replay in the UI (journal D494, D520).

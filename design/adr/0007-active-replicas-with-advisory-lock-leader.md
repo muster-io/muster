@@ -49,7 +49,8 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
   (ADR-0014);
 - after a master key rotation, recomputing the Desired state of the open Alert Groups whose buttons an older key
   signed, so their Root messages are re-signed (ADR-0011);
-- from L2, finding the gaps of Schedules over the next two weeks, which raises an Internal alert (ADR-0018);
+- from L2, finding the gaps of Schedules ahead, which the Schedule page shows for two weeks and an Internal alert
+  reports within a horizon the L2 PRD sets (ADR-0018);
 - from L2, re-reading the `info` of every Bridge Connection, Notification gateways included, once its copy is older than
   `bridge.info_max_age`, so that a Connection's page is current without deliveries (ADR-0017);
 - from L2, sending the daily telemetry report where an Admin opted in (ADR-0019);

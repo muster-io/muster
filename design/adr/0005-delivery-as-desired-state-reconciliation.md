@@ -16,13 +16,14 @@
   when the bridge did not recognise it; a Root message past the bridge's edit window is republished on a change of
   status instead of edited; answers to presses and Text commands are interactive calls that the bridge places privately
   or in the Thread
-- Amended: 2026-10-26 — for L2 (journal D477, D503, D505, D512, D519, D529, D532, D533, D546): a Page in a messenger is
-  a Mention in a Thread reply that delivery sends, and Muster sends no direct messages to page people; calls through a
-  Notification gateway get a send path of their own — rows with retries, outside reconciliation; the Lifecycle event
-  `destination_joined` publishes an Alert Group into a Destination it reaches later; a Storm summary is kept per Route
-  and Destination and counts only the Alert Groups sent there; a Destination's Mentions become a list of entries with
-  the Loud events they apply to, `storm_started` among them; the Loud/Quiet matrix becomes a Route setting; Telegram
-  Destinations in one chat share its limiter
+- Amended: 2026-10-26 — for L2 (journal D477, D503, D505, D512, D519, D529, D532, D533, D546, D558): a Page in a
+  messenger is a Mention in a Thread reply that delivery sends, and Muster sends no direct messages to Page people;
+  calls through a Notification gateway get a send path of their own — rows with retries, outside reconciliation; the
+  Lifecycle event `destination_joined` publishes an Alert Group into a Destination it reaches later; a Storm summary is
+  kept per Route and Destination and counts only the Alert Groups sent there; a Destination's Mentions become a list of
+  entries with the Loud events they apply to, `storm_started` among them; the Loud/Quiet matrix becomes a Route setting,
+  pre-filled by the Route profile Paging (formerly On-call) or Informational; Telegram Destinations in one chat share
+  its limiter
 
 ## Context
 
@@ -65,8 +66,9 @@ Thread replies and have no Desired state, so they are not reconciled. Each Page 
 budget like a delivery, through the gateway Connection's limiter, with critical Alert Groups first; the test call and
 the confirmation code of a contact, which a person waits for, take the interactive path. The architecture lint allows
 calls through a gateway only from that sender and the interactive path. A gateway that keeps failing becomes Broken, is
-probed through its `info` and raises an Internal alert; its failures never make a Destination Broken. Muster sends no
-direct messages to Page people: a Page in a messenger is a Mention in a Thread reply (journal D503, D505, D532).
+probed through its `info` and raises an Internal alert; its failures never make a Destination Broken, not even one of
+the same bridge when it also has the role `messenger`, whose own deliveries decide that. Muster sends no direct messages
+to Page people: a Page in a messenger is a Mention in a Thread reply (journal D503, D505, D532).
 
 **Rate limiting.** Each Destination has a limiter, and each Connection has one too, because a messenger limits a bot as
 a whole as well as each chat; a delivery waits for both. The limiters are shared by all replicas: their token buckets
@@ -130,7 +132,7 @@ chat, Muster users or messenger groups, separately per event — and templates c
 
 **Loud events and Mentions per Route and Destination (L2).** For each Loud event — a new Alert Group, new Alerts, a
 Reopen, an ack timeout notice, the end of a Snooze, a rise to critical and the start of a Storm — the Route says whether
-it rings; the Route profile pre-fills the choice, the On-call profile with the table above and the Informational profile
+it rings; the Route profile pre-fills the choice, the Paging profile with the table above and the Informational profile
 ringing only for a new Alert Group. A change applies to later events: an event that no longer rings is still delivered,
 Quietly, and edits never ring. Whether new Alerts remove an acknowledgement is part of the same settings, off by default
 (ADR-0004). Whom to mention stays with each Destination, as one list of entries — everyone in the chat, people,

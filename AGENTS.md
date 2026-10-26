@@ -114,7 +114,8 @@ the `issue:` field by hand.
 The full table, with every domain package and the list of generated paths, is
 [§2 of the stories README](design/stories/README.md#2-repository-layout). The bridge libraries for Go and Python and
 the example bridge are not in this repository: they live in `muster-io/muster-bridge-go` and
-`muster-io/muster-bridge-python` under MIT (ADR-0017).
+`muster-io/muster-bridge-python` under MIT (ADR-0017); nor is the Terraform provider, which lives in
+`muster-io/terraform-provider-muster` under MIT (ADR-0001).
 
 ## Architecture rules
 

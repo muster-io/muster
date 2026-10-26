@@ -57,8 +57,8 @@ _Avoid_: API key
 
 **Inbound webhook**:
 An Integration that takes Alerts in the format of Alertmanager's API from senders without Alertmanager, such as
-scripts, CI jobs or a rule evaluator. A request reports Alerts one by one, not as a Snapshot: each Alert stays open
-for as long as its last report says, and then becomes Stale.
+scripts, CI jobs or a rule evaluator. A request reports Alerts one by one, not as a Snapshot: an Alert reported with
+an end that has passed is resolved, and one whose last report runs out without a new one becomes Stale.
 _Avoid_: Event, Generic webhook, Snapshot (for its requests)
 
 **Alerts view**:
@@ -91,8 +91,8 @@ How close in time two Snapshots of the same Alertmanager group must arrive to co
 
 **Route**:
 A rule that picks Alerts by their labels and decides how their Alert Groups are handled and where they are delivered:
-to its own Destinations and, where the Route asks for it, to those of the Teams its Alerts belong to. A Route may
-belong to a Team, which owns it but adds no delivery.
+to its own Destinations and, where the Route asks for it, to those of the Teams its Alerts belong to, with or without
+the Escalation chains of those Teams. A Route may belong to a Team, which owns it but adds no delivery.
 _Avoid_: Policy, Rule, Direction
 
 **Default route**:
@@ -100,7 +100,7 @@ The Route that takes every Alert no other Route took. It always exists.
 _Avoid_: Fallback, Catch-all
 
 **Matcher**:
-A condition on one label that a Route uses to pick Alerts.
+A condition on one label that a Route, or a Team through its Team matchers, uses to pick Alerts.
 _Avoid_: Filter, Selector
 
 **Group key**:
@@ -122,8 +122,8 @@ An Alert Group whose Severity level, with its Route's Minimum severity, is criti
 _Avoid_: High urgency
 
 **Route profile**:
-A starting set of Route settings for a kind of traffic, such as On-call or Informational.
-_Avoid_: Route type
+A starting set of Route settings for a kind of traffic, such as Paging or Informational.
+_Avoid_: Route type, On-call (as a profile name)
 
 ### Status of an Alert Group
 
@@ -165,8 +165,8 @@ the first day of the week ("Until Monday 09:00"), in the person's time zone; the
 _Avoid_: Calendar snooze, Snooze template
 
 **Attach** / **Detach**:
-Put an Alert Group under another one that stands for the same problem, so that it follows that Alert Group's status /
-let it live on its own again.
+Put an Alert Group under another one that stands for the same problem, its main Alert Group, so that it follows the
+main Alert Group's status / let it live on its own again.
 _Avoid_: Merge, Link
 
 **Reopen**:
@@ -239,9 +239,10 @@ _Avoid_: Responder, Assigned
 
 **Team**:
 A set of Users that owns Routes, Destinations, Schedules and Escalation chains, and to which Alerts belong by their
-Team label or its Team matchers. It gives no access of its own: Roles stay global. A User may be in several Teams,
-added by hand or through the groups of the identity provider; a Team may have nobody in it and serve only as a name
-for Alerts, with its own Destinations and Team mention.
+Team label or its Team matchers. The Destinations of a Team receive the Alert Groups of its Alerts; owning a
+Destination does not make it one of them. A Team gives no access of its own: Roles stay global. A User may be in
+several Teams, added by hand or through the groups of the identity provider; a Team may have nobody in it and serve
+only as a name for Alerts, with its Destinations and Team mention.
 _Avoid_: Squad, Group
 
 **Team label**:
@@ -262,12 +263,13 @@ _Avoid_: Team tag
 
 **Working hours**:
 The days and hours, in a time zone, that count as working time: the Organization's, or a Team's own. An Escalation
-step may be limited to the Working hours of the Team that owns its chain.
+step may be limited to the Working hours of the Team that owns its chain; the Organization's also give the start of
+the working day that Snooze presets use.
 _Avoid_: Business hours
 
 **Schedule**:
 A Team's plan of who is On-call and when: Rotation layers with Overrides on top. A Team may have several; its main
-Schedule names the Team's On-call. A time in which nobody has a Shift is a gap.
+Schedule names the Team's On-call. A time in which nobody who may be Paged has a Shift is a gap.
 _Avoid_: Rota, Calendar
 
 **Rotation layer**:
@@ -284,15 +286,16 @@ A one-off change of a Schedule that puts another person On-call for a span of ti
 _Avoid_: Swap
 
 **On-call**:
-The person who has the current Shift of a Schedule. A Team's On-call is the one of its main Schedule.
+The person whom a Schedule has on Shift now, after its Overrides and higher Rotation layers. A Team's On-call is the
+one of its main Schedule.
 _Avoid_: Responder (that is a Role)
 
 ### Paging
 
 **Escalation chain**:
-An ordered list of Escalation steps that Pages more and more people while an Alert Group stays Firing. It is attached
-to a Route or to a Team, optionally for some Severity levels; several may run on one Alert Group, and acknowledging it
-stops them all.
+An ordered list of Escalation steps that Pages more and more people while an Alert Group stays Firing. Routes and
+Teams name the chains that run on their Alert Groups, optionally for some Severity levels; several may run on one
+Alert Group, and acknowledging it stops them all.
 _Avoid_: Escalation policy, Escalation (on its own)
 
 **Escalation step**:
@@ -313,7 +316,8 @@ _Avoid_: Notification policy, Contact method
 
 **Notification gateway**:
 A Bridge in the role `gateway` that Pages people outside messengers, by phone call or SMS for example, at the contact
-each person confirmed in their profile, and reports when one of them acknowledges. It is never a Destination.
+each person confirmed in their profile, and reports when one of them acknowledges. Its calls never go to a
+Destination, and a Bridge whose only role is `gateway` cannot be one.
 _Avoid_: Notifier, Pager
 
 ### When alerts stop or return
@@ -330,7 +334,8 @@ An Alert that Alertmanager has stopped listing in its Snapshots. Muster resolves
 _Avoid_: Disappeared
 
 **Stale**:
-An Alert that Muster has heard nothing about for too long. Muster resolves it.
+An Alert that Muster has heard nothing about for too long: no Snapshot of its Alertmanager group arrived, or the
+sender of an Inbound webhook did not report it again in time. Muster resolves it.
 _Avoid_: Expired
 
 **Continuation**:
@@ -428,8 +433,8 @@ The single message that stands for the Alert Groups of a Storm.
 **Maintenance window**:
 A span of time, current or planned, during which Muster delivers nothing about the Alert Groups of an Integration, a
 Route or a Team and runs no Escalation chains for them, while ingestion and grouping go on. Alert Groups still firing
-when it ends are published with a mark. A Team's window holds an Alert Group only while every Team of its Alerts is in
-a window.
+when it ends are published with a mark. A Team's window keeps an Alert Group back only while every Team of its Alerts
+is in a window.
 _Avoid_: Silence, Mute, Downtime
 
 **Destination check**:

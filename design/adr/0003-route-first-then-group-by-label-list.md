@@ -2,11 +2,12 @@
 
 - Status: Accepted
 - Date: 2026-10-02
-- Amended: 2026-10-26 — for L2 (journal D468, D510, D511, D525, D531, D532): an Alert Group is Urgent when its Severity
-  level is critical; the Route's urgent mark and the Organization's switch for critical give way to the Route's Minimum
-  severity, which raises only the Severity level of its Alert Groups; a Route may also deliver to the Destinations of
-  the Teams of its Alerts (ADR-0018), with one status for all; a Route or a Team may limit each Destination to some
-  Severity levels, and the conditions of a Destination named more than once combine with OR
+- Amended: 2026-10-26 — for L2 (journal D468, D510, D511, D525, D531, D532, D557, D558): an Alert Group is Urgent when
+  its Severity level is critical; the Route's urgent mark and the Organization's switch for critical give way to the
+  Route's Minimum severity, which raises only the Severity level of its Alert Groups; a Route may also deliver to the
+  Destinations of the Teams of its Alerts (ADR-0018), with one status for all and with or without the Escalation chains
+  of those Teams; a Route or a Team may limit each Destination to some Severity levels, and the conditions of a
+  Destination named more than once combine with OR; the Route profile On-call is renamed Paging
 
 ## Context
 
@@ -33,15 +34,17 @@ status are shared by all of them. How an Alert Group is handled is set on its Ro
 ack timeout, Reminders, Reopen window, Grace period, the Thread batching window, the Storm threshold, templates, Snooze
 durations and the Group key, and from L2 its Minimum severity, its Escalation chains and which Lifecycle events are Loud
 (ADR-0005, ADR-0018). Whom to mention is a setting of each Destination (ADR-0005); Severity levels and Instance labels
-are settings of the Organization. A Route profile (On-call or Informational) only pre-fills the Route's settings when a
+are settings of the Organization. A Route profile (Paging or Informational) only pre-fills the Route's settings when a
 Route is created; it is not stored as a type.
 
 **Delivery to Teams (L2).** A Route may also deliver to the Teams its Alerts belong to (ADR-0018), a Route setting that
 is off by default. Its Alert Groups then go to the Route's Destinations together with the Destinations of those Teams —
 one Root message per Destination, even when it is named more than once — and keep one status everywhere; the Route still
-owns them and their timers. Each Destination of a Route or a Team may be limited to some Severity levels, checked
-against the Alert Group's Severity level; the conditions of a Destination named more than once combine with OR. A Route
-may belong to a Team, which owns it and filters it in the UI but adds no Destination: ownership and delivery are
+owns them and their timers. A sub-option of the setting, on by default, runs the Escalation chains of those Teams; with
+it off, the Teams receive the Alert Groups in their Destinations without their chains, for example on a Route that picks
+test clusters by `cluster` (journal D557). Each Destination of a Route or a Team may be limited to some Severity levels,
+checked against the Alert Group's Severity level; the conditions of a Destination named more than once combine with OR.
+A Route may belong to a Team, which owns it and filters it in the UI but adds no Destination: ownership and delivery are
 separate relations (journal D468, D510, D525, D532).
 
 **Route first, then group.** Grouping happens inside a Route, and an Alert Group never crosses a Route boundary. A

@@ -49,7 +49,7 @@ auto-unacknowledge after unanswered Reminders (ADR-0004) and the move of an open
 its Route is deleted (`moved_to_default_route`), and from L2 the steps of Escalation chains with the Pages, skipped
 steps and undelivered Pages they record, a change of Assignees, a Team that joins an Alert Group or a value of the Team
 label that names no Team, the start and end of a Maintenance window for an Alert Group, and an attached Alert Group
-following the status of the one it is attached to (ADR-0004, ADR-0018). All of them pass through **one dispatcher** with
+following the status of its main Alert Group (ADR-0004, ADR-0018). All of them pass through **one dispatcher** with
 fixed steps: **permission → precondition → transition → Audit log (people and automation) → Timeline → re-render**, the
 last step updating the Desired state for reconciliation (ADR-0005). Transports are thin adapters: they authenticate,
 turn a request into a command and turn the result into a response. Recording the Audit log is a step of the dispatcher,
@@ -77,8 +77,9 @@ behind the `lint` build tag) that fails the build when:
 3. a messenger send or edit through the delivery adapter interface is called from outside the delivery worker and the
    named interactive path (ADR-0005); the messenger clients beneath the adapters are not checked, so the conformance
    check of `muster bridge check`, which calls the Bridge protocol client directly (ADR-0017), needs no exception; from
-   L2, a call through a Notification gateway is allowed only from the gateway sender and the interactive path (ADR-0005;
-   journal D532);
+   L2, a call of the adapter's Notification gateway method is allowed only from the gateway sender and the interactive
+   path (ADR-0005; journal D532), and like the messenger methods the lint checks that method, not the protocol client
+   beneath it, so `muster bridge check` needs no exception for gateway calls either;
 4. an HTTP client or transport is created outside the outbound HTTP package (ADR-0015);
 5. a known secret value reaches a log line — a test pushes known secrets through the code and inspects the output;
 6. `context.Background()` is used outside `main`, the wiring code and tests;

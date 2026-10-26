@@ -196,8 +196,9 @@ which during a call needs the push mode, so that the answer comes while the pers
 `notification_acknowledged`, which returns the action data when the person acknowledges. Muster takes the actor from its
 own signature on that data, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only
 role is `gateway` cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing
-becomes Broken and raises an Internal alert. Its events in the poll mode come through Bridge polling, its calls go
-through a queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same
+becomes Broken and raises an Internal alert. For a bridge with both roles, failed calls make its gateway Broken and
+failed deliveries its Destinations, never the other way round. Its events in the poll mode come through Bridge polling,
+its calls go through a queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same
 `POST /v1/notifications` (ADR-0013). The bridge libraries for Go and Python support the role in releases of their own
 (journal D505, D517, D532, D542).
 

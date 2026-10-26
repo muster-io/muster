@@ -33,11 +33,11 @@ The model has to fit what earlier decisions fixed:
 **Teams own; they do not isolate.** A Team is a unit of ownership: Routes, Destinations and Escalation chains may belong
 to one, every Schedule belongs to one, and the UI filters by "my Teams". A Team grants no access: Roles stay global, and
 isolation and Roles within a Team wait for custom Roles (journal D464). Ownership is otherwise optional, and the objects
-of L1 keep working without a Team. A Team may exist with nobody in it and no Schedule — only a name for its Alerts, its
-own Destinations and its Team mention — which is enough for a team that wants its own channels but keeps no Schedule in
-Muster (journal D476). Two relations are kept apart: the Team that owns an object, which only organizes and filters, and
-the Destinations of a Team, which receive the Alert Groups of its Alerts (journal D525). A Route's own Team therefore
-never adds delivery.
+of L1 keep working without a Team. A Team may exist with nobody in it and no Schedule — only a name for its Alerts, the
+Destinations of the Team and its Team mention — which is enough for a team that wants its own channels but keeps no
+Schedule in Muster (journal D476). Two relations are kept apart: the Team that owns an object, which only organizes and
+filters, and the Destinations of a Team, which receive the Alert Groups of its Alerts (journal D525). Owning a
+Destination does not make it a Destination of the Team, and a Route's own Team never adds delivery.
 
 **Who is in a Team.** A User may be in several Teams. An Admin adds people by hand in the UI or through the API; a Team
 may also name groups of the identity provider, and its membership then follows them at every sign-in and token refresh,
@@ -54,44 +54,45 @@ setting, `team` by default — is the Team's slug, or when one of the Team's Tea
 syntax of Route Matchers on any label, for Alerts whose rules set no team; the Timeline and the filters show by which of
 the two an Alert reached its Team (journal D538). A value of the Team label that names no Team adds nothing: the Alert
 Group goes to its Route's Destinations, its Timeline records the unknown value, and the Teams page lists the values seen
-without a Team (journal D468, D525). Where teams share a namespace, as on shared staging clusters, matchers on other
-labels or a team label on the workloads tell them apart, and a Route that picks those clusters first keeps their Alert
-Groups away from Escalation chains (journal D539).
+without a Team (journal D468, D525). Where teams share a namespace, matchers on other labels or a team label on the
+workloads tell them apart (journal D539).
 
 **Delivery to the Teams of an Alert Group.** Routes stay first-match and keep their Alert Groups, statuses and timers
-(ADR-0003). A Route may also deliver to the Teams of its Alerts, a Route setting that is off by default. An Alert Group
-of such a Route goes to the Route's Destinations together with the Destinations of every Team its Alerts belong to; a
-Destination named more than once gets one Root message (journal D468, D532). Each Destination of a Route or a Team may
-be limited to some Severity levels, such as critical only or everything below critical, checked against the Alert
-Group's Severity level; where a Destination is named more than once, its conditions combine with OR (journal D468,
-D532). The Teams of an Alert Group grow with its Alerts: an Alert of another Team adds that Team's Destinations and
-starts that Team's Escalation chains, just as a rise in Severity level adds the Destinations whose condition it now
-meets. Destinations are only ever added: a Severity level that falls again, or a Team whose Alerts resolved, leaves its
-Root message in place and keeps it current (journal D469, D510). Every Destination shows the same Alert Group with one
-status and one list of Alerts: a team sees the Alerts of other teams that share its Alert Group, and an Alert Group that
-is already acknowledged reaches a joining Team acknowledged and starts no chain there. Teams that want to handle such
-problems apart add the Team label to the Group key. The documentation and the hints of the Route settings explain this
-with a worked example and say that the feature is optional: many installations need nothing but two operations channels
-(journal D510).
+(ADR-0003). A Route may also deliver to the Teams of its Alerts, a Route setting that is off by default, with a
+sub-option that is on by default: run the Escalation chains of those Teams. With the sub-option off, the Teams receive
+the Alert Groups in their Destinations but their chains do not run, for example on a Route that picks test clusters by
+`cluster` (journal D539, D557). An Alert Group of such a Route goes to the Route's Destinations together with the
+Destinations of every Team its Alerts belong to; a Destination named more than once gets one Root message (journal D468,
+D532). Each Destination of a Route or a Team may be limited to some Severity levels, such as critical only or everything
+below critical, checked against the Alert Group's Severity level; where a Destination is named more than once, its
+conditions combine with OR (journal D468, D532). The Teams of an Alert Group grow with its Alerts: an Alert of another
+Team adds that Team's Destinations and, where the Route runs the chains of Teams, starts that Team's Escalation chains,
+just as a rise in Severity level adds the Destinations whose condition it now meets. Destinations are only ever added: a
+Severity level that falls again, or a Team whose Alerts resolved, leaves its Root message in place and keeps it current
+(journal D469, D510). Every Destination shows the same Alert Group with one status and one list of Alerts: a team sees
+the Alerts of other teams that share its Alert Group, and an Alert Group that is already acknowledged reaches a joining
+Team acknowledged and starts no chain there. Teams that want to handle such problems apart add the Team label to the
+Group key. The documentation and the hints of the Route settings explain this with a worked example and say that the
+feature is optional: many installations need nothing but two operations channels (journal D510).
 
 **Joining a Destination later.** When an Alert Group reaches a Destination after its first Publication elsewhere —
 because its Severity level rose into the Destination's condition or because a Team joined — the Lifecycle event
 `destination_joined` publishes it there: Loudly, with the Mentions of a new Alert Group, if it is firing; Quietly if it
-is acknowledged or snoozed; and only once a Maintenance window that holds it has ended. An Admin who changes a Severity
-condition adds Destinations the way a Destination added to a Route does, Quietly, and removes none (ADR-0005; journal
-D512).
+is acknowledged or snoozed; and only once a Maintenance window that keeps it back has ended. An Admin who changes a
+Severity condition adds Destinations the way a Destination added to a Route does, Quietly, and removes none (ADR-0005;
+journal D512).
 
 **Mentions of Teams.** A Destination's Mentions become one list of whom to mention — everyone in the chat, a person, a
 messenger group, a Team or the On-call of a Team — each entry with the Loud events it applies to, all of them by
-default. The Team in an entry is either named or taken from the Team label, so that one Destination serves the Alert
-Groups of every team (journal D477, D509). The list offers only what the Destination's Connection can mention and shows
-the rest as unavailable, with the reason (journal D540). A Team is mentioned by its Team mention for that Connection — a
-Mattermost group, a Slack user group once the Connection may read them, or a group mention that a bridge declares in
-`info` — and where it has none, nobody is mentioned and the message alone is enough, as in L1. A Team mention never
-falls back to the On-call; the On-call of a Team is mentioned only where an entry names it (journal D509, D516).
-Telegram has no group mentions. A Team's own Destinations mention the Team by default, which rings only where a Team
-mention is set. An entry may also apply to `storm_started`, the first publication of a Storm summary; a Storm summary
-starts no Escalation chain (journal D533).
+default. The Team in an entry is either named or taken from the Alert Group — the Teams its Alerts belong to by Team
+label or Team matchers — so that one Destination serves the Alert Groups of every team (journal D477, D509). The list
+offers only what the Destination's Connection can mention and shows the rest as unavailable, with the reason (journal
+D540). A Team is mentioned by its Team mention for that Connection — a Mattermost group, a Slack user group once the
+Connection may read them, or a group mention that a bridge declares in `info` — and where it has none, nobody is
+mentioned and the message alone is enough, as in L1. A Team mention never falls back to the On-call; the On-call of a
+Team is mentioned only where an entry names it (journal D509, D516). Telegram has no group mentions. The Destinations of
+a Team mention the Team by default, which rings only where a Team mention is set. An entry may also apply to
+`storm_started`, the first publication of a Storm summary; a Storm summary starts no Escalation chain (journal D533).
 
 **Schedules.** A Schedule belongs to a Team and has Rotation layers — the people of a Rotation layer take Shifts in
 turn, a day, a week or a length of its own, with a handover time, optional limits such as "weekdays 9–18", and the
@@ -102,11 +103,12 @@ Team may have several Schedules, such as a first and a second line; one of them 
 Team's On-call, and an Escalation step may Page the On-call of any Schedule (journal D526). Schedules are not imported
 from iCal.
 
-**Gaps.** A time in which no Rotation layer has a Shift is a gap. A step that would Page the On-call of a Schedule with
-nobody on Shift is skipped with a Timeline entry, and the chain goes on with its next step. The Schedule page shows the
-gaps of the next two weeks, and an Internal alert reports a coming gap (journal D482, D525). The Shifts of people who
-may not be Paged count as gaps too: a Viewer, a person no longer in the Team — for example after the groups of the
-identity provider changed — and a disabled User; the Schedule warns about each (journal D514).
+**Gaps.** A time in which nobody who may be Paged has a Shift, Overrides included, is a gap. A step that would Page the
+On-call of a Schedule with nobody on Shift is skipped with a Timeline entry, and the chain goes on with its next step.
+The Schedule page shows the gaps of the next two weeks, and an Internal alert reports a gap ahead, within a horizon the
+L2 PRD sets (journal D482, D525). The Shifts of people who may not be Paged count as gaps too: a Viewer, a person no
+longer in the Team — for example after the groups of the identity provider changed — and a disabled User; the Schedule
+warns about each (journal D514).
 
 **Overrides and permissions.** Only an Admin changes the structure: Teams, Rotation layers, Escalation chains and
 Routes. An Override needs the Permission `schedule-overrides:write`, which Responders and Admins have, and a
@@ -115,28 +117,31 @@ Viewers. Overrides need no approval and send no message; the Audit log records t
 and the iCal feed show them (journal D483, D514, D534). Shifts send no messages either: who is on call is shown in the
 UI and the iCal feed, and no messenger command answers it (journal D504, D515).
 
-**Escalation chains.** An Escalation chain is an object of its own, attached to Routes and to Teams; a Team's chains run
-on the Alert Groups delivered to that Team. Each attachment may be limited to some Severity levels. Several chains may
-run on one Alert Group at the same time, and any Acknowledge stops them all (journal D471). Its steps are (journal
-D472): Page the On-call of a Schedule; Page chosen people; Page a whole Team or everyone in the chat; call a person
-through a Notification gateway (journal D540, D542); wait N minutes; send the event `escalation_webhook` to an outgoing
-webhook Destination named in the step, which receives only that event, whether or not the Alert Group is delivered there
-(journal D513); and repeat from step K up to N times. A step may be limited to Working hours and to some Severity
-levels. Working hours are the Organization's — days, hours and a time zone — unless the Team that owns the chain sets
-its own; holidays come later (journal D525, D541). The step-by-step test of a Destination also plays a chain in
-accelerated time and shows whom each step would Page and where, without calling anyone (journal D548).
+**Escalation chains.** An Escalation chain is an object of its own: Routes and Teams name the chains that run on their
+Alert Groups, as they name Destinations, and each may limit a chain it names to some Severity levels. A Team's chains
+run on the Alert Groups delivered to that Team, unless the Route has turned the chains of Teams off (journal D557).
+Several chains may run on one Alert Group at the same time, and any Acknowledge stops them all (journal D471). Its steps
+are (journal D472): Page the On-call of a Schedule; Page chosen people; Page a whole Team or everyone in the chat; call
+a person through a Notification gateway (journal D540, D542); wait N minutes; send the event `escalation_webhook` to an
+outgoing webhook Destination named in the step, which receives only that event, whether or not the Alert Group is
+delivered there (journal D513); and repeat from step K up to N times. A step may be limited to Working hours and to some
+Severity levels. Working hours are the Organization's — days, hours and a time zone — unless the Team that owns the
+chain sets its own; holidays come later (journal D525, D541). The step-by-step test of a Destination also plays a chain
+in accelerated time and shows whom each step would Page and where, without calling anyone (journal D548).
 
 **When a chain runs.** A chain runs where an ack timeout runs, with the same points of start, restart and stop
 (ADR-0004): it starts at the Alert Group's Publication, starts over whenever the Alert Group becomes firing again — a
-Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to Urgent that ends an
-acknowledgement or a Snooze, an auto-unacknowledge — and stops on Acknowledge, Snooze and Resolve (journal D507). An
-Alert Group with no Destination that can publish it — none at all, or only Broken ones — starts its chains when it is
-created (journal D528). In a Storm, the chain of an Alert Group waits for that Alert Group's own Publication, and a
-Maintenance window holds chains. A rise in Severity level of a firing Alert Group restarts no running chain; it only
-starts the chains whose condition it now meets. When the first chain of an Alert Group starts, its running ack timeout
-stops and sends no more notices: the steps take their place, while an Alert Group without a chain keeps the ack timeout
-of L1 (journal D487, D535). The Alert Group is Unclaimed once every chain started on it has run out without an
-acknowledgement; a chain that starts later, for a Team that joins, starts as usual (journal D507, D535).
+Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an
+acknowledgement or a Snooze, an auto-unacknowledge, and new Alerts that remove the acknowledgement where the Route
+allows it — and stops on Acknowledge, Snooze and Resolve (journal D507, D546, D555). An Alert Group with no Destination
+that can publish it — none at all, or only Broken ones — starts its chains when it is created (journal D528). In a
+Storm, the chain of an Alert Group waits for that Alert Group's own Publication, and a Maintenance window keeps chains
+waiting. A rise in Severity level of a firing Alert Group that nobody owns restarts no running chain; it only starts the
+chains whose condition it now meets, such as those for critical only (journal D555). When the first chain of an Alert
+Group starts, its running ack timeout stops and sends no more notices: the steps take their place, while an Alert Group
+without a chain keeps the ack timeout of L1 (journal D487, D535). The Alert Group is Unclaimed once every chain started
+on it has run out without an acknowledgement; a chain that starts later, for a Team that joins, starts as usual (journal
+D507, D535).
 
 **Where a chain Pages.** A Route's chain writes in the Threads of the Route's Destinations; a Team's chain writes in the
 Threads of that Team's Destinations or, where the Alert Group is delivered to none of them, in those of the Route's
@@ -154,7 +159,9 @@ Notification gateway, never by a direct message; direct messages stay for Accoun
 cannot mention them: they have no Account link in the Identity space of those Connections, a bridge there has no native
 mentions, an outgoing webhook there has no reply in a Thread, or they are not in the discussion group of a Telegram
 channel (journal D503, D528). Until the facts about push for Mentions in Threads are verified, the documentation says
-that at night only a Notification gateway is reliable (journal D532).
+that at night only a Notification gateway is reliable (journal D532). A Telegram Destination may be a person's private
+chat with the bot (journal D554): that is a Destination like any other, chosen by an Admin, not a direct message that
+Pages.
 
 **Notification rules.** How a person is Paged is up to their Notification rules: a normal and an important sequence of
 Mentions in the Thread and calls through a Notification gateway, with waits between them; a step that Pages the On-call
@@ -192,19 +199,20 @@ Destination, and which of them a Destination shows is a setting of that Destinat
 acknowledgement, Owner and status per Team would change the Alert Group and its state machine (ADR-0004) and is planned
 for L3 (journal D508, D535).
 
-**Maintenance windows.** A Maintenance window holds an Integration, a Route or a Team from now until a time, or over a
+**Maintenance windows.** A Maintenance window covers an Integration, a Route or a Team from now until a time, or over a
 planned span such as Saturday 02:00–04:00; people open windows in the UI or through the API, for example from a CI
-pipeline before a deploy (journal D493). While a window holds an Alert Group, ingestion and grouping go on and its
+pipeline before a deploy (journal D493). While a window keeps an Alert Group back, ingestion and grouping go on and its
 status changes as usual, but nothing is delivered for it and its timers and chains wait; when the window ends, the Alert
-Groups still firing are published with a mark, as at the end of a Storm, and those resolved meanwhile are not. Whether
-Urgent Alert Groups pass through is a setting of the window. A window of an Integration or a Route holds all their Alert
-Groups. A window of a Team holds an Alert Group — in all its Destinations, the operations channels included — only while
-every Team of its Alerts is in a window, the Route's own Team not counted, so one team's deploy never holds back an
-Alert Group that another team shares; a Team that joins an Alert Group during its window never stops the chains already
-running there (journal D523, D530). Opening and closing a window is recorded in the Audit log, and the Permission
-`maintenance:write` belongs to Admins and Responders, so a CI pipeline uses a Service account with the Role Responder
-(journal D535). A window is one row with a start and an end, which any replica handles like a timer (ADR-0007; journal
-D535).
+Groups still firing are published with a mark, as at the end of a Storm, and those resolved meanwhile are not. Urgent
+Alert Groups may pass through where a setting allows it; the L2 PRD says where that setting lives (journal D493, D511).
+A window of an Integration or a Route keeps back all their Alert Groups. A window of a Team keeps an Alert Group back —
+in all its Destinations, the operations channels included — only while every Team of its Alerts is in a window, the
+Route's own Team not counted, so one team's deploy never keeps back an Alert Group that another team shares; a Team that
+joins an Alert Group during its window never stops the chains already running there (journal D523, D530). Opening and
+closing a window is recorded in the Audit log, and the Permission `maintenance:write` belongs to Admins and Responders,
+so a CI pipeline uses a Service account with the Role Responder (journal D535). A window is one row with a start and an
+end, which any replica handles like a timer (ADR-0007; journal D535). "Keeps back" is not the hold that ADR-0004 leaves
+out, which would delay a first publication.
 
 **Changes to an Alert Group.** Everything these features change on an Alert Group — its Assignees, the Pages, skipped
 steps and undelivered Pages in its Timeline, a Team that joins, the start and end of a window — goes through the
@@ -228,8 +236,8 @@ one table (journal D513).
   behaviour of L1.
 - Permissions stay global: a Responder of one Team may acknowledge another Team's Alert Groups, and only Overrides check
   who is in a Team.
-- A shared Alert Group may still Page people during one team's deploy, because a Team's window holds it only when all
-  its Teams are in a window.
+- A shared Alert Group may still Page people during one team's deploy, because a Team's window keeps it back only when
+  all its Teams are in a window.
 - Several Schedules per Team cover a first and a second line without a concept of their own.
 - The push of a mobile app can join the Notification rules later as one more way to Page.
 
@@ -266,7 +274,7 @@ one table (journal D513).
   D507).
 - **Every chain writing in every Thread of its Alert Group.** A person would get one Mention per Destination, and a
   team's step for everyone in the chat would ring the operations channels (journal D529).
-- **A Team's window holding every Alert Group of that Team.** One team's deploy would stop the Escalation chains of
+- **A Team's window keeping back every Alert Group of that Team.** One team's deploy would stop the Escalation chains of
   another team whose Alerts share an Alert Group (journal D523, D530).
 - **Importing Schedules from iCal**, and **Overrides that the other person must approve.** More moving parts than teams
   need; Overrides take effect at once and are audited (journal D470, D483).
