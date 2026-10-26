@@ -203,6 +203,9 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   ack · resolve · snooze 1h", and takes the presets as Text commands such as `snooze tomorrow`.
 - **Edits and Thread replies.** An edit sends the whole envelope of the new state, Quiet and without Mentions. A Thread
   reply goes under the Root message with the Thread reference the bridge returned last.
+- **The footer.** "Acknowledged by", "Snoozed by" and "Resolved by" name a person with an Account link for the
+  Connection by a Mention marker in a new Root message to a bridge with native mentions, Loud or Quiet; in an edit,
+  which carries no Mentions, and through any other bridge, by the name the bridge reported for their account.
 - **Posts are not repeated.** Every new message carries an idempotency key, the same for every retry of it. When an
   answer is lost — a timeout, or a connection cut after the request — Muster retries with the same key, the bridge
   answers with the message it posted already, and Muster edits it to the current state. When the bridge did not know

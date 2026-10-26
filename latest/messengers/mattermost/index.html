@@ -3160,8 +3160,11 @@ request of the Connection, to any of its Destinations, for the seconds of its <c
   the line of Mentions. A reply in the
   Thread carries its Mentions in its own text. A <code>{{ mention "channel" }}</code> in a Route's template shows in the attachment
   as text and, on a Loud post, adds its Mention to the line of Mentions.</li>
-<li>Alert data never mention anyone: an <code>@</code> in a label or annotation is shown as text and notifies nobody. The footer of
-  a Root message names a person by their username without <code>@</code>, which does not notify them either.</li>
+<li>Alert data never mention anyone: an <code>@</code> in a label or annotation is shown as text and notifies nobody.</li>
+<li>The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
+  for the Connection as <code>@username</code>, so that Mattermost shows their name with their profile; a person without one is
+  their Muster name as text. An edit notifies nobody, but a new post with the footer, after a republish, may notify that
+  person.</li>
 </ul>
 <h2 id="check-from-the-command-line">Check from the command line<a class="headerlink" href="#check-from-the-command-line" title="Permanent link">&para;</a></h2>
 <p><code>muster doctor</code> prints one line per Mattermost Connection and per Mattermost Destination with the same checks, without

@@ -3007,7 +3007,8 @@
 <p>An <strong>Account link</strong> ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
 or your account on a messenger that Muster reaches through a <a href="../bridge/">Bridge</a>, to your Muster User. With it, a button
 you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
-in — and Mentions and footers in the messenger name you.</p>
+in — and Mentions in the messenger name you, as does the footer of a Root message you acknowledged, snoozed or
+resolved, which mentions you there in the messenger's own form.</p>
 <p>A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
 Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
 and an account reached through a Bridge, per Bridge Connection. You have at
@@ -3093,9 +3094,10 @@ links. Every bridge takes a <strong>token</strong> that you send to its bot. A b
 chat with them also offers a <strong>code</strong> that its bot sends you, as Mattermost does. Your profile offers what the
 Connection's bridge declares.</p>
 <p>Once linked, a Mention of you in a message of that Connection names you by the name the bridge reported for your
-account, which a bridge with native mentions turns into its messenger's mention, and the footer of a message you
-acknowledged, snoozed or resolved names you by that name. Without a link, a Mention is your Muster name as plain text,
-which notifies nobody.</p>
+account, which a bridge with native mentions turns into its messenger's mention. The footer of a Root message you
+acknowledged, snoozed or resolved mentions you the same way when Muster posts it to a bridge with native mentions; an
+edit carries no Mentions, so there, and through any other bridge, the footer names you by that name. Without a link, a
+Mention is your Muster name as plain text, which notifies nobody.</p>
 <h3 id="by-a-token-sent-to-the-bot">By a token sent to the bot<a class="headerlink" href="#by-a-token-sent-to-the-bot" title="Permanent link">&para;</a></h3>
 <ol>
 <li>In your profile, open <strong>Messenger accounts</strong> and select <strong>Link through {Connection}</strong> of the Bridge Connection.</li>
