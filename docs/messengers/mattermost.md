@@ -177,8 +177,11 @@ Muster edits a Root message for as long as its Alert Group is open, which can be
   the line of Mentions. A reply in the
   Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
   as text and, on a Loud post, adds its Mention to the line of Mentions.
-- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody. The footer of
-  a Root message names a person by their username without `@`, which does not notify them either.
+- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody.
+- The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
+  for the Connection as `@username`, so that Mattermost shows their name with their profile; a person without one is
+  their Muster name as text. An edit notifies nobody, but a new post with the footer, after a republish, may notify that
+  person.
 
 ## Check from the command line
 

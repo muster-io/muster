@@ -799,10 +799,11 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   constraints and the old column, renames the new one and adds the constraints again under their old names, under one
   exclusive lock of the small table; the values of Mattermost and Telegram links do not change, so an earlier binary
   reads and writes the column and catches the unique violations by name as before. Its down migration deletes the Bridge
-  links and swaps the column back the same way. S-076 writes `display_name` for every Bridge link, and the footer names
-  a User linked through a Bridge by it, else by the link's `username` (C-22.FR-16). S-102 writes `username` (the Slack
-  account's `name`) for every Slack link and `display_name` when the account has one; the footer names a User linked
-  through a Slack Connection by the link's `display_name`, else by their Muster display name (C-24.FR-6).
+  links and swaps the column back the same way. S-076 writes `display_name` for every Bridge link, and a Mention marker
+  and the footer where it carries no marker name a User linked through a Bridge by it, else by the link's `username`
+  (C-22.FR-16). S-102 writes `username` (the Slack account's `name`) for every Slack link and `display_name` when the
+  account has one; a Mention and the footer write a User linked through a Slack Connection as `<@external_id>`
+  (C-24.FR-6, C-12.FR-12).
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and

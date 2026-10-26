@@ -20,7 +20,8 @@ import (
 // status emoji and `<b><a href="{Alert Group page}">#N title</a></b>`, on a Loud message its Mentions, the environment
 // and start, the group labels, common labels and common annotations inside one `<blockquote expandable>`, the summary
 // in `<i>`, the Alerts as one line each (resolved ones struck through), never a table (F-020), the line of links that
-// starts with "Open in Muster", the notices and the footer — with an inline keyboard of its buttons. Alert data are
+// starts with "Open in Muster", the notices and the footer, which names a user with a Telegram Account link by a
+// `tg://user` link (C-12.FR-12) — with an inline keyboard of its buttons. Alert data are
 // escaped for HTML and their `@` neutralized; the trusted Mention tokens of template output stay text that notifies
 // nobody. A Thread reply carries its Mentions and its text. Rich Messages are not used (F-019). After the messenger
 // rejected the markup, the same sections are sent as plain text.
@@ -29,7 +30,7 @@ import (
 // parsed the entities; Muster counts the UTF-16 code units of the HTML it sends, which are never fewer.
 const LengthLimit = 4096
 
-// space is the identity space of Telegram, whose usernames the footer names users by (C-12.FR-12).
+// space is the identity space of Telegram, whose Account links the footer mentions users by (C-12.FR-12).
 const space = "telegram"
 
 // zeroWidthSpace follows the `@` of a Mention that must not notify.
@@ -76,6 +77,7 @@ func (w writer) link(text, url string) string {
 // text lays out m, whose sections are already shortened, with mentions — rendered already — after its heading, or
 // first in a message without one.
 func (w writer) text(m messages.Message, mentions string) string {
+	m = w.withFooter(m)
 	var out []string
 	add := func(s string) {
 		if s != "" {
@@ -145,8 +147,16 @@ func (w writer) text(m messages.Message, mentions string) string {
 	for _, n := range m.Notices {
 		add(esc(n))
 	}
-	add(esc(m.FooterIn(space)))
+	add(m.FooterText(w.esc))
 	return strings.Join(out, "\n")
+}
+
+// withFooter is m with the footer of Telegram's identity space, its user with an Account link there written as their
+// Mention (C-12.FR-12).
+func (w writer) withFooter(m messages.Message) messages.Message {
+	return m.WithFooterIn(space, func(u mentions.User) string {
+		return mentionText([]mentions.Target{{Kind: mentions.TargetUser, User: &u}}, w)
+	})
 }
 
 // output is template output written in markup, with its trusted Mention tokens as text: as it is in HTML; as plain
@@ -187,6 +197,7 @@ func fit(m messages.Message, w writer, mentions string, limit int) string {
 	if w.plain {
 		markup = messages.MarkupPlain
 	}
+	m = w.withFooter(m)
 	budget := limit - length(mentions)
 	for budget > 0 {
 		short, _ := messages.Shorten(m, budget, markup)
@@ -198,7 +209,8 @@ func fit(m messages.Message, w writer, mentions string, limit int) string {
 		budget -= max(n-limit, 1)
 	}
 	short, _ := messages.Shorten(messages.Message{Language: m.Language, Colour: m.Colour, Heading: m.Heading,
-		Links: m.Links, Footer: m.FooterIn(space)}, max(limit/2-length(mentions), 1), markup)
+		Links: m.Links, Footer: m.Footer, FooterMention: m.FooterMention, FooterName: m.FooterName},
+		max(limit/2-length(mentions), 1), markup)
 	return cutEnd(w.text(short, mentions), limit, w.plain)
 }
 

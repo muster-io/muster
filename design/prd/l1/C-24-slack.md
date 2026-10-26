@@ -117,7 +117,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   User with an Account link for the Destination's Connection is `<@U…>` (F-097); a User without one is named by their
   display name as text, which notifies nobody; everyone in the chat is `<!channel>` or `<!here>`, only as the
   Destination's Mention settings ask. A Slack Destination takes nobody, `channel`, `here` and chosen users, and refuses
-  `all` and messenger groups. The footer names a User linked for the Connection by the link's display name (C-12.FR-12).
+  `all` and messenger groups. The footer names a User linked for the Connection by `<@U…>`, in edits and new messages
+  alike (C-12.FR-12).
 - **C-24.FR-7** The adapter escapes alert data for Slack's mrkdwn (C-12.FR-7): `&`, `<` and `>` become `&amp;`,
   `&lt;` and `&gt;`, so that nothing in alert data becomes a link, a Mention, `<!channel>` or `<!here>` (F-097); `@`
   gets the zero-width space of C-12.FR-7; and since mrkdwn has no escape for `*`, `_`, `~` and `` ` `` (F-097), each of
@@ -202,7 +203,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   profile, and after it is confirmed the bot sends "Linked to Muster user {name}". Codes follow
   `account_link.slack_code` and are limited by `account_link.slack_code_requests`, per requesting User and per target
   account; a wrong code is refused as for Mattermost, with the attempts left. The link stores the account's user id, its
-  name and its display name — `profile.display_name`, else `profile.real_name` — which Mentions and the footer use. The
+  name and its display name — `profile.display_name`, else `profile.real_name` — which names the account where Muster
+  shows the link; Mentions and the footer write it as `<@U…>` (FR-6). The
   link-making messages are interactive calls (C-18.FR-11). The app's Messages tab stays on and read-only, so the person
   sees the code and cannot write to the bot (F-096); Slack documents that with the tab off it refuses the direct message
   (`messages_tab_disabled`; not yet seen on the stand, [Pending](../../facts.md#pending)), and then the request is

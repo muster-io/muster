@@ -3545,7 +3545,7 @@ type AccountLink struct {
 	Connection *EntityRef `json:"connection,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 
-	// DisplayName Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
+	// DisplayName Set on Bridge and Slack links; the account's name as the bridge reported it, which a Bridge's Mentions and footers show, or a Slack account's `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).
 	DisplayName *string `json:"display_name,omitempty"`
 	ExternalId  string  `json:"external_id"`
 

@@ -209,7 +209,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   envelope's `mentions` — `external_id` and `display_name` — and a marker `[@{display_name}](muster-mention:{ref})` in
   the body; a bridge with `native_mentions` renders it as its messenger's mention, any other as the plain name. The
   Mentions of a Loud message form the first line of its body. A User without such a link is named by their display name
-  as text, which mentions nobody. The footer names a linked User by the link's `display_name` (C-12.FR-12).
+  as text, which mentions nobody. The footer of a new Root message to a bridge with `native_mentions` names a linked
+  User by such a marker, Loud or Quiet; an edit, which carries no Mentions, and any other bridge name them by the
+  link's `display_name` (C-12.FR-12).
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.

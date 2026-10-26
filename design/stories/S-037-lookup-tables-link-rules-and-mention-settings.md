@@ -176,9 +176,12 @@ issue: 37
   show a token as `@all`, `@channel`, `@here`, `@owner` or `@<group>`. Any other argument is a template error.
 - **User names** (C-12.FR-12): the footer and user targets use the messenger username when the user has an Account link
   in the Destination's identity space, otherwise the display name as plain text, which notifies nobody. A Root message
-  carries the footer naming the user by display name in `Footer` and, per identity space where the user has an
-  Account link with a username, the footer naming them by that username in `Footers`; `Message.FooterIn(space)` is the
-  one an adapter shows. The username is written without `@`, so a footer never notifies.
+  carries the footer naming the user by display name in `Footer` and, per identity space where the user has an Account
+  link with a username, the footer naming them by that username in `Footers`; `Message.FooterIn(space)` is the one an
+  adapter shows. The username is written without `@`, so a footer never notifies. Revised after merge (C-12.FR-12,
+  journal D521): the footer now writes a user with an Account link as the messenger's Mention — `@username` in
+  Mattermost, a `tg://user?id=` link in Telegram, `<@U…>` in Slack, a marker in a new message to a bridge with
+  `native_mentions` — through `Message.FooterUsers` and `WithFooterIn`.
 - **Fake Alertmanager** (C-01.FR-13): `PUT /_fake/groups/{group}/alerts/{alert}` accepts `generator_url`, sent as the
   Alert's `generatorURL`.
 - **Log events**: `link_rule_failed` (WARN: `link_rule`, `route`, `group`, `error`) at most once per rule and Alert

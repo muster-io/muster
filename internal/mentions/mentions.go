@@ -9,13 +9,11 @@
 // lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
 // Destination's identity space — through a Bridge by the link's messenger user id and display name (C-22.FR-16), and
 // in Slack by the link's user id as <@id>, which its adapter renders (C-24.FR-6) — otherwise by the Muster display
-// name, which mentions nobody; the footer of a message names users the same way, a Bridge or a Slack link by its
-// display name. Storing the settings is the Destination's, and rendering a target in a messenger's syntax is its
-// adapter's.
+// name, which mentions nobody; the footer of a message names its user the same way (C-12.FR-12). Storing the
+// settings is the Destination's, and rendering a target in a messenger's syntax is its adapter's.
 package mentions
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -120,8 +118,7 @@ type Queries interface {
 	GetEventOwners(ctx context.Context, arg dbgen.GetEventOwnersParams) (dbgen.GetEventOwnersRow, error)
 	ListMentionUsers(ctx context.Context, arg dbgen.ListMentionUsersParams) ([]dbgen.ListMentionUsersRow, error)
 	ListLiveUserPublicIDs(ctx context.Context, arg dbgen.ListLiveUserPublicIDsParams) ([]string, error)
-	ListFooterUsernames(ctx context.Context, arg dbgen.ListFooterUsernamesParams) ([]dbgen.ListFooterUsernamesRow,
-		error)
+	ListFooterUsers(ctx context.Context, arg dbgen.ListFooterUsersParams) ([]dbgen.ListFooterUsersRow, error)
 }
 
 // Service validates Mention settings, resolves Mentions and names users for the Organization.
@@ -481,32 +478,37 @@ func (s *Service) owners(ctx context.Context, q Queries, org int64, r Request) (
 	return owner, previous, nil
 }
 
-// FooterNames are the names, by identity space, of the user the footer of the Alert Group groupID names — its Owner,
-// who snoozed it or who resolved it — read through db, or the main pool for a nil one (C-12.FR-12): the username of a
-// Mattermost or Telegram link, the display name of a Bridge link, else its username (C-22.FR-16), and the display name
-// of a Slack link (C-24.FR-6), each on one line; a link whose name is blank is left out, so that the footer names the
-// User by their Muster display name.
-func (s *Service) FooterNames(ctx context.Context, db DBTX, groupID int64) (map[string]string, error) {
-	rows, err := s.q(db).ListFooterUsernames(ctx, dbgen.ListFooterUsernamesParams{OrgID: s.orgID, ID: groupID})
+// FooterUsers are the user the footer of the Alert Group groupID names — its Owner, who snoozed it or who resolved
+// it — by the identity spaces where they have an Account link their messenger can mention them by, read through db,
+// or the main pool for a nil one (C-12.FR-12): a Mattermost link with a username, a Telegram, Bridge or Slack link
+// with the messenger's user id, which every link has. Each carries only what its adapter writes the user by, so that
+// a Desired state changes only with what a messenger shows: the Muster display name, and a Mattermost link's
+// username, a Telegram or Slack link's user id, a Bridge link's user id, display name and username, on one line. The
+// adapter writes the user as its messenger's Mention (C-22.FR-16, C-24.FR-6); in any other identity space the footer
+// names the User by their Muster display name.
+func (s *Service) FooterUsers(ctx context.Context, db DBTX, groupID int64) (map[string]User, error) {
+	rows, err := s.q(db).ListFooterUsers(ctx, dbgen.ListFooterUsersParams{OrgID: s.orgID, ID: groupID})
 	if err != nil {
-		return nil, fmt.Errorf("read the usernames of the footer of alert group %d: %w", groupID, err)
+		return nil, fmt.Errorf("read the account links of the footer of alert group %d: %w", groupID, err)
 	}
-	var out map[string]string
+	var out map[string]User
 	for _, r := range rows {
-		name := oneLine(r.Username)
+		u := User{Name: r.Name}
 		switch r.Messenger {
+		case TypeMattermost:
+			u.Username = oneLine(r.Username)
 		case TypeBridge:
-			name = cmp.Or(oneLine(r.DisplayName), name)
-		case TypeSlack:
-			name = oneLine(r.DisplayName)
+			u.Username, u.ExternalID, u.DisplayName = oneLine(r.Username), r.ExternalID, oneLine(r.DisplayName)
+		default:
+			u.ExternalID = r.ExternalID
 		}
-		if name == "" {
+		if u.Username == "" && u.ExternalID == "" {
 			continue
 		}
 		if out == nil {
-			out = make(map[string]string, len(rows))
+			out = make(map[string]User, len(rows))
 		}
-		out[r.IdentitySpace] = name
+		out[r.IdentitySpace] = u
 	}
 	return out, nil
 }

@@ -899,14 +899,14 @@ func TestSeveralConnectionsTelegramSameChat(t *testing.T) {
 		t.Errorf("the presses at the other bot changed %s: %s", g, s)
 	}
 
-	// C-18.AC-7: bot B's Root message of an Alert Group Alice acknowledged names her Telegram username.
+	// C-18.AC-7: bot B's Root message of an Alert Group Alice acknowledged mentions her Telegram account.
 	g2 := e.fire("s2", "AliceTest", "t", true)
 	pb2 := e.tgPostOf(g2, tdb)
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g2+"/acknowledge", "", http.StatusOK)
 	e.settle()
-	footer := regexp.MustCompile(`Acknowledged by alice_t($|[^A-Za-z0-9_])`)
 	eventually(t, "the footer of bot B's post", func() bool {
-		return footer.MatchString(e.tgMessage(faketelegram.ChannelID, pb2).Text)
+		return strings.HasSuffix(e.tgMessage(faketelegram.ChannelID, pb2).Text,
+			"\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`)
 	})
 
 	// C-17.FR-2: the ack timeout notices of a new Alert Group, each a reply to its own copy from its own bot.

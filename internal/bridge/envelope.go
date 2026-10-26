@@ -29,7 +29,9 @@ import (
 // body is shortened as C-12.FR-11 says, keeping its line of links, its notices and its footer; without `buttons`, a
 // bridge that forwards Thread messages gets the commands line at the end of a Root message (messages.CommandsLine).
 // The Mentions of a Loud message are its first line, with a Mention marker for each User linked through the
-// Connection, listed in `mentions` (C-22.FR-16); its footer names the user as the Connection's identity space does.
+// Connection, listed in `mentions` (C-22.FR-16). The footer names a user linked through the Connection by a marker of
+// their own in a new message for a bridge with `native_mentions`; an edit carries no Mentions, and any other bridge
+// would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
 // Template output keeps its trusted Mention tokens as text that notifies nobody.
 
 // MinBodyLength is the protocol's floor of limits.max_body_length, in code points: the body limit when info has none.
@@ -113,9 +115,8 @@ func mentionsOf(c delivery.Call) ([]string, []gen.Mention) {
 		if t.Kind != mentions.TargetUser || t.User == nil {
 			continue
 		}
-		u := t.User
-		name := cutEnd(cmp.Or(oneLine(u.DisplayName), oneLine(u.Name)), maxDisplayName)
-		if u.ExternalID == "" || utf8.RuneCountInString(u.ExternalID) > maxID || name == "" {
+		u := *t.User
+		if !markable(u) {
 			if n := messages.EscapeCommonMark(messages.Value(oneLine(u.Name))); n != "" && !slices.Contains(names, n) {
 				names = append(names, n)
 			}
@@ -124,14 +125,44 @@ func mentionsOf(c delivery.Call) ([]string, []gen.Mention) {
 		if slices.ContainsFunc(list, func(m gen.Mention) bool { return m.ExternalId == u.ExternalID }) {
 			continue
 		}
-		ref := "m" + strconv.Itoa(len(list)+1)
-		list = append(list, gen.Mention{Ref: ref, ExternalId: u.ExternalID, DisplayName: name})
-		names = append(names, "[@"+messages.EscapeCommonMark(messages.Value(name))+"]("+markerScheme+ref+")")
+		var n string
+		n, list = marker(u, list)
+		names = append(names, n)
 	}
 	if len(names) == 0 {
 		return nil, list
 	}
 	return []string{strings.Join(names, " ")}, list
+}
+
+// markerName is the display name of a User's marker and entry: the link's display name, else the Muster display
+// name, on one line and cut to maxDisplayName.
+func markerName(u mentions.User) string {
+	return cutEnd(cmp.Or(oneLine(u.DisplayName), oneLine(u.Name)), maxDisplayName)
+}
+
+// markable reports whether a User has a marker: a link's external id within maxID and a display name.
+func markable(u mentions.User) bool {
+	return u.ExternalID != "" && utf8.RuneCountInString(u.ExternalID) <= maxID && markerName(u) != ""
+}
+
+// marker is the marker `[@name](muster-mention:mN)` of a markable User and the Mentions with their entry: the entry of
+// the same account when list has one, otherwise a new one at its end.
+func marker(u mentions.User, list []gen.Mention) (string, []gen.Mention) {
+	name := markerName(u)
+	n := slices.IndexFunc(list, func(m gen.Mention) bool { return m.ExternalId == u.ExternalID })
+	if n < 0 {
+		list = append(list, gen.Mention{Ref: "m" + strconv.Itoa(len(list)+1), ExternalId: u.ExternalID,
+			DisplayName: name})
+		n = len(list) - 1
+	}
+	return "[@" + messages.EscapeCommonMark(messages.Value(name)) + "](" + markerScheme + list[n].Ref + ")", list
+}
+
+// footerName is the user of a footer as text, which mentions nobody: the display name of their Account link, else its
+// username, else their Muster display name, escaped.
+func footerName(u mentions.User) string {
+	return messages.EscapeCommonMark(messages.Value(cmp.Or(u.DisplayName, u.Username, oneLine(u.Name))))
 }
 
 // oneLine is s on one line: every run of white space and control characters a single space, trimmed.
@@ -143,8 +174,33 @@ func oneLine(s string) string {
 // withFooterIn is m with the footer of the identity space of the Bridge Connection conn, which names the user by the
 // display name of their Account link there (C-22.FR-16), otherwise by the Muster display name.
 func withFooterIn(m messages.Message, conn int64) messages.Message {
-	m.Footer = m.FooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn))
-	return m
+	return m.WithFooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn), footerName)
+}
+
+// withFooterMention is m, a new message for a bridge whose info is i, with the footer of the identity space of the
+// Bridge Connection conn and the Mentions list (C-12.FR-12, C-22.FR-16): with `native_mentions`, a user linked there
+// is their marker, whose entry list gains unless it has one for the account; otherwise withFooterIn names them.
+func withFooterMention(m messages.Message, conn int64, i Info, list []gen.Mention) (messages.Message, []gen.Mention) {
+	if c := i.Capabilities.NativeMentions; c == nil || !*c {
+		return withFooterIn(m, conn), list
+	}
+	m = m.WithFooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn), func(u mentions.User) string {
+		if !markable(u) {
+			return footerName(u)
+		}
+		var s string
+		s, list = marker(u, list)
+		return s
+	})
+	return m, list
+}
+
+// marked are the Mentions of list whose marker body still carries: shortening may have cut the footer's (C-12.FR-11),
+// and an entry names a marker. The list is never nil.
+func marked(list []gen.Mention, body string) []gen.Mention {
+	return slices.DeleteFunc(slices.Clone(list), func(m gen.Mention) bool {
+		return !strings.Contains(body, "]("+markerScheme+m.Ref+")")
+	})
 }
 
 // bodyLimit is limits.max_body_length of i, MinBodyLength without one.
@@ -222,9 +278,9 @@ func fit(m messages.Message, room int) string {
 	if utf8.RuneCountInString(full) <= room {
 		return full
 	}
-	tail := messages.Layout(messages.Message{Links: short.Links, Notices: short.Notices, Footer: short.Footer},
-		messages.MarkupCommonMark)
-	short.Links, short.Notices, short.Footer = nil, nil, ""
+	tail := messages.Layout(messages.Message{Links: short.Links, Notices: short.Notices, Footer: short.Footer,
+		FooterMention: short.FooterMention}, messages.MarkupCommonMark)
+	short.Links, short.Notices, short.Footer, short.FooterMention = nil, nil, "", ""
 	return cutMiddle(messages.Layout(short, messages.MarkupCommonMark), tail, room)
 }
 

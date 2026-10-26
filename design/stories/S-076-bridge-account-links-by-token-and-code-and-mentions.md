@@ -145,7 +145,10 @@ issue: 234
   one left out, so a Bridge link names its User by the account's name (C-22.FR-16, C-12.FR-12), also without a
   username; a Mention target of a User with a link for the Destination's Connection carries `external_id` and
   `display_name`; the envelope lists it in `mentions` with a `ref` (`m1`, `m2`, …) and puts the markers on the first
-  line of the body of a Loud message; a User without a link is their display name as text.
+  line of the body of a Loud message; a User without a link is their display name as text. Revised after merge
+  (C-12.FR-12, journal D521): `ListFooterUsers` and `FooterUsers` replace `ListFooterUsernames` and `FooterNames`, and
+  the footer of a new message to a bridge with `native_mentions` names a linked User by their marker, with its entry
+  in `mentions`; an edit and any other bridge still name them by the display name, else the username.
 - **Fake bridge** (`people.go`, `fakebridge.go`, `events.go`): `findUsers` by the kind in `/_fake/config` — `email`
   (`alice@example.org`, `bob@example.org`), `login` or `none`; `sendDirectMessage` recorded at
   `/_fake/direct-messages`, `forbidden` for users set through `/_fake/config` `dm_blocked`; `/_fake/config` also sets

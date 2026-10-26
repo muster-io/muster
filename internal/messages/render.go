@@ -30,8 +30,8 @@ import (
 // Config is what a Renderer needs: the Organization, the main pool that previews and dry runs read, MUSTER_PUBLIC_URL
 // for the links to Muster, the business clock of `now` and of the template error state, the real clock of the
 // sandbox's execution limit and of the render durations, the Keyring that signs the buttons (nil leaves them
-// unsigned), the logger, MUSTER_RUNBOOK_BASE_URL, the links of Alert Groups and the usernames of the users a footer
-// names (nil for none).
+// unsigned), the logger, MUSTER_RUNBOOK_BASE_URL, the links of Alert Groups and the Account links of the users a
+// footer names (nil for none).
 type Config struct {
 	OrgID       int64
 	DB          DBTX
@@ -52,10 +52,10 @@ type Links interface {
 	RenderURL(ctx context.Context, db links.DBTX, source string, in links.Input) (string, error)
 }
 
-// Names are the messenger usernames, by identity space, of the user the footer of an Alert Group names
-// (C-12.FR-12), declared by their consumer; *mentions.Service implements them.
+// Names are the user the footer of an Alert Group names, by the identity spaces where their Account link lets the
+// messenger mention them (C-12.FR-12), declared by their consumer; *mentions.Service implements them.
 type Names interface {
-	FooterNames(ctx context.Context, db mentions.DBTX, groupID int64) (map[string]string, error)
+	FooterUsers(ctx context.Context, db mentions.DBTX, groupID int64) (map[string]mentions.User, error)
 }
 
 // Renderer renders the messages of an Organization (C-12): Root messages, with a Route's templates or the default
@@ -167,10 +167,10 @@ type Source struct {
 	ResolvedBy        string
 	Alerts            []SourceAlert
 	TotalAlerts       int64
-	// Links are its links after "Open in Muster"; FooterNames the messenger usernames, by identity space, of the
-	// user its footer names.
+	// Links are its links after "Open in Muster"; FooterUsers the user its footer names, by the identity spaces
+	// where their Account link lets the messenger mention them.
 	Links       []links.Link
-	FooterNames map[string]string
+	FooterUsers map[string]mentions.User
 }
 
 // RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — and the
@@ -224,7 +224,7 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 		return nil, err
 	}
 	if r.names != nil {
-		if src.FooterNames, err = r.names.FooterNames(ctx, db, groupID); err != nil {
+		if src.FooterUsers, err = r.names.FooterUsers(ctx, db, groupID); err != nil {
 			return nil, err
 		}
 	}

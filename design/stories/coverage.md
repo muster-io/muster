@@ -488,7 +488,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-12.FR-9 | S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-10 | S-036 | complete |  |
 | C-12.FR-11 | S-036 (part), S-061 (part), S-042 (part) | complete |  |
-| C-12.FR-12 | S-037, S-051 (part), S-102 (part) | complete | checked with real Account links in C-18.AC-7 (S-051); Slack's Mention form and display names in S-102 |
+| C-12.FR-12 | S-037, S-051 (part), S-102 (part) | complete | checked with real Account links in C-18.AC-7 (S-051); Slack's Mention form in S-102; the footer's Mentions since the revision of journal D521 |
 | C-12.FR-13 | S-036 (part), S-037 (part), S-045 (part) | complete |  |
 | C-12.AC-1 | S-036 (part), S-037 (part) | complete |  |
 | C-12.AC-2 | S-036 (part), S-038 (part) | complete |  |

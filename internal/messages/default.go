@@ -14,6 +14,7 @@ import (
 
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/links"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 // The default Root message (C-12.FR-1): its exclusions and the limits of its Alerts section.
@@ -40,13 +41,15 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 	m := Message{Kind: KindRoot, Language: lang, TimeZone: src.TimeZone, Colour: src.Status,
 		Heading: &Heading{Number: src.Number, Title: Value(src.Title), URL: url},
 		Links:   append([]Link{{Text: T(lang, "link.open", nil), URL: url}}, linksOf(src.Links, lang)...),
-		Notices: notices(src, lang), Footer: footer(src, lang, ""), Buttons: []Button{}}
-	for space, name := range src.FooterNames {
-		if f := footer(src, lang, name); f != "" && f != m.Footer {
-			if m.Footers == nil {
-				m.Footers = map[string]string{}
-			}
+		Notices: notices(src, lang), Footer: footer(src, lang, Value), Buttons: []Button{}}
+	token := func(string) string { return templates.MentionToken(templates.Token{Name: FooterUserToken}) }
+	if f := footer(src, lang, token); len(src.FooterUsers) > 0 && f != m.Footer {
+		m.Footers = make(map[string]string, len(src.FooterUsers))
+		m.FooterUsers = make(map[string]FooterUser, len(src.FooterUsers))
+		for space, u := range src.FooterUsers {
 			m.Footers[space] = f
+			m.FooterUsers[space] = FooterUser{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID,
+				DisplayName: u.DisplayName}
 		}
 	}
 	keyID := ""
@@ -125,11 +128,10 @@ func notices(src *Source, lang string) []string {
 	return out
 }
 
-// footer is item 11: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it. The user
-// is named by username when it is set — the messenger username of their Account link — and by the Muster display
-// name otherwise, which mentions nobody (C-12.FR-12).
-func footer(src *Source, lang, username string) string {
-	user := func(name string) string { return Value(cmp.Or(username, name)) }
+// footer is item 11: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it, with the
+// user written by user from their Muster display name: the name made safe, or the trusted token of the user that an
+// adapter writes as its messenger's Mention where they have an Account link (C-12.FR-12).
+func footer(src *Source, lang string, user func(name string) string) string {
 	switch src.Status {
 	case ColourAcknowledged:
 		return T(lang, "footer.acknowledged", Args{"user": user(src.Owner)})

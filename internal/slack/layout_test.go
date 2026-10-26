@@ -431,9 +431,9 @@ func TestRootStructure(t *testing.T) {
 		t.Errorf("reply text = %q", o.Text)
 	}
 
-	// The footer names the user as the Destination's identity space does (C-12.FR-12).
+	// The footer names a user without a user id of Slack's form by their display name, escaped (C-12.FR-12).
 	src := layoutSource(messages.ColourAcknowledged)
-	src.FooterNames = map[string]string{"slack:3": "alice_s"}
+	src.Owner, src.FooterUsers = "alice_s", map[string]mentions.User{"slack:3": {Name: "alice_s", ExternalID: "u-1"}}
 	body = strings.Split(sections(layout(e.root(t, src), testLook(), nil))[blockBody], "\n")
 	if got := body[len(body)-1]; got != "Acknowledged by alice_\u200bs" {
 		t.Errorf("footer = %q", got)
@@ -818,11 +818,41 @@ func TestLinkedMentions(t *testing.T) {
 		len(o.Attachments) != 0 {
 		t.Errorf("reminder = %q, %q", o.Text, o.Blocks[0].Text.Text)
 	}
-	ack := layoutSource(messages.ColourAcknowledged)
-	ack.FooterNames = map[string]string{"slack:3": "Alice Smith", "slack:4": "alice"}
-	body := strings.Split(sections(layout(e.root(t, ack), testLook(), nil))[blockBody], "\n")
-	if got := body[len(body)-1]; got != "Acknowledged by Alice Smith" {
-		t.Errorf("footer = %q", got)
+	// The footer mentions the Owner, who snoozed and who resolved by <@U…> where they have an Account link for the
+	// Connection, in an edit — a Quiet call without Mentions — as in a new message and in plain text (C-12.FR-12);
+	// another Connection names them by their display name.
+	users := map[string]mentions.User{"slack:3": {Name: "Alice Smith", ExternalID: "U0FAKEALICE"},
+		"slack:4": {Name: "Alice Smith", ExternalID: "U0FAKEOTHER"}}
+	until := time.Date(2026, 10, 8, 14, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		status string
+		set    func(s *messages.Source)
+		want   string
+	}{
+		{messages.ColourAcknowledged, func(*messages.Source) {}, "Acknowledged by <@U0FAKEALICE>"},
+		{messages.ColourSnoozed, func(s *messages.Source) { s.SnoozedBy, s.SnoozeUntil = "Alice Smith", &until },
+			"Snoozed by <@U0FAKEALICE> until 2026-10-08 14:00 UTC"},
+		{messages.ColourResolved, func(s *messages.Source) { s.ResolvedByKind, s.ResolvedBy = "user", "Alice Smith" },
+			"Resolved by <@U0FAKEALICE>"},
+	} {
+		src := layoutSource(tc.status)
+		tc.set(src)
+		src.FooterUsers = users
+		m := e.root(t, src)
+		quiet := delivery.Call{Destination: loud.Destination, Loudness: groups.Quiet}
+		body := strings.Split(sections(layout(m, testLook(), callMentions(quiet, m)))[blockBody], "\n")
+		if got := body[len(body)-1]; got != tc.want {
+			t.Errorf("%s footer = %q", tc.status, got)
+		}
+		if lines := strings.Split(layout(m, plainLook(), nil).Text, "\n"); lines[len(lines)-1] != tc.want {
+			t.Errorf("%s plain footer = %q", tc.status, lines[len(lines)-1])
+		}
+		other := testLook()
+		other.space = "slack:5"
+		body = strings.Split(sections(layout(m, other, nil))[blockBody], "\n")
+		if got := body[len(body)-1]; got != strings.Replace(tc.want, "<@U0FAKEALICE>", "Alice Smith", 1) {
+			t.Errorf("%s footer without a link = %q", tc.status, got)
+		}
 	}
 }
 

@@ -36,16 +36,19 @@ SELECT public_id
 FROM users
 WHERE org_id = @org_id AND status <> 'deleted' AND public_id = ANY(@public_ids::text[]);
 
--- ListFooterUsernames lists the Account links, by identity space, of the user the footer of an Alert Group names: its
--- Owner while acknowledged, who snoozed it while snoozed, who resolved it while resolved, with the messenger, the
--- username and the display name of each, empty without one; FooterNames picks the name (C-22.FR-16, C-24.FR-6).
--- name: ListFooterUsernames :many
+-- ListFooterUsers lists the Account links, by identity space, of the user the footer of an Alert Group names: its Owner
+-- while acknowledged, who snoozed it while snoozed, who resolved it while resolved, with the messenger, the username,
+-- the messenger's user id and the display name of each, empty without one, and the user's display name; FooterUsers
+-- keeps the links its messenger can mention the user by (C-12.FR-12, C-22.FR-16, C-24.FR-6).
+-- name: ListFooterUsers :many
 SELECT al.identity_space, al.messenger, coalesce(al.username, '')::text AS username,
-       coalesce(al.display_name, '')::text AS display_name
+       coalesce(al.external_id, '')::text AS external_id, coalesce(al.display_name, '')::text AS display_name,
+       u.name
 FROM alert_groups g
-JOIN account_links al ON al.org_id = g.org_id
-                     AND al.user_id = CASE g.status WHEN 'acknowledged' THEN g.owner_user_id
-                                                    WHEN 'snoozed' THEN g.snoozed_by_user_id
-                                                    WHEN 'resolved' THEN g.resolved_by_user_id END
+JOIN users u ON u.org_id = g.org_id
+            AND u.id = CASE g.status WHEN 'acknowledged' THEN g.owner_user_id
+                                     WHEN 'snoozed' THEN g.snoozed_by_user_id
+                                     WHEN 'resolved' THEN g.resolved_by_user_id END
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
 WHERE g.org_id = @org_id AND g.id = @id
 ORDER BY al.identity_space;

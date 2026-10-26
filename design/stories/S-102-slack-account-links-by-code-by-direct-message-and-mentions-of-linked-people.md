@@ -92,9 +92,12 @@ issue: 311
   `SendCode` and `SendLinked` — `chat.postMessage` to the user's id through the interactive path (C-18.FR-11), the code
   registered as a secret of the request so that the Request log and the logs mask it; Slack refusing it with
   `cannot_dm_bot`, `user_not_found` or `channel_not_found` for the user id is `direct_message_refused`.
-- **Mentions** (`internal/mentions`, `internal/slack/layout.go`): a chosen User with a Slack link for the
-  Destination's Connection renders as `<@external_id>`, in `text` and the top `section` only; the footer names a User
-  linked for the Connection by the link's `display_name`, else by their Muster display name.
+- **Mentions** (`internal/mentions`, `internal/slack/layout.go`): a chosen User with a Slack link for the Destination's
+  Connection renders as `<@external_id>`, in `text` and the top `section` only; the footer names a User linked for the
+  Connection by the link's `display_name`, else by their Muster display name. Revised after merge (C-12.FR-12, journal
+  D521): the footer now writes a user with an Account link as the messenger's Mention — `@username` in Mattermost, a
+  `tg://user?id=` link in Telegram, `<@U…>` in Slack, a marker in a new message to a bridge with `native_mentions` —
+  through `Message.FooterUsers` and `WithFooterIn`.
 - **Log events**: `account_link_linked` and the events of link refusals name Slack among their messengers.
 - **Fake Slack server** (`internal/fakes/fakeslack/people.go`): per app, `U0FAKEALICE` "alice" "Alice Smith"
   `alice@example.org`, `U0FAKEBOB` "bob", two accounts whose display name is "Sam" and a deleted one and a bot, over
@@ -192,4 +195,4 @@ None.
 | C-24.AC-14 | full | |
 | C-24.AC-15 | partial | linked Mentions and the footer; the rest is S-098 and S-099 |
 | C-18.FR-4 | partial | the Identity space of a Slack Connection |
-| C-12.FR-12 | partial | Slack's Mention form and the footer's display names |
+| C-12.FR-12 | partial | Slack's Mention form, also the footer's since C-12.FR-12 was revised (journal D521) |

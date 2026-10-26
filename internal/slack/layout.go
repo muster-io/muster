@@ -413,11 +413,11 @@ func headingText(m messages.Message) string {
 func bodyText(m messages.Message, l look, b bound) string {
 	cp := laidOut(m, l)
 	tail := messages.Layout(messages.Message{Language: cp.Language, Links: cp.Links, Notices: cp.Notices,
-		Footer: cp.Footer}, messages.MarkupMrkdwn)
+		Footer: cp.Footer, FooterMention: cp.FooterMention}, messages.MarkupMrkdwn)
 	if !b.fits(tail) {
 		return cutText(tail, b)
 	}
-	cp.Links, cp.Notices, cp.Footer = nil, nil, ""
+	cp.Links, cp.Notices, cp.Footer, cp.FooterMention = nil, nil, "", ""
 	// The heading is not in the body: shortening lays it out only so that the full list of Alerts links to the Alert
 	// Group page, without the title, and its line does not count.
 	extra := 0
@@ -439,11 +439,11 @@ func bodyText(m messages.Message, l look, b bound) string {
 }
 
 // laidOut is m as its body lays it out for the Destination: without buttons, with the footer of its identity space,
-// the heading without its title, and its template output with its trusted Mention tokens as text that notifies
-// nobody and its literal Mentions neutralized.
+// whose user with an Account link there is <@U…> (C-12.FR-12), the heading without its title, and its template output
+// with its trusted Mention tokens as text that notifies nobody and its literal Mentions neutralized.
 func laidOut(m messages.Message, l look) messages.Message {
-	cp := m
-	cp.Buttons, cp.Footer, cp.Footers = nil, m.FooterIn(l.space), nil
+	cp := m.WithFooterIn(l.space, userMention)
+	cp.Buttons = nil
 	if h := m.Heading; h != nil {
 		cp.Heading = &messages.Heading{Number: h.Number, URL: h.URL}
 	}
@@ -512,12 +512,8 @@ func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 		case mentions.TargetEveryone:
 			add(everyoneMentions[t.Everyone])
 		case mentions.TargetUser:
-			switch {
-			case t.User == nil:
-			case slackUserID.MatchString(t.User.ExternalID):
-				add("<@" + t.User.ExternalID + ">")
-			default:
-				add(messages.EscapeMrkdwn(messages.Value(strings.Join(strings.Fields(t.User.Name), " "))))
+			if t.User != nil {
+				add(userMention(*t.User))
 			}
 		}
 	}
@@ -525,6 +521,15 @@ func mentionText(ts []mentions.Target, tokens []templates.Token) []string {
 		add(everyoneMentions[tk.Name])
 	}
 	return out
+}
+
+// userMention is a User in mrkdwn: <@U…> of the user id of their Account link for the Destination's Connection
+// (F-097), otherwise their display name as text, escaped, which notifies nobody (C-24.FR-6, C-12.FR-12).
+func userMention(u mentions.User) string {
+	if slackUserID.MatchString(u.ExternalID) {
+		return "<@" + u.ExternalID + ">"
+	}
+	return messages.EscapeMrkdwn(messages.Value(strings.Join(strings.Fields(u.Name), " ")))
 }
 
 // actionsBlock is the `actions` block of the buttons of m (C-24.FR-5), false when it has none: each button with the
