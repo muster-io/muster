@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.3](https://github.com/muster-io/muster/compare/v0.1.2...v0.1.3) (2026-10-26)
+
+
+### Features
+
+* **mattermost:** leave the summary line out of root messages and keep only the attachment ([#366](https://github.com/muster-io/muster/issues/366)) ([0abf6f3](https://github.com/muster-io/muster/commit/0abf6f397d3a5264400e25271980627bdd703128))
+* **messages:** write the Owner and other names in the footer as mentions when the account is linked ([#387](https://github.com/muster-io/muster/issues/387)) ([7210552](https://github.com/muster-io/muster/commit/72105526c4bc8b976706063622fa4389fcba6ef0))
+
+
+### Bug Fixes
+
+* **mattermost:** name the bot and the roles read when the check warns about ephemeral answers ([#386](https://github.com/muster-io/muster/issues/386)) ([03e0984](https://github.com/muster-io/muster/commit/03e09842e02304731611b90b827b91be87a373a0))
+
+
+### Dependencies
+
+* **deps:** update tanstack ([#383](https://github.com/muster-io/muster/issues/383)) ([e5ba78b](https://github.com/muster-io/muster/commit/e5ba78beffbfe20a0218fa5b0adebaf94a673e9f))
+* **deps:** update zod to 4.6.6 ([#377](https://github.com/muster-io/muster/issues/377)) ([1391ff2](https://github.com/muster-io/muster/commit/1391ff2279a3c46885b5550beece5fb599a73172))
+
 ## [0.1.2](https://github.com/muster-io/muster/compare/v0.1.1...v0.1.2) (2026-10-22)
 
 
