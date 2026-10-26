@@ -441,7 +441,7 @@ jobs:
       # renovate: datasource=github-releases depName=anchore/syft
       SYFT_VERSION: v1.54.1
       # renovate: datasource=github-releases depName=aquasecurity/trivy
-      TRIVY_VERSION: v0.76.0
+      TRIVY_VERSION: v0.76.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
