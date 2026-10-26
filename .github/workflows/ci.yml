@@ -75,9 +75,32 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      # The system packages of Chromium come from a cache, as the Ubuntu mirror at times serves them at a few kB/s; the
+      # script says how the cache is keyed and when it is saved.
+      - name: key the Playwright system packages
+        id: playwright-debs-key
+        run: ./scripts/ci/install-playwright-deps.sh key >>"$GITHUB_OUTPUT"
+      - name: restore the Playwright system packages
+        id: playwright-debs-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/playwright-debs
+          key: ${{ steps.playwright-debs-key.outputs.prefix }}
+          restore-keys: |
+            ${{ steps.playwright-debs-key.outputs.prefix }}
+            ${{ steps.playwright-debs-key.outputs.os-prefix }}
       - name: install Playwright dependencies
-        timeout-minutes: 9
+        id: playwright-deps
+        timeout-minutes: 12
+        env:
+          PLAYWRIGHT_DEBS_RESTORED: ${{ steps.playwright-debs-restore.outputs.cache-matched-key }}
         run: ./scripts/ci/install-playwright-deps.sh
+      - name: save the Playwright system packages
+        if: steps.playwright-deps.outputs.key != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/playwright-debs
+          key: ${{ steps.playwright-deps.outputs.key }}
       - run: make ${{ github.event_name == 'pull_request' && 'test-race' || 'test' }}
 
   # The integration tests on PostgreSQL 14 and 17, started by testcontainers on the runner's Docker.
@@ -358,9 +381,32 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      # The system packages of Chromium come from a cache, as the Ubuntu mirror at times serves them at a few kB/s; the
+      # script says how the cache is keyed and when it is saved.
+      - name: key the Playwright system packages
+        id: playwright-debs-key
+        run: ./scripts/ci/install-playwright-deps.sh key >>"$GITHUB_OUTPUT"
+      - name: restore the Playwright system packages
+        id: playwright-debs-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/playwright-debs
+          key: ${{ steps.playwright-debs-key.outputs.prefix }}
+          restore-keys: |
+            ${{ steps.playwright-debs-key.outputs.prefix }}
+            ${{ steps.playwright-debs-key.outputs.os-prefix }}
       - name: install Playwright dependencies
-        timeout-minutes: 9
+        id: playwright-deps
+        timeout-minutes: 12
+        env:
+          PLAYWRIGHT_DEBS_RESTORED: ${{ steps.playwright-debs-restore.outputs.cache-matched-key }}
         run: ./scripts/ci/install-playwright-deps.sh
+      - name: save the Playwright system packages
+        if: steps.playwright-deps.outputs.key != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/playwright-debs
+          key: ${{ steps.playwright-deps.outputs.key }}
       - run: make e2e-web
 
   # The required check of both suites: it fails when either job did not succeed, also when one was cancelled.
