@@ -11,7 +11,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
 1. A small installation keeps only the Default route.
 2. The Admin creates the Route "payments-critical" with Matchers `team="payments"` and `severity="critical"`, marks it
-   urgent and keeps the On-call profile.
+   urgent and keeps the On-call profile. _Revised for L2 (2026-10-26):_ from 0.2.0 the Admin sets its Minimum severity
+   to critical instead, and the profile is called Paging (C-26.FR-8, C-26.FR-11).
 3. The Admin changes a Route's Group key to `alertname, cluster, namespace` and sees how the Snapshots of the last day
    would have been grouped.
 4. The Admin creates "certificates" with the Informational profile: no ack timeout, no Reminders, long Snooze durations
@@ -29,6 +30,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   values of its Route profile ([defaults.md](defaults.md#routing-and-lifecycle)) — and the API reads and writes them
   all; the capability named with each field adds its behaviour and its section of the Route form. Until C-12 can check
   templates, a Route accepts only the built-in templates, and any other template is refused.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the urgent mark no longer acts and the Route's Minimum severity
+  (`route.minimum_severity`) takes its place (C-26.FR-8, C-26.FR-10); each Destination of a Route has a Severity
+  condition (C-26.FR-1), and a Route also has the option to deliver to the Teams from the label (C-26.FR-2), its
+  Escalation chains (C-32.FR-2), its owning Team (C-25.FR-2) and its "Labels in the message" (C-29.FR-2).
 - **C-08.FR-2** Matchers use Alertmanager syntax — `=`, `!=`, `=~`, `!~` with RE2 regular expressions — and are combined
   with AND. The UI builds them from fields; the API accepts the same structure; an invalid expression is refused with a
   pointer to the field.
@@ -50,10 +55,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   (`organization.severity_mapping`). An Alert Group's Severity level is the highest of its firing Alerts. An Alert Group
   is Urgent if its Route is marked urgent, or if its Severity level is critical and "critical is Urgent"
   (`organization.critical_is_urgent`) is on.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 an Alert Group's Severity level is the highest of its firing Alerts raised
+  to its Route's Minimum severity, and it is Urgent exactly when that level is critical (C-26.FR-8); the urgent mark and
+  "critical is Urgent" no longer act (C-26.FR-10).
 - **C-08.FR-7** Creating a Route offers two Route profiles that only pre-fill its settings and are not stored: On-call
   and Informational. Every policy field has a value for each profile, given in
   [defaults.md](defaults.md#routing-and-lifecycle). The profiles are read-only data served from the built-in defaults
   (`route-profiles`); they cannot be edited.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the profiles are Paging, formerly On-call, and Informational, with the ids
+  `paging` and `informational` (C-26.FR-11).
 - **C-08.FR-8** Edits of a Route's settings apply at once, also to open Alert Groups (whose Root messages are re-rendered
   once delivery exists, C-11); they never change any Alert Group's status. A new Group key or new Matchers apply only to
   new Alert Groups, and a fingerprint already living in an open Alert Group stays there until that Alert Group is
@@ -82,6 +92,10 @@ Routes list in evaluation order with drag-to-reorder and the Default route pinne
 editor with the Matcher builder, profile choice on creation, Group key editor with preview, the Destinations picker and
 the policy sections as later capabilities add them.
 
+_Revised for L2 (2026-10-26):_ the editor also has the Severity conditions of its Destinations, "Also to the Teams from
+the label", the Minimum severity instead of the urgent mark, the owning Team and the preview "Where alerts go" (C-26),
+its Escalation chains (C-32) and "Labels in the message" (C-29).
+
 ## API surface
 
 `routes` (list, create, read, update, delete); `route-order` (replace); `route-profiles` (list); `route-suggestions`
@@ -105,6 +119,8 @@ Checked with the fake Alertmanager, through the Integration's Alerts view and th
 - **C-08.AC-10** A Matcher with an invalid RE2 expression is refused with `422` and a pointer to the field.
 - **C-08.AC-11** A reorder that lists the Default route gets `409`; accepting a suggestion twice gets `409` the second
   time; `route-profiles` returns the On-call and Informational profiles with the values of the defaults.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 `route-profiles` returns the Paging and Informational profiles, `paging` and
+  `informational` (C-26.AC-8).
 - **C-08.AC-12** The Group key preview with the Matchers of an unsaved Route and a proposed key returns the proposed
   side for the Snapshots of the period.
 

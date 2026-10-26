@@ -51,6 +51,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   order after it recovers, none dropped and with no age limit. New event names and new fields are added
   within `version` 1; removing a field or changing its meaning needs a new `version`. The URL and headers are templates
   that may use Secrets. The schema is part of the API specification.
+  _Revised for L2 (2026-10-26):_ events mode also sends the lifecycle events of the [L2
+  table](reference.md#lifecycle-events-added-in-l2), except `escalation_webhook`, which goes only to the outgoing
+  webhook Destination its Escalation step names (C-32.FR-13); `alert_group` also carries its Teams and its Assignees,
+  and its `urgent` is true exactly when its Severity level is critical (C-26.FR-8).
 - **C-15.FR-3** Template mode defines a "create" request (method, URL, headers, body) with extraction rules that pick
   values from the response (for example `$.data.id`); the values are stored per Alert Group and Destination. "Update"
   requests use them and run through reconciliation, so only the latest state is sent. Optional "open thread" runs once,
@@ -91,6 +95,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   templates' `.Mentions` list each target as `{"type": "everyone"}`, `{"type": "group", "name": …}` or
   `{"type": "user", "id": …, "name": …, "login": …}`, and in templates `mention` renders a target as plain text —
   `@all`, the group name, or `@` and the login — for the template to wrap in the receiver's syntax.
+  _Revised for L2 (2026-10-26):_ the Mention entries of C-28.FR-1 apply: a Team is a target of its own with its slug and
+  name, and the On-call of a Team and the people that `paged` names are `user` targets.
 - **C-15.FR-12** Deleting an outgoing webhook Destination (C-11.FR-14): in events mode its queued events are abandoned
   and end as Not delivered, no final event is sent, and its secrets — the Signing secrets, the Secrets and the proxy
   password — are wiped at once; in template mode the final edit goes out through the "update" request first and the

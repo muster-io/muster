@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-22
+- Date: 2026-10-26
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
@@ -883,6 +883,30 @@ requests](https://docs.slack.dev/authentication/verifying-requests-from-slack), 
 API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
 
 ## Pending
+
+Before the stories of L2, these spikes check what the core of L2 relies on:
+
+- **Push of Mentions in Threads** (C-32). Whether a Mention in a Thread reply reaches a person's phone as a push: in
+  Mattermost (the mobile app through the push proxy, under `PushNotificationContents` `full` and `generic`), in Slack (a
+  bot's Thread reply with `<@U…>`) and in Telegram (a comment in a channel's discussion group with a `tg://user?id=`
+  link, also when the person muted the group). Until it is checked, the documentation says that at night only a
+  Notification gateway is reliable (C-32.FR-20). To check on the test stands with a person's phone.
+- **Mattermost groups** (C-25.FR-8, C-28). Whether `@<group>` notifies the people of a Mattermost group in a Thread
+  reply's `message` and inside the attachment of a Root message, as `@channel` does (F-113); which editions and licences
+  of Mattermost have custom groups and LDAP-synced groups; and how a bot reads the groups (`GET /api/v4/groups`) and with
+  which permission.
+- **Slack user groups** (C-24.FR-1, C-25.FR-8, C-28). What `usergroups.list` answers with the scope `usergroups:read`;
+  whether `<!subteam^ID>` from a bot notifies the people of the user group in a Thread reply and in the blocks of a Root
+  message; whether `<!everyone>` from a bot notifies anyone outside the workspace's general channel; and whether an app
+  that gained the scope in its manifest lacks it in `x-oauth-scopes` until it is reinstalled.
+- **GitLab role claims** (C-03.FR-5, C-25.FR-4, issue #369). Which token carries
+  `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer` — the ID token, userinfo or both — whether
+  they list direct memberships only or inherited ones too, and whether discovery's `claims_supported` names them.
+- **Telegram** (C-27.FR-8, C-28). Whether a `tg://user?id=` Mention in a comment rings a member of the discussion group
+  who muted it, and whether the bot can tell with `getChatMember` that a person is not in the discussion group, which the
+  warning about an unreachable On-call uses. Forum topics and plain group chats are checked with the later part of L2.
+
+Earlier pending checks:
 
 - **Telegram and Mattermost, several bots** (S-069). Two admin bots of one channel and its discussion group: whether
   each receives the automatic copies of the other's posts, their `edited_message` and people's comments, as the fake

@@ -7,7 +7,9 @@ The single list of configurable values and built-in limits of L1. Requirements c
 the environment, the Helm chart, the Organization, an Integration, a Route, a Connection, a Destination, a token, a
 request, or nowhere (built in). The last column is "decided", or the item `P-NN` of the
 [open questions](../L1.md#5-open-questions) when the value is _provisional_. A story that changes a value updates this
-table in the same pull request.
+table in the same pull request. The values of L2 (`C-25` onwards) are listed here too, their provisional items in the
+[open questions of L2](../L2.md#53-provisional-values-and-behaviours); a value that L2 removes stays listed with the
+release that removes it.
 
 ## Environment
 
@@ -93,11 +95,19 @@ table in the same pull request.
 ## Routing and lifecycle
 
 Route policy fields with their values for the two Route profiles (C-08.FR-7). A profile only pre-fills a new Route.
+From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 
-| Name | On-call (default) | Informational | Capability | Status |
+| Name | Paging (default) | Informational | Capability | Status |
 |---|---|---|---|---|
 | Matchers | none (the Default route) | — | C-08 | decided |
-| `route.urgent` | off | off | C-08 | decided |
+| `route.urgent` | off; from 0.2.0 it no longer acts, reads `true` exactly when `route.minimum_severity` is critical and is ignored in requests, and 0.3.0 removes it (C-26.FR-10) | off | C-08, C-26 | decided |
+| `route.minimum_severity` | none | none | C-26 | decided |
+| `route.deliver_to_teams` | off ("Also to the Teams from the label") | off | C-26 | decided |
+| `route.run_team_chains` | on ("Run the Teams' Escalation chains", under `route.deliver_to_teams`) | on | C-26, C-32 | decided |
+| Severity condition of a Route's or a Team's Destination or Escalation chain | any Severity level | same | C-26, C-32 | decided |
+| `route.team` | none (no owning Team) | none | C-25, C-26 | decided |
+| `route.escalation_chains` | none | none | C-32 | decided |
+| `route.message_labels` | computed while the Route sets none: the labels of the Group key except `alertname` and `organization.severity_label`, plus the Team label and `namespace` | same | C-29 | decided |
 | `route.group_key` | `alertname`, `severity`, `cluster` | same | C-08 | decided |
 | `route.reopen_window` | 15 min | 15 min | C-09 | decided |
 | `route.grace_period` | 15 min | 15 min | C-09 | decided |
@@ -133,14 +143,17 @@ Other lifecycle values:
 | `delivery.broken_probe_interval` | 5 min; the probe is the oldest waiting delivery, or the Destination check when nothing waits | built in | C-11 | decided |
 | `delivery.storm_calm_period` | 5 min below the threshold | built in | C-11 | decided |
 | `delivery.thread_alerts_listed` | first 10 new Alerts, then "…and K more" | built in | C-11 | decided |
-| `message.alerts_listed` | 10 lines; above that, the distinct values of each differing label, at most 10 per label | built in | C-12 | decided |
+| `message.alerts_listed` | 10 lines; above that, the distinct values of each differing label, at most 10 per label; from 0.2.0 the default layout lists `message.compact_alerts_listed` values instead (C-29.FR-3) | built in | C-12 | decided |
 | `template.dry_run_sample` | up to 20 most recent Stored Snapshots of the Route | built in | C-12 | decided |
 | `template.output_cap` | about 50,000 characters | built in | C-12 | decided |
 | `message.value_cap` | 4 KB per label or annotation value | built in | C-12 | decided |
 | `lookup_table.size_max` | 50 columns and 10,000 rows per Lookup table; a name or a column name up to 200 characters, the description up to 2,000, a key or a value up to 4,096; above that `422` (`too_long`) | built in | C-12 | P-46 |
 | `template.lookups_per_render` | 100 rows read by `lookup` in one render; the 101st is a template error | built in | C-12 | P-47 |
 | `lookup_table.page_max` | 50 Lookup tables per page of `listLookupTables`, since each carries its rows; a larger `limit` is lowered to it | built in | C-12 | P-48 |
-| `destination.mentions` | nobody, for every kind of Loud event | Destination | C-12 | decided |
+| `destination.mentions` | nobody, for every kind of Loud event; from 0.2.0 an empty list of Mention entries, and a Destination of a Team gets the entry "Team {Team}" for every Loud event (C-28.FR-6); the L1 settings move into entries unchanged (C-28.FR-5) | Destination | C-12, C-28 | decided |
+| `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
+| `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
+| `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
 
 ## Connections and Destinations
 
@@ -214,7 +227,11 @@ Other lifecycle values:
 | `organization.severity_mapping` | `critical` → critical; `warning` → warning; `info` and `none` → info; any other value → warning, shown as received; label missing → info | Organization | C-08, C-20 | decided |
 | `organization.severity_styles` | the emoji and colour of each Severity level: critical 🟥 `#d32f2f`, warning 🟧 `#f57c00`, info 🟦 `#1976d2` (squares, so that they never look like the status colours of messages) | Organization | C-02, C-20 | decided |
 | `organization.severity_values_window` | values seen in the last 14 days | built in | C-20 | decided |
-| `organization.critical_is_urgent` | on | Organization | C-08, C-20 | decided |
+| `organization.critical_is_urgent` | on; from 0.2.0 it no longer acts — critical is always Urgent — reads `true` and is ignored in requests, and 0.3.0 removes it (C-26.FR-10) | Organization | C-08, C-20, C-26 | decided |
+| `organization.team_label` | `team` | Organization | C-25 | decided |
+| `organization.team_values_window` | values of the Team label without a Team seen in the last 14 days, like `organization.severity_values_window` | built in | C-25 | P-75 |
+| `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone` | Organization | C-25 | decided |
+| `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; a User follows them "As in the Organization" until they choose "Call" or "Don't call", which keep the rules as they were then, or custom rules are set through the API or by an Admin (C-31.FR-2) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
 | `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events; never Notes) | Organization | C-09, C-20 | decided |
@@ -222,6 +239,26 @@ Other lifecycle values:
 | `retention.audit_log` | 1 year | Organization | C-03, C-20 | decided |
 | `organization.outbound_policy` | standard (private allowed, loopback blocked) | Organization | C-02, C-20 | decided |
 | `organization.outbound_allowed` / `organization.outbound_denied` | empty | Organization | C-02, C-20 | decided |
+
+## Teams, Schedules and paging
+
+| Name | Default | Set on | Capability | Status |
+|---|---|---|---|---|
+| `team.slug_format` | 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — starting with a letter or a digit; unique in the Organization | built in | C-25 | P-74 |
+| `team.working_hours` | the Organization's (`organization.working_hours`) | Team | C-25 | decided |
+| `schedule.time_zone` | `organization.time_zone` | Schedule | C-27 | P-77 |
+| `schedule.gap_view` | the next 14 days | built in | C-27 | decided |
+| `schedule.gap_alert` | by default: on while the Schedule is its Team's main one, off otherwise; an Admin may set it on or off | Schedule | C-27 | decided |
+| `schedule.gap_alert_horizon` | 7 days: `MusterScheduleGap` is raised while there is a gap now or one that starts within it | built in | C-27 | decided |
+| `schedule.gap_scan_interval` | 5 min, the Leader's scan for gaps | built in | C-27 | P-80 |
+| `ical.window` | the segments of the Result in which the User is On-call, from 7 days back to 60 days ahead | built in | C-27 | P-81 |
+| `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | P-82 |
+| `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | P-85 |
+| `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
+| `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
+| `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
+| `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |
+| Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | P-88 |
 
 ## Self-observation and chart
 

@@ -56,10 +56,13 @@ table, with Broken Destinations that recover to the current state; outgoing webh
 and OIDC sign-in, TOTP, Personal access tokens, Service accounts and an Audit log; Muster's own metrics, alert rules,
 Internal alerts and outgoing heartbeat. L1 is the first release. See [L1.md](L1.md).
 
-**L2 — On-call parity.** Schedules, rotations, escalations beyond the ack timeout and paging the person on call; the
-`pull` and `agent` Connection modes that ask Alertmanager directly; a generic inbound webhook for sources other than
-Alertmanager; backup Destinations, Alertmanager silence sync, Telegram forum topics and group chats, a Terraform
-provider and an MCP server; a maintenance mode and a configurable Loud/Quiet matrix. See [L2.md](L2.md).
+**L2 — On-call parity.** Its core, 0.2.0: Teams that own Routes, Destinations, Schedules and Escalation chains, with
+routing to the channels of the Teams of an Alert Group under one status; Schedules of Rotation layers with Overrides;
+Escalation chains that Page by Mentions in Threads or through Notification gateways — bridges that call or send SMS —
+following each person's Notification rules; Assignees; Mentions and buttons per Destination; a compact message layout.
+Later 0.2.x releases add the `pull` and `agent` Connection modes, an Inbound webhook in the format of Alertmanager's
+API, Telegram groups and topics, maintenance windows, a configurable Loud/Quiet matrix per Route, a Terraform provider,
+an MCP server and opt-in telemetry. See [L2.md](L2.md).
 
 **L3 — Incidents.** A coordinated response to a problem that may span several Alert Groups, with its own lifecycle and
 record. See [L3.md](L3.md).
@@ -93,9 +96,10 @@ code. Neither signs in to the UI or links messenger accounts.
 |---|---|
 | [L1.md](L1.md) | The first release: scope, rollout stages, the capability map, conventions, non-functional requirements, what is out of scope and what is still open |
 | [l1/C-NN-….md](l1/) | One file per L1 capability `C-01`…`C-24`, with scenarios, functional requirements (`C-NN.FR-n`), UI, API surface, acceptance statements (`C-NN.AC-n`) and a suggested story split |
-| [l1/reference.md](l1/reference.md) | Tables shared by several capabilities: Loud and Quiet, buttons, banners, Roles and Permissions, Internal alerts, metrics, chart rules |
-| [l1/defaults.md](l1/defaults.md) | Every configurable value and built-in limit of L1, with its status: decided or provisional |
-| [L2.md](L2.md) | Scope of the on-call parity layer and the designs already kept for it, plus features waiting for operating experience |
+| [l1/reference.md](l1/reference.md) | Tables shared by several capabilities, of L1 and L2: Loud and Quiet, the lifecycle events of L2, Transports, buttons, banners, Roles and Permissions, Internal alerts, metrics, chart rules |
+| [l1/defaults.md](l1/defaults.md) | Every configurable value and built-in limit of L1 and L2, with its status: decided or provisional |
+| [L2.md](L2.md) | The on-call parity layer: its releases and scope, the capability map of its core, conventions, changes to the non-functional requirements, what is out of scope and still open, and its revisions to L1 |
+| [l2/C-NN-….md](l2/) | One file per capability of the L2 core, `C-25`…`C-32`, in the format of the L1 files |
 | [L3.md](L3.md) | Scope of the Incidents layer |
 | [L4.md](L4.md) | Scope of the AI layer: tiers, data sources, protocols, safety and cost controls |
 | [ADR index](../adr/README.md) | Architectural decisions with their context, consequences and rejected alternatives |

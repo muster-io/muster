@@ -41,6 +41,10 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
 
   The Owner is always a User. A Service account cannot become an Owner: Acknowledge from it is refused with the code
   `owner_must_be_user` (C-04.FR-2); it may Resolve, Snooze and add Notes. A Personal access token acts as its User.
+  _Revised for L2 (2026-10-26):_ Acknowledge, Snooze and Resolve also stop every Escalation chain of the Alert Group and
+  clear its Assignees (C-32.FR-5, C-32.FR-12). An Acknowledge reported by a Notification gateway, with the Transport
+  `gateway`, applies only while nobody owns the Alert Group: firing or snoozed → acknowledged; acknowledged → unchanged,
+  and the person is told who has it; it never makes a Takeover (C-30.FR-6).
 
 - **C-10.FR-2** Refusals carry a stable code and a message: "already resolved" (Acknowledge, Resolve, Snooze on
   resolved); "not acknowledged"; "not snoozed"; "not resolved", "resolved automatically — it reopens by itself when an
@@ -51,6 +55,8 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
 - **C-10.FR-3** Every command passes through one dispatcher: permission → precondition → transition → Audit log →
   Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`) is recorded;
   transitions Muster starts itself use the Transport `system` and appear in the Timeline only (ADR-0016).
+  _Revised for L2 (2026-10-26):_ the Transport `gateway` joins them (C-30.FR-6), and `mcp` comes with the MCP server
+  later in L2; the [Transports](reference.md#transports) are listed in reference.md.
 - **C-10.FR-4** A Takeover needs no confirmation: ownership moves to the new user, a Loud event names both users and
   mentions the previous Owner, Reminders start over for the new Owner (C-17), and the Audit log records it as a
   Takeover.
@@ -230,6 +236,8 @@ Snooze presets now, for a time zone).
   is Asia/Tokyo snoozes it until the next 09:00 Tokyo time; by one without a profile time zone, until the next 09:00 of
   the Organization's time zone. A Route without Snooze durations offers neither preset; after the working day is set to
   start at 08:30, the next re-render of a Root message shows "Until tomorrow 08:30".
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the durations are those of the Paging profile, called On-call before
+  (C-26.FR-11), and the Root message shows the buttons of its Destination's set, all of them by default (C-28.FR-8).
 - **C-10.AC-24** The Snooze dialog of the Alert Group page and of a bulk Snooze offers "Until tomorrow 09:00" and "Until
   Monday 09:00" («До завтра 09:00», «До понедельника 09:00») with the end each would set in the user's time zone;
   choosing one snoozes until that end, which the page header then shows; the dialog fits a screen 360 CSS pixels wide

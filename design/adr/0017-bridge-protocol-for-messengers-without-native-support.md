@@ -29,6 +29,15 @@
   a Destination; a bridge may declare group mentions in `info`, which Muster sends as tokens the bridge renders; Muster
   drops its copy of `info` when a bridge answers again after being unreachable, and the Leader re-reads every bridge's
   `info` once its copy is older than `bridge.info_max_age`
+- Amended: 2026-10-26 — with the L2 PRD (journal D559, D560): the envelope of a Root message may also carry a structured
+  `layout` beside its CommonMark body, with plain-text values, the Alert Group's number apart from its title, the Alerts
+  listed with their total, labels as key and value, and people as references to the Mentions, so that a bridge may
+  render the message natively instead of translating markup; and (journal D540, D567) a bridge may declare in `info`
+  which mentions of everyone in the chat its messenger has, by the symbolic names `channel`, `here`, `all` and
+  `everyone`, which Mention entries and Escalation steps then offer and Muster sends as entries of their own kind; and
+  (journal D569) the signed action data of a call through a Notification gateway names the call, which Muster keeps with
+  its person and Alert Groups, so that one call about several Alert Groups fits the size of a button's data; all
+  additive in version 1
 
 ## Context
 
@@ -96,7 +105,11 @@ a body in CommonMark, the buttons, the Mentions and whether the message is Loud.
 between the heading and the buttons — the environment, labels, summary, Alerts, links, notices and footer — rendered
 from the Route's templates in CommonMark, with alert data escaped for CommonMark (output safety stays Muster's, as in
 ADR-0005). Muster shortens the body below `max_body_length`, counted in code points; the bridge makes the final cut
-safely for its markup and says when it did.
+safely for its markup and says when it did. From L2 a Root message also carries the same content as a structured
+`layout` — plain-text values that the bridge escapes itself, the number apart from the title because `#N` becomes a
+hashtag in some messengers, the Alerts with their total so that the bridge can cut further and count the rest, labels
+as key and value, and people as references to the envelope's Mentions — and a bridge renders either the body or the
+layout; a bridge that ignores `layout` is unaffected (journal D559, D560).
 
 **Buttons.** Each button has a label, a style hint — `primary`, `danger`, `neutral` or `success`, which a bridge maps to
 the closest style its messenger has or ignores — and opaque data of at most 64 ASCII bytes: the action id, the key id
@@ -106,7 +119,9 @@ Muster verifies it and checks that it belongs to the pressed message, as for Mat
 **Mentions** name linked people, as `{external_id, display_name}` in the envelope, each placed in the body by a marker
 that reads as the plain name where the bridge cannot mention natively. From L2 a bridge may also declare in `info` the
 group mentions its messenger has; Muster then sends a Team mention (ADR-0018) as a group token that the bridge renders
-itself (journal D516). Mentions never appear in an edit (ADR-0005).
+itself (journal D516). It may also declare which mentions of everyone in the chat its messenger has, by the symbolic
+names `channel`, `here`, `all` and `everyone`; Muster sends each as a `mentions` entry of its own kind, which the bridge
+renders as its messenger's mention (journal D540, D567). Mentions never appear in an edit (ADR-0005).
 
 **Idempotency.** Every request that creates a message carries an `Idempotency-Key`; the bridge stores the key with its
 successful result and answers a repeated key with that result, marked as replayed, without posting again — whatever
@@ -193,14 +208,16 @@ which makes the bridge a Notification gateway (ADR-0018) that reaches people out
 for example. A bridge may have both. A gateway implements `info`; `POST /v1/notifications`, which takes the person's
 contact, a text, signed action data like a button's and an `Idempotency-Key`; answering the person behind an event,
 which during a call needs the push mode, so that the answer comes while the person is still on the line; and the event
-`notification_acknowledged`, which returns the action data when the person acknowledges. Muster takes the actor from its
-own signature on that data, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only
-role is `gateway` cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing
-becomes Broken and raises an Internal alert. For a bridge with both roles, failed calls make its gateway Broken and
-failed deliveries its Destinations, never the other way round. Its events in the poll mode come through Bridge polling,
-its calls go through a queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same
-`POST /v1/notifications` (ADR-0013). The bridge libraries for Go and Python support the role in releases of their own
-(journal D505, D517, D532, D542).
+`notification_acknowledged`, which returns the action data when the person acknowledges. The action data names the call,
+which Muster keeps with the person and the Alert Groups it is about, so a call about several Alert Groups fits the 64
+bytes of a button's data (journal D569). Muster takes the actor from its own signature on that data and the call it
+names, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only role is `gateway`
+cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing becomes Broken and
+raises an Internal alert. For a bridge with both roles, failed calls make its gateway Broken and failed deliveries its
+Destinations, never the other way round. Its events in the poll mode come through Bridge polling, its calls go through a
+queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same `POST /v1/notifications`
+(ADR-0013). The bridge libraries for Go and Python support the role in releases of their own (journal D505, D517, D532,
+D542).
 
 **Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
 through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are

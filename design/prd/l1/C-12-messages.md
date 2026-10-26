@@ -58,14 +58,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   links of item 9 form one line under the Alerts that starts with "Open in Muster"; item 11 is the last line of its
   text; the attachment's own footer shows "Muster v<version>" with the Muster logo; and the buttons follow
   (C-13.FR-3).
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the default Root message follows the compact layout of C-29.FR-1, which
+  replaces the order above; the status colour, the notices, the footer and the buttons keep their meaning there, the
+  `summary` is joined by the `description`, and the label sections give way to one line of the Route's "Labels in the
+  message".
 - **C-12.FR-2** A Route's Root message template, if set, renders only the body — items 3 to 8; the status colour,
   heading, links, notices, footer and buttons always come from Muster, so no template can lose the buttons or the link
   to Muster. A Route's line template, if set, replaces the default line of each Alert in item 8.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 a Root message template renders items 3 to 5 of C-29.FR-1 (C-29.FR-5).
 - **C-12.FR-3** Built-in texts exist in English and Russian for: the default Root message, new-Alert Thread replies,
   Replacement, Reopen, Takeover, Snooze ended, rise to Urgent, resolution by the system, ack timeout notices, Unclaimed,
   Reminders, auto-unacknowledge, the Storm summary, delivered late, deleted and republished, and "no longer updated
   here". The language is a Route policy field (`route.language`); times in messages use the Organization's time zone,
   absolute, never relative.
+  _Revised for L2 (2026-10-26):_ L2 adds built-in texts, in both languages, for Pages and undelivered Pages, undelivered
+  Mentions, the Assignees, the end of Escalation chains in the footer, the Mentions of a Storm summary and the calls of
+  a Notification gateway (C-28, C-29, C-30, C-32).
 - **C-12.FR-4** Templates — the Root message, the line template, the ack timeout notice, Link rule URLs and outgoing
   webhook requests — are Go templates rendered in the sandbox of ADR-0012: explicitly registered sprout functions,
   Alertmanager's template functions under their own names, `now` from Muster's clock, capped loops and output capped at
@@ -93,6 +101,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Owner, Takeovers the previous Owner, a Reopen into acknowledged only the Owner. In templates, `{{ mention "all" }}`
   and similar produce trusted tokens rendered for the platform; a literal `@all` in a template's text is escaped. The
   settings form is part of the Destination form (C-13.FR-9).
+  _Revised for L2 (2026-10-26):_ from 0.2.0 a Destination's Mentions are one list of entries, each with the Loud events
+  it applies to, `storm_started` among them; the entries may name Teams and the On-call of Teams, named or taken from
+  the Alert Group, and offer only what the Destination's Connection can mention (C-28.FR-1 to C-28.FR-4). The settings
+  above move into entries with the same effect (C-28.FR-5).
 - **C-12.FR-9** Links: the Organization keeps Lookup tables (a key and one value per named column, edited in the UI). A
   Link rule has a name, a Matcher condition checked against the Alert Group's common labels (a label that only some of
   its Alerts carry counts as missing), a scope — the Alert Group, or each distinct value of a label among its Alerts —
@@ -106,6 +118,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 a message is shortened in the order of C-29.FR-6: its description, then its
+  Alerts, then its summary, then its key labels.
 - **C-12.FR-12** A Mention of a user with an Account link in the Destination's identity space uses the messenger's own
   form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack,
   a Mention marker through a Bridge (C-22.FR-16) — and of a user without one the display name as text, which notifies
@@ -116,6 +130,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   through a Bridge, which carries no Mentions, or a bridge without `native_mentions` — the footer names them as text:
   the link's display name through a Bridge, otherwise their Muster display name. Shortening (FR-11) keeps the footer
   with its Mention where it fits, otherwise with their name as text (checked in C-18.AC-7).
+  _Revised for L2 (2026-10-26):_ a Mention entry that names a person without such a link leaves them out of the
+  message's Mentions; nothing is written in the Thread, the Alert Group's Timeline records the delivery event "Mention
+  not delivered" and the Destination page warns (C-28.FR-3); the Assignees are named like the footer's users
+  (C-32.FR-12).
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 
@@ -125,6 +143,9 @@ Route → Message: editors for the Root message template, the line template and 
 from the built-in template's source and with a preview against a chosen recent Stored Snapshot, in Mattermost or
 Telegram markup, and the language; Organization → Lookup tables and Link rules with a
 preview; the links block on the Alert Group page.
+
+_Revised for L2 (2026-10-26):_ Route → Message also has "Labels in the message", and its preview shows the compact
+layout in every markup (C-29.FR-2).
 
 ## API surface
 

@@ -64,6 +64,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   otherwise names what answered: `not_bridge` (an answer that is not a problem), `wrong_path_prefix` (`404`),
   `unexpected_status` (another status with a problem) and the network codes of the step `info`. A check before saving
   stores no `info`.
+  _Revised for L2 (2026-10-26):_ `info` also declares the bridge's roles — `messenger`, the default, and `gateway`,
+  which makes the Connection a Notification gateway (C-30.FR-1) — whether the bridge can mention groups, which Team
+  mentions and group entries need (C-25.FR-8, C-28.FR-2), and which of the mentions of everyone in the chat — `channel`,
+  `here`, `all`, `everyone` — its messenger has (ADR-0017); the check shows them.
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
   `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and
@@ -74,6 +78,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   and never on the interactive path, and in `muster doctor` (C-02.FR-14); a successful check of a Broken Destination
   ends the Broken state. Mention settings take nobody or chosen users, as in Telegram; everyone in the chat and
   messenger groups are refused.
+  _Revised for L2 (2026-10-26):_ the Mention entries of C-28.FR-2 apply: messenger groups and Teams too where the bridge
+  declares group mentions, and the mentions of everyone in the chat that it declares; chosen people stay as in L1; a
+  Connection whose only role is `gateway` has no Destination (C-30.FR-1).
 - **C-22.FR-4** Every message Muster posts through a bridge is an envelope (`MessageInput`): the kind (`root`,
   `storm_summary`, `test`), the status with its colour and emoji (item 1 of C-12.FR-1), the title — `#N` and the
   Alert Group's title (item 2) — the link to the Alert Group page as "Open in Muster", the body, the buttons, the
@@ -83,6 +90,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   Alert data is escaped for CommonMark and `@` is neutralized (C-12.FR-7), so nothing in alert data becomes markup, a
   link or a Mention. The bridge renders the envelope in its messenger's own markup; Muster never writes a messenger's
   markup for a bridge. Thread replies, Storm summaries and test messages use the same body rules.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the envelope of a Root message and of a test message also carries `layout`,
+  the compact layout as plain-text data (C-29.FR-8).
 - **C-22.FR-5** When `info` declares `buttons`, a Root message carries the buttons of its status
   ([reference.md](reference.md#buttons-and-links-by-status)), with Snooze durations and then the Snooze presets
   (C-10.FR-18) as separate buttons, and a Reminder carries "Still on it" and "Unack" (C-17.FR-4). Each button has a
@@ -154,6 +163,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   further than `bridge.push_tolerance` from its real clock; it answers `204` once the event is handled or was handled
   before, `400` to a body that is no event, and `401` to a bad signature, an unknown or deleted Connection and a
   Connection in poll mode alike, so the endpoint reveals nothing about which Connections exist.
+  _Revised for L2 (2026-10-26):_ a Notification gateway also sends the event `notification_acknowledged` (C-30.FR-2,
+  C-30.FR-6).
 - **C-22.FR-12** A `press` names the message whose button was pressed, the person (`external_id`, `display_name`) and
   the button's data. Muster verifies the signature with the key it names, checks that the data was issued for that
   message — a Root message or a Thread reply of a Destination of this Connection, a mismatch refused like a bad
@@ -212,6 +223,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   as text, which mentions nobody. The footer of a new Root message to a bridge with `native_mentions` names a linked
   User by such a marker, Loud or Quiet; an edit, which carries no Mentions, and any other bridge name them by the
   link's `display_name` (C-12.FR-12).
+  _Revised for L2 (2026-10-26):_ a group — a Team mention or a group entry — and a mention of everyone in the chat are
+  entries of the envelope's `mentions` with a kind of their own (`api/bridge.yaml` gains the field) and the group's name
+  or the symbolic name `channel`, `here`, `all` or `everyone`, placed by the same marker, which a bridge that declares
+  them renders as its messenger's mention (C-25.FR-8, C-28.FR-2). A linked person on a bridge without `native_mentions`
+  is still sent and shown by the plain name, and the Timeline records that the Mention was not delivered (C-28.FR-3).
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.
@@ -237,6 +253,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   the reason, or skipped because the bridge does not offer it — and exits `1` when a step failed. Steps that need a
   person, such as a press, wait for one with a prompt, or are skipped with `--no-interactive`. It is the one sender
   outside delivery and the interactive path, an exception ADR-0017 allows because it runs outside any installation.
+  _Revised for L2 (2026-10-26):_ it also checks the role `gateway` with `sendNotification` (C-30.FR-2) and accepts
+  `layout` (C-29.FR-8).
 - **C-22.FR-22** The example bridge, in Go under the MIT licence, lives in the repository of the Go bridge library
   (FR-25) and is built on it — never in Muster's repository, binary, image or chart (ADR-0017): a small chat server with
   its own web page — channels, Threads, buttons, direct messages, users found by login — that offers every feature of

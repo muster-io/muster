@@ -37,6 +37,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   `public_id`, Route, Integrations, title and `summary` (FR-23), Severity level, start time, Urgent flag, Reopen count,
   counts of firing and resolved Alerts, the time of the last change, and — filled by later capabilities — Owner (C-10),
   Snooze end and who set it (C-10) and the Unclaimed flag (C-17).
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the Urgent flag is true exactly when the Severity level is critical
+  (C-26.FR-8), and an Alert Group also has its Teams (C-25.FR-6), its running Escalation chains and its Assignees
+  (C-32.FR-12).
 - **C-09.FR-2** `#N` is assigned per Organization without gaps in the transaction that creates the Alert Group;
   `public_id` is opaque and used in URLs, the API and signed buttons.
 - **C-09.FR-23** The title of an Alert Group is the `alertname` its Alerts share or, once Alerts with different
@@ -78,6 +81,8 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   the Alert Group becomes firing, a Loud event gives the reason and mentions the Owner, and the ack timeout starts over.
   A rise that leaves urgency unchanged, and any configuration edit, never removes an acknowledgement or a Snooze. The
   acceptance of this requirement needs Acknowledge and Snooze and is in C-10 (C-10.AC-12, C-10.AC-13).
+  _Revised for L2 (2026-10-26):_ from 0.2.0 a rise makes an Alert Group Urgent when it reaches critical (C-26.FR-8);
+  where Escalation chains run, they start over in place of the ack timeout (C-32.FR-5, C-32.FR-6).
 - **C-09.FR-10** Every automatic status change carries its reason, shown on the Alert Group page, in the Timeline and,
   from C-11 on, in the Root message or Thread.
 - **C-09.FR-11** The Timeline of an Alert Group shows, in order: Alerts added, resolved (with the reason), replaced and
@@ -88,6 +93,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   Alert Group tables, and the Timeline merges them with its entries by time as the kind `delivery` (C-11.FR-21). Each
   later capability adds its entry types. Every entry has a kind (FR-14); an entry that records a lifecycle event also
   carries the event name, its loudness and its Mentions (FR-22).
+  _Revised for L2 (2026-10-26):_ L2 adds the Teams that join, unknown Team label values, Destinations joined later,
+  Pages, skipped Escalation steps, undelivered Pages, changes of the Assignees and webhook steps of Escalation chains,
+  the last five of the new kind `escalation` ([reference.md](reference.md#lifecycle-events-added-in-l2)).
 - **C-09.FR-12** Snooze ends, Reopen window ends and Grace period ends are timer rows with deadlines that any replica
   may claim; after downtime each overdue timer fires once.
 - **C-09.FR-18** After downtime (C-02.FR-12), every open Alert Group gets a Timeline entry "Muster was unavailable from
@@ -133,6 +141,11 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   | `moved_to_default_route` | its Route is deleted (FR-19) | Quiet | — | `system` | as a Destination removed from or added to a Route (C-11.FR-14) |
   | `unacknowledged` | its Owner is disabled or deleted (C-03.FR-13): firing without an Owner, the reason `owner_disabled` or `owner_deleted` | Loud | — | `status` | Thread reply with the reason and Root message update |
 
+  _Revised for L2 (2026-10-26):_ L2 adds the rows of the [lifecycle event table of
+  L2](reference.md#lifecycle-events-added-in-l2), with the same columns and meaning; Mentions are then the Loud events
+  of a Destination's Mention entries (C-28.FR-1), `storm_started` among them, and `paged`, the people an Escalation step
+  Pages.
+
 ### Alert Group list
 
 - **C-09.FR-13** The Alert Group list is the main working page of the UI:
@@ -156,6 +169,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
   - **Live updates** — rows change in place; Alert Groups that newly match the filters are announced as "N new"
     above the list and shown on click, so the list never moves under the pointer.
   - Filters, tab, range, search, label columns and sorting are kept in the URL, so a view can be shared as a link.
+  _Revised for L2 (2026-10-26):_ L2 adds the filter Team, with the quick filter "My Teams" (C-25.FR-6), and the filter
+  Assignee, a User or "me" (C-32.FR-18), and the columns Teams and Assignees; the Urgent filter selects the critical
+  Alert Groups (C-26.FR-8).
 - **C-09.FR-17** Times in the UI are shown in the user's time zone; durations are relative ("2 h 14 min"), and the
   absolute time is available on hover.
 - **C-09.FR-24** The Alert Group list and the Alert Group page work at phone width (NFR-15): from a viewport 360 CSS
@@ -209,6 +225,9 @@ with its loudness and Mentions (FR-22); Destinations receive the events from C-1
     to mention;
   - sections added later: links (C-12), delivery state per Destination (C-11, shown from C-13 on), the next scheduled
     notice or Reminder (C-17) and the Note box (C-10).
+  _Revised for L2 (2026-10-26):_ L2 adds to the header the Teams with the rule that brought each (C-25.FR-6) and the
+  Assignees (C-32.FR-12), a section of the running Escalation chains with their next step (C-32.FR-18), the entries that
+  reached each Destination in its delivery state (C-26), and the Timeline kind `escalation`.
 - **C-09.FR-20** The Alert Group page lists the previous Alert Groups of the same Route with the same Group key values —
   number, status, start, duration and who resolved them — linked to each.
 
@@ -263,6 +282,8 @@ Checked with the fake Alertmanager, through the API and the UI.
   `cluster` starts a second one.
 - **C-09.AC-7** Changing a Route's Matchers leaves an already grouped fingerprint in its open Alert Group.
 - **C-09.AC-8** Marking a Route urgent does not change the status of any of its open Alert Groups.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the same holds for raising a Route's Minimum severity to critical
+  (C-26.AC-7), which replaces the urgent mark.
 - **C-09.AC-9** Deleting a Route with open Alert Groups returns `409` with their count; after moving them, deletion
   succeeds and each moved Alert Group's Timeline shows `moved_to_default_route`.
 - **C-09.AC-10** A new `startsAt` without `resolved` on an open Alert Group records `alert_continued` and no Reopen or
