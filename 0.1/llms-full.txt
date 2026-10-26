@@ -100,7 +100,7 @@ Download the compose example into a new directory:
 <!-- quickstart -->
 ```sh
 mkdir muster && cd muster
-curl -fsSLO https://raw.githubusercontent.com/muster-io/muster/v0.1.2/deploy/compose/docker-compose.yml # x-release-please-version
+curl -fsSLO https://raw.githubusercontent.com/muster-io/muster/v0.1.3/deploy/compose/docker-compose.yml # x-release-please-version
 ```
 
 Write its settings into `.env` next to it, with a generated master key and generated passwords:
@@ -2677,8 +2677,16 @@ is never lost.
 
 **Check connection** tells you which applies: when the bot's roles do not grant `create_post_ephemeral`, the check
 passes with a warning that answers will show in the Thread of the Root message, and `muster doctor` prints the
-Connection as a `WARN` line. To show answers in the channel, give the bot that permission, for example the system admin
-role. Otherwise keep the role Member and let people read the answers in the Thread.
+Connection as a `WARN` line. The warning names the bot whose token the Connection holds, as `@username`, and the roles
+Muster read for it, for example `system_user`, so you can see which account the token belongs to. To show answers in
+the channel, give the bot that permission, for example the system admin role. Otherwise keep the role Member and let
+people read the answers in the Thread.
+
+Promote the bot account itself, not the person who owns it, and check that it is the bot the warning names: a bot of
+another Connection, or an older token of another bot, keeps its own roles. As a system admin, open **Integrations →
+Bot Accounts** from the product menu, select **Edit** on the bot, set **Role** to **System Admin** and select
+**Update**; or run `mmctl roles system-admin <bot-username>`. Then run **Check connection** again: the warning is gone
+once the bot's roles grant the permission.
 
 ## Rate limit
 
@@ -2699,12 +2707,22 @@ Muster edits a Root message for as long as its Alert Group is open, which can be
   message, or a reply in the Thread.
 - **Thread replies notify the Thread's followers** by their own notification settings, and a Mention makes the person
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".
-- A Loud post carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's `@username` through
-  their Account link — in the post's text, never in the attachment, so that the notification shows what happened. A
-  `{{ mention "channel" }}` in a Route's template shows in the attachment as text and, on a Loud post, adds its Mention
-  to the post's text.
-- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody. The footer of
-  a Root message names a person by their username without `@`, which does not notify them either.
+- A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
+  `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
+  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
+  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  the post shows its title once. What a notification shows follows from that: an email notification shows no content;
+  a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
+  attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
+  not show; a push notification under `generic` shows a fixed text such as "… notified the channel." An edit removes
+  the line of Mentions. A reply in the
+  Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
+  as text and, on a Loud post, adds its Mention to the line of Mentions.
+- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody.
+- The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
+  for the Connection as `@username`, so that Mattermost shows their name with their profile; a person without one is
+  their Muster name as text. An edit notifies nobody, but a new post with the footer, after a republish, may notify that
+  person.
 
 ## Check from the command line
 
@@ -2883,9 +2901,11 @@ Telegram notifies them about the copy of the post in the group, and that copy ca
 
 - The Root message is a regular message in Telegram's HTML: the status and `#N` with the title, linked to the Alert
   Group page, the labels in an expandable quote, the summary, one line per Alert — never a table, which phones cannot
-  show — the link to Muster and the footer. Alert data are escaped, so a label value cannot format the message or
-  mention anyone. A message is at most 4,096 characters: a long one drops its Alert lines first, then the label
-  sections, but always keeps its title, status, footer, buttons and link to Muster.
+  show — the link to Muster and the footer. The footer — "Acknowledged by", "Snoozed by", "Resolved by" — names a person
+  with a Telegram Account link by a link to their account with their Muster name, as a Mention does, and anyone else by
+  their name as text. Alert data are escaped, so a label value cannot format the message or mention anyone. A message is
+  at most 4,096 characters: a long one drops its Alert lines first, then the label sections, but always keeps its title,
+  status, footer, buttons and link to Muster.
 - Every edit of the Root message carries all its buttons again, because Telegram removes the buttons of a message
   edited without them. The bot may edit its own messages at any age.
 - Muster never replies inside the channel: a reply there would be a new post that notifies every subscriber.
@@ -3457,8 +3477,9 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
   them from the person's list of mentions.
 - **Mentions** are `@channel` and `@here`, as the Destination's Mention settings ask, and the people chosen in them,
   through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
-  Slack Destination takes neither `@all` nor groups. The footer of a Root message names a linked person without a
-  Mention.
+  Slack Destination takes neither `@all` nor groups. The footer of a Root message — "Acknowledged by", "Snoozed by",
+  "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as their
+  name, in an edit as in a new message; a person without one is their display name as text.
 - **Thread replies** stay in the Thread: Muster never also broadcasts them to the channel.
 - **Alert data and template text never mention anyone.** An `&`, `<` or `>` in a label or an annotation is escaped, and
   so is `@`. A literal `<!here>` or `<@U…>` written in a template is shown as text and notifies nobody. Only the
@@ -3826,6 +3847,9 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   ack · resolve · snooze 1h", and takes the presets as Text commands such as `snooze tomorrow`.
 - **Edits and Thread replies.** An edit sends the whole envelope of the new state, Quiet and without Mentions. A Thread
   reply goes under the Root message with the Thread reference the bridge returned last.
+- **The footer.** "Acknowledged by", "Snoozed by" and "Resolved by" name a person with an Account link for the
+  Connection by a Mention marker in a new Root message to a bridge with native mentions, Loud or Quiet; in an edit,
+  which carries no Mentions, and through any other bridge, by the name the bridge reported for their account.
 - **Posts are not repeated.** Every new message carries an idempotency key, the same for every retry of it. When an
   answer is lost — a timeout, or a connection cut after the request — Muster retries with the same key, the bridge
   answers with the message it posted already, and Muster edits it to the current state. When the bridge did not know
@@ -5744,7 +5768,8 @@ with secrets masked. Open a record for the request with its headers and body, an
 An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
 or your account on a messenger that Muster reaches through a [Bridge](https://muster-io.github.io/muster/0.1/messengers/bridge.md), to your Muster User. With it, a button
 you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
-in — and Mentions and footers in the messenger name you.
+in — and Mentions in the messenger name you, as does the footer of a Root message you acknowledged, snoozed or
+resolved, which mentions you there in the messenger's own form.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
 Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
@@ -5836,9 +5861,10 @@ chat with them also offers a **code** that its bot sends you, as Mattermost does
 Connection's bridge declares.
 
 Once linked, a Mention of you in a message of that Connection names you by the name the bridge reported for your
-account, which a bridge with native mentions turns into its messenger's mention, and the footer of a message you
-acknowledged, snoozed or resolved names you by that name. Without a link, a Mention is your Muster name as plain text,
-which notifies nobody.
+account, which a bridge with native mentions turns into its messenger's mention. The footer of a Root message you
+acknowledged, snoozed or resolved mentions you the same way when Muster posts it to a bridge with native mentions; an
+edit carries no Mentions, so there, and through any other bridge, the footer names you by that name. Without a link, a
+Mention is your Muster name as plain text, which notifies nobody.
 
 ### By a token sent to the bot
 
@@ -8165,7 +8191,8 @@ You cannot change the loudness of an event. You can change whom it Mentions.
 ## What Loud means in each Destination
 
 Mattermost
-:   A Loud change is a new post, with its Mentions in the text of the post.
+:   A Loud change is a new post with its Mentions: at the top of the attachment of a Root message or a Storm summary,
+    in the text of a reply in the Thread.
 
     A Quiet change is an edit, or a new post without a Mention.
 
@@ -8193,9 +8220,10 @@ Outgoing webhook
 A few details:
 
 - **Mattermost.** A reply in a Thread notifies the Thread's followers by their own settings, and a Mention makes the
-  person a follower. So Quiet means "without a Mention", not "nobody is notified". Mentions are in the text of the
-  post and never in the attachment, because a Mention in an attachment notifies with an empty notification. See [Who
-  gets notified](https://muster-io.github.io/muster/0.1/messengers/mattermost.md#who-gets-notified).
+  person a follower. So Quiet means "without a Mention", not "nobody is notified". A Loud Root message has its Mentions
+  as the first line of its attachment, where a person's Mention, `@channel`, `@here` and `@all` notify; a push or
+  desktop notification shows the summary line of the Alert Group, and an email shows no content. A Thread reply has
+  its Mentions in its text. See [Who gets notified](https://muster-io.github.io/muster/0.1/messengers/mattermost.md#who-gets-notified).
 - **Slack.** Slack cannot send a message without a notification: whom a new message notifies depends on each member's
   settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
   no Mention, so it drops the Mentions of the message it edits. See [Who gets

@@ -324,8 +324,9 @@ the channel and the Thread. So, as in Mattermost, **Quiet** means "without a Men
   them from the person's list of mentions.
 - **Mentions** are `@channel` and `@here`, as the Destination's Mention settings ask, and the people chosen in them,
   through their Account links. A person without a link is named by their display name as text, which notifies nobody. A
-  Slack Destination takes neither `@all` nor groups. The footer of a Root message names a linked person without a
-  Mention.
+  Slack Destination takes neither `@all` nor groups. The footer of a Root message — "Acknowledged by", "Snoozed by",
+  "Resolved by" — writes a person with an Account link for the Connection as their Mention, which Slack shows as their
+  name, in an edit as in a new message; a person without one is their display name as text.
 - **Thread replies** stay in the Thread: Muster never also broadcasts them to the channel.
 - **Alert data and template text never mention anyone.** An `&`, `<` or `>` in a label or an annotation is escaped, and
   so is `@`. A literal `<!here>` or `<@U…>` written in a template is shown as text and notifies nobody. Only the

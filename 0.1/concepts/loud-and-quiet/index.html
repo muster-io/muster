@@ -3012,7 +3012,8 @@ just lost the Alert Group.</p>
 <dl>
 <dt>Mattermost</dt>
 <dd>
-<p>A Loud change is a new post, with its Mentions in the text of the post.</p>
+<p>A Loud change is a new post with its Mentions: at the top of the attachment of a Root message or a Storm summary,
+in the text of a reply in the Thread.</p>
 <p>A Quiet change is an edit, or a new post without a Mention.</p>
 </dd>
 <dt>Slack</dt>
@@ -3040,9 +3041,10 @@ just lost the Alert Group.</p>
 <p>A few details:</p>
 <ul>
 <li><strong>Mattermost.</strong> A reply in a Thread notifies the Thread's followers by their own settings, and a Mention makes the
-  person a follower. So Quiet means "without a Mention", not "nobody is notified". Mentions are in the text of the
-  post and never in the attachment, because a Mention in an attachment notifies with an empty notification. See <a href="../../messengers/mattermost/#who-gets-notified">Who
-  gets notified</a>.</li>
+  person a follower. So Quiet means "without a Mention", not "nobody is notified". A Loud Root message has its Mentions
+  as the first line of its attachment, where a person's Mention, <code>@channel</code>, <code>@here</code> and <code>@all</code> notify; a push or
+  desktop notification shows the summary line of the Alert Group, and an email shows no content. A Thread reply has
+  its Mentions in its text. See <a href="../../messengers/mattermost/#who-gets-notified">Who gets notified</a>.</li>
 <li><strong>Slack.</strong> Slack cannot send a message without a notification: whom a new message notifies depends on each member's
   settings for the channel and the Thread. So Quiet means "without a Mention", not "nobody is notified". An edit carries
   no Mention, so it drops the Mentions of the message it edits. See <a href="../../messengers/slack/#who-gets-notified">Who gets

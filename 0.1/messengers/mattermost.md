@@ -144,8 +144,16 @@ is never lost.
 
 **Check connection** tells you which applies: when the bot's roles do not grant `create_post_ephemeral`, the check
 passes with a warning that answers will show in the Thread of the Root message, and `muster doctor` prints the
-Connection as a `WARN` line. To show answers in the channel, give the bot that permission, for example the system admin
-role. Otherwise keep the role Member and let people read the answers in the Thread.
+Connection as a `WARN` line. The warning names the bot whose token the Connection holds, as `@username`, and the roles
+Muster read for it, for example `system_user`, so you can see which account the token belongs to. To show answers in
+the channel, give the bot that permission, for example the system admin role. Otherwise keep the role Member and let
+people read the answers in the Thread.
+
+Promote the bot account itself, not the person who owns it, and check that it is the bot the warning names: a bot of
+another Connection, or an older token of another bot, keeps its own roles. As a system admin, open **Integrations →
+Bot Accounts** from the product menu, select **Edit** on the bot, set **Role** to **System Admin** and select
+**Update**; or run `mmctl roles system-admin <bot-username>`. Then run **Check connection** again: the warning is gone
+once the bot's roles grant the permission.
 
 ## Rate limit
 
@@ -166,12 +174,22 @@ Muster edits a Root message for as long as its Alert Group is open, which can be
   message, or a reply in the Thread.
 - **Thread replies notify the Thread's followers** by their own notification settings, and a Mention makes the person
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".
-- A Loud post carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's `@username` through
-  their Account link — in the post's text, never in the attachment, so that the notification shows what happened. A
-  `{{ mention "channel" }}` in a Route's template shows in the attachment as text and, on a Loud post, adds its Mention
-  to the post's text.
-- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody. The footer of
-  a Root message names a person by their username without `@`, which does not notify them either.
+- A Loud Root message carries its Mentions — `@channel`, `@here`, `@all`, a Mattermost group, or a person's
+  `@username` through their Account link — as one line at the top of the attachment, directly under its title. There a
+  person's `@username`, `@channel`, `@here` and `@all` notify as they do anywhere in a post; whether a group's Mention
+  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  the post shows its title once. What a notification shows follows from that: an email notification shows no content;
+  a push notification, when the server's **PushNotificationContents** is `full`, and a desktop notification show the
+  attachment's summary line — the status, `#N` and the title — which Muster sets as its `fallback` and the channel does
+  not show; a push notification under `generic` shows a fixed text such as "… notified the channel." An edit removes
+  the line of Mentions. A reply in the
+  Thread carries its Mentions in its own text. A `{{ mention "channel" }}` in a Route's template shows in the attachment
+  as text and, on a Loud post, adds its Mention to the line of Mentions.
+- Alert data never mention anyone: an `@` in a label or annotation is shown as text and notifies nobody.
+- The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
+  for the Connection as `@username`, so that Mattermost shows their name with their profile; a person without one is
+  their Muster name as text. An edit notifies nobody, but a new post with the footer, after a republish, may notify that
+  person.
 
 ## Check from the command line
 

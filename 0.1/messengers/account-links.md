@@ -3,7 +3,8 @@
 An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace,
 or your account on a messenger that Muster reaches through a [Bridge](bridge.md), to your Muster User. With it, a button
 you press under an Alert Group in a messenger runs as you — the Timeline names you and shows the messenger you pressed
-in — and Mentions and footers in the messenger name you.
+in — and Mentions in the messenger name you, as does the footer of a Root message you acknowledged, snoozed or
+resolved, which mentions you there in the messenger's own form.
 
 A Telegram account belongs to one User across every Telegram Connection. A Mattermost account belongs to one User per
 Mattermost Connection, since each Connection is its own server, and so does a Slack account, per Slack Connection,
@@ -95,9 +96,10 @@ chat with them also offers a **code** that its bot sends you, as Mattermost does
 Connection's bridge declares.
 
 Once linked, a Mention of you in a message of that Connection names you by the name the bridge reported for your
-account, which a bridge with native mentions turns into its messenger's mention, and the footer of a message you
-acknowledged, snoozed or resolved names you by that name. Without a link, a Mention is your Muster name as plain text,
-which notifies nobody.
+account, which a bridge with native mentions turns into its messenger's mention. The footer of a Root message you
+acknowledged, snoozed or resolved mentions you the same way when Muster posts it to a bridge with native mentions; an
+edit carries no Mentions, so there, and through any other bridge, the footer names you by that name. Without a link, a
+Mention is your Muster name as plain text, which notifies nobody.
 
 ### By a token sent to the bot
 

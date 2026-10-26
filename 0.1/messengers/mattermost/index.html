@@ -3125,8 +3125,15 @@ Mattermost's default, it is not shown in the channel view; the person opens the 
 is never lost.</p>
 <p><strong>Check connection</strong> tells you which applies: when the bot's roles do not grant <code>create_post_ephemeral</code>, the check
 passes with a warning that answers will show in the Thread of the Root message, and <code>muster doctor</code> prints the
-Connection as a <code>WARN</code> line. To show answers in the channel, give the bot that permission, for example the system admin
-role. Otherwise keep the role Member and let people read the answers in the Thread.</p>
+Connection as a <code>WARN</code> line. The warning names the bot whose token the Connection holds, as <code>@username</code>, and the roles
+Muster read for it, for example <code>system_user</code>, so you can see which account the token belongs to. To show answers in
+the channel, give the bot that permission, for example the system admin role. Otherwise keep the role Member and let
+people read the answers in the Thread.</p>
+<p>Promote the bot account itself, not the person who owns it, and check that it is the bot the warning names: a bot of
+another Connection, or an older token of another bot, keeps its own roles. As a system admin, open <strong>Integrations →
+Bot Accounts</strong> from the product menu, select <strong>Edit</strong> on the bot, set <strong>Role</strong> to <strong>System Admin</strong> and select
+<strong>Update</strong>; or run <code>mmctl roles system-admin &lt;bot-username&gt;</code>. Then run <strong>Check connection</strong> again: the warning is gone
+once the bot's roles grant the permission.</p>
 <h2 id="rate-limit">Rate limit<a class="headerlink" href="#rate-limit" title="Permanent link">&para;</a></h2>
 <p>Mattermost's rate limit is off by default. When an admin turns it on (<code>RateLimitSettings.Enable</code>, which takes a server
 restart), it allows 10 requests per second, with a burst of 100, <strong>per client address</strong>. All Connections of one Muster
@@ -3142,12 +3149,22 @@ request of the Connection, to any of its Destinations, for the seconds of its <c
   message, or a reply in the Thread.</li>
 <li><strong>Thread replies notify the Thread's followers</strong> by their own notification settings, and a Mention makes the person
   mentioned a follower of the Thread. "Quiet" therefore means "without a Mention", not "nobody notified".</li>
-<li>A Loud post carries its Mentions — <code>@channel</code>, <code>@here</code>, <code>@all</code>, a Mattermost group, or a person's <code>@username</code> through
-  their Account link — in the post's text, never in the attachment, so that the notification shows what happened. A
-  <code>{{ mention "channel" }}</code> in a Route's template shows in the attachment as text and, on a Loud post, adds its Mention
-  to the post's text.</li>
-<li>Alert data never mention anyone: an <code>@</code> in a label or annotation is shown as text and notifies nobody. The footer of
-  a Root message names a person by their username without <code>@</code>, which does not notify them either.</li>
+<li>A Loud Root message carries its Mentions — <code>@channel</code>, <code>@here</code>, <code>@all</code>, a Mattermost group, or a person's
+  <code>@username</code> through their Account link — as one line at the top of the attachment, directly under its title. There a
+  person's <code>@username</code>, <code>@channel</code>, <code>@here</code> and <code>@all</code> notify as they do anywhere in a post; whether a group's Mention
+  notifies from an attachment has not been checked. The post's own text is empty: everything is in the attachment, so
+  the post shows its title once. What a notification shows follows from that: an email notification shows no content;
+  a push notification, when the server's <strong>PushNotificationContents</strong> is <code>full</code>, and a desktop notification show the
+  attachment's summary line — the status, <code>#N</code> and the title — which Muster sets as its <code>fallback</code> and the channel does
+  not show; a push notification under <code>generic</code> shows a fixed text such as "… notified the channel." An edit removes
+  the line of Mentions. A reply in the
+  Thread carries its Mentions in its own text. A <code>{{ mention "channel" }}</code> in a Route's template shows in the attachment
+  as text and, on a Loud post, adds its Mention to the line of Mentions.</li>
+<li>Alert data never mention anyone: an <code>@</code> in a label or annotation is shown as text and notifies nobody.</li>
+<li>The footer of a Root message — "Acknowledged by", "Snoozed by", "Resolved by" — writes a person with an Account link
+  for the Connection as <code>@username</code>, so that Mattermost shows their name with their profile; a person without one is
+  their Muster name as text. An edit notifies nobody, but a new post with the footer, after a republish, may notify that
+  person.</li>
 </ul>
 <h2 id="check-from-the-command-line">Check from the command line<a class="headerlink" href="#check-from-the-command-line" title="Permanent link">&para;</a></h2>
 <p><code>muster doctor</code> prints one line per Mattermost Connection and per Mattermost Destination with the same checks, without

@@ -1,7 +1,7 @@
 openapi: 3.1.2
 info:
   title: Muster API
-  version: 0.1.2 # x-release-please-version
+  version: 0.1.3 # x-release-please-version
   summary: Muster L1 API
   description: |-
     Spec-first contract of Muster L1: alert grouping and on-call after Alertmanager.
@@ -4836,7 +4836,9 @@ paths:
       - Destinations
       summary: Preview a message or request
       description: Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending
-        anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format
+        anything. For a Mattermost Destination the item `message` has the format `markdown`, its `text` the post's
+        `message`, which Muster leaves empty, and its `request` the post, whose one attachment holds what the channel
+        shows. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format
         `json`). For a Slack Destination the item `message` is the body of `chat.postMessage` as JSON (format `json`),
         and its `request` that call with the bot token masked.
       x-permission: destinations:test
@@ -5903,9 +5905,10 @@ paths:
         `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none;
         a request of another User, or one that is not a Slack request, is `404`. The link stores the account''s user id
         as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as
-        `display_name`, which Mentions and the footer use; a second link of the User through the same Connection
-        replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that
-        fails is only logged. Runs on the interactive path: when no limiter token is free within
+        `display_name`, which names the account where Muster shows the link, while Mentions and the footer write it
+        as `<@external_id>`; a second link of the User through the same Connection replaces the first. The bot then
+        confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on
+        the interactive path: when no limiter token is free within
         `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation
         starts a link for another User, whatever the caller''s Role.'
       x-permission: authenticated
@@ -13043,10 +13046,11 @@ components:
             $ref: '#/components/schemas/ConnectionCheckStep'
         warnings:
           type: array
-          description: 'Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot''s roles do not
-            grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses
-            show in the Thread of the Root message instead of the channel view; granting that permission, for example
-            with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode):
+          description: 'Hints that do not fail the check. `press_answers_in_thread` (Mattermost): none of the bot''s
+            roles, which `bot_roles` lists, grants `create_post_ephemeral`, so the bot `bot_name` may not make ephemeral
+            messages and the answers to button presses show in the Thread of the Root message instead of the channel
+            view; granting the bot account itself that permission, for example with the system admin role, shows them in
+            the channel. `another_client_connected` (Slack, `socket` mode):
             the last `hello` counted another connection of the Slack app than the Leader''s; presses are shared between
             them at random — use one Slack app for each Connection and share it with no other Connection or
             installation.'
@@ -13060,6 +13064,14 @@ components:
           - string
           - 'null'
           description: The bot's name or username.
+        bot_roles:
+          type: array
+          description: Mattermost only. Set with the warning `press_answers_in_thread`, omitted otherwise — the system
+            roles of the bot `bot_name` that Muster read from its user (`GET /api/v4/users/me`), none of which grants
+            `create_post_ephemeral`, empty when the bot has none; clients name them with the bot, so that the operator
+            sees which account the token belongs to.
+          items:
+            type: string
         webhook_set:
           type:
           - boolean
@@ -13963,8 +13975,9 @@ components:
           type:
           - string
           - 'null'
-          description: The rendered Root message text; for a Bridge, the envelope, and for Slack, the body of
-            `chat.postMessage`, as JSON.
+          description: The rendered Root message text; for Mattermost, the post's `message`, which is empty, the
+            attachment being in `request`; for a Bridge, the envelope, and for Slack, the body of `chat.postMessage`,
+            as JSON.
         request:
           $ref: '#/components/schemas/RenderedRequest'
     DestinationPreview:
@@ -14356,8 +14369,9 @@ components:
             account's `name`.
         display_name:
           type: string
-          description: Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's
-            `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
+          description: Set on Bridge and Slack links; the account's name as the bridge reported it, which a Bridge's
+            Mentions and footers show, or a Slack account's `profile.display_name`, else `profile.real_name`, which
+            names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).
         last_used_at:
           type:
           - string
