@@ -241,18 +241,55 @@ export function CheckDetail({
   );
 }
 
+const codeClass = "rounded bg-muted px-1 font-mono text-xs";
+
 /**
- * The hint of a warning; the permission is Mattermost's identifier and shows as code. A Slack app whose last Socket Mode
- * hello counted another connection shares its presses with that program (C-24.FR-2, FR-9).
+ * The hint of a warning; the permission is Mattermost's identifier and shows as code. A Mattermost bot whose roles do
+ * not grant it is named by its @username with the roles the server read (bot_roles), so that the operator sees which
+ * account the token belongs to; both are elements, never parsed as markup. Only an empty bot_roles says the bot has no
+ * roles: a result without it, or without the bot's name, keeps the text that names neither. A Slack app whose last
+ * Socket Mode hello counted another connection shares its presses with that program (C-24.FR-2, FR-9).
  */
-function WarningText({ warning }: { warning: ConnectionCheckResultWarningsItem }) {
+function WarningText({
+  warning,
+  bot,
+  roles,
+}: {
+  warning: ConnectionCheckResultWarningsItem;
+  bot: string;
+  roles?: readonly string[];
+}) {
   const { t } = useTranslation();
   switch (warning) {
     case "press_answers_in_thread":
+      if (roles === undefined || bot === "") {
+        return (
+          <Trans
+            i18nKey="connections.check.warnings.pressAnswersInThreadUnnamed"
+            components={{ code: <code className={codeClass} /> }}
+          />
+        );
+      }
+      if (roles.length === 0) {
+        return (
+          <Trans
+            i18nKey="connections.check.warnings.pressAnswersInThreadNoRoles"
+            components={{
+              code: <code className={codeClass} />,
+              bot: <code className={codeClass}>@{bot}</code>,
+            }}
+          />
+        );
+      }
       return (
         <Trans
           i18nKey="connections.check.warnings.pressAnswersInThread"
-          components={{ code: <code className="rounded bg-muted px-1 font-mono text-xs" /> }}
+          count={roles.length}
+          components={{
+            code: <code className={codeClass} />,
+            bot: <code className={codeClass}>@{bot}</code>,
+            roles: <span>{roles.join(", ")}</span>,
+          }}
         />
       );
     case "another_client_connected":
@@ -573,7 +610,7 @@ function Result({
               className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
             />
             <p className="min-w-0 wrap-anywhere">
-              <WarningText warning={warning} />
+              <WarningText warning={warning} bot={name} roles={result.bot_roles} />
               {fix !== undefined && (
                 <>
                   {" "}

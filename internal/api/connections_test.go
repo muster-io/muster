@@ -429,21 +429,31 @@ func TestDeleteConnectionAPI(t *testing.T) {
 }
 
 // TestCheckConnectionAPI is checkConnection (C-13.FR-2, C-11.FR-2): the token step with its latency and path, the
-// message of a failure and the bot's name; 503 with Retry-After when no limiter token is free in time.
+// message of a failure and the bot's name, with the roles read beside the warning press_answers_in_thread and without
+// them otherwise; 503 with Retry-After when no limiter token is free in time.
 func TestCheckConnectionAPI(t *testing.T) {
 	x, fc := newConnectionsAPI(t)
 	path := "/api/v1/connections/" + connectionID + "/checks"
 	fc.check = connections.CheckResult{OK: true, BotName: "muster-dev-bot", Steps: []connections.Step{{
 		Name: connections.StepToken, OK: true, Latency: 7 * time.Millisecond, Via: mattermost.ViaDirect}},
-		Warnings: []string{connections.WarningPressAnswersInThread}}
+		Warnings: []string{connections.WarningPressAnswersInThread}, BotRoles: []string{"system_user", "custom"}}
 	a := x.as(t, connectionsWriter, http.MethodPost, path, "")
 	var res gen.ConnectionCheckResult
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || !res.Ok || res.BotName.MustGet() != "muster-dev-bot" || len(res.Steps) != 1 ||
 		res.Steps[0].Name != "token" || res.Steps[0].LatencyMs.MustGet() != 7 || *res.Steps[0].Via != "direct" ||
 		!res.Steps[0].Message.IsNull() || !res.Steps[0].Code.IsNull() || len(res.Warnings) != 1 ||
-		res.Warnings[0] != gen.PressAnswersInThread {
+		res.Warnings[0] != gen.PressAnswersInThread || res.BotRoles == nil ||
+		!slices.Equal(*res.BotRoles, []string{"system_user", "custom"}) {
 		t.Errorf("check = %d %s", a.status, a.body)
+	}
+	fc.check.BotRoles = []string{}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, ""); !strings.Contains(string(a.body), `"bot_roles":[]`) {
+		t.Errorf("a bot without roles = %d %s", a.status, a.body)
+	}
+	fc.check = connections.CheckResult{OK: true, BotName: "muster-dev-bot", Steps: fc.check.Steps}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, ""); strings.Contains(string(a.body), "bot_roles") {
+		t.Errorf("without the warning = %d %s", a.status, a.body)
 	}
 	fc.check = connections.CheckResult{Steps: []connections.Step{{Name: connections.StepToken,
 		Latency: 3 * time.Millisecond, Via: mattermost.ViaProxy, Message: mattermost.MessageTokenInvalid,
@@ -507,11 +517,12 @@ func TestCheckConnectionDraftAPI(t *testing.T) {
 	}
 	fc.check = connections.CheckResult{OK: true, BotName: "muster-dev-bot-b", Steps: []connections.Step{{
 		Name: connections.StepToken, OK: true, Latency: 7 * time.Millisecond, Via: mattermost.ViaDirect}},
-		Warnings: []string{connections.WarningPressAnswersInThread}}
+		Warnings: []string{connections.WarningPressAnswersInThread}, BotRoles: []string{"system_user"}}
 	a = x.as(t, connectionsWriter, http.MethodPost, path, `{"type":"mattermost","server_url":"http://127.0.0.1:18066"}`)
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || !res.Ok || res.BotName.MustGet() != "muster-dev-bot-b" ||
-		res.Warnings[0] != gen.PressAnswersInThread || len(fc.drafts) != 2 || fc.drafts[1].BotToken.Given ||
+		res.Warnings[0] != gen.PressAnswersInThread || res.BotRoles == nil ||
+		!slices.Equal(*res.BotRoles, []string{"system_user"}) || len(fc.drafts) != 2 || fc.drafts[1].BotToken.Given ||
 		fc.drafts[1].Proxy != nil || fc.drafts[1].ConnectionID != nil {
 		t.Fatalf("a new draft without a token = %d %s, %+v", a.status, a.body, fc.drafts)
 	}

@@ -301,8 +301,8 @@ func (s *Service) doctorBridge(ctx context.Context, row dbgen.GetConnectionRow, 
 }
 
 // connectionCheck is the Connection check in the background class, bounded by each: an empty message when the bot
-// token works, otherwise the message of the failure; and the hint mattermost.HintPressAnswersInThread when the token
-// works but the bot's roles do not let it make ephemeral posts (D284).
+// token works, otherwise the message of the failure; and the hint mattermost.HintPressAnswersInThread, naming the bot
+// and the roles read, when the token works but the bot's roles do not let it make ephemeral posts (D284).
 func connectionCheck(ctx context.Context, c *mattermost.Client, each time.Duration) (message, warning string) {
 	ctx, cancel := context.WithTimeout(ctx, each)
 	defer cancel()
@@ -311,7 +311,7 @@ func connectionCheck(ctx context.Context, c *mattermost.Client, each time.Durati
 	case r.OK():
 		if granted, r := c.Grants(ctx, outbound.ClassBackground, u, mattermost.PermissionEphemeralPosts); r.OK() &&
 			!granted {
-			return "", mattermost.HintPressAnswersInThread
+			return "", mattermost.HintPressAnswersInThread(u.Username, u.RoleNames())
 		}
 		return "", ""
 	case r.Status == http.StatusUnauthorized:

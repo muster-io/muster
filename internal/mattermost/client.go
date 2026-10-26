@@ -165,6 +165,9 @@ type User struct {
 	DeleteAt int64  `json:"delete_at"`
 }
 
+// RoleNames are the system roles of u, as Grants reads them.
+func (u User) RoleNames() []string { return strings.Fields(u.Roles) }
+
 // Role is a Mattermost role with its permissions; a DeleteAt other than 0 grants nothing.
 type Role struct {
 	Name        string   `json:"name"`
@@ -176,10 +179,23 @@ type Role struct {
 // default (F-063).
 const PermissionEphemeralPosts = "create_post_ephemeral"
 
-// HintPressAnswersInThread is the hint of a Connection whose bot lacks PermissionEphemeralPosts (D284).
-const HintPressAnswersInThread = "the bot may not make ephemeral messages (create_post_ephemeral), so answers to " +
-	"button presses show in the Thread of the Root message; give it that permission, for example the system admin " +
-	"role, to show them in the channel"
+// HintPressAnswersInThread is the hint of a Connection whose bot lacks PermissionEphemeralPosts (D284): it names the bot
+// by its username and the system roles Muster read for it (User.RoleNames), so that the operator sees which account the
+// token belongs to.
+func HintPressAnswersInThread(bot string, roles []string) string {
+	var read string
+	switch len(roles) {
+	case 0:
+		read = "has no roles, so it lacks"
+	case 1:
+		read = "has the role " + roles[0] + ", which does not grant"
+	default:
+		read = "has the roles " + strings.Join(roles, ", ") + ", none of which grants"
+	}
+	return "the bot @" + bot + " " + read + " create_post_ephemeral: it may not make ephemeral messages, so answers " +
+		"to button presses show in the Thread of the Root message; give the bot account itself that permission, for " +
+		"example the system admin role, to show them in the channel"
+}
 
 // Team is a Mattermost team: Name is its URL name, the team_domain of a press.
 type Team struct {
@@ -222,7 +238,7 @@ func (c *Client) UserByUsername(ctx context.Context, class outbound.Class, usern
 // one read of the roles, POST /api/v4/roles/names, of which any role that is not deleted holds permission. A user
 // without roles is granted nothing and needs no read.
 func (c *Client) Grants(ctx context.Context, class outbound.Class, u User, permission string) (bool, Result) {
-	names := strings.Fields(u.Roles)
+	names := u.RoleNames()
 	if len(names) == 0 {
 		return false, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
 	}

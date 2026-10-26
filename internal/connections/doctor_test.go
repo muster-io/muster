@@ -149,7 +149,8 @@ func TestDoctor(t *testing.T) {
 
 	got := findings(t, e.svc, e.store)
 	open := "open the bot token of the connection " + broken.PublicID + ": cannot decrypt"
-	want := []string{"connection mm: warning: " + mattermost.HintPressAnswersInThread, "connection broken: " + open,
+	hint := mattermost.HintPressAnswersInThread(fakemattermost.BotUsername, []string{"system_user"})
+	want := []string{"connection mm: warning: " + hint, "connection broken: " + open,
 		"connection tg-" + telegramID + `: dry_probe: Get "http://127.0.0.1:1/bot0:x/getMe": dial tcp`,
 		"destination dest-7: ok",
 		"destination dest-8: " + mattermost.MessageNotMember, "destination dest-9: its Connection failed its check: " + open,

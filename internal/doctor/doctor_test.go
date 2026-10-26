@@ -597,6 +597,9 @@ func connectionRow(r cdb.ListConnectionsRow) []any {
 	return values
 }
 
+// botHint is the hint of the bot of the fake Mattermost server, which reads the role system_user only (D284).
+var botHint = mattermost.HintPressAnswersInThread(fakemattermost.BotUsername, []string{"system_user"})
+
 const (
 	doctorToken         = "doctor-bot-token-0123456789"
 	doctorTelegramToken = "777001:doctor-telegram-token"
@@ -613,7 +616,7 @@ func TestMessengerChecks(t *testing.T) {
 	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
 	before := background.Get()
 	out, ok := run(t, d, environ(key))
-	want := "WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+	want := "WARN connection Example Mattermost: " + botHint + "\n" +
 		"OK   connection Example Telegram: ok\n" +
 		"OK   connection Example Bridge: ok\n" +
 		"OK   connection Example Slack: ok\n" +
@@ -725,7 +728,7 @@ func TestDevRoutes(t *testing.T) {
 	d.routes = &routes{mattermost: route(doctorToken), telegram: route(doctorTelegramToken),
 		bridge: route(fakebridge.Token)}
 	out, _ := run(t, d, environ(key))
-	for _, want := range []string{"WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n",
+	for _, want := range []string{"WARN connection Example Mattermost: " + botHint + "\n",
 		"OK   connection Example Telegram: ok\n", "OK   connection Example Bridge: ok\n", "OK   destination alerts: ok\n",
 		"OK   destination tg-alerts: ok\n", "OK   destination br-alerts: ok\n"} {
 		if !strings.Contains(out, want) {

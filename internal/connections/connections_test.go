@@ -1197,8 +1197,8 @@ func TestStepCalled(t *testing.T) {
 }
 
 // TestCheck is C-13.FR-2: the Connection check on the interactive path, limited by the Connection, returns the bot's
-// name and records the bot, with the warning press_answers_in_thread while the bot's roles do not grant
-// create_post_ephemeral (D284) and without it once they do; a revoked token fails with "The bot token is not
+// name and records the bot, with the warning press_answers_in_thread and the roles it read while the bot's roles do
+// not grant create_post_ephemeral (D284) and without either once they do; a revoked token fails with "The bot token is not
 // valid."; no limiter token in time is a *delivery.LimitedError.
 func TestCheck(t *testing.T) {
 	e := newEnv(t)
@@ -1208,7 +1208,8 @@ func TestCheck(t *testing.T) {
 	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 1 ||
 		res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
 		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" || res.Steps[0].Code != "" ||
-		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) {
+		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) ||
+		!slices.Equal(res.BotRoles, []string{"system_user"}) {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	got, _ := e.svc.Get(ctx, c.PublicID)
@@ -1226,15 +1227,27 @@ func TestCheck(t *testing.T) {
 		t.Errorf("requests %+v", reqs)
 	}
 	e.configure(t, `{"bot_system_admin":true}`)
-	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 {
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 ||
+		res.BotRoles != nil {
 		t.Errorf("an admin bot = %+v, %v", res, err)
 	}
 	e.configure(t, `{"bot_system_admin":false}`)
 	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/roles/names", Status: 503, Times: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 {
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 ||
+		res.BotRoles != nil {
 		t.Errorf("roles unreadable = %+v, %v", res, err)
+	}
+	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/users/me", Status: http.StatusOK, Times: 1,
+		ContentType: "application/json", Body: `{"id":"` + fakemattermost.BotUserID + `","username":"` +
+			fakemattermost.BotUsername + `","is_bot":true,"roles":""}`}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK ||
+		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) || res.BotRoles == nil ||
+		len(res.BotRoles) != 0 {
+		t.Errorf("a bot without roles = %+v, %v", res, err)
 	}
 	e.configure(t, `{"revoked_tokens":["`+botToken+`"]}`)
 	nBots := len(e.store.bots)

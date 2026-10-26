@@ -32,14 +32,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 - **C-13.FR-2** The connection check (interactive) verifies the token and shows the bot's name; saving a Destination
   verifies that the bot is a member of the channel and refuses otherwise, naming the failing check. When the bot's
   roles do not grant `create_post_ephemeral` — read with `POST /api/v4/roles/names`, as the server decides it (F-064)
-  — the check still passes, with the warning `press_answers_in_thread`: the bot may not make ephemeral messages, so
-  answers to button presses will show in the Thread of the Root message, and granting the bot that permission, for
-  example the system admin role, shows them in the channel (FR-4, F-063). `muster doctor` prints the same hint as a
-  WARN line. When the check has no token it may send to the server URL — a changed server URL whose token is not typed
-  again (FR-14) — it makes only a dry probe without the token, `GET <server>/api/v4/system/ping`, which a Mattermost
-  server answers to anyone (F-069); it passes on a `200` JSON answer whose `status` is `OK` and otherwise names what
-  answered: `not_mattermost` (an answer that is not that JSON), `wrong_path_prefix` (`404`), `unexpected_status`
-  (another status with JSON) and the network codes of the other steps.
+  — the check still passes, with the warning `press_answers_in_thread`, which names the bot it checked (`@username`)
+  and the roles Muster read for it (`bot_roles`), none of which grants `create_post_ephemeral`: the bot may not make
+  ephemeral messages, so answers to button presses will show in the Thread of the Root message, and granting the bot
+  account itself that permission, for example the system admin role, shows them in the channel (FR-4, F-063).
+  `muster doctor` prints the same hint, with the bot and the roles, as a WARN line. When the check has no token it may
+  send to the server URL — a changed server URL whose token is not typed again (FR-14) — it makes only a dry probe
+  without the token, `GET <server>/api/v4/system/ping`, which a Mattermost server answers to anyone (F-069); it passes
+  on a `200` JSON answer whose `status` is `OK` and otherwise names what answered: `not_mattermost` (an answer that is
+  not that JSON), `wrong_path_prefix` (`404`), `unexpected_status` (another status with JSON) and the network codes of
+  the other steps.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
   limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is empty, with one attachment,
   coloured by status, that holds everything of C-12.FR-1, so the channel shows the title once: the attachment's title
@@ -223,8 +225,9 @@ Checked against the fake Mattermost server.
 - **C-13.AC-15** A `429` from the fake server with a plain-text body and `Retry-After: 1` delays the next request
   through that Connection, to any of its Destinations, by 1 to 2 seconds and is not counted as an attempt.
 - **C-13.AC-16** The connection check of a bot whose roles do not grant `create_post_ephemeral` passes with the warning
-  `press_answers_in_thread`, and `muster doctor` prints it as a WARN line; with the system admin role there is no
-  warning.
+  `press_answers_in_thread`, which names the bot as `@username` and the roles read (`system_user` for the fake
+  server's bot), and `muster doctor` prints it, with the bot and the roles, as a WARN line; with the system admin role
+  there is no warning.
 - **C-13.AC-17** "Check connection" in the create form, with the fake server's address and a bot token, shows the
   bot's name, and afterwards no Connection exists and the Audit log has no new entry. In the edit form of a saved
   Connection, with only the server URL changed to a second fake server, the check makes only the dry probe

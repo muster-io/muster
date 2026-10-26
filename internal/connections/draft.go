@@ -342,8 +342,8 @@ func (s *Service) checkMattermostDraft(ctx context.Context, r draftRoute) (Check
 	if !step.OK {
 		return CheckResult{Steps: []Step{step}}, nil
 	}
-	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username,
-		Warnings: pressWarnings(ctx, c, run, user)}, nil
+	warnings, roles := pressWarnings(ctx, c, run, user)
+	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username, Warnings: warnings, BotRoles: roles}, nil
 }
 
 // checkTelegramDraft checks a Telegram draft (C-14.FR-11) with telegram.RunCheck: the dry probe, getMe and

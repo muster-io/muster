@@ -123,7 +123,7 @@ const SLACK: SlackConnection = {
 };
 
 const WARNING =
-  "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
+  "The bot @muster-dev-bot has the role system_user, which does not grant the create_post_ephemeral permission, so it may not make ephemeral messages and answers to button presses show in the Thread of the Root message. Give the bot account itself that permission, for example the system admin role, to show them in the channel.";
 
 function refusal(status: number, problem: Record<string, unknown>, retryAfter?: number): ApiError {
   return new ApiError(
@@ -772,6 +772,7 @@ const PASSED: ConnectionCheckResult = {
   steps: [{ name: "token", ok: true, latency_ms: 12, via: "direct", message: null }],
   warnings: ["press_answers_in_thread"],
   bot_name: "muster-dev-bot",
+  bot_roles: ["system_user"],
   request_log_run: "CR0000000000R1",
 };
 
@@ -811,10 +812,12 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-warning"))
       .toHaveTextContent(`${WARNING} How to fix`);
-    // The permission is Mattermost's identifier and shows as code.
+    // The bot and the permission are Mattermost's identifiers and show as code.
     expect(
-      page.getByTestId("connection-check-warning").element().querySelector("code")?.textContent,
-    ).toBe("create_post_ephemeral");
+      [...page.getByTestId("connection-check-warning").element().querySelectorAll("code")].map(
+        (c) => c.textContent,
+      ),
+    ).toEqual(["@muster-dev-bot", "create_post_ephemeral"]);
     expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/connections/CN0000000000AA/checks");
   });
 
@@ -927,7 +930,7 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-warning"))
       .toHaveTextContent(
-        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора. Как исправить",
+        "У бота @muster-dev-bot роль system_user, и она не даёт права create_post_ephemeral, поэтому боту нельзя создавать эфемерные сообщения и ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте это право самой учётной записи бота, например роль системного администратора. Как исправить",
       );
     expect(checkErrorText(i18n.t, refusal(503, {}, 3))).toBe(
       "Мессенджер занят, повторите через 3 с.",
