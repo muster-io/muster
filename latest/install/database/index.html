@@ -2878,7 +2878,10 @@ creates it. Neither the Helm chart nor the compose example backs up the database
 <p>When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every <code>PG*</code> variable,
 such as <code>PGHOST</code>, <code>PGSSLMODE</code>, <code>PGSSLROOTCERT</code>, <code>PGOPTIONS</code> and <code>PGPASSFILE</code>, and the password file <code>~/.pgpass</code>. Give
 any other libpq setting as a parameter of the URL instead, such as <code>sslrootcert</code>, <code>options</code> or <code>target_session_attrs</code>.
-Only libpq's default certificate files still apply when the URL names none: <code>~/.postgresql/root.crt</code>, and
+Percent-encode the values as libpq requires, <code>=</code> as <code>%3D</code> and a space as <code>%20</code>, for example
+<code>options=-c%20search_path%3Dmuster</code>. A URL that libpq rejects stops Muster at start with an error that names the
+parameter; the URL in the error includes the <code>sslmode</code> that Muster appends when the URL names none. Only libpq's
+default certificate files still apply when the URL names none: <code>~/.postgresql/root.crt</code>, and
 <code>~/.postgresql/postgresql.crt</code> with <code>postgresql.key</code>; these are files, not variables, and the Muster image has none. Any
 secret can come from a <code>*_FILE</code> variable.</p>
 <p>Prefer the fields when the host, user and name are plain values and only the password is a secret: the Helm chart does
