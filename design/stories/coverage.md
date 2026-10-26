@@ -1,20 +1,22 @@
-# Coverage of L1 requirements by stories
+# Coverage of L1 and L2 requirements by stories
 
 - Status: Draft
-- Date: 2026-10-04
+- Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md). A capability is done when its stories together cover every ID of its file
+[L1](../prd/L1.md) and of the core of [L2](../prd/L2.md). A capability is done when its stories together cover every ID of its file
 ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID fully or in
 part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
-  Every ID of L1 is complete.
+  Every ID of L1 is complete. An ID of L2 shows `open:` with the story reserved for it until that story's contract is
+  written; the sections of L2 follow the non-functional requirements of L1, and the requirements of L1 that L2 revises
+  have a section of their own at the end.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) · [C-28](#c-28) · [C-29](#c-29) · [L1 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
 
@@ -44,6 +46,10 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090, S-097, S-100, S-101 | yes | 13 of 13 |
 | C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
+| C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124, S-125; open S-131, S-139, S-143, S-144, S-154 | in part | 17 of 26 |
+| C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-119, S-121, S-122, S-123, S-124; open S-140 | yes | 23 of 24 |
+| C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114; open S-140, S-143, S-144 | in part | 3 of 20 |
+| C-29 Compact message layout | L2 Teams | 16 | S-125, S-126, S-127, S-128, S-129, S-130; open S-155 | yes | 15 of 16 |
 
 ## C-01
 
@@ -898,3 +904,173 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-13 API | S-002, S-010, S-011 | spec-first generation (S-002); RFC 9457 errors with pointers, UTC and `public_id` in URLs (S-010); optimistic locking with `ETag` and `If-Match`, and cursor pagination without `OFFSET` (S-011) |
 | NFR-14 Quality | S-001, S-002, S-004, S-014 | the coverage gate (S-001); the nightly mutation report (S-002); end-to-end tests with fake servers (S-004) and a real browser (S-014); evidence for every acceptance statement in each pull request (section 7 of the [README](README.md#7-lifecycle)) |
 | NFR-15 Phone width | S-030 | the Alert Group list and page at 360 CSS pixels, checked end to end at that width |
+
+## C-25
+
+[Teams](../prd/l2/C-25-teams.md) · L2 Teams · stories: S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124,
+S-125; later S-131, S-139, S-143, S-144, S-154
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-25.FR-1 | S-115 (part), S-117 (part), S-118 (part) | open: S-139 | Team mentions; the Destinations, Schedules and chains of a Team are C-26, C-27 and C-32 |
+| C-25.FR-2 | S-115 (part), S-118 (part), S-119 (part), S-120 (part) | open: S-154 | the owning Team of Escalation chains and the filters of the lists of Schedules (S-131, S-135) and chains (S-154, S-158) |
+| C-25.FR-3 | S-115 (part), S-119 (part) | complete |  |
+| C-25.FR-4 | S-116 (part), S-117 (part), S-119 (part) | complete | GitLab's role claims checked by the spike S-116 |
+| C-25.FR-5 | S-118 (part), S-163 (part), S-120 (part) | complete | the Team's slug on Internal alerts about a Team's object comes with `MusterScheduleGap` (S-133) |
+| C-25.FR-6 | S-118 (part), S-120 (part), S-125 (part) | complete |  |
+| C-25.FR-7 | S-118 (part), S-163 (part), S-120 (part) | complete |  |
+| C-25.FR-8 | — | open: S-139 | after the spike S-138; "How to mention the Team" on the Team page is S-143 |
+| C-25.FR-9 | S-115 (part), S-119 (part) | complete | Escalation steps limited to Working hours use them from S-154 |
+| C-25.FR-10 | S-115 (part), S-118 (part), S-121 (part) | open: S-131 | the refusal `team_in_use` for Schedules (S-131) and chains (S-154); P-64 confirmed with S-131 |
+| C-25.FR-11 | S-115 (part), S-117 (part), S-118 (part) | open: S-139 | Team mentions' locking and Audit log |
+| C-25.FR-12 | S-115 (part), S-117 (part), S-118 (part), S-124 (part) | open: S-144 | Team mentions per messenger |
+| C-25.FR-13 | S-163 (part), S-121 (part) | complete |  |
+| C-25.AC-1 | S-118 (part), S-163 (part) | complete |  |
+| C-25.AC-2 | S-118 | complete |  |
+| C-25.AC-3 | S-117 | complete |  |
+| C-25.AC-4 | S-117 | complete | the fake OIDC server's GitLab mode follows S-116's facts |
+| C-25.AC-5 | S-118 | complete |  |
+| C-25.AC-6 | S-115 | complete |  |
+| C-25.AC-7 | — | open: S-139 |  |
+| C-25.AC-8 | S-115 | complete |  |
+| C-25.AC-9 | S-115 (part), S-118 (part) | open: S-131 | the Team with a Schedule |
+| C-25.AC-10 | S-119 (part), S-120 (part) | open: S-143 | the Team mention field of each Connection, or its reason |
+| C-25.AC-11 | S-115 (part), S-118 (part), S-119 (part), S-120 (part) | complete |  |
+| C-25.AC-12 | S-115 | complete |  |
+| C-25.AC-13 | S-163 (part), S-121 (part) | complete | "starts no Escalation chain" holds while chains do not exist; S-154 keeps it |
+
+## C-26
+
+[Routing to Teams and by Severity](../prd/l2/C-26-routing-to-teams-and-by-severity.md) · L2 Teams · stories: S-111,
+S-162, S-112, S-119, S-121, S-122, S-123, S-124
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-26.FR-1 | S-121 (part), S-123 (part) | complete | the Mention entry "Team {Team}" that naming a Destination of the Team adds is C-28.FR-6, S-140 |
+| C-26.FR-2 | S-121 (part), S-123 (part) | complete | "Run the Teams' Escalation chains" acts on chains with C-32.FR-4, S-154 |
+| C-26.FR-3 | S-121 | complete |  |
+| C-26.FR-4 | S-121 | complete |  |
+| C-26.FR-5 | S-121 (part), S-123 (part) | open: S-140 | the Mentions of the Destination's entries for `new_alert_group` (C-28.FR-1); the delay by Maintenance windows is specified later |
+| C-26.FR-6 | S-121 | complete |  |
+| C-26.FR-7 | S-119 (part), S-121 (part) | complete |  |
+| C-26.FR-8 | S-111 (part), S-112 (part) | complete |  |
+| C-26.FR-9 | S-111 (part), S-112 (part), S-121 (part) | complete | "starts no Escalation chain" holds while chains do not exist; S-154 keeps it |
+| C-26.FR-10 | S-111 (part), S-112 (part) | complete |  |
+| C-26.FR-11 | S-162 | complete |  |
+| C-26.FR-12 | S-122 (part), S-123 (part) | complete |  |
+| C-26.FR-13 | S-111 (part), S-121 (part), S-122 (part), S-124 (part) | complete |  |
+| C-26.AC-1 | S-121 | complete |  |
+| C-26.AC-2 | S-121 | complete |  |
+| C-26.AC-3 | S-121 | complete |  |
+| C-26.AC-4 | S-121 | complete |  |
+| C-26.AC-5 | S-121 | complete |  |
+| C-26.AC-6 | S-121 | complete |  |
+| C-26.AC-7 | S-111 | complete |  |
+| C-26.AC-8 | S-111 (part), S-162 (part) | complete |  |
+| C-26.AC-9 | S-123 | complete |  |
+| C-26.AC-10 | S-121 | complete |  |
+| C-26.AC-11 | S-111 (part), S-121 (part) | complete |  |
+
+## C-28
+
+[Mentions and buttons of a Destination](../prd/l2/C-28-mentions-and-buttons-of-a-destination.md) · L2 Teams (buttons),
+L2 On call (Mentions) · stories: S-113, S-114; later S-140, S-143, S-144
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-28.FR-1 | — | open: S-140 | the grid on the Destination form is S-143 |
+| C-28.FR-2 | — | open: S-140 | the group and everyone-in-the-chat mentions of Connections come with S-139 |
+| C-28.FR-3 | — | open: S-140 |  |
+| C-28.FR-4 | — | open: S-140 |  |
+| C-28.FR-5 | — | open: S-140 |  |
+| C-28.FR-6 | — | open: S-140 |  |
+| C-28.FR-7 | — | open: S-140 |  |
+| C-28.FR-8 | S-113 (part), S-114 (part) | complete |  |
+| C-28.FR-9 | S-113 | complete |  |
+| C-28.FR-10 | S-113 (part), S-114 (part) | open: S-143 | the Mentions on the Destination form |
+| C-28.FR-11 | S-114 (part) | open: S-144 | the page on whom a message mentions |
+| C-28.AC-1 | — | open: S-140 |  |
+| C-28.AC-2 | — | open: S-140 |  |
+| C-28.AC-3 | — | open: S-140 |  |
+| C-28.AC-4 | — | open: S-140 |  |
+| C-28.AC-5 | — | open: S-140 |  |
+| C-28.AC-6 | — | open: S-140 |  |
+| C-28.AC-7 | S-113 | complete |  |
+| C-28.AC-8 | — | open: S-140 |  |
+| C-28.AC-9 | S-114 (part) | open: S-143 | the Telegram Destination's unavailable targets |
+
+## C-29
+
+[Compact message layout](../prd/l2/C-29-compact-message-layout.md) · L2 Teams · stories: S-125, S-126, S-127, S-128,
+S-129, S-130; later S-155
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-29.FR-1 | S-125 (part), S-126 (part) | open: S-155 | the Assignees and the Owner's Team in item 7, with "· Escalation chains stopped" |
+| C-29.FR-2 | S-125 (part), S-129 (part) | complete |  |
+| C-29.FR-3 | S-125 | complete | P-67 stays provisional until the test environment confirms it |
+| C-29.FR-4 | S-125 (part), S-126 (part) | complete |  |
+| C-29.FR-5 | S-125 | complete |  |
+| C-29.FR-6 | S-125 (part), S-126 (part) | complete |  |
+| C-29.FR-7 | S-125 | complete |  |
+| C-29.FR-8 | S-126 (part), S-127 (part), S-128 (part) | complete | the libraries in `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python` |
+| C-29.FR-9 | S-125 (part), S-130 (part) | complete |  |
+| C-29.AC-1 | S-125 | complete |  |
+| C-29.AC-2 | S-125 | complete |  |
+| C-29.AC-3 | S-125 | complete |  |
+| C-29.AC-4 | S-125 | complete |  |
+| C-29.AC-5 | S-125 | complete |  |
+| C-29.AC-6 | S-126 | complete |  |
+| C-29.AC-7 | S-129 | complete |  |
+
+## L1 requirements revised for L2
+
+The requirements of L1 that [L2 §6](../prd/L2.md#6-revisions-to-l1) revises, with the L2 stories that carry the
+revision. Their rows in the L1 sections above stay as they were, for L1; a row here is complete when the revision is.
+Revised requirements that only later batches carry may still be added.
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-03.FR-5 | S-116 (part), S-117 (part), S-119 (part) | complete | the claim of every mapping entry and subtrees; GitLab's facts in S-116 |
+| C-03.FR-6 | S-117 | complete |  |
+| C-03.FR-7 | S-117 | complete |  |
+| C-03 UI | S-119 | complete | the claim of each entry in the group mapping editor |
+| C-03.AC-28 | S-117 | complete | added for L2 |
+| C-03.FR-13 | S-115 (part) | open: S-145 | out of every Team in S-115; the gateway contacts with C-30 |
+| C-03.FR-14 | — | open: S-148 | the Transport `gateway` |
+| C-03.FR-30 | S-117 | complete |  |
+| C-06.FR-19 | S-118 (part), S-120 (part) | complete |  |
+| C-08 scenario 2 | S-111, S-112 | complete | the Minimum severity instead of the urgent mark |
+| C-08.FR-1 | S-111 (part), S-115 (part), S-121 (part), S-123 (part), S-125 (part) | open: S-154 | the Escalation chains of a Route |
+| C-08.FR-6 | S-111 | complete |  |
+| C-08.FR-7 | S-162 | complete |  |
+| C-08 UI | S-112, S-119, S-123, S-129 | open: S-158 | the Escalation chains on the Route form |
+| C-08.AC-11 | S-162 | complete |  |
+| C-09.FR-1 | S-111 (part), S-118 (part) | open: S-155 | the running chains and Assignees |
+| C-09.FR-9 | S-111 (part) | open: S-154 | chains that start over on a rise |
+| C-09.FR-11 | S-118 (part), S-120 (part), S-123 (part) | open: S-159 | the Assignees and running chains on the page |
+| C-09.FR-13 | S-118 (part), S-120 (part) | open: S-159 | the Assignee filter |
+| C-09.FR-14 | S-120 (part), S-123 (part) | open: S-159 | the Teams in the header and the entries of each Destination in the delivery state; the Assignees and running chains with C-32 |
+| C-09.FR-22 | S-118 (part), S-121 (part) | open: S-155 | the lifecycle events of C-32 |
+| C-09.AC-8 | S-111 | complete |  |
+| C-10.FR-3 | — | open: S-148 | the Transport `gateway` |
+| C-10.AC-23 | S-162 (part), S-113 (part) | complete |  |
+| C-11.FR-3 | S-111 | complete |  |
+| C-11.FR-6 | S-121 (part) | open: S-140 | `storm_started` |
+| C-11.FR-14 | S-121 | complete |  |
+| C-11.FR-21 | — | open: S-140 | the delivery event "Mention not delivered" |
+| C-12.FR-1 | S-125 (part), S-126 (part) | complete |  |
+| C-12.FR-2 | S-125 | complete |  |
+| C-12.FR-3 | S-125 (part) | open: S-155 | the built-in texts of C-28, C-30 and C-32 come with their stories |
+| C-12.FR-11 | S-125 | complete |  |
+| C-12 UI | S-129 | complete | "Labels in the message" and the preview of the layout |
+| C-13.FR-3 | S-125 | complete |  |
+| C-13.FR-9 | S-114 (part) | open: S-143 | the Mention entries on the Destination page |
+| C-14.FR-16 | S-125 | complete |  |
+| C-15.FR-2 | S-118 (part), S-121 (part) | open: S-156 | the Assignees in `alert_group` and `escalation_webhook` |
+| C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
+| C-20.FR-1 | S-111 (part), S-112 (part), S-113 (part), S-114 (part), S-115 (part), S-118 (part), S-119 (part), S-120 (part) | open: S-152 | the default Notification rules (S-152, S-153) |
+| C-20.FR-9 | S-115 (part), S-119 (part) | complete |  |
+| C-22.FR-4 | S-126 | complete |  |
+| C-22.FR-21 | S-126 (part) | open: S-145 | the check accepts `layout`; it checks the role `gateway` with C-30 |
+| C-24.FR-4 | S-125 | complete |  |
