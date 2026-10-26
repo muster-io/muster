@@ -144,6 +144,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   about it with its Timeline entries by time, as the kind `delivery` (C-09.FR-11, C-09.FR-14); they are not lifecycle
   events and reach neither delivery nor outgoing webhook events (C-09.FR-22). They are kept for
   `retention.alert_details`, like Timeline entries (C-09.FR-16).
+  _Revised for L2 (2026-10-26):_ L2 adds the delivery event "Mention not delivered" for a person whom a Mention entry
+  names without an Account link (C-28.FR-3).
 
 ## UI
 

@@ -65,8 +65,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   `unexpected_status` (another status with a problem) and the network codes of the step `info`. A check before saving
   stores no `info`.
   _Revised for L2 (2026-10-26):_ `info` also declares the bridge's roles — `messenger`, the default, and `gateway`,
-  which makes the Connection a Notification gateway (C-30.FR-1) — and whether the bridge can mention groups, which Team
-  mentions and group entries need (C-25.FR-8, C-28.FR-2); the check shows both.
+  which makes the Connection a Notification gateway (C-30.FR-1) — whether the bridge can mention groups, which Team
+  mentions and group entries need (C-25.FR-8, C-28.FR-2), and which of the mentions of everyone in the chat — `channel`,
+  `here`, `all`, `everyone` — its messenger has (ADR-0017); the check shows them.
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
   `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and
@@ -78,7 +79,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   ends the Broken state. Mention settings take nobody or chosen users, as in Telegram; everyone in the chat and
   messenger groups are refused.
   _Revised for L2 (2026-10-26):_ the Mention entries of C-28.FR-2 apply: messenger groups and Teams too where the bridge
-  declares group mentions; a Connection whose only role is `gateway` has no Destination (C-30.FR-1).
+  declares group mentions, and the mentions of everyone in the chat that it declares; chosen people stay as in L1; a
+  Connection whose only role is `gateway` has no Destination (C-30.FR-1).
 - **C-22.FR-4** Every message Muster posts through a bridge is an envelope (`MessageInput`): the kind (`root`,
   `storm_summary`, `test`), the status with its colour and emoji (item 1 of C-12.FR-1), the title — `#N` and the
   Alert Group's title (item 2) — the link to the Alert Group page as "Open in Muster", the body, the buttons, the
@@ -221,9 +223,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   as text, which mentions nobody. The footer of a new Root message to a bridge with `native_mentions` names a linked
   User by such a marker, Loud or Quiet; an edit, which carries no Mentions, and any other bridge name them by the
   link's `display_name` (C-12.FR-12).
-  _Revised for L2 (2026-10-26):_ a group — a Team mention or a group entry — is an entry of the envelope's `mentions`
-  with its name, placed by the same marker, which a bridge that declares group mentions renders as its messenger's group
-  mention (C-25.FR-8).
+  _Revised for L2 (2026-10-26):_ a group — a Team mention or a group entry — and a mention of everyone in the chat are
+  entries of the envelope's `mentions` with a kind of their own (`api/bridge.yaml` gains the field) and the group's name
+  or the symbolic name `channel`, `here`, `all` or `everyone`, placed by the same marker, which a bridge that declares
+  them renders as its messenger's mention (C-25.FR-8, C-28.FR-2). A linked person on a bridge without `native_mentions`
+  is still sent and shown by the plain name, and the Timeline records that the Mention was not delivered (C-28.FR-3).
 - **C-22.FR-17** The Destination test and preview of C-16 apply: "Send test message" makes one `postMessage` of the
   kind `test`, marked "🧪 Test message", through the interactive path, and a press on it is answered "This is a test
   message; nothing was changed"; "Preview" shows the envelope as Muster would post it.

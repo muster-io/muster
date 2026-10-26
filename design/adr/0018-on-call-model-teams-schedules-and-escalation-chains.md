@@ -2,6 +2,10 @@
 
 - Status: Accepted
 - Date: 2026-10-26
+- Amended: 2026-10-26 — with the L2 PRD (journal D567): an Override makes one person On-call from one time to another
+  over every Rotation layer, so it also closes gaps, and only the person who takes the Shift must be in the Team and not
+  a Viewer; the Shifts of people who may not be Paged are skipped, and the Rotation layer below decides, so a gap is a
+  time when no Override and no Rotation layer has someone who may be Paged
 
 ## Context
 
@@ -106,14 +110,16 @@ from iCal.
 **Gaps.** A time in which nobody who may be Paged has a Shift, Overrides included, is a gap. A step that would Page the
 On-call of a Schedule with nobody on Shift is skipped with a Timeline entry, and the chain goes on with its next step.
 The Schedule page shows the gaps of the next two weeks, and an Internal alert reports a gap ahead, within a horizon the
-L2 PRD sets (journal D482, D525). The Shifts of people who may not be Paged count as gaps too: a Viewer, a person no
-longer in the Team — for example after the groups of the identity provider changed — and a disabled User; the Schedule
-warns about each (journal D514).
+L2 PRD sets (journal D482, D525). The Shifts of people who may not be Paged — a Viewer, a person no longer in the Team,
+for example after the groups of the identity provider changed, and a disabled User — are skipped, and the Rotation layer
+below decides; they leave a gap only where no other Rotation layer and no Override has someone, and the Schedule warns
+about each (journal D514, D567).
 
 **Overrides and permissions.** Only an Admin changes the structure: Teams, Rotation layers, Escalation chains and
 Routes. An Override needs the Permission `schedule-overrides:write`, which Responders and Admins have, and a
-precondition: the caller is in the Team or is an Admin, and both people of the Override are in the Team and are not
-Viewers. Overrides need no approval and send no message; the Audit log records them, and the UI, its "on call now" view
+precondition: the caller is in the Team or is an Admin, and the person who takes the Shift is in the Team and is not a
+Viewer. An Override makes that person On-call from one time to another over every Rotation layer, so it also closes a
+gap; the person whose Shift it takes may be named for the record (journal D567). Overrides need no approval and send no message; the Audit log records them, and the UI, its "on call now" view
 and the iCal feed show them (journal D483, D514, D534). Shifts send no messages either: who is on call is shown in the
 UI and the iCal feed, and no messenger command answers it (journal D504, D515).
 

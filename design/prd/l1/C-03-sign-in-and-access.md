@@ -121,6 +121,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   its Reminders end (C-17.FR-8) and its ack timeout starts over, so that it can become Unclaimed again (C-17.FR-1,
   C-17.FR-3). An Alert Group they owned that reopens later reopens into firing (C-09.FR-4). Enabling the user again
   gives no acknowledgement back.
+  _Revised for L2 (2026-10-26):_ deleting a user also erases their contacts at Notification gateways (C-30.FR-3) and
+  takes them out of every Team (C-25.FR-3); disabling keeps them in their Teams, where their Shifts are skipped
+  (C-27.FR-5).
 - **C-03.FR-14** The Audit log records configuration changes with a before/after diff, security events (sign-in,
   sign-out, failed or refused sign-in, token issued or revoked, TOTP enrolled, removed or reset, OIDC identity linked or
   refused, account converted to local, user refused by the IdP at a background re-check, Account link created, removed

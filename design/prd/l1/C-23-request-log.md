@@ -68,6 +68,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   event, the code in a direct message — are replaced too. Masking happens before the record is written: for outbound
   requests in the outbound package, which knows each request's Secrets, and for inbound requests in one place shared by
   the callbacks and the Socket Mode connection. The secret lint of ADR-0016 covers both (C-01.FR-6).
+  _Revised for L2 (2026-10-26):_ the contact of a person at a Notification gateway is personal data, not a secret, and
+  the Request log masks it too (C-30.FR-3).
 - **C-23.FR-4** Muster keeps the newest `request_log.max_records` records of each Connection and of each outgoing
   webhook Destination, and as many of the checks before saving of new Connections per Organization, none older than
   `request_log.max_age`; a Leader task deletes the rest and is safe to run twice (ADR-0007), and reads never show a

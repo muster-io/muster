@@ -39,9 +39,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   and changes any User's rules on the User's page, and the change is recorded in the Audit log with a before/after diff.
   A call action is offered only while a Notification gateway exists (C-30.FR-9) and can be saved only for a gateway at
   which the User has a confirmed contact.
-- **C-31.FR-5** The profile shows each rule in words and offers the switch "Also call through the Notification gateway"
-  for the important rule, which adds a call to its first action, at the same time as the first Mention (_provisional_,
-  P-69); the API takes any sequence within the limits.
+- **C-31.FR-5** The profile shows each rule in words and edits them with one switch, "Also call through the Notification
+  gateway", for the important rule. On, the User's important rule is the Organization's important rule with a call
+  through the gateway at its first Mention, at the same time; off, it is the Organization's important rule. With the
+  default rules (FR-2) that is, on, a Mention with a call, a wait of 5 minutes and a second Mention, and off, the
+  Mention, the wait and the second Mention; the normal rule stays the Organization's. Turning the switch on is a change
+  of the User's rules (FR-2); turning it off again, or "Reset to the Organization's rules", makes the User follow the
+  Organization's rules again. The API takes any sequence within the limits; when a User's rules are not the
+  Organization's, with or without that call, — set through the API or by an Admin — the profile shows them in words
+  without the switch, with "Reset to the Organization's rules". An editor of whole sequences comes later in L2.
 - **C-31.FR-6** The documentation describes the rules, their defaults, how they combine with the steps of a chain, and
   that a Mention reaches a person only through an Account link in the Identity space of the Destination's Connection.
 
@@ -78,7 +84,12 @@ a rule for a person directly.
   to the Organization's rules" a User who had changed them follows it again.
 - **C-31.AC-5** In a real browser, the profile shows both rules in words, the switch unavailable without a gateway and
   available after a contact is confirmed, in English and in Russian.
-
+- **C-31.AC-6** With the default rules, turning the switch on makes the important rule exactly a Mention with a call, a
+  wait of 5 minutes and a Mention, and an important Page then calls the fake gateway at once; turning it off makes the
+  User follow the Organization's rules again. After the Organization's important rule changes to a Mention, a wait of 10
+  minutes and a Mention, the switch of a User who turned it on gives that rule with a call at its first Mention. After
+  an Admin sets a sequence of three Mentions through the API, the profile shows it in words without the switch, and
+  "Reset to the Organization's rules" brings the switch back, off.
 ## Related ADRs
 
 ADR-0005, ADR-0013, ADR-0018.

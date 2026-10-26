@@ -157,6 +157,7 @@ verified facts of [Alertmanager](../../facts.md#alertmanager) and [Grafana](../.
   labels, state (firing, or resolved with its reason and time), `startsAt`, time last seen, the Alertmanager groups
   listing it and any Static label warning — filtered by state and by labels; from C-08 and C-09 on, each also shows its
   Route, Severity level and Alert Group. Resolved Alerts stay in the view for `retention.alert_details`.
+  _Revised for L2 (2026-10-26):_ from L2 each Alert also shows its Teams and the rule that brought each (C-25.FR-5).
 - **C-06.FR-20** A Stored Snapshot that cannot be processed — the body is not JSON, lacks the fields of an Alertmanager
   payload, or processing fails — is marked `failed` with the error, logged as the registered ingestion event "failed"
   and counted in `muster_ingest_failed_snapshots_total{integration}`; it is never retried by itself and never blocks the

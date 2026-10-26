@@ -3,10 +3,11 @@
 [L2 index](../L2.md) · Release: 0.2.0 · UI: yes · Depends on: C-12, C-13, C-14, C-22, C-24, C-25, C-28
 
 **Goal.** A Root message shows on a phone what a person needs to act (issue #375): the title with the status as a word,
-a grid of a few fields, the summary, one line of key labels chosen per Route, the Alerts named by the label that tells
-them apart, who is Paged or who has it, the Destination's buttons and the links — in every messenger, in its own syntax.
-A bridge receives the same layout as structured data next to the body, so that it can render the message natively
-without parsing markup (issue #390). The visual editor of the layout, previewed on real Alert Groups, comes later in L2.
+a grid of a few fields, the summary and the description, one line of key labels chosen per Route, the Alerts named by
+the label that tells them apart, who is Paged or who has it, the Destination's buttons and the links — in every
+messenger, in its own syntax. A bridge receives the same layout as structured data next to the body, so that it can
+render the message natively without parsing markup (issue #390). The visual editor of the layout, previewed on real
+Alert Groups, comes later in L2.
 
 Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.md).
 
@@ -14,9 +15,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
 1. A firing `KubernetesContainerOOMKilled` Alert Group of three Alerts shows, in `infra-notice` on a phone: "#1287
    KubernetesContainerOOMKilled — Firing"; Severity warning, Route Infrastructure, Teams payments, Started 03:12; its
-   summary; `system=kubernetes · team=payments · namespace=checkout`; "pod: checkout-api-7d9f4, checkout-api-5b2c1,
-   checkout-worker-8e6a0"; "Assignees: @ivan (devops), @petr (payments)"; the buttons of the Destination; "Open in
-   Muster · Runbook · Source". Every other label is one click away in Muster.
+   summary and description; `system=kubernetes · team=payments · namespace=checkout`; "pod: checkout-api-7d9f4,
+   checkout-api-5b2c1, checkout-worker-8e6a0"; "Assignees: @ivan (devops), @petr (payments)"; the buttons of the
+   Destination; "Open in Muster · Runbook · Source". Every other label is one click away in Muster.
 2. After Acknowledge, the same message reads "Acknowledged" and "Acknowledged by @olga (payments) · Escalation chains
    stopped".
 3. `NodeDiskPressure` has twelve Alerts; the message lists five nodes and "…and 7 more".
@@ -33,7 +34,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
      emoji;
   2. fields: Severity (the Alert Group's Severity level, C-26.FR-8), Route, Teams (C-25.FR-6; left out when it has none)
      and Started (absolute, in the Organization's time zone);
-  3. the Alert Group's `summary` (C-09.FR-23) as plain text;
+  3. the Alert Group's `summary` (C-09.FR-23) and its `description` — the `description` annotation of the first of its
+     Alerts that has one, taken like the `summary` — each as plain text, and left out when there is none;
   4. one line of key labels: the labels of the Route's "Labels in the message" (FR-2);
   5. when the Alert Group has more than one Alert, its Alerts (FR-3);
   6. the notices of [reference.md](../l1/reference.md#banners-warnings-and-notices) that apply;
@@ -48,10 +50,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   says for the footer. A Loud message carries its Mentions first, as before (C-12.FR-1). The Alert Group page shows all
   labels and annotations, and the message leaves them out.
 - **C-29.FR-2** "Labels in the message" is a Route setting (`route.message_labels`): a list of label names, by default
-  the labels of the Group key except `alertname`, plus the Team label and `namespace`. A label is shown as `name=value`
-  when every firing Alert of the Alert Group has the same value, as `name: N values` when they differ, and not at all
-  when no Alert has it. The Route form suggests labels from the Route's recent Alert Groups with an example value. A
-  change re-renders the open Root messages of the Route.
+  the labels of the Group key except `alertname` and the Organization's severity label (`organization.severity_label`,
+  which the field Severity shows), plus the Team label and `namespace`; the default is computed from the current Group
+  key and settings, not copied when the Route is created, until an Admin sets a list of their own. A label is shown as
+  `name=value` when every firing Alert of the Alert Group has the same value, as `name: N values` when they differ, and
+  not at all when no Alert has it. The Route form suggests labels from the Route's recent Alert Groups with an example
+  value. A change re-renders the open Root messages of the Route.
 - **C-29.FR-3** The Alerts of item 5 are named by their distinguishing label: the first of the Organization's Instance
   labels (`organization.instance_labels`) whose values differ among the Alerts, else the first label, by name, whose
   values differ (_provisional_, P-67). The line lists up to `message.compact_alerts_listed` values, firing Alerts first
@@ -69,9 +73,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   title, fields, notices, people, buttons and links always come from Muster. A line template, if set, renders each
   listed Alert on a line of its own instead of the value of the distinguishing label. The Fallback template (C-12.FR-6)
   keeps every label.
-- **C-29.FR-6** A rendered message longer than the limit its adapter declares is shortened by cutting the Alerts of item
-  5 first, then the summary of item 3, then the key labels of item 4, always keeping the title, the status, the fields,
-  the people of item 7, the buttons and the link to Muster (C-12.FR-11).
+- **C-29.FR-6** A rendered message longer than the limit its adapter declares is shortened by cutting the description of
+  item 3 first, then the Alerts of item 5, then the summary of item 3, then the key labels of item 4, always keeping the
+  title, the status, the fields, the people of item 7, the buttons and the link to Muster (C-12.FR-11).
 - **C-29.FR-7** The default layout replaces the layout of L1 for every Route from 0.2.0 on; a Route with its own Root
   message template keeps its body. The upgrade notes say so.
 
@@ -84,7 +88,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
     text becomes a hashtag in some messengers;
   - `status`, its key (`firing`, `acknowledged`, `snoozed`, `resolved`) and its word in the Route's language;
   - `fields`, a list of name and value (item 2);
-  - `text`, the summary (item 3);
+  - `summary` and `description`, the two texts of item 3 — the `text` of issue #390;
   - `labels`, a list of key and value (item 4), so that the bridge decides how to show them;
   - `alerts`, the distinguishing label, the values listed, each with whether its Alert is resolved, and the total number
     of Alerts — not a ready "and K more" string, because the bridge may have to cut more than Muster did and counts the
@@ -104,10 +108,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 ## UI
 
 Route form, section "Message": "Labels in the message" — the chosen labels as removable chips, "+ label" with
-suggestions "From recent Alert Groups of the Route" with an example value each, and the hint "By default: the Group key,
-the Team label and `namespace`. Labels without a value in the Alert Group are not shown." — next to the existing
-template editors and preview of C-12, whose preview shows the new layout in Mattermost, Slack, Telegram and Bridge
-markup, the last with the `layout` it carries, and the length against each messenger's limit.
+suggestions "From recent Alert Groups of the Route" with an example value each, and the hint "By default: the Group key
+without `alertname` and the severity label, the Team label and `namespace`. Labels without a value in the Alert Group
+are not shown." — next to the existing template editors and preview of C-12, whose preview shows the new layout in
+Mattermost, Slack, Telegram and Bridge markup, the last with the `layout` it carries, and the length against each
+messenger's limit.
 
 ## API surface
 
@@ -120,14 +125,16 @@ Checked through `template-previews`, the recording test adapter of C-11 and the 
 
 - **C-29.AC-1** The Root message of a firing Alert Group of three `KubernetesContainerOOMKilled` Alerts with three `pod`
   values, on a Route with the Group key `alertname`, `system`, `team`, shows in order the title with "Firing", the
-  fields Severity, Route, Teams and Started, the summary, `system=kubernetes · team=payments · namespace=checkout`, the
-  line "pod:" with the three values and the links — in Mattermost as attachment `fields`, in Slack as a `section` with
-  `fields`, in Telegram as lines.
+  fields Severity, Route, Teams and Started, the summary and the description, `system=kubernetes · team=payments ·
+  namespace=checkout`, the line "pod:" with the three values and the links — in Mattermost as attachment `fields`, in
+  Slack as a `section` with `fields`, in Telegram as lines.
 - **C-29.AC-2** An Alert Group whose Alerts carry two `namespace` values shows `namespace: 2 values`; one whose Alerts
   have no `namespace` shows no `namespace`; one Alert shows no Alerts line.
 - **C-29.AC-3** Twelve Alerts list `message.compact_alerts_listed` values and "…and 7 more"; rendered with a length
-  limit of 4,096 characters and a long summary, the message cuts the Alerts, then the summary, and keeps the title,
-  fields, people, buttons and link.
+  limit of 4,096 characters and a long description and summary, the message cuts the description first, then the Alerts,
+  then the summary, and keeps the title, fields, people, buttons and link. An Alert Group whose Alerts have only a
+  `description` shows it, and one with neither annotation shows no text; on a Route whose Group key holds `severity`,
+  the line of key labels has no `severity`.
 - **C-29.AC-4** Adding `cluster` to "Labels in the message" edits the open Root messages of the Route to show it.
 - **C-29.AC-5** A Route with its own Root message template keeps its body under Muster's title, fields, people, buttons
   and links.

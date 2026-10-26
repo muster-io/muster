@@ -59,8 +59,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   text; the attachment's own footer shows "Muster v<version>" with the Muster logo; and the buttons follow
   (C-13.FR-3).
   _Revised for L2 (2026-10-26):_ from 0.2.0 the default Root message follows the compact layout of C-29.FR-1, which
-  replaces the order above; the status colour, the notices, the footer and the buttons keep their meaning there, and the
-  label sections give way to one line of the Route's "Labels in the message".
+  replaces the order above; the status colour, the notices, the footer and the buttons keep their meaning there, the
+  `summary` is joined by the `description`, and the label sections give way to one line of the Route's "Labels in the
+  message".
 - **C-12.FR-2** A Route's Root message template, if set, renders only the body — items 3 to 8; the status colour,
   heading, links, notices, footer and buttons always come from Muster, so no template can lose the buttons or the link
   to Muster. A Route's line template, if set, replaces the default line of each Alert in item 8.
@@ -117,8 +118,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
-  _Revised for L2 (2026-10-26):_ from 0.2.0 a message is shortened in the order of C-29.FR-6: its Alerts, then its
-  summary, then its key labels.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 a message is shortened in the order of C-29.FR-6: its description, then its
+  Alerts, then its summary, then its key labels.
 - **C-12.FR-12** A Mention of a user with an Account link in the Destination's identity space uses the messenger's own
   form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack,
   a Mention marker through a Bridge (C-22.FR-16) — and of a user without one the display name as text, which notifies
@@ -130,8 +131,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   the link's display name through a Bridge, otherwise their Muster display name. Shortening (FR-11) keeps the footer
   with its Mention where it fits, otherwise with their name as text (checked in C-18.AC-7).
   _Revised for L2 (2026-10-26):_ a Mention entry that names a person without such a link leaves them out of the
-  message's Mentions, and a Quiet Thread reply says "Mention not delivered" (C-28.FR-3); the Assignees are named like
-  the footer's users (C-32.FR-12).
+  message's Mentions; nothing is written in the Thread, the Alert Group's Timeline records the delivery event "Mention
+  not delivered" and the Destination page warns (C-28.FR-3); the Assignees are named like the footer's users
+  (C-32.FR-12).
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 

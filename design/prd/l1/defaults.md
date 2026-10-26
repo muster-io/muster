@@ -107,7 +107,7 @@ From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 | Severity condition of a Route's or a Team's Destination or Escalation chain | any Severity level | same | C-26, C-32 | decided |
 | `route.team` | none (no owning Team) | none | C-25, C-26 | decided |
 | `route.escalation_chains` | none | none | C-32 | decided |
-| `route.message_labels` | the labels of the Group key except `alertname`, plus the Team label and `namespace` | same | C-29 | decided |
+| `route.message_labels` | computed while the Route sets none: the labels of the Group key except `alertname` and `organization.severity_label`, plus the Team label and `namespace` | same | C-29 | decided |
 | `route.group_key` | `alertname`, `severity`, `cluster` | same | C-08 | decided |
 | `route.reopen_window` | 15 min | 15 min | C-09 | decided |
 | `route.grace_period` | 15 min | 15 min | C-09 | decided |
@@ -230,8 +230,8 @@ Other lifecycle values:
 | `organization.critical_is_urgent` | on; from 0.2.0 it no longer acts — critical is always Urgent — reads `true` and is ignored in requests, and 0.3.0 removes it (C-26.FR-10) | Organization | C-08, C-20, C-26 | decided |
 | `organization.team_label` | `team` | Organization | C-25 | decided |
 | `organization.team_values_window` | values of the Team label without a Team seen in the last 14 days, like `organization.severity_values_window` | built in | C-25 | P-75 |
-| `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone` | Organization | C-25 | P-76 |
-| `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention | Organization | C-31 | decided |
+| `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone` | Organization | C-25 | decided |
+| `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; the profile's switch "Also call through the Notification gateway" gives a User the Organization's important rule with a call at its first Mention (C-31.FR-5) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
 | `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events; never Notes) | Organization | C-09, C-20 | decided |
@@ -249,7 +249,7 @@ Other lifecycle values:
 | `schedule.time_zone` | `organization.time_zone` | Schedule | C-27 | P-77 |
 | `schedule.gap_view` | the next 14 days | built in | C-27 | decided |
 | `schedule.gap_alert` | on | Schedule | C-27 | P-78 |
-| `schedule.gap_alert_horizon` | 24 h: `MusterScheduleGap` is raised for a gap that starts within it | built in | C-27 | P-79 |
+| `schedule.gap_alert_horizon` | 7 days: `MusterScheduleGap` is raised while there is a gap now or one that starts within it | built in | C-27 | decided |
 | `schedule.gap_scan_interval` | 5 min, the Leader's scan for gaps | built in | C-27 | P-80 |
 | `ical.window` | the Shifts from 7 days back to 60 days ahead | built in | C-27 | P-81 |
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | P-82 |
@@ -257,7 +257,7 @@ Other lifecycle values:
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
-| `gateway.combine_window` | 60 s: the calls to one person through one gateway that come due within it are one call | built in | C-30 | P-87 |
+| `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the calls that come due after it go together, no sooner than this after the previous call | built in | C-30 | P-87 |
 | Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | P-88 |
 
 ## Self-observation and chart

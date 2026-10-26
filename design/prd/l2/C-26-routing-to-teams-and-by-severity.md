@@ -82,9 +82,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   or an acknowledgement on a rise (C-09.FR-9); Urgent Alert Groups have their filter and column in the list, `urgent` in
   outgoing webhook events and their count in Storm summaries.
 - **C-26.FR-9** The Minimum severity is a Route setting like any other (C-08.FR-8): a change applies at once to the open
-  Alert Groups of the Route, never removes an acknowledgement or a Snooze and starts no Escalation chain; it records no
-  `urgency_raised` or `severity_raised`, and the open Root messages are only re-rendered, Quietly; the Alert Groups it
-  raises into a Destination's condition reach that Destination Quietly (FR-6).
+  Alert Groups of the Route, never removes an acknowledgement or a Snooze and starts no Escalation chain. Each Alert
+  Group it raises records a Quiet `severity_raised` — or the Quiet `urgency_raised` of an Alert Group it makes critical,
+  which removes nothing (C-09.FR-22) — with the reason "Minimum severity of the Route"; a lowered Minimum severity
+  records nothing, as a falling Severity level does. The open Root messages are re-rendered Quietly, and the Alert
+  Groups it raises into a Destination's condition reach that Destination Quietly (FR-6).
 - **C-26.FR-10** In 0.2.0 the Route's urgent mark (`route.urgent`) and the Organization's switch "critical is Urgent"
   (`organization.critical_is_urgent`) no longer act, in expand and contract steps. The 0.2.0 migration gives every Route
   marked urgent the Minimum severity critical. Until 0.3.0 the API keeps `urgent` on Routes and on Route profiles as a
@@ -93,7 +95,17 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   columns. The upgrade notes of 0.2.0 say: Routes marked urgent got the Minimum severity critical, which also makes
   their Alert Groups critical for Severity conditions, and an Organization that had turned "critical is Urgent" off now
   sees its critical Alert Groups as Urgent — a rise to critical ends their Snoozes and, where
-  `route.urgent_rise_removes_ack` is on, their acknowledgements.
+  `route.urgent_rise_removes_ack` is on, their acknowledgements. The migration and the API also do this:
+  - the Severity level and the Urgent flag stored on the open Alert Groups and their deliveries are computed again once,
+    by the new rule, when 0.2.0 migrates: without lifecycle events, Mentions or Escalation chains, without ending a
+    Snooze or an acknowledgement, and without publishing anywhere new;
+  - `urgent` in the input of a Route and `critical_is_urgent` in the input of the Organization become optional in the
+    API specification, so that clients may leave them out;
+  - during a rolling update from 0.1, whose replicas still read the columns, 0.2.0 writes `routes.urgent` as `true`
+    exactly when the Minimum severity is critical, and the migration sets `organizations.critical_is_urgent` to `true`,
+    so that both versions compute the same urgency;
+  - the change of the profile id `on_call` to `paging` (FR-11) breaks clients that type the enum, and the upgrade notes
+    say so.
 - **C-26.FR-11** The Route profiles are Paging (formerly On-call) and Informational; neither sets a Minimum severity.
   `route-profiles` returns the ids `paging` and `informational` from 0.2.0; profiles are not stored, so the rename needs
   no migration, and the upgrade notes name it.
@@ -159,10 +171,18 @@ Checked with the fake Alertmanager, the fake messenger servers and the recording
   Escalation chain.
 - **C-26.AC-8** After the 0.2.0 migration, a Route that was marked urgent has the Minimum severity critical, reads
   `urgent: true`, and an update that sends `urgent: false` changes nothing; `route-profiles` returns `paging` and
-  `informational`, and `organization` reads `critical_is_urgent: true` whatever an update sends.
+  `informational`, and `organization` reads `critical_is_urgent: true` whatever an update sends. An open warning Alert
+  Group of a Route marked urgent is critical and Urgent after the migration, with no new Timeline entry and no new
+  delivery; a new Route created with the Minimum severity critical has `routes.urgent` set; a Route created without
+  `urgent` in its input is accepted.
 - **C-26.AC-9** In a real browser, the Route form with "Also to the Teams from the label" on and no `team` in the Group
   key shows the hint and "Add team to the key", and the preview "Where alerts go" lists for recent Alerts the Alert
   Groups with their Teams and Destinations; the Team page lists its Destinations with their conditions.
+- **C-26.AC-10** The owning Team of a Route adds nothing: a Route owned by "payments", without "Also to the Teams from
+  the label", delivers an Alert Group of `team="payments"` only to its own Destinations. Turning "Also to the Teams from
+  the label" off gives the final edit of C-11.FR-14 in each Team Destination that no other entry reaches.
+- **C-26.AC-11** Raising the Minimum severity of a Route to critical records a Quiet `urgency_raised` with the reason
+  "Minimum severity of the Route" on its open warning Alert Groups and removes no acknowledgement.
 
 ## Related ADRs
 
@@ -175,7 +195,9 @@ and the Teams of an Alert Group.
 
 ## Suggested story split
 
-- **BE** — Severity conditions on Route and Team Destinations, delivery to Teams, `destination_joined`, the Minimum
-  severity and Urgent as critical with the expand step of the urgent mark and the profile rename, the delivery preview.
+- **BE** — the Minimum severity and Urgent as critical, with the migrations and the expand step of the urgent mark and
+  of "critical is Urgent", and the profile Paging; it does not need Teams and may come first.
+- **BE** — Severity conditions on Route and Team Destinations, delivery to Teams, `destination_joined`.
+- **BE** — the preview "Where alerts go".
 - **FE** — the Route form, the Destinations of a Team, the preview, the delivery state by entry.
 - **Docs** — routing to Teams and "What critical changes".

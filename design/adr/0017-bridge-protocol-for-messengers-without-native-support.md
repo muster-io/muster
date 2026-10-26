@@ -32,7 +32,10 @@
 - Amended: 2026-10-26 — with the L2 PRD (journal D559, D560): the envelope of a Root message may also carry a structured
   `layout` beside its CommonMark body, with plain-text values, the Alert Group's number apart from its title, the Alerts
   listed with their total, labels as key and value, and people as references to the Mentions, so that a bridge may
-  render the message natively instead of translating markup; additive in version 1
+  render the message natively instead of translating markup; and (journal D540, D567) a bridge may declare in `info`
+  which mentions of everyone in the chat its messenger has, by the symbolic names `channel`, `here`, `all` and
+  `everyone`, which Mention entries and Escalation steps then offer and Muster sends as entries of their own kind; both
+  additive in version 1
 
 ## Context
 
@@ -114,7 +117,9 @@ Muster verifies it and checks that it belongs to the pressed message, as for Mat
 **Mentions** name linked people, as `{external_id, display_name}` in the envelope, each placed in the body by a marker
 that reads as the plain name where the bridge cannot mention natively. From L2 a bridge may also declare in `info` the
 group mentions its messenger has; Muster then sends a Team mention (ADR-0018) as a group token that the bridge renders
-itself (journal D516). Mentions never appear in an edit (ADR-0005).
+itself (journal D516). It may also declare which mentions of everyone in the chat its messenger has, by the symbolic
+names `channel`, `here`, `all` and `everyone`; Muster sends each as a `mentions` entry of its own kind, which the bridge
+renders as its messenger's mention (journal D540, D567). Mentions never appear in an edit (ADR-0005).
 
 **Idempotency.** Every request that creates a message carries an `Idempotency-Key`; the bridge stores the key with its
 successful result and answers a repeated key with that result, marked as replayed, without posting again — whatever

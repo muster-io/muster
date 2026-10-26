@@ -41,6 +41,8 @@
   and a press by a person on its test message shows that presses reach Muster (C-24.FR-13).
 - **C-16.FR-4** "Preview" renders the Root message (or webhook request) for a chosen Alert Group or the example without
   sending it.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the preview and the test message show the compact layout (C-29.FR-1) and the
+  buttons of the Destination's set (C-28.FR-9).
 - **C-16.FR-5** Sending a test message is recorded in the Audit log.
 - **C-16.FR-6** Testing the full lifecycle on a test message (update, Thread replies, commands) is not part of L1.
 - **C-16.FR-7** A successful test of a Broken Destination ends its Broken state and resolves `MusterDestinationBroken`,

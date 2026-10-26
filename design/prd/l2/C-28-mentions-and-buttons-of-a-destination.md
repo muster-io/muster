@@ -18,8 +18,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
    alone is enough.
 3. A Telegram Destination offers only people with a linked Telegram account and the On-call entries; everyone in the
    chat and groups are shown unavailable: "Telegram cannot mention everyone or groups".
-4. The On-call of "payments", Petr, has no linked Mattermost account; the new Alert Group's Thread in `payments-notice`
-   gets "Mention not delivered: Petr has no linked Mattermost account".
+4. The On-call of "payments", Petr, has no linked Mattermost account; the new Alert Group's Timeline records that the
+   Mention in `payments-notice` was not delivered, and the Destination page warns "Mention not delivered: @petr, the
+   On-call of payments, has no linked Mattermost account". Nothing is written in the Thread.
 5. A Storm starts on the Route "Infrastructure"; the first publication of its Storm summary in `infra-critical` mentions
    the On-call of devops, through the event "Start of a Storm".
 6. After the upgrade to 0.2.0, a Destination that mentioned `@channel` only for new Alert Groups keeps doing exactly
@@ -38,7 +39,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   summary). A new entry applies to all of them. The targets are: everyone in the chat (`channel`, `here`, `all` or
   `everyone`); a person, by User; a messenger group, by its name; a Team, by name; "Team from the label" — the Teams of
   the Alert Group (C-25.FR-6); "On-call of a Team", by name; and "On-call of the Team from the label" — the On-call of
-  each Team of the Alert Group. A list without entries mentions nobody (`destination.mentions`).
+  each Team of the Alert Group, both from C-27 on. A list without entries mentions nobody (`destination.mentions`).
 - **C-28.FR-2** The list offers only the targets that the Destination's Connection can mention and shows the others as
   unavailable with the reason:
 
@@ -47,7 +48,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   | Mattermost | `@channel`, `@here`, `@all` | Mattermost groups by name | linked people |
   | Slack | `<!channel>`, `<!here>`, `<!everyone>` | Slack user groups, when the Connection's check found the scope `usergroups:read` (C-24.FR-1) | linked people |
   | Telegram | none | none | linked people |
-  | Bridge | none | group names, when the bridge declares group mentions in `info` (C-22.FR-2) | linked people |
+  | Bridge | those of `channel`, `here`, `all` and `everyone` that the bridge declares in `info` (C-22.FR-2) | group names, when the bridge declares group mentions in `info` | linked people; a bridge without `native_mentions` shows their plain name, which notifies nobody (C-22.FR-16) |
   | Outgoing webhook | every target, as data (C-15.FR-11) | every target, as data | every target, as data |
 
   Saving an entry that the Connection cannot mention is refused with `422` and the code `mention_unsupported`. When a
@@ -60,8 +61,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Schedule has on Shift at the moment of the event (C-27.FR-4), and nobody when the Team has no main Schedule or it has
   a gap; "On-call of the Team from the label", the same for each Team of the Alert Group. Each person and group is
   mentioned once in a message. A person whom an entry names but who has no Account link in that Identity space is not
-  mentioned: a Quiet Thread reply in that Destination names them as text — "Mention not delivered: {name} has no linked
-  {messenger} account" — with the entry and the event.
+  mentioned, and nothing is written in the Thread for it; through a bridge without `native_mentions`, a linked person is
+  named by the plain name of C-22.FR-16, which notifies nobody. In both cases the Alert Group's Timeline records the
+  delivery event "Mention not delivered" with the person, the entry, the event and the reason (C-11.FR-21), and the
+  Destination page warns about each person and entry whose latest such delivery event is not followed by a delivered
+  Mention of that person through that entry — computed from the delivery events, not stored: "Mention not delivered:
+  @{login}, {entry}, has no linked {messenger} account" or "… the bridge cannot mention people".
 - **C-28.FR-4** The rules of L1 stay: Reminders and auto-unacknowledge mention the Owner and a Takeover the previous
   Owner, whatever the entries; a Reopen into acknowledged mentions only the Owner; Mentions are never added by an edit
   (ADR-0005); a Quiet new message carries none.
@@ -69,8 +74,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   same effect: each target chosen for a kind of Loud event becomes an entry for the kinds it was chosen for, and an
   entry for `new_alert_group` also applies to `storm_started`, since an L1 Storm summary mentioned the targets of
   `new_alert_group`. A Destination that mentioned nobody keeps an empty list. Until 0.3.0 the API also returns the L1
-  form of the settings, read-only and computed from the entries, and ignores it in requests; 0.3.0 removes it and its
-  column. The upgrade notes say so.
+  form of the settings, read-only, computed from the entries that L1 can express — everyone in the chat, chosen Users
+  and messenger groups, for the six kinds of L1 — so that the other entries are not seen in it, and ignores it in
+  requests. The L1 column keeps what the migration found and is not written after it, so that 0.1 replicas of a rolling
+  update mention as before; 0.3.0 removes the field and the column. The upgrade notes say so.
 - **C-28.FR-6** When a Destination becomes a Destination of a Team (C-26.FR-1) and has no entry naming that Team, Muster
   adds the entry "Team {Team}" for every Loud event, recorded in the Audit log; it mentions someone only where the Team
   has a Team mention for the Destination's Connection. An Admin may remove it.
@@ -83,10 +90,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-28.FR-8** The buttons a Root message shows come from a button set: the Organization's (`organization.buttons`),
   which shows all of them by default, or the Destination's own (`destination.buttons`). A set chooses Acknowledge (with
   Unacknowledge), Resolve, each Snooze duration by its value, "Until tomorrow" and "Until {first day of the week}"
-  (C-10.FR-18). A Root message shows, in the order of [reference.md](../l1/reference.md#buttons-and-links-by-status),
-  the buttons its status offers that the set includes: of the Route's Snooze durations only those in the set, and the
-  presets only on a Route that has Snooze durations. Unsnooze on a snoozed Root message is not part of the set and
-  always shows. A Destination with "As in the Organization" follows later changes of the Organization's set.
+  (C-10.FR-18); the form offers the distinct Snooze durations of the Organization's Routes. A Root message shows, in the
+  order of [reference.md](../l1/reference.md#buttons-and-links-by-status), the buttons its status offers that the set
+  includes: of the Route's Snooze durations only those in the set, and the presets only on a Route that has Snooze
+  durations. Unsnooze on a snoozed Root message is not part of the set and always shows. A Destination with "As in the
+  Organization" follows later changes of the Organization's set.
 - **C-28.FR-9** The set changes only the buttons of Root messages: the buttons of Reminders ("Still on it", "Unack"),
   the Text commands of Bridges (C-22.FR-14), the UI and the API keep every action. Each messenger lays out the shown
   buttons as before: a Slack Root message puts the shown durations and presets in its menu "Snooze…" and leaves the menu
@@ -112,11 +120,12 @@ targets: `@channel`, `@here`, `@all`, `@everyone`, "Group…", "Person…", "Tea
 Team…", "On-call of the Team from the label", the unavailable ones greyed with their reason; with no entry, "Nobody is
 mentioned: messages arrive without Mentions." Notes under the grid: "'Team' is the Team mention for this Connection, if
 it is set; otherwise nobody. The On-call is not mentioned instead.", "A person without a linked account is not
-mentioned; the Thread says 'Mention not delivered'.", "Reminders and auto-unacknowledge always mention the Owner, and a
-Takeover the previous Owner." A table "What each messenger supports" (FR-2). Section "Buttons": "Which buttons the Root
-message shows. Hidden actions stay in Muster and in the Text commands of Bridges." — "As in the Organization" or "Own
-for this Destination" with a tick box per button, and a preview "What {Destination} shows" with the buttons of a firing
-and of an acknowledged Root message. Organization → Alert handling: the Organization's button set.
+mentioned; the Alert Group's Timeline and this page say so.", "Reminders and auto-unacknowledge always mention the
+Owner, and a Takeover the previous Owner." Above the grid, the warnings of FR-3. A table "What each messenger supports"
+(FR-2). Section "Buttons": "Which buttons the Root message shows. Hidden actions stay in Muster and in the Text commands
+of Bridges." — "As in the Organization" or "Own for this Destination" with a tick box per button, and a preview "What
+{Destination} shows" with the buttons of a firing and of an acknowledged Root message. Organization → Alert handling:
+the Organization's button set.
 
 ## API surface
 
@@ -135,9 +144,13 @@ Checked through the recording test adapter of C-11 and the fake messenger server
   mention for the Connection, and nobody — and not the On-call — when it has none.
 - **C-28.AC-3** A Telegram Destination refuses `@channel`, a group and a Team with `422` `mention_unsupported`, and
   takes a person and "On-call of a Team"; a Slack Destination takes `everyone`, and takes a user group only after its
-  Connection's check found `usergroups:read`.
-- **C-28.AC-4** An On-call without a linked account in the Destination's Identity space is not mentioned, and the Thread
-  there gets a Quiet reply "Mention not delivered: {name} has no linked Mattermost account".
+  Connection's check found `usergroups:read`; a Bridge Destination takes `channel` only when its bridge declares it in
+  `info`, and takes a person on any bridge, where one without `native_mentions` gets the plain name and the Timeline
+  records "Mention not delivered" with the reason that the bridge cannot mention people.
+- **C-28.AC-4** An On-call without a linked account in the Destination's Identity space is not mentioned; the Alert
+  Group's Timeline has the delivery event "Mention not delivered" with that person and entry, nothing is posted in the
+  Thread, and the Destination's read carries the warning for that person and entry until, after the person links an
+  account, a later Mention of them through that entry is delivered.
 - **C-28.AC-5** A Destination migrated from the L1 settings "`@channel` for `new_alert_group`, Alice for `ack_timeout`"
   has two entries — `@channel` for `new_alert_group` and `storm_started`, Alice for `ack_timeout` — and mentions on
   every Loud event exactly whom it mentioned before; its L1 form still reads the same.
@@ -163,6 +176,8 @@ and Team mentions; C-26 — the Destinations of a Team; C-27 — the On-call of 
 
 ## Suggested story split
 
-- **BE** — the Mention entries with their resolution and the migration of the L1 settings, `storm_started`, the button
-  sets.
-- **FE** — the Mentions grid and the Buttons section of the Destination form, the Organization's button set.
+- **BE** — the button sets of the Organization and the Destinations (#367); it needs neither Teams nor Schedules.
+- **BE** — the Mention entries with their resolution, the undelivered Mentions and the migration of the L1 settings,
+  `storm_started`.
+- **FE** — the Buttons section of the Destination form and the Organization's button set.
+- **FE** — the Mentions grid of the Destination form with its warnings.

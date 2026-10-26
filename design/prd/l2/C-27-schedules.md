@@ -14,11 +14,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
    Monday at 10:00 among Petr, Sergey and Olga; above, "Working hours 11–19", weekly Shifts on weekdays from 11:00 to
    19:00 among Olga and Petr. On a Wednesday at 15:00 the On-call is the person of the upper Rotation layer; at 21:00,
    the person of the lower one.
-2. Olga gives her Shift of Wednesday 11:00–19:00 to Petr; Petr is On-call then, nothing else changes, nobody gets a
-   message, and the Audit log records who made the Override.
-3. Sergey is disabled. His Shifts from Monday 10:00 are a gap outside working hours; the Schedule shows the gap and
-   "Disabled: @sergey in Rotation layer 1", and an Internal alert reports the gap a day ahead. Petr takes Sergey's week
-   with an Override, and the alert resolves.
+2. Olga gives her Shift of Wednesday 11:00–19:00 to Petr: an Override makes Petr On-call from 11:00 to 19:00 on
+   Wednesday. Nothing else changes, nobody gets a message, and the Audit log records who made the Override.
+3. Sergey is disabled. In the upper Rotation layer someone else is on Shift during working hours, so his Shifts in the
+   lower one leave a gap only outside working hours, from Monday 10:00; the Schedule shows the gap and "Disabled:
+   @sergey in Rotation layer 1", and an Internal alert reports it up to seven days ahead. Petr takes Sergey's week with
+   an Override, which covers every Rotation layer, and the alert resolves.
 4. "payments" also has the Schedule "Second line" with one Rotation layer; an Escalation step Pages its On-call, while
    the Team's On-call stays that of its main Schedule "Main".
 5. The Home page shows "On call now": devops — Ivan, until Monday 10:00; payments — Petr, "unreachable in Mattermost",
@@ -40,31 +41,35 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Monday to Friday 11:00–19:00: outside the limits it has no Shift, and the person whose turn it is takes only the
   limited times. Times are wall-clock times in the Schedule's time zone, by its rules on each day, so a handover at
   10:00 stays at 10:00 across a change of the clocks.
-- **C-27.FR-3** An Override names the person who takes the Shift, the person it replaces and a span from one time to
-  another. Within the span, wherever the Rotation layers make the replaced person On-call, the person who takes it is
-  On-call instead; elsewhere it changes nothing. Overrides apply in the order in which they were created, each to the
-  result of the earlier ones (_provisional_, P-65). An Override may not end in the past (_provisional_, P-91).
-- **C-27.FR-4** The On-call of a Schedule at a moment is the person whom the highest Rotation layer with a Shift then
-  has on Shift, after the Overrides; it is nobody when no Rotation layer has a Shift then, or when that person may not
-  be Paged (FR-5). The Schedule computes the On-call on the business clock (C-02), so the development clock moves it.
-- **C-27.FR-5** A time when a Schedule's On-call is nobody is a gap. People who may not be Paged are Viewers, Users who
-  are not in the Team — after the groups of the identity provider changed, for example (C-25.FR-4) — and disabled Users;
-  their Shifts are gaps, and the Schedule shows a warning for each: "Disabled: @{login} in {Rotation layer}", "@{login}
-  is a Viewer", "@{login} is not in the Team". Muster keeps them in the Rotation layers; an Admin removes them.
+- **C-27.FR-3** An Override says that from one time to another one person is On-call, on top of every Rotation layer:
+  within its span it wins over all of them, and so it also closes gaps. It may name the person whose Shift it takes,
+  which the Schedule shows and the modes of the form fill in, but that changes nothing in the On-call. Where Overrides
+  overlap, the one created last wins (_provisional_, P-65). An Override may not end in the past (_provisional_, P-91).
+- **C-27.FR-4** The On-call of a Schedule at a moment is the person of its Override then, when there is one and that
+  person may be Paged; otherwise the person on Shift in the highest Rotation layer that has a Shift then with a person
+  who may be Paged (FR-5). A person who may not be Paged is skipped, and the next Rotation layer below decides. The
+  Schedule computes the On-call on the business clock (C-02), so the development clock moves it.
+- **C-27.FR-5** A gap is a time when no Override and no Rotation layer has a Shift with a person who may be Paged.
+  People who may not be Paged are Viewers, Users who are not in the Team — after the groups of the identity provider
+  changed, for example (C-25.FR-4) — and disabled Users; their Shifts are skipped (FR-4), and the Schedule shows a
+  warning for each: "Disabled: @{login} in {Rotation layer}", "@{login} is a Viewer", "@{login} is not in the Team".
+  Muster keeps them in the Rotation layers; an Admin removes them.
 - **C-27.FR-6** An Override needs the Permission `schedule-overrides:write`, which Responders and Admins have, and a
-  precondition: the caller is in the Team or is an Admin, refused otherwise with `409` and the code `not_in_team`; both
-  people of the Override are in the Team, are neither Viewers nor disabled, refused otherwise with `422` and a pointer
-  to the person. The same holds for changing and deleting an Override. Overrides need no approval and send no message;
-  each is recorded in the Audit log with its people and span, and shows in the Schedule, in "On call now" and in the
-  iCal feed.
+  precondition: the caller is in the Team or is an Admin, refused otherwise with `409` and the code `not_in_team`; the
+  person who takes the Shift is in the Team and is not a Viewer, refused otherwise with `422` and a pointer to the
+  person. The person whose Shift it takes, if named, may be anyone. The same holds for changing and deleting an
+  Override. Overrides need no approval and send no message; each is recorded in the Audit log with its people and span,
+  and shows in the Schedule, in "On call now" and in the iCal feed.
 - **C-27.FR-7** The Schedule page shows the gaps of the next `schedule.gap_view`. A Schedule may report its gaps as an
   Internal alert (`schedule.gap_alert`): the Leader looks for gaps every `schedule.gap_scan_interval` and raises
-  `MusterScheduleGap` for each Schedule with a gap that starts within `schedule.gap_alert_horizon`, with the labels
-  `schedule`, `schedule_name`, `team` and `team_name` — ids and current names, as every Internal alert has
-  ([reference.md](../l1/reference.md#internal-alerts-added-in-l2)) — and resolves it once no gap starts within the
-  horizon. A second scan finds the same gaps and the Internal alert is deduplicated by its fingerprint, so the scan is
-  safe to run twice (ADR-0007). The Leader exports `muster_schedule_gap{schedule}` — 1 while a gap starts within the
-  horizon — for the chart rule of the same name, and the runbook page of `MusterScheduleGap` says how to fill a gap.
+  `MusterScheduleGap` for each Schedule with a gap now or one that starts within `schedule.gap_alert_horizon`, with the
+  labels `schedule`, `schedule_name`, `team` and `team_name` — ids and current names, as every Internal alert has
+  ([reference.md](../l1/reference.md#internal-alerts-added-in-l2)). The alert stays raised while the gap lasts and
+  resolves once no gap is current or within the horizon — an Override or a change of the Rotation layers closed it, or
+  it is past. A second scan finds the same gaps and the Internal alert is deduplicated by its fingerprint, so the scan
+  is safe to run twice (ADR-0007). The Leader exports `muster_schedule_gap{schedule}` — 1 while there is a gap now or
+  within the horizon — for the chart rule of the same name, and the runbook page of `MusterScheduleGap` says how to fill
+  a gap.
 - **C-27.FR-8** The Schedule warns that its On-call, now or in a Shift of the next `schedule.gap_view`, is unreachable
   where the Destinations of their Team (C-26.FR-1) — and, from C-32 on, all the Destinations in whose Threads the
   Escalation chains that Page this Schedule write (C-32.FR-8) — cannot mention them: the person has no Account link in
@@ -92,7 +97,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Schedule exports `muster_schedule_info{schedule,name}`; the stories register their log events.
 - **C-27.FR-14** The documentation has a page on Schedules: Rotation layers with the example of a weekly Rotation layer
   around the clock under a working-hours Rotation layer with other people, several Schedules for a first and a second
-  line, Overrides and who may make them, gaps and the people who count as gaps, the Internal alert and the iCal feed.
+  line, Overrides and who may make them, gaps and the people whose Shifts are skipped, the Internal alert and the iCal
+  feed.
 
 ## UI
 
@@ -106,10 +112,11 @@ Overrides and a row "Result — who is On-call", gaps in red and disabled people
 the previous week, today and the next week; "Rotation layers" (top first, each with its limits, Shift length, handover
 and people in turn) and "Add Rotation layer" for Admins; "Overrides" — "Any Responder of the Team; no messages." — each
 with who gives what to whom, when and who made it, and "Add Override": "I take the Shift of…" or "I give my Shift to…",
-who takes it, whom it replaces, from, to ("You can give only your own Shift: choose it in the view and the person who
-takes it."), Save and Cancel; "iCal subscription" — "A personal link for your calendar application. It is shown once; a
-revoked link stops working at once." — with the link shown once ("Copy the link now: it will not be shown again"), "New
-link" and "Revoke". Home page: "On call now" with "All Teams" and "By the main Schedule of each Team".
+which fill in whose Shift it is, then who takes it, from and to ("Choose the Shift in the view and the person who takes
+it; from {from} to {to} they are On-call on top of every Rotation layer."), Save and Cancel; "iCal subscription" — "A
+personal link for your calendar application. It is shown once; a revoked link stops working at once." — with the link
+shown once ("Copy the link now: it will not be shown again"), "New link" and "Revoke". Home page: "On call now" with
+"All Teams" and "By the main Schedule of each Team".
 
 ## API surface
 
@@ -126,16 +133,21 @@ Checked through the API and the UI on a virtual clock, with the development cloc
 - **C-27.AC-1** With the two Rotation layers of scenario 1, the On-call is the upper Rotation layer's person on a
   Wednesday at 15:00 and the lower one's at 21:00 and on Saturday at 15:00; the weekly handover stays at Monday 10:00 in
   the Schedule's time zone across a change of the clocks.
-- **C-27.AC-2** An Override from Olga to Petr for Wednesday 11:00–19:00 makes Petr On-call then and leaves the On-call
-  of 10:00 and 20:00 unchanged; it records an Audit log entry and no message reaches the fake messenger servers.
+- **C-27.AC-2** An Override that makes Petr On-call on Wednesday 11:00–19:00 makes him On-call then, also where the
+  lower Rotation layer alone has a Shift, and leaves the On-call of 10:00 and 20:00 unchanged; it records an Audit log
+  entry and no message reaches the fake messenger servers.
 - **C-27.AC-3** A Responder who is not in the Team gets `409` `not_in_team` on an Override; a Viewer gets `403`; an
-  Override that gives a Shift to a Viewer or to a User outside the Team gets `422` naming that person; an Admin who is
-  not in the Team creates it.
-- **C-27.AC-4** After a User of a Rotation layer is disabled — or turned into a Viewer, or taken out of the Team by the
-  identity provider — their Shifts are gaps and the Schedule shows the matching warning.
-- **C-27.AC-5** With a gap 20 hours ahead and `schedule.gap_alert` on, the next scan raises `MusterScheduleGap` with the
-  Schedule's id and name and `muster_schedule_gap` is 1; an Override that fills the gap resolves it on the next scan;
-  running the scan twice raises it once; with `schedule.gap_alert` off, nothing is raised.
+  Override whose person who takes the Shift is a Viewer or outside the Team gets `422` naming that person, while one
+  that takes the Shift of a disabled User or of someone outside the Team is saved; an Admin who is not in the Team
+  creates an Override.
+- **C-27.AC-4** After a User of the upper Rotation layer is disabled — or turned into a Viewer, or taken out of the Team
+  by the identity provider — the On-call during their Shifts is the person of the lower Rotation layer, and the Schedule
+  shows the matching warning; where no Override and no other Rotation layer has a Shift with someone who may be Paged,
+  their Shifts are gaps.
+- **C-27.AC-5** With a gap 5 days ahead and `schedule.gap_alert` on, the next scan raises `MusterScheduleGap` with the
+  Schedule's id and name and `muster_schedule_gap` is 1; once the gap has started it stays raised; an Override that
+  closes the gap resolves it on the next scan, and so does the end of the gap; running the scan twice raises it once; a
+  gap 8 days ahead raises nothing yet; with `schedule.gap_alert` off, nothing is raised.
 - **C-27.AC-6** An On-call without a Mattermost Account link, in a Team with a Mattermost Destination, is marked
   unreachable in Mattermost on the Schedule and in "On call now".
 - **C-27.AC-7** A User's iCal feed lists their Shifts and Overrides in `ical.window` as events; the token is returned
@@ -146,6 +158,8 @@ Checked through the API and the UI on a virtual clock, with the development cloc
 - **C-27.AC-9** In a real browser, the Schedule page shows the two-week view with the row "Result", the gap in red and
   the warnings; "Add Override" in the mode "I give my Shift to…" saves an Override; the Home page shows "On call now",
   in English and in Russian.
+- **C-27.AC-10** Two Overrides that overlap make the person of the one created last On-call in the overlap; a Responder
+  gets `403` on creating, changing or deleting a Schedule or a Rotation layer.
 
 ## Related ADRs
 

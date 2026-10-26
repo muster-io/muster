@@ -20,7 +20,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
    with the Transport `gateway`.
 4. Bob presses 1 three minutes after Alice acknowledged the same Alert Group in Mattermost; nothing changes, and the
    call tells him "Already taken by Alice".
-5. Two Alert Groups Page Ivan through the gateway within a minute; he gets one call about both.
+5. Three Alert Groups Page Ivan through the gateway within a minute: the call about the first goes at once, and the
+   other two wait and go together in one call a minute after it.
 6. The provider rejects the bridge's credentials; the gateway's calls fail until the retry budget runs out, the gateway
    becomes Broken and `MusterNotificationGatewayBroken` reaches the admins through another Destination.
 7. An installation without a gateway shows, where a call could be chosen, "Unavailable: a Notification gateway is needed
@@ -42,21 +43,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   role in releases of their own.
 - **C-30.FR-3** A person adds, in their profile and from their own web session (C-03.FR-27), one contact for each
   Notification gateway — a phone number or another address the gateway understands, as text — and confirms it: "Send
-  code" sends a code (`gateway.contact_code`) through that gateway with `sendNotification`, on the interactive path,
-  since the person waits for it; the person types the code back into the same session. Code requests are limited by
-  `gateway.contact_code_requests`. Only a confirmed contact is called. An Admin sees and removes the contacts of any
-  User, never sets one, so nobody can tie a contact to another person's User (ADR-0013). A contact is personal data, not
-  a Secret: the person, Admins and the gateway read it; the Request log masks it (C-23); deleting the User erases it,
-  and the Audit log shows it as `[erased]` in earlier diffs (C-03.FR-13). Adding, confirming and removing a contact are
-  recorded in the Audit log.
+  code" sends a code (`gateway.contact_code`) through that gateway with `sendNotification`, without action data since
+  there is nothing to acknowledge, on the interactive path, since the person waits for it; the person types the code
+  back into the same session. Code requests are limited by `gateway.contact_code_requests`. Only a confirmed contact is
+  called. An Admin sees and removes the contacts of any User, never sets one, so nobody can tie a contact to another
+  person's User (ADR-0013). A contact is personal data, not a Secret: the person, Admins and the gateway read it; the
+  Request log masks it (C-23); deleting the User erases it, and the Audit log shows it as `[erased]` in earlier diffs
+  (C-03.FR-13). Adding, confirming and removing a contact are recorded in the Audit log.
 - **C-30.FR-4** A call — from an Escalation step (C-32.FR-3) or a Notification rule (C-31.FR-3) — is a row per person
   and gateway with `next_attempt_at` and a lease, which any replica claims, sent at least once under an
   `Idempotency-Key` through the gateway Connection's limiter (`connection.bridge.limiter`), calls for critical Alert
   Groups first. Its failures are classified and retried in the delivery client class within `delivery.transient_backoff`
   and `delivery.transient_budget`, as deliveries are (C-11.FR-8). Calls are not reconciled: a call has no Root message
-  and no Desired state (ADR-0005). The calls to one person through one gateway that come due within
-  `gateway.combine_window` are sent as one call about all of their Alert Groups, whose action data names each of them.
-  Mentions are never combined.
+  and no Desired state (ADR-0005). The first call to a person through a gateway goes at once; the calls to the same
+  person through the same gateway that come due after it wait and go together, as one call about all of their Alert
+  Groups whose action data names each of them, no sooner than `gateway.combine_window` after the previous call to that
+  person was sent. Mentions are never combined.
 - **C-30.FR-5** The text of a call names the Alert Groups — number, title and Severity level — and how to acknowledge,
   in the language of the person's profile. Only the gateway sender and the interactive path call `sendNotification`
   (ADR-0016, lint 3).
@@ -65,9 +67,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Alert Group the data names, under a precondition of its own (ADR-0004): a firing or snoozed Alert Group becomes
   acknowledged; one that someone owns, the same person included, stays as it is, and the gateway's answer to the person
   says "Already taken by {name}"; a resolved one stays resolved, answered "Already resolved". A Takeover is never made
-  through a gateway. The person's Role and state apply as for a press (C-18.FR-8). The command is recorded in the Audit
-  log and the Timeline like any Acknowledge, and the answer goes through `answerEvent` on the interactive path. Events
-  are handled once per id (C-22.FR-11).
+  through a gateway. The person's Role and state apply as for a press (C-18.FR-8). An Acknowledge that runs is recorded
+  in the Audit log and the Timeline like any Acknowledge; one that its precondition refuses changes nothing and is
+  logged as a refusal, like any refused Command (C-10.AC-4). The answer goes through `answerEvent` on the interactive
+  path. Events are handled once per id (C-22.FR-11).
 - **C-30.FR-7** A call the person does not acknowledge lets the Escalation chain and the Notification rules go on. A
   call that ends Not delivered — refused, an unknown answer, or the retry budget used up — records the lifecycle event
   `page_not_delivered` naming the person and the gateway.
@@ -120,14 +123,19 @@ them through the call sender directly.
   code is refused with the attempts left; an Admin's request to set a contact for another User gets `403`, and the Admin
   removes it; the Request log shows the contact masked; deleting the User shows it as `[erased]` in the Audit log.
 - **C-30.AC-3** A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` until it is
-  accepted; two calls to one person within `gateway.combine_window` reach the fake gateway as one.
+  accepted; of three calls to one person within `gateway.combine_window`, the first reaches the fake gateway at once and
+  the other two as one call when the window after it has passed.
 - **C-30.AC-4** `notification_acknowledged` for a firing Alert Group acknowledges it as the person the call was for,
   with the Transport `gateway` in the Timeline and the Audit log; for an Alert Group another User owns it changes
-  nothing and the gateway's answer says "Already taken by" that User; replaying the event changes nothing.
-- **C-30.AC-5** A gateway that answers `unauthorized` to a call becomes Broken, raises `MusterNotificationGatewayBroken`
-  and sets its gauge; the Destinations of the same bridge stay healthy; a successful probe resolves the alert.
+  nothing, is logged as a refusal, and the gateway's answer says "Already taken by" that User; replaying the event
+  changes nothing.
+- **C-30.AC-5** A gateway that answers a call with `401` becomes Broken, raises `MusterNotificationGatewayBroken` and
+  sets its gauge; the Destinations of the same bridge stay healthy; a successful probe resolves the alert.
 - **C-30.AC-6** In a real browser, without a gateway the profile shows the unavailable note and no phone field; with the
   fake gateway, the profile confirms a contact with the code, in English and in Russian.
+- **C-30.AC-7** A call that the fake gateway answers with the class `invalid` ends Not delivered and records
+  `page_not_delivered` naming the person and the gateway; an Acknowledge through the gateway counts in
+  `muster_commands_total{transport="gateway"}`, and the calls in `muster_gateway_calls_total` by outcome.
 
 ## Related ADRs
 

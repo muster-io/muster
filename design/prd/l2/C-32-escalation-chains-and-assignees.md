@@ -41,12 +41,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Severity level. Deleting a chain that a Route or a Team names is refused with `409` and the code `chain_in_use`.
 - **C-32.FR-3** An Escalation step is one of:
   - **Page the On-call of a Schedule** — of any Team (C-27.FR-4) — normally or importantly;
-  - **Page chosen people** — Users — normally or importantly;
+  - **Page chosen people** — Users who may be Paged: saving a step that names a Viewer or a disabled User is refused
+    with `422` and a pointer to the person — normally or importantly;
   - **Page a whole Team or everyone in the chat** — a Team, the chain's owning Team by default, by its Team mention, or
     everyone in the chat (`channel`, `here`, `all` or `everyone`); the form offers only what the Connections of the
     chain's Destinations can mention (C-28.FR-2);
-  - **Call through a Notification gateway** — the On-call of a Schedule or chosen people, through a gateway it names
-    when there is more than one (C-30.FR-4); offered only while a gateway exists (C-30.FR-9);
+  - **Call through a Notification gateway** — the On-call of a Schedule or chosen people, the chosen people under the
+    same check as above, through a gateway it names when there is more than one (C-30.FR-4); offered only while a
+    gateway exists (C-30.FR-9);
   - **Wait N minutes**;
   - **Send to an outgoing webhook** — the event `escalation_webhook` to an outgoing webhook Destination in events mode
     or both that the step names (FR-13);
@@ -85,7 +87,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   chain started on it has run out without an acknowledgement; it records `unclaimed` (C-17.FR-11), and the Root message
   and the UI show "Nobody has taken this". A chain that starts later on an Unclaimed Alert Group — for a Team that
   joins, or a rise — makes it no longer Unclaimed while that chain runs, and it is Unclaimed again once that chain has
-  run out too, as the definition of ADR-0004 says for every chain started on it (_provisional_, P-72).
+  run out too, as the definition of ADR-0004 says for every chain started on it (ADR-0018; journal D535).
 
 ### Where and how chains Page
 
@@ -135,8 +137,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   The event is signed, ordered and delivered at least once like the other events of C-15.FR-2.
 - **C-32.FR-14** A step is skipped, recording `escalation_step_skipped` with its reason, when it is limited to Working
   hours and the time is outside them, when the Alert Group's Severity level does not meet its condition, when the
-  Schedule it Pages has a gap, or when its gateway or the person's confirmed contact is gone; the chain goes on with its
-  next step at once.
+  Schedule it Pages has a gap, when its gateway or the person's confirmed contact is gone, or for a person it names who
+  has become a Viewer or been disabled since the step was saved; the chain goes on with its next step at once.
 - **C-32.FR-15** A step "Repeat from step K, up to N times" goes back to step K until it has done so N times and then
   goes on; each pass makes its steps again.
 - **C-32.FR-16** A change of a chain applies to the runs that start after it; a running chain keeps the steps it started
@@ -156,7 +158,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-32.FR-19** Chains use optimistic locking and are recorded in the Audit log with a before/after diff. Each chain
   exports `muster_escalation_chain_info{chain,name}`; Pages are counted by `muster_pages_total{chain,kind,outcome}`,
   where `kind` is `mention` or `call`; the stories register their log events and add the lifecycle events of this
-  capability to the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2).
+  capability to the [L2 lifecycle event table](../l1/reference.md#lifecycle-events-added-in-l2). The `mentions` of a
+  Timeline entry, which L1 limits to eight symbolic names, gain `paged`, and the entry gains a field of its own for the
+  people a Page names — expand steps of the schema (ADR-0006).
 - **C-32.FR-20** The documentation has a page on Escalation chains — the steps, the table of FR-5, where chains Page,
   the table of FR-11, Assignees — and says that, until push for Mentions in Threads is verified, only a Notification
   gateway is reliable at night; and a page "How an alert reaches people" that walks one Alert from its Route and Alert
@@ -166,27 +170,28 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
 Team page → "Escalation chain of the Team" and the chain page: "Writes only in the Threads of {Destinations}. Starts at
 publication." and "Stops when the Alert Group is acknowledged, snoozed or resolved; starts over on Unacknowledge, the
-end of a Snooze, a Reopen and a rise to critical."; "Run for: any severity / Severity = critical / Severity < critical"
-— on the Team page the condition of the Team's own reference to the chain, while each Route edits its condition in the
-Route form — and whose Alert Groups it runs on; "Steps", numbered, each with its target, normal or important, and its
-limits as chips ("Severity: any", "always", "only in the working hours of {Team} (Mon–Fri 11–19)", "Severity =
-critical"), and "Add step" with the seven kinds — "Page the On-call of a Schedule", "Page people", "Page the whole
-Team", "Wait", "Send to an outgoing webhook", "Repeat from step", "Call through the Notification gateway" — the last
-greyed with "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)" when there is none; the hint
-"Any step may be limited to working hours and to a Severity condition. Steps through a Notification gateway do not
-depend on a messenger, but need the gateway."; "Whom 'Page the whole Team' calls" — the Team mention, `@channel`,
-`@here`, `@all` or `@everyone`, the unavailable ones greyed with their reason; "Normal and important": "What exactly
-happens is decided by each person's Notification rules. Muster sends no direct messages: a Page is a Mention in the
-Thread of the Root message."; "How it went": the recent Alert Groups with their Pages, skipped steps and the
-acknowledgement that stopped the chain. Route form: "Escalation chains" with their conditions and the hint "Pages only
-in the Threads of the Route's Destinations. The Teams from the label Page with their own chains." Alert Group page, list
-and Home as FR-18.
+end of a Snooze, a Reopen, and a rise to critical that ends an acknowledgement or a Snooze."; "Run for: any severity /
+Severity = critical / Severity < critical" — on the Team page the condition of the Team's own reference to the chain,
+while each Route edits its condition in the Route form — and whose Alert Groups it runs on; "Steps", numbered, each with
+its target, normal or important, and its limits as chips ("Severity: any", "always", "only in the working hours of
+{Team} (Mon–Fri 11–19)", "Severity = critical"), and "Add step" with the seven kinds — "Page the On-call of a Schedule",
+"Page people", "Page the whole Team", "Wait", "Send to an outgoing webhook", "Repeat from step", "Call through the
+Notification gateway" — the last greyed with "Unavailable: a Notification gateway is needed (a bridge for calls and
+SMS)" when there is none; the hint "Any step may be limited to working hours and to a Severity condition. Steps through
+a Notification gateway do not depend on a messenger, but need the gateway."; "Whom 'Page the whole Team' calls" — the
+Team mention, `@channel`, `@here`, `@all` or `@everyone`, the unavailable ones greyed with their reason; "Normal and
+important": "What exactly happens is decided by each person's Notification rules. Muster sends no direct messages: a
+Page is a Mention in the Thread of the Root message."; "How it went": the recent Alert Groups with their Pages, skipped
+steps and the acknowledgement that stopped the chain. Route form: "Escalation chains" with their conditions and the hint
+"Pages only in the Threads of the Route's Destinations. The Teams from the label Page with their own chains." Alert
+Group page, list and Home as FR-18.
 
 ## API surface
 
-`escalation-chains` (list, create, read, update, delete); the chains with their conditions on `routes` and `teams`; the
-running chains, their steps and the Assignees on `alert-groups`; the Assignee filter of the list; `escalation_webhook`
-in the outgoing webhook event schema.
+`escalation-chains` (list, create, read, update, delete); `escalation-chains/{id}/runs` (list the recent runs of a chain
+with their Alert Groups, Pages, skipped steps and what stopped them, for "How it went"); the chains with their
+conditions on `routes` and `teams`; the running chains, their steps and the Assignees on `alert-groups`; the Assignee
+filter of the list; `escalation_webhook` in the outgoing webhook event schema.
 
 ## Acceptance
 
@@ -230,6 +235,15 @@ C-11.
 - **C-32.AC-14** In a real browser, the chain page builds the payments chain of scenario 1, shows the gateway step
   unavailable without a gateway, and the Alert Group page shows the running chains, the next step and the Assignees, in
   English and in Russian, 360 CSS pixels wide without horizontal scrolling of the page.
+- **C-32.AC-15** A Responder gets `403` on creating, changing or deleting a chain; deleting a chain that a Route names
+  gets `409` `chain_in_use`; a step "Page chosen people" naming a Viewer gets `422`, and one whose person was turned
+  into a Viewer later is skipped with that reason.
+- **C-32.AC-16** A chain that both the Route and a Team of the Alert Group name runs once and Pages in the Threads of
+  both; a change of a chain's steps while it runs leaves that run on its old steps, and the next run takes the new ones.
+- **C-32.AC-17** A Route with a chain, no Destination and "Also to the Teams from the label" off shows "Only a
+  Notification gateway can reach anyone from this Escalation chain: the Route has no Destination."; with a Destination
+  named, the warning is gone. `escalation-chains/{id}/runs` lists the last run of the chain with its Pages and the
+  acknowledgement that stopped it.
 
 ## Related ADRs
 
@@ -242,8 +256,11 @@ C-28 — what each messenger can mention; C-30 — Notification gateways; C-31 �
 
 ## Suggested story split
 
-- **BE** — chains and steps, their lifecycle with the ack timeout and Unclaimed, Pages by Mention in their own Threads,
-  undelivered Pages, Assignees, `escalation_webhook`, lifecycle events.
+- **BE** — chains and steps, naming them on Routes and Teams, their lifecycle with the ack timeout and Unclaimed,
+  skipped steps.
+- **BE** — Pages by Mention in their own Threads, undelivered Pages, Assignees, with the Assignees of the layout
+  (C-29.FR-1, C-29.FR-8).
+- **BE** — `escalation_webhook`.
 - **BE** — calls through a gateway from steps and rules, with combining.
 - **FE** — the chain page, chains on the Route form and the Team page, running chains and Assignees on the Alert Group
   page, the Assignee filter, "I am an Assignee" on the Home page.

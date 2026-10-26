@@ -43,8 +43,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Groups filter by Team and by "My Teams" — the Teams the signed-in User is in. Owning a Destination never makes it one
   of the Team's Destinations, and a Route's owning Team never adds delivery (C-26.FR-7).
 - **C-25.FR-3** An Admin adds Users to a Team and removes them, in the UI or through the API. A User may be in several
-  Teams. Deleting a User removes them from every Team; disabling a User keeps them in their Teams, and their Shifts
-  count as gaps (C-27.FR-5).
+  Teams. Deleting a User removes them from every Team; disabling a User keeps them in their Teams, where their Shifts
+  are skipped (C-27.FR-4).
 - **C-25.FR-4** A Team may name groups of the identity provider: each entry has a group and, optionally, the claim it
   reads, by default the groups claim of the OIDC settings, and matches as the entries of the Role mapping do
   (C-03.FR-5): exactly, or as a subtree when it ends in `/*`. At every OIDC sign-in and at every successful background
@@ -60,8 +60,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Matchers (C-08.FR-2) on any label, and each is enough on its own: an Alert that any one of them picks belongs to the
   Team. An Alert may belong to several Teams. Muster decides the Teams of an Alert when the Alert starts firing and
   records them, with the rule that matched — the Team label, or the matcher by its text — on the Alert; the Alerts view
-  of its Integration (C-06.FR-19) and the Alert Group page show them (_provisional_, P-62: an Alert keeps the Teams it
-  was given; a later change of the Team label, a slug or Team matchers applies to Alerts that start firing afterwards).
+  of its Integration (C-06.FR-19) and the Alert Group page show them; saving a Team evaluates them again (FR-13).
 - **C-25.FR-6** The Teams of an Alert Group are the Teams of all the Alerts that ever joined it. They only grow: a Team
   stays among them after its Alerts resolve (ADR-0018). Each Team that joins records the lifecycle event `team_joined`,
   which names the Team and the rule that brought it. The Teams of an Alert Group are shown in the header of the Alert
@@ -100,19 +99,25 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   without people that only name Alerts, test clusters where every team shares one namespace (match `pod`, an app label,
   or put the team label on the workloads), membership from the identity provider with the claim of each entry and
   subtrees, and Team mentions per messenger.
+- **C-25.FR-13** Saving a Team — a new one, a changed slug or changed Team matchers — or a new Team label of the
+  Organization evaluates the firing Alerts of open Alert Groups again, and only adds: a Team that an Alert now belongs
+  to joins its Alert Group with `team_joined` (FR-6), the Destinations it adds receive the Alert Group Quietly, as a
+  configuration change does (from C-26 on, C-26.FR-6), and no Escalation chain starts. A Team that an Alert no longer
+  belongs to stays where it is. So "Create Team" next to a value of the Team label also brings the open Alert Groups of
+  that value to the new Team.
 
 ## UI
 
-Teams in the main navigation: the list of Teams, each with its On-call now (C-27.FR-9), how many people are in it and
-its Team mentions, and above it the Team label with its hint "An Alert belongs to a Team by the value of the Team label
-or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization." and a link to
-change it in the Organization settings; the section "Unknown values of team" (named after the Team label) with each
-value, when it was last seen and "Create Team". The Team page: name, slug, description; "On call now"; Working hours —
-the Organization's, shown as "Organization default: Mon–Fri 09:00–18:00, Europe/Berlin", or its own with days, from, to
-and time zone; "Which Alerts belong to this Team" — the Team label value (the slug) and the Team matchers, with the hint
-"A matcher may look at any label of the Alert, not only `namespace`. Any one matcher is enough." and "On test clusters
-with a shared namespace, match by `pod` or `app`, or put the team label on the pods", and an example of how an Alert
-Group shows it; People — User, Role, source ("added by hand" or the identity provider group), Account links, and
+Teams in the main navigation: the list of Teams, each with its On-call now (from C-27 on, C-27.FR-9), how many people
+are in it and its Team mentions, and above it the Team label with its hint "An Alert belongs to a Team by the value of
+the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization." and
+a link to change it in the Organization settings; the section "Unknown values of team" (named after the Team label) with
+each value, when it was last seen and "Create Team". The Team page: name, slug, description; "On call now"; Working
+hours — the Organization's, shown as "Organization default: Mon–Fri 09:00–18:00, Europe/Berlin", or its own with days,
+from, to and time zone; "Which Alerts belong to this Team" — the Team label value (the slug) and the Team matchers, with
+the hint "A matcher may look at any label of the Alert, not only `namespace`. Any one matcher is enough." and "On test
+clusters with a shared namespace, match by `pod` or `app`, or put the team label on the pods", and an example of how an
+Alert Group shows it; People — User, Role, source ("added by hand" or the identity provider group), Account links, and
 "Remove" for people added by hand; "Identity provider groups" with claim and group per entry — the claims of discovery
 offered as suggestions, as in the Role mapping (C-03.FR-5) — and the hint "Checked at every sign-in, like the Role
 mapping: each entry reads its own claim, and `a/b/*` takes the whole subtree. The Role of the people does not change.";
@@ -120,14 +125,15 @@ mapping: each entry reads its own claim, and `a/b/*` takes the whole subtree. Th
 bridge declares no group mentions", "Telegram cannot mention everyone or groups"), with the hint "The entry 'Team' of a
 Destination's Mentions is this Team mention. Without one, nobody is mentioned, and the On-call is not mentioned
 instead."; and the sections of C-26 (Destinations of the Team), C-27 (Schedules) and C-32 (Escalation chains). Lists of
-Routes, Destinations, Schedules, Escalation chains and Alert Groups gain the Team filter and "My Teams".
+Routes, Destinations, Schedules, Escalation chains and Alert Groups gain the filter by Team and "My Teams".
 
 ## API surface
 
 `teams` (list, create, read, update, delete); `teams/{id}/users` (list, add, remove); identity provider entries, Team
 matchers, Team mentions and Working hours as fields of `teams`; `team-label-values` (list the values seen without a
 Team); the owning Team as a field of `routes`, `destinations` and `escalation-chains`; the Teams of an Alert and of an
-Alert Group, with the rule that brought each, on `alert-groups` and `alerts`; the Team filters of the list operations.
+Alert Group, with the rule that brought each, on `alert-groups` and `alerts`; the filters by Team of the list
+operations.
 
 ## Acceptance
 
@@ -159,6 +165,13 @@ Checked with the fake Alertmanager and the fake OIDC server, through the API and
   "Create Team" opens the form with the slug `checkout`, and for `Payments` with the note about Team matchers; the Team
   page shows each person's source and the Team mention field of each Connection or its reason, in English and in
   Russian.
+- **C-25.AC-11** A User in "payments" and not in "search" sees, with "My Teams", the Routes, Destinations and Alert
+  Groups that "payments" owns or that have it among their Teams, and not those of "search".
+- **C-25.AC-12** Deleting a User takes them out of every Team; disabling a User keeps them in their Teams.
+- **C-25.AC-13** With an open, firing Alert Group of `team="checkout"` and no such Team, creating the Team "checkout"
+  adds it to the Alert Group with `team_joined`, publishes the Alert Group Quietly in the Team's Destinations where its
+  Route delivers to Teams (checked from C-26 on), and starts no Escalation chain; changing a Team matcher so that it no
+  longer picks an Alert leaves the Team in its Alert Group.
 
 ## Related ADRs
 
@@ -170,7 +183,13 @@ C-03 — OIDC sign-in, the Role mapping and its re-check; C-08 — Matchers and 
 
 ## Suggested story split
 
-- **BE** — Teams, people by hand and from the identity provider, the Team label and Team matchers, the Teams of Alerts
-  and Alert Groups with their lifecycle events, unknown values, Team mentions, Working hours, the owning Team on Routes,
-  Destinations and chains, filters.
-- **FE** — the Teams list and the Team page, the Team filters of the lists, the Teams on the Alert Group page.
+- **BE** — Teams, people added by hand, the owning Team on Routes, Destinations and chains, the filters by Team, Working
+  hours.
+- **BE** — the identity provider: the claim of every mapping entry and subtrees for Roles and Teams (C-03.FR-5,
+  C-03.FR-6, C-03.FR-7, C-03.AC-28), membership from the identity provider (FR-4, AC-3, AC-4).
+- **BE** — the Team label and Team matchers, the Teams of Alerts and Alert Groups with `team_joined`, the evaluation on
+  save (FR-13), unknown values.
+- **BE** — Team mentions, after the spikes on Mattermost groups and Slack user groups: the Connections' checks that find
+  them — the scope `usergroups:read` of Slack (C-24.FR-2), the groups a Mattermost bot reads, the group mentions that a
+  bridge declares in `info` (C-22.FR-2).
+- **FE** — the Teams list and the Team page, the filters by Team of the lists, the Teams on the Alert Group page.

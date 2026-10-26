@@ -37,7 +37,7 @@ recorded in its Timeline with the kind `delivery`, and none is sent as an outgoi
 
 | Delivery event | Loud or Quiet | How it appears | Mentions |
 |---|---|---|---|
-| Publication into a newly added Destination — added to a Route, from L2 also to a Team, by "Also to the Teams from the label" turned on or by a changed Severity condition (C-26.FR-6) | Quiet | new Root message | — |
+| Publication into a newly added Destination — added to a Route, from L2 also to a Team, by "Also to the Teams from the label" turned on, by a changed Severity condition (C-26.FR-6) or by a saved Team (C-25.FR-13) | Quiet | new Root message | — |
 | Storm summary, first publication | Loud | new message | `new_alert_group`; from L2 `storm_started` (C-28.FR-7) |
 | Storm summary updates and final state | Quiet | message update | — |
 | Gradual publication after a Storm | Quiet | new Root messages | — |
@@ -45,7 +45,7 @@ recorded in its Timeline with the kind `delivery`, and none is sent as an outgoi
 | Publication after a Broken Destination recovers | Loud if the Alert Group is firing, otherwise Quiet | new Root message | `new_alert_group` when Loud |
 | Root message update after a Broken Destination recovers | Quiet | one edit to the current state | — |
 | Thread replies that came due while a Destination was Broken, from L2 Pages among them (C-32.FR-10) | not sent | — | — |
-| Mention not delivered: a Mention entry names a person without an Account link in the Destination's Identity space (C-28.FR-3), from L2 | Quiet | Thread reply "Mention not delivered: …" | — |
+| Mention not delivered: a Mention entry names a person without an Account link in the Destination's Identity space (C-28.FR-3), from L2 | not sent | nothing in the Thread; the delivery event in the Alert Group's Timeline and a warning on the Destination | — |
 | Alert Group that resolved while its Destination was Broken, never published there | not published | Timeline and UI only | — |
 | Republication after a deleted Root message | Quiet | new Root message with a note; Thread starts over | — |
 | Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here"; for a Bridge Root message past its edit window, a Thread reply with the same text (C-22.FR-9); a Bridge Publication whose answer was lost before the Destination left is not withheld but posted again with its key, carrying the final text (C-22.FR-6): a replayed message is edited to it, otherwise the new message is the final one and a possible duplicate is recorded | — |
@@ -66,9 +66,7 @@ channel and the Thread, so Quiet means "without a Mention" there too (C-24.FR-6)
 The lifecycle events that the capabilities of L2 record, with the columns and meaning of the table of C-09.FR-22, and
 the capability that records each. Outgoing webhooks in events mode receive them one to one (C-15.FR-2), except
 `escalation_webhook`, which goes only to the outgoing webhook Destination its step names (C-32.FR-13). The events of L1
-keep their rows; L2 changes two of them: `unclaimed` is also recorded once every Escalation chain started on an Alert
-Group has run out (C-32.FR-7), and an Acknowledge through a Notification gateway records `acknowledged` with the
-Transport `gateway` (C-30.FR-6). The Timeline kind `escalation` is new and joins the filter of the Timeline
+keep their rows; L2 adds causes to some of them: `unclaimed` is also recorded once every Escalation chain started on an Alert Group has run out (C-32.FR-7); an Acknowledge through a Notification gateway records `acknowledged` with the Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route records the Quiet `severity_raised` or `urgency_raised` with its reason (C-26.FR-9). The Timeline kind `escalation` is new and joins the filter of the Timeline
 (C-09.FR-14). Lifecycle events of the later part of L2 — Maintenance windows, Attach and Detach — are added with it.
 
 | Event | When | Loud or Quiet | Mentions | Timeline kind | In a messenger (C-11) | Capability |
@@ -203,7 +201,7 @@ commands of Bridges, the UI and the API keep every action.
 | Team page, Team mention · Destination form, an unavailable Mention target | the Connection cannot mention a group | "Needs the scope usergroups:read" · "The bridge declares no group mentions" · "Telegram cannot mention everyone or groups" | C-25, C-28 |
 | Route form | "Also to the Teams from the label" on and the Team label not in the Group key | "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add {team label} to the key if each Team needs its own." | C-26 |
 | Route form | it names an Escalation chain and no Destination, and does not deliver to Teams | "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination." | C-32 |
-| Thread reply | a Mention entry names a person without an Account link | "Mention not delivered: {name} has no linked {messenger} account" | C-28 |
+| Destination page; Alert Group page, delivery event | a Mention entry names a person without an Account link | "Mention not delivered: @{login}, {entry}, has no linked {messenger} account" | C-28 |
 | Thread reply | a Page of a person without an Account link | "Page not delivered: @{login} has no linked {messenger} account" | C-32 |
 | Thread reply | a Page by Mention | "Step {n}: {Mentions}, you are needed" and "Chain of the Route {Route} · On-call of {Team} {Schedule} · normal" (or "· important, again in {N} min") | C-32 |
 | Root message | not acknowledged while Escalation chains Page | "Assignees: {person} ({Team}), …" | C-29, C-32 |
@@ -409,7 +407,7 @@ the story that implements it.
 
 | Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
 |---|---|---|---|---|
-| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap that starts within `schedule.gap_alert_horizon` | `schedule`, `schedule_name`, `team`, `team_name` | C-27 |
+| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap now or one that starts within `schedule.gap_alert_horizon` | `schedule`, `schedule_name`, `team`, `team_name` | C-27 |
 | `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken | `connection`, `connection_name` | C-30 |
 
 ## Metrics catalogue
@@ -498,7 +496,7 @@ windows are _provisional_ (P-88), as those of L1 were.
 
 | Rule | Severity | Default expression | For | Meaning |
 |---|---|---|---|---|
-| `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule has a gap ahead; the backup for the Internal alert |
+| `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule has a gap now or within the horizon; the backup for the Internal alert |
 | `MusterNotificationGatewayBroken` | critical | `max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1` | 5m | a Notification gateway is Broken |
 
 ## Metrics added in L2
@@ -512,7 +510,7 @@ holds them, outside the catalogue that the code checks. The value `gateway` join
 |---|---|---|---|
 | `muster_team_info` | gauge | `team`, `name` | C-25 |
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
-| `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while a gap starts within `schedule.gap_alert_horizon` | C-27 |
+| `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while there is a gap now or one that starts within `schedule.gap_alert_horizon` | C-27 |
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) | C-30 |
 | `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
