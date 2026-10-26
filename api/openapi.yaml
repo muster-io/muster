@@ -5905,9 +5905,10 @@ paths:
         `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none;
         a request of another User, or one that is not a Slack request, is `404`. The link stores the account''s user id
         as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as
-        `display_name`, which Mentions and the footer use; a second link of the User through the same Connection
-        replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that
-        fails is only logged. Runs on the interactive path: when no limiter token is free within
+        `display_name`, which names the account where Muster shows the link, while Mentions and the footer write it
+        as `<@external_id>`; a second link of the User through the same Connection replaces the first. The bot then
+        confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on
+        the interactive path: when no limiter token is free within
         `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation
         starts a link for another User, whatever the caller''s Role.'
       x-permission: authenticated
@@ -14368,8 +14369,9 @@ components:
             account's `name`.
         display_name:
           type: string
-          description: Set on Bridge and Slack links; the account's name as the bridge reported it, or a Slack account's
-            `profile.display_name`, else `profile.real_name`, which Mentions and footers show.
+          description: Set on Bridge and Slack links; the account's name as the bridge reported it, which a Bridge's
+            Mentions and footers show, or a Slack account's `profile.display_name`, else `profile.real_name`, which
+            names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).
         last_used_at:
           type:
           - string

@@ -15,11 +15,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 )
 
 var t0 = time.Date(2026, 10, 4, 14, 5, 0, 0, time.UTC)
@@ -194,6 +196,121 @@ func TestFootersAndNotices(t *testing.T) {
 	}
 	if reason("en", "") != "all alerts resolved" {
 		t.Error("an empty reason")
+	}
+}
+
+// TestFooterMentions is C-12.FR-12: the Owner, who snoozed and who resolved are a token in the footer of every identity
+// space where they have an Account link, with the link as FooterUsers; an adapter writes the token as its Mention,
+// while the text around it is escaped like any neutral text, and as the escaped display name without one; the footer
+// without a link, a footer the system wrote and a Desired state stored before the tokens stay as they were; shortening
+// keeps the footer with its Mention and cuts one that cannot fit alone without breaking a token.
+func TestFooterMentions(t *testing.T) {
+	r := newRenderer(t)
+	until := t0.Add(2 * time.Hour)
+	alice := mentions.User{PublicID: "SRAAAAAAAAAAA1", Name: "Alice_*Smith*", Username: "alice.mm"}
+	users := map[string]mentions.User{"mattermost:3": alice, "telegram": {Name: "Alice_*Smith*", ExternalID: "7001"}}
+	mention := func(u mentions.User) string { return "<@" + u.Username + u.ExternalID + ">" }
+	cases := []struct {
+		status string
+		set    func(s *Source)
+		want   string
+	}{
+		{"acknowledged", func(s *Source) { s.Owner = "Alice_*Smith*" }, "Acknowledged by <@alice.mm>"},
+		{"snoozed", func(s *Source) { s.SnoozedBy, s.SnoozeUntil = "Alice_*Smith*", &until },
+			"Snoozed by <@alice.mm> until 2026-10-04 16:05 UTC"},
+		{"snoozed", func(s *Source) { s.SnoozedBy, s.SnoozeNoEnd = "Alice_*Smith*", true },
+			"Snoozed by <@alice.mm> with no end"},
+		{"resolved", func(s *Source) { s.ResolvedByKind, s.ResolvedBy = "user", "Alice_*Smith*" },
+			"Resolved by <@alice.mm>"},
+	}
+	for _, tc := range cases {
+		src := source(tc.status, 1)
+		tc.set(src)
+		src.FooterUsers = users
+		m := r.Root(src, MarkupMarkdown).Message
+		f := m.WithFooterIn("mattermost:3", mention)
+		// The text around the token is escaped as one line: CommonMark keeps the space after a Mention.
+		if f.FooterText(EscapeMarkdown) != tc.want || f.FooterText(EscapeCommonMark) != tc.want || f.Footers != nil ||
+			f.FooterUsers != nil || !strings.Contains(Layout(f, MarkupMarkdown), "\n"+tc.want) {
+			t.Errorf("%s: %q in\n%s", tc.status, f.FooterText(EscapeMarkdown), Layout(f, MarkupMarkdown))
+		}
+		if tg := m.WithFooterIn("telegram", mention); !strings.Contains(tg.FooterText(EscapeHTML), "<@7001>") {
+			t.Errorf("%s in telegram: %q", tc.status, tg.FooterText(EscapeHTML))
+		}
+		// Without a link, or with an adapter that writes nothing, the display name, escaped for the markup.
+		for _, plain := range []Message{m.WithFooterIn("mattermost:4", mention), m.WithFooterIn("mattermost:3", nil),
+			m.WithFooterIn("telegram", func(mentions.User) string { return "" })} {
+			if got := plain.FooterText(EscapeMarkdown); !strings.Contains(got, `Alice\_\*Smith\*`) ||
+				plain.FooterMention != "" {
+				t.Errorf("%s plain: %q", tc.status, got)
+			}
+		}
+		if m.Footer != strings.Replace(tc.want, "<@alice.mm>", "Alice_*Smith*", 1) || m.Text() != Layout(m, MarkupPlain) ||
+			strings.ContainsAny(m.Text(), "\ue000\ue002") {
+			t.Errorf("%s: the footer without a link %q", tc.status, m.Footer)
+		}
+		// WithFooterIn twice changes nothing.
+		if again := f.WithFooterIn("telegram", nil); again.Footer != f.Footer || again.FooterMention != f.FooterMention {
+			t.Errorf("%s: again %+v", tc.status, again)
+		}
+	}
+	// No link, or a footer the system wrote: no footers by identity space, so that the Desired state is unchanged.
+	src := source("acknowledged", 1)
+	src.Owner = "Alice"
+	plain := r.Root(src, MarkupMarkdown).Message
+	src.FooterUsers = users
+	src.Status, src.ResolvedByKind, src.ResolveReason = "resolved", "system", "stale"
+	if system := r.Root(src, MarkupMarkdown).Message; plain.Footers != nil || plain.FooterUsers != nil ||
+		system.Footers != nil || system.FooterUsers != nil {
+		t.Errorf("footers without a user: %v %v", plain.Footers, system.Footers)
+	}
+	b, _ := json.Marshal(plain)
+	if strings.Contains(string(b), "footer_users") || strings.Contains(string(b), "FooterMention") {
+		t.Errorf("stored %s", b)
+	}
+	// A Desired state stored before the tokens names the user as text, laid out as it was.
+	var old Message
+	if err := json.Unmarshal([]byte(`{"kind":"root","footer":"Acknowledged by Alice","footers":{"mattermost:3":`+
+		`"Acknowledged by alice.mm"},"buttons":[]}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if f := old.WithFooterIn("mattermost:3", mention); f.FooterText(EscapeMarkdown) != "Acknowledged by alice.mm" {
+		t.Errorf("an old state %q", f.FooterText(EscapeMarkdown))
+	}
+	// The Mention survives shortening; a footer that cannot fit with it names the user by their display name, cut
+	// only when that does not fit either, never inside a token.
+	long := source("acknowledged", 30)
+	long.Owner, long.FooterUsers = "Alice", users
+	m := r.Root(long, MarkupMarkdown).Message.WithFooterIn("mattermost:3", mention)
+	short, changed := Shorten(m, 400, MarkupMarkdown)
+	if out := Layout(short, MarkupMarkdown); !changed || !strings.Contains(out, "\nAcknowledged by <@alice.mm>\n") ||
+		utf8.RuneCountInString(out) > 400 {
+		t.Errorf("shortened %v\n%s", changed, out)
+	}
+	alone := Message{Footer: m.Footer, FooterMention: m.FooterMention, FooterName: "Alice"}
+	if plain, _ := Shorten(alone, 22, MarkupMarkdown); Layout(plain, MarkupMarkdown) != "Acknowledged by Alice" ||
+		plain.FooterMention != "" {
+		t.Errorf("a footer without room for the Mention %q", Layout(plain, MarkupMarkdown))
+	}
+	cut, _ := Shorten(alone, 10, MarkupMarkdown)
+	if out := Layout(cut, MarkupMarkdown); out != "Acknowled…" || strings.ContainsAny(cut.Footer, "\ue000\ue002") {
+		t.Errorf("cut %q", out)
+	}
+	// The stored footer user holds only what an adapter writes: the user's public_id and login, which no messenger
+	// shows, leave the Desired state and its hash as they were; a username changes them.
+	hash := func(users map[string]mentions.User) [32]byte {
+		src := source("acknowledged", 1)
+		src.Owner, src.FooterUsers = "Alice", users
+		b, _ := json.Marshal(r.Root(src, MarkupMarkdown).Message)
+		return sha256.Sum256(b)
+	}
+	base := hash(map[string]mentions.User{"mattermost:3": {Name: "Alice", Username: "alice.mm"}})
+	if hash(map[string]mentions.User{"mattermost:3": {PublicID: "SRAAAAAAAAAAA9", Login: "alice2", Name: "Alice",
+		Username: "alice.mm"}}) != base {
+		t.Error("an unrendered field changed the hash")
+	}
+	if hash(map[string]mentions.User{"mattermost:3": {Name: "Alice", Username: "alice.m2"}}) == base {
+		t.Error("a new username left the hash as it was")
 	}
 }
 

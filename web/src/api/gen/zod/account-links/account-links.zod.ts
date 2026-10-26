@@ -23,7 +23,7 @@ export const ListMyAccountLinksResponse = zod.object({
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
   "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
-  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, which a Bridge\'s Mentions and footers show, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))
@@ -121,7 +121,7 @@ export const ConfirmMattermostLinkResponse = zod.object({
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
   "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
-  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, which a Bridge\'s Mentions and footers show, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -194,7 +194,7 @@ export const ConfirmBridgeLinkResponse = zod.object({
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
   "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
-  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, which a Bridge\'s Mentions and footers show, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -223,7 +223,7 @@ export const StartSlackLinkResponse = zod.object({
 })
 
 /**
- * At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which Mentions and the footer use; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
+ * At most 5 attempts (`account_link.slack_code`); after that the code is void. A wrong code, and a request that is void, used or expired or whose Connection was deleted, answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request still takes, 0 once it takes none; a request of another User, or one that is not a Slack request, is `404`. The link stores the account's user id as `external_id`, its `name` as `username`, and its `profile.display_name`, else `profile.real_name`, as `display_name`, which names the account where Muster shows the link, while Mentions and the footer write it as `<@external_id>`; a second link of the User through the same Connection replaces the first. The bot then confirms "Linked to Muster user {name}" by direct message; a confirmation that fails is only logged. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
  * @summary Confirm a Slack link with the code
  */
 export const confirmSlackLinkBodyRequestIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -247,7 +247,7 @@ export const ConfirmSlackLinkResponse = zod.object({
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
   "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
-  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, which a Bridge\'s Mentions and footers show, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 })
@@ -276,7 +276,7 @@ export const ListUserAccountLinksResponse = zod.object({
 }).optional().describe('The Connection the link was made through; Mattermost, Bridge and Slack links belong to it.'),
   "external_id": zod.string(),
   "username": zod.string().nullish().describe('The account\'s username; for a Bridge link, the handle the bridge reported; for a Slack link, the account\'s `name`.'),
-  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which Mentions and footers show.'),
+  "display_name": zod.string().optional().describe('Set on Bridge and Slack links; the account\'s name as the bridge reported it, which a Bridge\'s Mentions and footers show, or a Slack account\'s `profile.display_name`, else `profile.real_name`, which names the account where Muster shows the link (Slack Mentions and footers write `<@external_id>`).'),
   "last_used_at": zod.iso.datetime({"offset":true}).nullish(),
   "created_at": zod.iso.datetime({"offset":true})
 }))

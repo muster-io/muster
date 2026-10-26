@@ -558,4 +558,16 @@ func TestFooterOfTheConnection(t *testing.T) {
 		"\n\nAcknowledged by Bob Smith") {
 		t.Fatalf("not linked through the connection: %q", body)
 	}
+	// A shortened body keeps the footer's marker whole, with its entry (C-12.FR-11, FR-12).
+	m.Footers["bridge:7"] = "Acknowledged by " + templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	m.FooterUsers = map[string]messages.FooterUser{"bridge:7": {Name: "Bob Smith", ExternalID: "u-bob",
+		DisplayName: "Bob B."}}
+	m.Summary = strings.Repeat("s ", 1000)
+	i := infoOf(t, set("limits", "max_body_length", 500))
+	marked, list := withFooterMention(m, 7, i, []gen.Mention{})
+	body := content(marked, i, nil).Body
+	if !strings.HasSuffix(body, "\n\nAcknowledged by [@Bob B.](muster-mention:m1)") || strings.Contains(body, "s s") ||
+		utf8.RuneCountInString(body) > 500 || len(list) != 1 || list[0].ExternalId != "u-bob" {
+		t.Fatalf("a cut body %q, %+v", body, list)
+	}
 }

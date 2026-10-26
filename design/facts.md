@@ -314,11 +314,11 @@ source_ · Used in C-12.FR-1, C-13.FR-3.
 
 **F-060. A username without `@` does not notify.** A bot post whose `message` and attachment text both ended with
 "Acknowledged by <username>" — the username of a channel member, written without `@` and mentioned nowhere else, as
-the footer of a Root message names a person — left that member's `mention_count` at `0`: it was read with
-`GET /api/v4/channels/{channel_id}/members/{user_id}` before the post and again 3 s after. The member kept their own
-notification settings; a person who adds their username to their own mention keywords would still be notified. —
-_2026-10-08 · one post in a public channel with a bot without the system admin role, deleted afterwards · Mattermost
-11.2.2_ · Used in C-12.FR-12, C-13.FR-3.
+the footer of a Root message named a person before C-12.FR-12 was revised to write a Mention — left that member's
+`mention_count` at `0`: it was read with `GET /api/v4/channels/{channel_id}/members/{user_id}` before the post and
+again 3 s after. The member kept their own notification settings; a person who adds their username to their own
+mention keywords would still be notified. — _2026-10-08 · one post in a public channel with a bot without the system
+admin role, deleted afterwards · Mattermost 11.2.2_ · Used in C-12.FR-12, C-13.FR-3.
 
 ### Rate limit and server settings
 

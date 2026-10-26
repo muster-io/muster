@@ -985,9 +985,10 @@ func TestLiveBridgeLinks(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			names, err := mentions.New(org.ID, d.Pool).FooterNames(ctx, nil, group)
-			if err != nil || len(names) != 1 || names[space] != step.want {
-				t.Errorf("footer names with %q = %v, %v", step.set, names, err)
+			footer, err := mentions.New(org.ID, d.Pool).FooterUsers(ctx, nil, group)
+			if u := footer[space]; err != nil || len(footer) != 1 || u.ExternalID != "u-bob" || u.Name == "" ||
+				(u.DisplayName != step.want && u.DisplayName+u.Username != step.want) {
+				t.Errorf("footer users with %q = %+v, %v", step.set, footer, err)
 			}
 		}
 		if u, err := svc.Lookup(ctx, accountlinks.SpaceBridge(conns["CNAAAAAAAAAAB1"]), "u-bob"); err != nil ||
@@ -1257,8 +1258,8 @@ func TestLiveSlackLinks(t *testing.T) {
 			attempts = 5 AND voided_at IS NOT NULL`, started.RequestPublicID) != 1 {
 			t.Errorf("the right code after five wrong ones = %v", err)
 		}
-		// The footer of an Alert Group alice acknowledged: by the display name of her link through Example Slack, and
-		// through sl, whose link has none, by none, which leaves her Muster display name.
+		// The footer of an Alert Group alice acknowledged: her links through Example Slack and through sl, each with
+		// its Slack user id alone, which the footer mentions her by.
 		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org.ID, t0); err != nil {
 			t.Fatal(err)
 		}
@@ -1273,9 +1274,10 @@ func TestLiveSlackLinks(t *testing.T) {
 			&group); err != nil {
 			t.Fatal(err)
 		}
-		names, err := mentions.New(org.ID, d.Pool).FooterNames(ctx, nil, group)
-		if err != nil || len(names) != 1 || names[s2] != "Alice Brown" {
-			t.Errorf("footer names = %v, %v", names, err)
+		footer, err := mentions.New(org.ID, d.Pool).FooterUsers(ctx, nil, group)
+		if err != nil || len(footer) != 2 || footer[s2].ExternalID != "U0ALICE" || footer[s2].DisplayName != "" ||
+			footer[s1].ExternalID != "U0DANA" {
+			t.Errorf("footer users = %+v, %v", footer, err)
 		}
 		// Ten code requests of one User at once store five; five Users' requests for one account store three.
 		race := func(n int, start func(i int) error) (stored, limited int) {

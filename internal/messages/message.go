@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -63,40 +64,103 @@ const (
 // of a Thread reply, a Storm summary or the Fallback template. Each adapter lays a Message out for its messenger and
 // escapes its neutral text (C-13.FR-8, C-14.FR-13); a Body and the template lines of Alerts are already written in
 // their Markup, where a trusted Mention token of the `mention` function stands for the adapter to render
-// (C-12.FR-8). Footers are the footer per identity space whose username names the user (C-12.FR-12). Language and
+// (C-12.FR-8). Footers are the footer per identity space where the user it names has an Account link, with a trusted
+// Mention token where the user stands, and FooterUsers that user per identity space, whom its adapter writes as its
+// messenger's Mention (C-12.FR-12); a Desired state stored before them names the user in Footers as text. Language and
 // TimeZone are those it was rendered in, for the notes delivery adds at call time. SnoozeSeconds are the Route's
 // Snooze durations, which its Snooze buttons name by index, set only in CommonMark and mrkdwn: a bridge writes the
 // first in the commands line and drops Snooze buttons from the longest (C-22.FR-5), Slack's Snooze menu names each as
 // its option (C-24.FR-5), and the Desired states of the other markups keep their hashes.
 type Message struct {
-	Kind              Kind              `json:"kind"`
-	Language          string            `json:"language"`
-	TimeZone          string            `json:"time_zone"`
-	Colour            string            `json:"colour"`
-	Heading           *Heading          `json:"heading,omitempty"`
-	Environment       string            `json:"environment,omitempty"`
-	GroupLabels       []Label           `json:"group_labels,omitempty"`
-	CommonLabels      []Label           `json:"common_labels,omitempty"`
-	CommonAnnotations []Label           `json:"common_annotations,omitempty"`
-	Summary           string            `json:"summary,omitempty"`
-	Body              *Body             `json:"body,omitempty"`
-	Alerts            *AlertList        `json:"alerts,omitempty"`
-	Lines             []string          `json:"lines,omitempty"`
-	Links             []Link            `json:"links,omitempty"`
-	Notices           []string          `json:"notices,omitempty"`
-	Footer            string            `json:"footer,omitempty"`
-	Footers           map[string]string `json:"footers,omitempty"`
-	Buttons           []Button          `json:"buttons"`
-	SnoozeSeconds     []int64           `json:"snooze_seconds,omitempty"`
+	Kind              Kind                  `json:"kind"`
+	Language          string                `json:"language"`
+	TimeZone          string                `json:"time_zone"`
+	Colour            string                `json:"colour"`
+	Heading           *Heading              `json:"heading,omitempty"`
+	Environment       string                `json:"environment,omitempty"`
+	GroupLabels       []Label               `json:"group_labels,omitempty"`
+	CommonLabels      []Label               `json:"common_labels,omitempty"`
+	CommonAnnotations []Label               `json:"common_annotations,omitempty"`
+	Summary           string                `json:"summary,omitempty"`
+	Body              *Body                 `json:"body,omitempty"`
+	Alerts            *AlertList            `json:"alerts,omitempty"`
+	Lines             []string              `json:"lines,omitempty"`
+	Links             []Link                `json:"links,omitempty"`
+	Notices           []string              `json:"notices,omitempty"`
+	Footer            string                `json:"footer,omitempty"`
+	Footers           map[string]string     `json:"footers,omitempty"`
+	FooterUsers       map[string]FooterUser `json:"footer_users,omitempty"`
+	Buttons           []Button              `json:"buttons"`
+	SnoozeSeconds     []int64               `json:"snooze_seconds,omitempty"`
+	// FooterMention is the user of the footer as an adapter writes them in its markup, and FooterName their Muster
+	// display name made safe, which a footer cut by shortening keeps instead; WithFooterIn sets both for the layout,
+	// and neither is stored.
+	FooterMention string `json:"-"`
+	FooterName    string `json:"-"`
 }
 
-// FooterIn is the footer in an identity space — "telegram" or "mattermost:<connection>" — naming the user by the
-// username of their Account link there, otherwise by the Muster display name (C-12.FR-12).
+// FooterUser is the user a footer names in an identity space where they have an Account link, with only what its
+// adapter writes them by, so that the Desired state, whose hash is that of its JSON, changes only with what a
+// messenger shows (C-12.FR-12): their Muster display name, and the username, the messenger's user id and the display
+// name of the link where its messenger's Mention uses them.
+type FooterUser struct {
+	Name        string `json:"name"`
+	Username    string `json:"username,omitempty"`
+	ExternalID  string `json:"external_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// FooterUserToken is the name of the trusted Mention token that stands for the user in the footer of an identity space
+// where they have an Account link (C-12.FR-12). The `mention` function of templates never writes it, and neutral text
+// never carries a token, so only Muster's own footer has one.
+const FooterUserToken = "user"
+
+// FooterIn is the footer in an identity space — "telegram", "mattermost:<connection>", "slack:<connection>" or
+// "bridge:<connection>" — with the token of the user it names when they have an Account link there, otherwise the
+// footer that names them by their Muster display name (C-12.FR-12).
 func (m Message) FooterIn(space string) string {
 	if f, ok := m.Footers[space]; ok {
 		return f
 	}
 	return m.Footer
+}
+
+// WithFooterIn is m with the footer of the identity space space as its only footer, for an adapter to lay out
+// (C-12.FR-12): a user with an Account link there is written by mention, the adapter's own Mention of them in its
+// markup — or their name escaped for it where it cannot mention them — and by their Muster display name when mention
+// is nil or writes nothing. A message without footers by identity space is returned as it is, so that calling
+// WithFooterIn again changes nothing.
+func (m Message) WithFooterIn(space string, mention func(mentions.User) string) Message {
+	if m.Footers == nil && m.FooterUsers == nil {
+		return m
+	}
+	cp := m
+	cp.Footer, cp.Footers, cp.FooterUsers, cp.FooterMention = m.FooterIn(space), nil, nil, ""
+	u, ok := m.FooterUsers[space]
+	cp.FooterName = Value(u.Name)
+	if ok && mention != nil {
+		cp.FooterMention = mention(mentions.User{Name: u.Name, Username: u.Username, ExternalID: u.ExternalID,
+			DisplayName: u.DisplayName})
+	}
+	if cp.FooterMention == "" {
+		cp.Footer, cp.FooterName = templates.ReplaceTokens(cp.Footer, func(templates.Token) string {
+			return cp.FooterName
+		}), ""
+	}
+	return cp
+}
+
+// FooterText is the footer of m laid out by esc: its text escaped as a whole, and the token of its user — which
+// survives the escaping of every markup — then the Mention that WithFooterIn chose, as it is.
+func (m Message) FooterText(esc func(string) string) string {
+	token := templates.MentionToken(templates.Token{Name: FooterUserToken})
+	s := templates.ReplaceTokens(m.Footer, func(tk templates.Token) string {
+		if tk.Name == FooterUserToken {
+			return token
+		}
+		return ""
+	})
+	return strings.ReplaceAll(esc(s), token, m.FooterMention)
 }
 
 // Heading is #N and the title of the Alert Group, linked to its page.
@@ -270,7 +334,7 @@ func Layout(m Message, markup Markup) string {
 	for _, n := range m.Notices {
 		add(esc(n))
 	}
-	add(esc(m.Footer))
+	add(m.FooterText(escape))
 	if len(m.Buttons) > 0 {
 		labels := make([]string, len(m.Buttons))
 		for i, b := range m.Buttons {
@@ -456,7 +520,7 @@ func layoutCommonMark(m Message) string {
 	for _, n := range m.Notices {
 		add(esc(n))
 	}
-	add(esc(m.Footer))
+	add(m.FooterText(EscapeCommonMark))
 	labels := make([]string, len(m.Buttons))
 	for i, b := range m.Buttons {
 		labels[i] = `\[` + esc(b.Label) + `\]`

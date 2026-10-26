@@ -2946,9 +2946,10 @@ func (l *live) mentionTargets(t *testing.T) {
 	}
 	l.round(t, l.a)
 	space := fmt.Sprintf("mattermost:%d", l.conn)
+	mention := func(u mentions.User) string { return "@" + u.Username }
 	if u := last(deliverytest.MethodUpdate); u.Loudness != groups.Quiet || u.Targets != nil ||
-		u.Message.FooterIn(space) != "Acknowledged by alice.mm" || u.Message.Footer != "Acknowledged by alice" ||
-		u.Message.FooterIn("telegram") != "Acknowledged by alice" {
+		u.Message.WithFooterIn(space, mention).FooterText(messages.EscapeMarkdown) != "Acknowledged by @alice.mm" ||
+		u.Message.Footer != "Acknowledged by alice" || u.Message.FooterIn("telegram") != "Acknowledged by alice" {
 		t.Fatalf("acknowledged: %q %q %v", u.Message.Footer, u.Message.FooterIn(space), u.Targets)
 	}
 	l.business.Advance(2 * time.Minute)

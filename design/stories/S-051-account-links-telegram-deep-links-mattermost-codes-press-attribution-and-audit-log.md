@@ -375,7 +375,10 @@ None.
   links made through the profile; if one does not hold, its fix belongs in this pull request.
 - The Reminder presses of C-18.AC-5 need the buttons of S-068, hence the dependency (D298).
 - How Telegram shows a user (D298): a Mention is a `tg://user?id=` link whose text is the display name, and the footer
-  names the user by the bare username, as S-042 renders them; C-18.AC-7 and C-12.FR-12 say so.
+  names the user by the bare username, as S-042 renders them; C-18.AC-7 and C-12.FR-12 say so. Revised after merge
+  (C-12.FR-12, journal D521): the footer now writes a user with an Account link as the messenger's Mention — `@username`
+  in Mattermost, a `tg://user?id=` link in Telegram, `<@U…>` in Slack, a marker in a new message to a bridge with
+  `native_mentions` — through `Message.FooterUsers` and `WithFooterIn`.
 
 ## Coverage
 

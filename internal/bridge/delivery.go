@@ -92,7 +92,8 @@ func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duratio
 }
 
 // Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call — their line before its body
-// and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space. Its outcome names
+// and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space, whose user is a
+// marker for a bridge with `native_mentions`. Its outcome names
 // the message, its link when the bridge sent a safe one, the Thread the answer named and whether the answer was
 // replayed; a truncated body is delivered.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
@@ -105,8 +106,9 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 		kind = gen.StormSummary
 	}
 	head, list := mentionsOf(c)
-	in := postInput(kind, t.ChannelID, content(withFooterIn(m, t.Conn.ID), i, head), c.Loudness == groups.Loud)
-	in.Mentions = list
+	m, list = withFooterMention(m, t.Conn.ID, i, list)
+	in := postInput(kind, t.ChannelID, content(m, i, head), c.Loudness == groups.Loud)
+	in.Mentions = marked(list, in.Body)
 	out, r := t.Conn.Client.PostMessage(ctx, c.Class, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {

@@ -363,6 +363,45 @@ func TestTextCut(t *testing.T) {
 	}
 }
 
+// TestFooterMention is C-12.FR-12: the footer names the Owner, who snoozed and who resolved by `@username` where they
+// have an Account link for the Connection — in an edit, which has no Mentions line, and in a new post alike, and when
+// the text is cut in its middle — and by their display name, escaped, without a link or with a username Mattermost
+// would not read, so that nothing but the link's username becomes a Mention.
+func TestFooterMention(t *testing.T) {
+	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	for _, sentence := range []string{"Acknowledged by %s", "Snoozed by %s until 2026-10-08 14:00 UTC",
+		"Resolved by %s"} {
+		m := rootMessage(messages.ColourAcknowledged)
+		m.Footer = fmt.Sprintf(sentence, "Bob_Smith")
+		m.Footers = map[string]string{"mattermost:3": fmt.Sprintf(sentence, token),
+			"mattermost:4": fmt.Sprintf(sentence, token)}
+		m.FooterUsers = map[string]messages.FooterUser{"mattermost:3": {Name: "Bob_Smith", Username: "bob.s"},
+			"mattermost:4": {Name: "Bob_Smith", Username: "bob <@here>"}}
+		for _, mentioned := range [][]string{nil, {"@channel"}} {
+			lines := strings.Split(rootPost(m, testLook(), mentioned).Props.Attachments[0].Text, "\n")
+			if got := lines[len(lines)-1]; got != fmt.Sprintf(sentence, "@bob.s") {
+				t.Errorf("footer %q with mentions %q", got, mentioned)
+			}
+		}
+		l := testLook()
+		l.limit = 240
+		long := m
+		long.Summary = strings.Repeat("s", 300)
+		if got := text(long, l, nil); utf8.RuneCountInString(got) > l.limit ||
+			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "@bob.s")) {
+			t.Errorf("a cut text = %q", got)
+		}
+		for _, space := range []string{"mattermost:4", "mattermost:5"} {
+			l := testLook()
+			l.space = space
+			lines := strings.Split(rootPost(m, l, nil).Props.Attachments[0].Text, "\n")
+			if got := lines[len(lines)-1]; got != fmt.Sprintf(sentence, `Bob\_Smith`) {
+				t.Errorf("footer in %s = %q", space, got)
+			}
+		}
+	}
+}
+
 // TestStormPost lays out a Storm summary, which has no heading, like a Root message: an empty message and one
 // attachment of the Storm colour, without a title, footer or buttons, whose text is the Mentions of a Loud post, then
 // its lines and the link, and whose fallback is its first line without Mentions; its Quiet edits have no Mentions line.

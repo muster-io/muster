@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 // destPublicID is the public_id of the Destination of the tests.
@@ -281,6 +282,92 @@ func TestUpdateEnvelope(t *testing.T) {
 	}
 	if env := decode(t, e.bridge.requests("edit")[1]); fmt.Sprint(env["buttons"]) != "[]" {
 		t.Fatalf("a resolved message has buttons: %v", env["buttons"])
+	}
+}
+
+// TestFooterMarker covers C-12.FR-12 and C-22.FR-16: in a new Root message for a bridge with `native_mentions`, Loud
+// or Quiet, the footer names a user linked through the Connection by a marker whose entry is in `mentions` — the entry
+// of the Mentions line when they are mentioned too — while an edit, which carries no Mentions, a bridge without
+// `native_mentions` and a user without a link there name them by the link's display name, or the Muster display name.
+func TestFooterMarker(t *testing.T) {
+	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	bob := mentions.User{Name: "Bob Smith", ExternalID: "u-bob", DisplayName: "Bob [B]"}
+	acked := func(space string, u mentions.User) messages.Message {
+		m := rootMessage(t, messages.ColourAcknowledged)
+		m.Footers[space] = "Acknowledged by " + token
+		m.FooterUsers = map[string]messages.FooterUser{space: {Name: u.Name, Username: u.Username,
+			ExternalID: u.ExternalID, DisplayName: u.DisplayName}}
+		return m
+	}
+	marker := `[@Bob \[B\]](muster-mention:m%d)`
+	e := newAdapterEnv(t)
+	loud := call(groups.Loud, "pub-"+destPublicID+"-1-1")
+	loud.Targets = []mentions.Target{{Kind: mentions.TargetUser, User: &mentions.User{Name: "Alice", ExternalID: "u-al",
+		DisplayName: "Alice"}}, {Kind: mentions.TargetUser, User: &bob}}
+	cases := []struct {
+		c        delivery.Call
+		m        messages.Message
+		footer   string
+		mentions string
+	}{
+		{loud, acked("bridge:1", bob), "Acknowledged by " + fmt.Sprintf(marker, 2),
+			"[map[display_name:Alice external_id:u-al ref:m1] map[display_name:Bob [B] external_id:u-bob ref:m2]]"},
+		{call(groups.Quiet, "pub-"+destPublicID+"-2-1"), acked("bridge:1", bob),
+			"Acknowledged by " + fmt.Sprintf(marker, 1), "[map[display_name:Bob [B] external_id:u-bob ref:m1]]"},
+		{call(groups.Quiet, "pub-"+destPublicID+"-3-1"), acked("bridge:1", mentions.User{Name: "Bob Smith"}),
+			"Acknowledged by Bob Smith", "[]"},
+		{call(groups.Quiet, "pub-"+destPublicID+"-4-1"), acked("bridge:9", bob), "Acknowledged by Bob Smith", "[]"},
+	}
+	for i, tc := range cases {
+		if o := e.adapter.Publish(t.Context(), tc.c, tc.m); o.Kind != delivery.OutcomeOK {
+			t.Fatalf("publish %d = %+v", i, o)
+		}
+		env := decode(t, e.bridge.requests("post")[i])
+		if body := env["body"].(string); !strings.HasSuffix(body, "\n\n"+tc.footer) ||
+			fmt.Sprint(env["mentions"]) != tc.mentions {
+			t.Errorf("post %d: body %q, mentions %v", i, body, env["mentions"])
+		}
+	}
+	if o := e.adapter.Update(t.Context(), call(groups.Quiet, ""), "m1", acked("bridge:1", bob)); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("update = %+v", o)
+	}
+	if env := decode(t, e.bridge.requests("edit")[0]); !strings.HasSuffix(env["body"].(string),
+		`Acknowledged by Bob \[B\]`) || env["mentions"] != nil {
+		t.Errorf("edit %v", env)
+	}
+	plain := newAdapterEnv(t, func(m map[string]any) { at(m, "capabilities")["native_mentions"] = false })
+	if o := plain.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-5-1"),
+		acked("bridge:1", bob)); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish without native_mentions = %+v", o)
+	}
+	if env := decode(t, plain.bridge.requests("post")[0]); !strings.HasSuffix(env["body"].(string),
+		`Acknowledged by Bob \[B\]`) || fmt.Sprint(env["mentions"]) != "[]" {
+		t.Errorf("without native_mentions %v", env)
+	}
+	// A body too short for its links and footer loses the footer's marker, and then its entry; the Mentions line of a
+	// Loud call keeps its own.
+	tiny := newAdapterEnv(t, set("limits", "max_body_length", MinBodyLength))
+	crowded := acked("bridge:1", bob)
+	for i := range 12 {
+		crowded.Links = append(crowded.Links, messages.Link{Text: fmt.Sprintf("Dashboard %02d", i),
+			URL: "https://grafana.example.org/d/" + strings.Repeat("x", 40)})
+	}
+	for n, c := range []delivery.Call{call(groups.Quiet, "pub-"+destPublicID+"-6-1"), loud} {
+		if o := tiny.adapter.Publish(t.Context(), c, crowded); o.Kind != delivery.OutcomeOK {
+			t.Fatalf("publish %d to a tiny body = %+v", n, o)
+		}
+		env := decode(t, tiny.bridge.requests("post")[n])
+		body := env["body"].(string)
+		want := "[]"
+		if n == 1 {
+			want = "[map[display_name:Alice external_id:u-al ref:m1] " +
+				"map[display_name:Bob [B] external_id:u-bob ref:m2]]"
+		}
+		if utf8.RuneCountInString(body) > MinBodyLength || strings.Contains(body, "Acknowledged by") ||
+			fmt.Sprint(env["mentions"]) != want {
+			t.Errorf("tiny body %d: mentions %v, body %q", n, env["mentions"], body)
+		}
 	}
 }
 

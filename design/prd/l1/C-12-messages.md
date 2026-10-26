@@ -106,11 +106,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
-- **C-12.FR-12** The footer shows a user by their messenger username, without `@`, when they have an Account link in
-  that messenger — through a Bridge or a Slack Connection by the link's display name (C-22.FR-16, C-24.FR-6) — otherwise
-  by their Muster display name. A Mention of a user with an Account link uses the messenger's own form — `@username` in
-  Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack — and of a user
-  without one the display name as text, which notifies nobody (checked in C-18.AC-7).
+- **C-12.FR-12** A Mention of a user with an Account link in the Destination's identity space uses the messenger's own
+  form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram, `<@U…>` in Slack,
+  a Mention marker through a Bridge (C-22.FR-16) — and of a user without one the display name as text, which notifies
+  nobody. The footer names its user — the Owner ("Acknowledged by"), who snoozed ("Snoozed by") and who resolved
+  ("Resolved by") — the same way: as that Mention when they have such a link, always, in edits and in new Quiet or
+  Loud messages alike, so that the messenger shows their name and profile; a new message with the footer, a republish
+  included, may therefore notify them. Without a link, and where the messenger cannot carry the Mention — an edit
+  through a Bridge, which carries no Mentions, or a bridge without `native_mentions` — the footer names them as text:
+  the link's display name through a Bridge, otherwise their Muster display name. Shortening (FR-11) keeps the footer
+  with its Mention where it fits, otherwise with their name as text (checked in C-18.AC-7).
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 

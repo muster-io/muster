@@ -482,11 +482,14 @@ attachment notifies (F-056, F-113); and that after the Root message is deleted i
 - `operator_attention`: the optional manual check against the operator's test Mattermost server.
 - The load test is the first place where NFR-1 and NFR-2 can be measured end to end; the nightly job fails on a breach
   from this story on.
-- The footer names a user by their Mattermost username without `@` (S-037), on the assumption that a bare username
-  never notifies; no fact in `design/facts.md` confirms it. This story verifies it against the real Mattermost on the
-  epsilon stand — a root post and a reply whose footer carries the bare username of a user mentioned nowhere else,
-  watched in that user's client — records the result as a new `F-NNN` under Mattermost in `design/facts.md`, and, if a
-  bare username does notify, changes the footer so that it no longer does (`internal/mattermost/layout.go`).
+- The footer names a user by their Mattermost username without `@` (S-037), on the assumption that a bare username never
+  notifies; no fact in `design/facts.md` confirms it. This story verifies it against the real Mattermost on the epsilon
+  stand — a root post and a reply whose footer carries the bare username of a user mentioned nowhere else, watched in
+  that user's client — records the result as a new `F-NNN` under Mattermost in `design/facts.md`, and, if a bare
+  username does notify, changes the footer so that it no longer does (`internal/mattermost/layout.go`). Revised after
+  merge (C-12.FR-12, journal D521): the footer now writes a user with an Account link as the messenger's Mention —
+  `@username` in Mattermost, a `tg://user?id=` link in Telegram, `<@U…>` in Slack, a marker in a new message to a bridge
+  with `native_mentions` — through `Message.FooterUsers` and `WithFooterIn`.
 - The full load profile against `muster dev` on a developer workstation (macOS, PostgreSQL in Docker) fails NFR-2:
   Snapshot processing of one Integration takes about 35 ms each, so 50 webhooks per second build a backlog, and the
   delivery latency, counted from receipt, reaches about 58 s at p95 while delivery itself adds about 6 ms. The

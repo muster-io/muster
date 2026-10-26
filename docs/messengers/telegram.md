@@ -169,9 +169,11 @@ Telegram notifies them about the copy of the post in the group, and that copy ca
 
 - The Root message is a regular message in Telegram's HTML: the status and `#N` with the title, linked to the Alert
   Group page, the labels in an expandable quote, the summary, one line per Alert — never a table, which phones cannot
-  show — the link to Muster and the footer. Alert data are escaped, so a label value cannot format the message or
-  mention anyone. A message is at most 4,096 characters: a long one drops its Alert lines first, then the label
-  sections, but always keeps its title, status, footer, buttons and link to Muster.
+  show — the link to Muster and the footer. The footer — "Acknowledged by", "Snoozed by", "Resolved by" — names a person
+  with a Telegram Account link by a link to their account with their Muster name, as a Mention does, and anyone else by
+  their name as text. Alert data are escaped, so a label value cannot format the message or mention anyone. A message is
+  at most 4,096 characters: a long one drops its Alert lines first, then the label sections, but always keeps its title,
+  status, footer, buttons and link to Muster.
 - Every edit of the Root message carries all its buttons again, because Telegram removes the buttons of a message
   edited without them. The bot may edit its own messages at any age.
 - Muster never replies inside the channel: a reply there would be a new post that notifies every subscriber.

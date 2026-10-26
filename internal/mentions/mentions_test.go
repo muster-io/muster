@@ -36,7 +36,7 @@ type fakeQueries struct {
 	users    []user
 	settings map[int64][]byte
 	owners   map[int64]dbgen.GetEventOwnersRow
-	footer   []dbgen.ListFooterUsernamesRow
+	footer   []dbgen.ListFooterUsersRow
 	fail     map[string]error
 	reads    []string
 }
@@ -99,9 +99,9 @@ func (f *fakeQueries) ListLiveUserPublicIDs(_ context.Context, arg dbgen.ListLiv
 	return out, nil
 }
 
-func (f *fakeQueries) ListFooterUsernames(context.Context, dbgen.ListFooterUsernamesParams) (
-	[]dbgen.ListFooterUsernamesRow, error) {
-	return f.footer, f.fail["ListFooterUsernames"]
+func (f *fakeQueries) ListFooterUsers(context.Context, dbgen.ListFooterUsersParams) ([]dbgen.ListFooterUsersRow,
+	error) {
+	return f.footer, f.fail["ListFooterUsers"]
 }
 
 const (
@@ -366,9 +366,10 @@ func TestResolve(t *testing.T) {
 }
 
 // TestNames (C-12.FR-12): a user is shown by the username of their Account link, else by the display name; the
-// footer's names come by identity space, a Bridge link's display name before its username, a Slack link's display name
-// alone, each on one line, and a blank one left out, so that the footer names the User by their Muster display name
-// (C-22.FR-16, C-24.FR-6); identity spaces follow the Destination type and Connection.
+// footer's user comes by identity space with the link's username, user id and display name on one line, wherever
+// its messenger can mention them — a Mattermost link only with a username, any other with a user id — and is left out
+// elsewhere, so that the footer names the User by their Muster display name (C-22.FR-16, C-24.FR-6); identity spaces
+// follow the Destination type and Connection.
 func TestNames(t *testing.T) {
 	if (User{Name: "Alice", Username: "alice"}).Display() != "alice" || (User{Name: "Alice"}).Display() != "Alice" {
 		t.Error("display names")
@@ -382,31 +383,39 @@ func TestNames(t *testing.T) {
 	}
 	f := newFake()
 	s := newService(f)
-	if got, err := s.FooterNames(t.Context(), nil, 5); err != nil || got != nil {
+	if got, err := s.FooterUsers(t.Context(), nil, 5); err != nil || got != nil {
 		t.Errorf("no links: %v %v", got, err)
 	}
-	f.footer = []dbgen.ListFooterUsernamesRow{
-		{IdentitySpace: "bridge:4", Messenger: TypeBridge, Username: "alice@example.org", DisplayName: "Alice Smith"},
-		{IdentitySpace: "bridge:5", Messenger: TypeBridge, DisplayName: " Alice\n\t Smith\u0085\r\n"},
-		{IdentitySpace: "bridge:6", Messenger: TypeBridge, Username: "alice@example.org", DisplayName: " \n "},
-		{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\n"},
-		{IdentitySpace: "mattermost:3", Messenger: TypeMattermost, Username: "alice.mm", DisplayName: "Alice Smith"},
-		{IdentitySpace: "mattermost:8", Messenger: TypeMattermost},
-		{IdentitySpace: "slack:9", Messenger: TypeSlack, Username: "alice", DisplayName: " Alice\n Smith "},
-		{IdentitySpace: "slack:10", Messenger: TypeSlack, Username: "alice"},
-		{IdentitySpace: "telegram", Messenger: TypeTelegram, Username: "alice_tg"}}
-	got, err := s.FooterNames(t.Context(), nil, 5)
-	if want := map[string]string{"bridge:4": "Alice Smith", "bridge:5": "Alice Smith", "bridge:6": "alice@example.org",
-		"mattermost:3": "alice.mm", "slack:9": "Alice Smith", "telegram": "alice_tg"}; err != nil ||
+	row := func(space, messenger, username, external, display string) dbgen.ListFooterUsersRow {
+		return dbgen.ListFooterUsersRow{IdentitySpace: space, Messenger: messenger, Username: username,
+			ExternalID: external, DisplayName: display, Name: "Alice Smith"}
+	}
+	f.footer = []dbgen.ListFooterUsersRow{
+		row("bridge:4", TypeBridge, "alice@example.org", "u-alice", "Alice Smith"),
+		row("bridge:5", TypeBridge, "", "u-alice", " Alice\n\t Smith\u0085\r\n"),
+		row("bridge:7", TypeBridge, "", "", "Alice"),
+		row("mattermost:3", TypeMattermost, " alice.mm\n", "mm-alice", "Alice Smith"),
+		row("mattermost:8", TypeMattermost, " ", "mm-alice", ""),
+		row("slack:9", TypeSlack, "alice", "U0FAKEALICE", " Alice\n Smith "),
+		row("telegram", TypeTelegram, "", "7001", "")}
+	got, err := s.FooterUsers(t.Context(), nil, 5)
+	user := func(username, external, display string) User {
+		return User{Name: "Alice Smith", Username: username, ExternalID: external, DisplayName: display}
+	}
+	// Only what each messenger's Mention uses: a Mattermost username, a Telegram or Slack user id, and a Bridge link's
+	// user id, display name and username.
+	if want := map[string]User{"bridge:4": user("alice@example.org", "u-alice", "Alice Smith"),
+		"bridge:5": user("", "u-alice", "Alice Smith"), "mattermost:3": user("alice.mm", "", ""),
+		"slack:9": user("", "U0FAKEALICE", ""), "telegram": user("", "7001", "")}; err != nil ||
 		!maps.Equal(got, want) {
-		t.Errorf("footer names %q %v, want %q", got, err, want)
+		t.Errorf("footer users %+v %v, want %+v", got, err, want)
 	}
-	f.footer = []dbgen.ListFooterUsernamesRow{{IdentitySpace: "bridge:7", Messenger: TypeBridge, DisplayName: "\t"}}
-	if got, err := s.FooterNames(t.Context(), nil, 5); err != nil || got != nil {
-		t.Errorf("only blank names: %v %v", got, err)
+	f.footer = []dbgen.ListFooterUsersRow{row("mattermost:8", TypeMattermost, "\t", "mm-alice", "")}
+	if got, err := s.FooterUsers(t.Context(), nil, 5); err != nil || got != nil {
+		t.Errorf("no link to mention by: %v %v", got, err)
 	}
-	f.fail["ListFooterUsernames"] = errors.New("boom")
-	if _, err := s.FooterNames(t.Context(), nil, 5); err == nil {
+	f.fail["ListFooterUsers"] = errors.New("boom")
+	if _, err := s.FooterUsers(t.Context(), nil, 5); err == nil {
 		t.Error("a failing read")
 	}
 }

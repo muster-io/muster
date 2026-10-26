@@ -20,7 +20,8 @@ import (
 // The layout of posts (C-13.FR-3, C-12.FR-1): a Root message is a post whose message is empty, with one attachment
 // coloured by status whose title, #N and the title, links to the Alert Group page and whose text holds, on a Loud post,
 // its Mentions as its first line, then the sections 3 to 8 of C-12.FR-1, the line of links that starts with "Open in
-// Muster", the notices and the footer, as its last line; its buttons follow. A Storm summary, which has no heading, is
+// Muster", the notices and the footer, as its last line, a user with an Account link for the Connection written
+// as `@username` (C-12.FR-12); its buttons follow. A Storm summary, which has no heading, is
 // laid out the same way without a title, in the Storm colour. A user's Mention, `@channel`, `@here` and `@all` in the
 // attachment notify (F-056, F-113); an email of such a post shows no content (F-056), while push and desktop
 // notifications show the attachment's fallback, the summary line without Mentions, which the channel does not draw
@@ -59,8 +60,9 @@ var name = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // zeroWidthSpace follows the `@` of a Mention that must not notify.
 const zeroWidthSpace = "\u200b"
 
-// look is how messages are laid out for one Destination: the markup, the identity space whose username the footer
-// names a user by, the callback address of the buttons, the attachment's footer and icon, and the length limit.
+// look is how messages are laid out for one Destination: the markup, the identity space whose Account links the
+// footer mentions a user by, the callback address of the buttons, the attachment's footer and icon, and the length
+// limit.
 type look struct {
 	markup   messages.Markup
 	space    string
@@ -76,6 +78,7 @@ type look struct {
 // counted, is shortened first (C-12.FR-11). The attachment's fallback, which push and desktop notifications show and
 // the channel does not (F-115), is the summary line, without Mentions.
 func rootPost(m messages.Message, l look, mentions []string) post {
+	m = l.withFooter(m)
 	limit := l.limit
 	if line := strings.Join(mentions, " "); line != "" {
 		limit -= utf8.RuneCountInString(line) + 1
@@ -106,7 +109,7 @@ func fallback(m messages.Message) string {
 // replyPost lays out a Thread reply: its Mentions first, then its text. A reply with buttons — a Reminder's "Still on
 // it" and "Unack" — keeps its Mentions in its message and has its text and buttons in one attachment.
 func replyPost(m messages.Message, l look, mentions []string) post {
-	m, _ = messages.Shorten(m, l.limit, l.markup)
+	m, _ = messages.Shorten(l.withFooter(m), l.limit, l.markup)
 	line := strings.Join(mentions, " ")
 	if len(m.Buttons) == 0 {
 		return post{Message: cutEnd(joinLines(line, text(m, l, nil)), l.limit)}
@@ -117,12 +120,12 @@ func replyPost(m messages.Message, l look, mentions []string) post {
 
 // text is the text of m without its heading and buttons, as messages.Layout lays it out for the markup, after the
 // line of mentions when there is one, with the footer of the Destination's identity space as its last line and the
-// trusted Mention tokens as text that notifies nobody.
+// trusted Mention tokens of template output as text that notifies nobody.
 // A text still longer than the limit loses its middle, so that the Mentions, the line of links, the notices and the
 // footer stay; a Mentions line too long for that loses whole Mentions from its end.
 func text(m messages.Message, l look, mentions []string) string {
-	cp := m
-	cp.Heading, cp.Buttons, cp.Footer, cp.Footers = nil, nil, m.FooterIn(l.space), nil
+	cp := l.withFooter(m)
+	cp.Heading, cp.Buttons = nil, nil
 	if m.Body != nil {
 		cp.Body = &messages.Body{Text: templates.ReplaceTokens(m.Body.Text, tokenText), Markup: m.Body.Markup}
 	}
@@ -140,8 +143,9 @@ func text(m messages.Message, l look, mentions []string) string {
 	if utf8.RuneCountInString(full) <= l.limit {
 		return full
 	}
-	tail := messages.Layout(messages.Message{Links: cp.Links, Notices: cp.Notices, Footer: cp.Footer}, l.markup)
-	cp.Links, cp.Notices, cp.Footer = nil, nil, ""
+	tail := messages.Layout(messages.Message{Links: cp.Links, Notices: cp.Notices, Footer: cp.Footer,
+		FooterMention: cp.FooterMention}, l.markup)
+	cp.Links, cp.Notices, cp.Footer, cp.FooterMention = nil, nil, "", ""
 	// The head keeps limit - tail - 2 characters (cutMiddle): the Mentions line and its new line fit in it whole.
 	line := fitMentions(mentions, l.limit-utf8.RuneCountInString(tail)-3)
 	return cutMiddle(joinLines(line, messages.Layout(cp, l.markup)), tail, l.limit)
@@ -214,12 +218,8 @@ func mentionText(ts []mentions.Target, tokens []templates.Token, markup messages
 				add("@" + t.Group)
 			}
 		case mentions.TargetUser:
-			switch {
-			case t.User == nil:
-			case name.MatchString(t.User.Username):
-				add("@" + t.User.Username)
-			default:
-				add(messages.Escaper(markup)(messages.Value(t.User.Name)))
+			if t.User != nil {
+				add(userMention(*t.User, markup))
 			}
 		}
 	}
@@ -234,6 +234,21 @@ func mentionText(ts []mentions.Target, tokens []templates.Token, markup messages
 		}
 	}
 	return out
+}
+
+// userMention is a User in Mattermost's syntax: `@` and the username of their Account link, otherwise their display
+// name as text, escaped for markup, which notifies nobody (C-12.FR-8, FR-12).
+func userMention(u mentions.User, markup messages.Markup) string {
+	if name.MatchString(u.Username) {
+		return "@" + u.Username
+	}
+	return messages.Escaper(markup)(messages.Value(u.Name))
+}
+
+// withFooter is m with the footer of the Destination's identity space, its user written as their Mention
+// (C-12.FR-12).
+func (l look) withFooter(m messages.Message) messages.Message {
+	return m.WithFooterIn(l.space, func(u mentions.User) string { return userMention(u, l.markup) })
 }
 
 // actionStyles are the styles of attachment actions by style hint (F-068); a neutral button has no style and stays

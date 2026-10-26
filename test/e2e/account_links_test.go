@@ -607,6 +607,10 @@ func TestAccountLinks(t *testing.T) {
 		t.Errorf("bob's ack in mattermost %s", res.Answer)
 	}
 	eventually(t, "bob's acknowledgement", func() bool { s, _ := e.ownerOf(g); return s == "acknowledged" })
+	// C-12.FR-12: the footer of the Mattermost Root message mentions him by his linked username.
+	eventually(t, "the mattermost footer mentioning bob", func() bool {
+		return strings.HasSuffix(e.root(e.number(g)).attachment(t).Text, "\nAcknowledged by @bob")
+	})
 	if x := e.timeline(g, "")[0]; x.Event != "acknowledged" || x.Actor.Transport != "mattermost" || x.Actor.Name != "bob" {
 		t.Errorf("timeline %+v", x)
 	}
@@ -668,8 +672,8 @@ func TestAccountLinks(t *testing.T) {
 	}
 	e.api.json(http.MethodPost, "/api/v1/users/"+bob.id+"/enable", "", http.StatusOK)
 
-	// C-18.AC-7, C-12.FR-12: Alice is mentioned by a tg://user link with her display name and named alice_t in the
-	// Telegram footer, and Alice Smith in Mattermost, where she has no link.
+	// C-18.AC-7, C-12.FR-12: Alice is mentioned by a tg://user link with her display name, in the Telegram footer as
+	// well, and named Alice Smith in Mattermost, where she has no link.
 	d := e.api.do(http.MethodGet, "/api/v1/destinations/"+e.tgDest, "")
 	var dest map[string]any
 	decode(t, d, &dest)
@@ -692,11 +696,10 @@ func TestAccountLinks(t *testing.T) {
 	}
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g2+"/acknowledge", "", http.StatusOK)
 	e.settle()
-	footer := regexp.MustCompile(`Acknowledged by alice_t($|[^A-Za-z0-9_])`)
 	eventually(t, "the telegram footer", func() bool {
 		for _, m := range e.messages(faketelegram.ChannelID) {
 			if m.ID == post2 {
-				return footer.MatchString(m.Text)
+				return strings.HasSuffix(m.Text, "\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`)
 			}
 		}
 		return false
@@ -1052,6 +1055,23 @@ func TestBridgeAccountLinks(t *testing.T) {
 		edits := b.posted("Mention")[0].Edits
 		return len(edits) > 0 && strings.HasSuffix(edits[len(edits)-1].Body, "Acknowledged by Alice Smith")
 	})
+	// C-12.FR-12, C-22.FR-16: once the message was deleted — the bridge reports it, as it declares deletion_events —
+	// the Quiet new Root message names alice in its footer by a marker with its entry, since the bridge declares
+	// native_mentions; its edit to snoozed carries no Mentions and names her by the link's display name.
+	b.settled()
+	b.fake(http.MethodDelete, b.fb+"/messages/"+b.posted("Mention")[0].ID, "")
+	again := b.waitPosted("Mention", 2)[1]
+	if env := again.Envelope; env.Notify ||
+		!strings.HasSuffix(env.Body, "Acknowledged by [@Alice Smith](muster-mention:m1)") ||
+		mustJSON(env.Mentions) != `[{"display_name":"Alice Smith","external_id":"u-alice","ref":"m1"}]` {
+		t.Errorf("the republished Root message: notify %v, mentions %s, body %q", env.Notify, mustJSON(env.Mentions),
+			env.Body)
+	}
+	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/snooze", `{"no_end":true}`, http.StatusOK)
+	eventually(t, "the edit naming alice as text", func() bool {
+		edits := b.posted("Mention")[1].Edits
+		return len(edits) > 0 && strings.HasSuffix(edits[len(edits)-1].Body, "Snoozed by Alice Smith with no end")
+	})
 
 	// Secrets (lint 5): no link token or code reaches the log.
 	out := r.Output()
@@ -1370,8 +1390,8 @@ func TestSlackAccountLinks(t *testing.T) {
 		t.Errorf("a Mention in the attachment %s", root.Message.Attachments)
 	}
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/acknowledge", "", http.StatusOK)
-	eventually(t, "the footer naming alice", func() bool {
-		return strings.HasSuffix(s.message(root.TS).body(t), "Acknowledged by Alice Smith")
+	eventually(t, "the footer mentioning alice", func() bool {
+		return strings.HasSuffix(s.message(root.TS).body(t), "Acknowledged by <@"+fakeslack.UserAlice+">")
 	})
 
 	// C-24.AC-14: a press of Alice's account runs as her; once she unlinked it, a press is answered "not linked".

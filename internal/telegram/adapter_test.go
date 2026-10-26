@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 const groupPage = "http://localhost:8080/alert-groups/AG0000000000A1"
@@ -324,6 +325,59 @@ func TestStylesReachTheServer(t *testing.T) {
 	}
 	if got := styledKeyboard(t, msgs[1].ReplyMarkup); got != "[Still on it:primary, Unack:-]" {
 		t.Errorf("reminder: %s", got)
+	}
+}
+
+// TestFooterMention is C-12.FR-12 and C-18.AC-7: the footer names the Owner, who snoozed and who resolved by a
+// `tg://user` link with their display name where they have a Telegram Account link — in an edit, which mentions nobody
+// else, and in a message shortened to its heading, links and footer — and by their display name as text in plain text,
+// without a link, or with a user id that is not Telegram's.
+func TestFooterMention(t *testing.T) {
+	e := newAdapter(t)
+	o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring))
+	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	link := `<a href="tg://user?id=42">Bob &lt;B&gt;</a>`
+	for _, sentence := range []string{"Acknowledged by %s", "Snoozed by %s with no end", "Resolved by %s"} {
+		m := root(messages.ColourAcknowledged)
+		m.Footer = fmt.Sprintf(sentence, messages.Value("Bob <B>"))
+		m.Footers = map[string]string{"telegram": fmt.Sprintf(sentence, token)}
+		m.FooterUsers = map[string]messages.FooterUser{"telegram": {Name: "Bob <B>", ExternalID: "42"}}
+		if u := e.adapter.Update(t.Context(), call(1), o.MessageID, m); u.Kind != delivery.OutcomeOK {
+			t.Fatalf("update = %+v", u)
+		}
+		if got := only(t, e.fake).Text; !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)) {
+			t.Errorf("edited footer:\n%s", got)
+		}
+		huge := m
+		huge.Heading = &messages.Heading{Number: 7, Title: strings.Repeat("Ü", 5000), URL: groupPage}
+		if got := fit(huge, writer{}, "", LengthLimit); length(got) > LengthLimit ||
+			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)) {
+			t.Errorf("shortened footer: %q", got[max(len(got)-200, 0):])
+		}
+		// About 2 KB of links and a long Mentions line leave only the heading, the links and the footer: wherever the
+		// footer is kept it names the user, never "by " and nobody.
+		crowded := m
+		crowded.Links = nil
+		for i := range 20 {
+			crowded.Links = append(crowded.Links, messages.Link{Text: fmt.Sprintf("Dashboard %02d", i),
+				URL: "https://grafana.example.org/d/" + strings.Repeat("x", 80)})
+		}
+		got := fit(crowded, writer{}, strings.Repeat("m", 2100), LengthLimit)
+		if length(got) > LengthLimit || strings.Contains(got, fmt.Sprintf(sentence, "")+"\n") ||
+			strings.HasSuffix(got, fmt.Sprintf(strings.TrimSuffix(sentence, " with no end"), "")) {
+			t.Errorf("a crowded message: %q", got[max(len(got)-200, 0):])
+		}
+		if got := (writer{plain: true}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob <B>")) {
+			t.Errorf("plain footer:\n%s", got)
+		}
+		m.FooterUsers["telegram"] = messages.FooterUser{Name: "Bob <B>", ExternalID: "u-42"}
+		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")) {
+			t.Errorf("footer without a Telegram user id:\n%s", got)
+		}
+		delete(m.Footers, "telegram")
+		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")) {
+			t.Errorf("footer without a link:\n%s", got)
+		}
 	}
 }
 

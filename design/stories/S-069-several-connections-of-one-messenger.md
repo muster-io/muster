@@ -322,7 +322,8 @@ None. The two questions of the first draft were settled by the maintainer (D308)
     Thread; `withhold_copies_from: [234567]` on a new Alert Group: only `tg-b`'s Thread "Thread not attached" after
     `telegram.copy_wait` (development clock), attached after a comment under post B; the copy of post A deleted: `tg-a`
     loses its Thread, `tg-b` keeps it; Account links and presses of the acceptance statements; Alice linked through
-    `Dev Telegram` only: bot B's footer names `alice_t` and its Loud Mention is `tg://user?id=…`; a press on one bot's
+    `Dev Telegram` only: bot B's footer names her by a `tg://user?id=…` link with her display name, which replaced
+    `alice_t` when C-12.FR-12 was revised (journal D521), and its Loud Mention is the same link; a press on one bot's
     post or Reminder that reaches the other bot is not verified — the button data name the Alert Group and the Command,
     not the Destination, so bot A's data on bot B's Reminder of the same Alert Group would be a valid press, and the
     binding to a Connection is the Connection that receives the press; the Destination check of `tg-b-alerts` fails

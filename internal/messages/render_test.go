@@ -732,17 +732,19 @@ func (f *fakeLinks) RenderURL(_ context.Context, _ links.DBTX, source string, in
 	return source + "|" + in.Data.CommonLabels["cluster"], f.fail
 }
 
-// fakeNames name the footer's user by a username in one identity space.
+// fakeNames are the footer's user with a Mattermost and a Telegram Account link.
 type fakeNames struct{ fail error }
 
-func (f fakeNames) FooterNames(context.Context, mentions.DBTX, int64) (map[string]string, error) {
-	return map[string]string{"mattermost:3": "alice.mm", "telegram": "Alice"}, f.fail
+func (f fakeNames) FooterUsers(context.Context, mentions.DBTX, int64) (map[string]mentions.User, error) {
+	return map[string]mentions.User{"mattermost:3": {Name: "Alice Smith", Username: "alice.mm"},
+		"telegram": {Name: "Alice Smith", ExternalID: "7001"}}, f.fail
 }
 
 // TestLinksMentionsAndFooters (C-12.FR-1 item 9, C-12.FR-7, C-12.FR-8, C-12.FR-12): the links follow "Open in
 // Muster" on one line, a rule's by its neutral name and the others in the message's language; a literal @all of a
-// template is neutralized while `mention` leaves a token the layout shows as @all; the footer names the user by the
-// username of each identity space, the display name elsewhere; a link_rule preview renders the URL template.
+// template is neutralized while `mention` leaves a token the layout shows as @all; the footer of each identity space
+// where the user has an Account link carries the token of the user, which its adapter writes as a Mention, and the
+// display name elsewhere; a link_rule preview renders the URL template.
 func TestLinksMentionsAndFooters(t *testing.T) {
 	ctx := t.Context()
 	f := &fakeQueries{group: source("acknowledged", 2)}
@@ -765,10 +767,17 @@ func TestLinksMentionsAndFooters(t *testing.T) {
 		m.Links[3].Text != "Source" {
 		t.Fatalf("links %+v", m.Links)
 	}
-	if m.Footer != "Acknowledged by Alice Smith" || m.FooterIn("mattermost:3") != "Acknowledged by alice.mm" ||
-		m.FooterIn("telegram") != "Acknowledged by Alice" || m.FooterIn("mattermost:4") != m.Footer ||
-		len(m.Footers) != 2 {
-		t.Errorf("footers %q %v", m.Footer, m.Footers)
+	userToken := templates.MentionToken(templates.Token{Name: FooterUserToken})
+	if m.Footer != "Acknowledged by Alice Smith" || m.FooterIn("mattermost:3") != "Acknowledged by "+userToken ||
+		m.FooterIn("telegram") != "Acknowledged by "+userToken || m.FooterIn("mattermost:4") != m.Footer ||
+		len(m.Footers) != 2 || m.FooterUsers["mattermost:3"].Username != "alice.mm" ||
+		m.FooterUsers["telegram"].ExternalID != "7001" {
+		t.Errorf("footers %q %v %v", m.Footer, m.Footers, m.FooterUsers)
+	}
+	mention := func(u mentions.User) string { return "@" + u.Username }
+	if f := m.WithFooterIn("mattermost:3", mention); Layout(f, MarkupMarkdown) == Layout(m, MarkupMarkdown) ||
+		!strings.Contains(Layout(f, MarkupMarkdown), "\nAcknowledged by @alice.mm\n[Unack] [Resolve]") {
+		t.Errorf("mattermost footer\n%s", Layout(f, MarkupMarkdown))
 	}
 	if tokens := templates.Tokens(m.Body.Text); len(tokens) != 3 || tokens[0].Name != "all" ||
 		tokens[1].Group != "db-oncall" || tokens[2].Name != "owner" {
