@@ -358,6 +358,37 @@ func TestPoolSize(t *testing.T) {
 	}
 }
 
+// TestSessionWithoutPoolSettings: the pool_* parameters of a session URL never reach PostgreSQL, which refuses the
+// connection over them, while the main pool still takes its size from its own URL.
+func TestSessionWithoutPoolSettings(t *testing.T) {
+	const pooled = "postgres://muster@127.0.0.1:5432/muster?sslmode=disable&application_name=muster" +
+		"&pool_max_conns=5&pool_min_conns=1"
+	db := config.Database{URL: pooled}
+	d, err := Open(t.Context(), db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for name := range d.sessionConfig.RuntimeParams {
+		if strings.HasPrefix(name, "pool_") {
+			t.Errorf("the session connection sends %s", name)
+		}
+	}
+	if d.sessionConfig.RuntimeParams["application_name"] != "muster" {
+		t.Errorf("run-time parameters %v, want application_name kept", d.sessionConfig.RuntimeParams)
+	}
+	if got := d.Pool.Config().MaxConns; got != 5 {
+		t.Errorf("the main pool has %d connections, want 5", got)
+	}
+	parsed, err := pgx.ParseConfig(pooled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := parsed.RuntimeParams["pool_max_conns"]; !ok {
+		t.Error("pgx no longer keeps pool_max_conns as a run-time parameter; withoutPoolSettings may be obsolete")
+	}
+}
+
 // TestIgnoresPGEnvironment sets the PG* variables pgx reads, class by class: none may change the connections, which
 // come only from the URL (ADR-0010).
 func TestIgnoresPGEnvironment(t *testing.T) {

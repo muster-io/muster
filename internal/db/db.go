@@ -86,6 +86,7 @@ func Open(ctx context.Context, main, session config.Database) (*DB, error) {
 		return nil, fmt.Errorf("the session database connection: %w", err)
 	}
 	onlyFromURL(sessionConfig, session.URL)
+	withoutPoolSettings(sessionConfig)
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("the main database connection: %w", err)
@@ -122,6 +123,17 @@ func onlyFromURL(c *pgx.ConnConfig, raw logging.Secret) {
 	c.Password, _ = u.User.Password()
 	if c.ConnectTimeout == 0 {
 		c.ConnectTimeout = connectTimeout
+	}
+}
+
+// withoutPoolSettings drops the pool_* parameters of a session connection's URL, which pgx.ParseConfig keeps as
+// run-time parameters: a session connection has no pool, and PostgreSQL refuses the connection over an unknown
+// parameter.
+func withoutPoolSettings(c *pgx.ConnConfig) {
+	for name := range c.RuntimeParams {
+		if strings.HasPrefix(name, "pool_") {
+			delete(c.RuntimeParams, name)
+		}
 	}
 }
 
