@@ -554,7 +554,7 @@ show the links.
 
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
-| [S-166](S-166-shared-fixtures-of-destination-and-connection-reads-in-the-web-tests.md) | C-28 | Shared fixtures of Destination and Connection reads in the web tests | infra | — |
+| [S-166](S-166-shared-fixtures-of-destination-and-connection-reads-in-the-web-tests.md) | C-28 | Shared fixtures of Destination, Connection and Alert Group reads in the web tests | infra | — |
 | [S-111](S-111-minimum-severity-and-urgent-as-critical.md) | C-26 | Minimum severity, Urgent as critical, and the expand step of the urgent mark and of "critical is Urgent" (BE) | be | — |
 | [S-162](S-162-the-route-profile-paging.md) | C-26 | The Route profile Paging, formerly On-call, with the id paging in the API, the UI and every client (BE) | be | S-111 |
 | [S-112](S-112-minimum-severity-on-the-route-form.md) | C-26 | Minimum severity on the Route form, and the urgent mark and "critical is Urgent" taken off the pages (FE) | fe | S-111, S-162 |
@@ -575,7 +575,7 @@ show the links.
 | [S-126](S-126-layout-in-the-bridge-protocol-the-bridge-adapter-and-the-fake-bridge.md) | C-29 | The structured layout in the Bridge protocol, the Bridge adapter, muster bridge check and the fake bridge (BE) | be | S-125 |
 | [S-127](S-127-go-bridge-library-types-for-layout.md) | C-29 | Types for the message layout in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-126 |
 | [S-128](S-128-python-bridge-library-types-for-layout.md) | C-29 | Types for the message layout in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-126 |
-| [S-129](S-129-labels-in-the-message-and-the-preview-for-every-markup.md) | C-29 | "Labels in the message" on the Route form, and the preview of the compact layout for every markup (FE) | fe | S-126 |
+| [S-129](S-129-labels-in-the-message-and-the-preview-for-every-markup.md) | C-29 | "Labels in the message" on the Route form, and the preview of the compact layout for every markup (FE) | fe | S-123, S-126 |
 | [S-130](S-130-documentation-message-layout-per-messenger-and-layout-for-bridge-authors.md) | C-29 | Documentation: the message layout in each messenger, "Labels in the message", and layout for bridge authors | docs | S-129, S-127, S-128 |
 
 ### L2 On call
@@ -613,7 +613,7 @@ show the links.
 | [S-151](S-151-documentation-connecting-a-notification-gateway-and-writing-a-gateway-bridge.md) | C-30 | Documentation: connecting a Notification gateway, confirming a contact and writing a gateway bridge | docs | S-130, S-146, S-147, S-150 |
 | [S-152](S-152-notification-rules-their-defaults-and-the-switch.md) | C-31 | Notification rules, the Organization's defaults, the four states and the switch that adds a call (BE) | be | S-167 |
 | [S-153](S-153-notification-rules-in-the-profile-on-a-users-page-and-the-organizations-defaults.md) | C-31 | Notification rules in the profile with the switch, on a User's page, and the Organization's defaults (FE) | fe | S-150, S-152 |
-| [S-154](S-154-escalation-chains-and-steps-and-naming-them-on-routes-and-teams.md) | C-32 | Escalation chains and their steps, naming them on Routes and Teams with Severity conditions, and the refusals that protect them (BE) | be | S-140, S-145 |
+| [S-154](S-154-escalation-chains-and-steps-and-naming-them-on-routes-and-teams.md) | C-32 | Escalation chains and their steps, naming them on Routes and Teams with Severity conditions, and the refusals that protect them (BE) | be | S-140, S-148, S-152 |
 | [S-169](S-169-the-lifecycle-of-escalation-chains-with-the-ack-timeout-unclaimed-and-skipped-steps.md) | C-32 | The lifecycle of Escalation chains on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps (BE) | be | S-154 |
 | [S-155](S-155-pages-by-mention-in-the-threads-of-their-chains-notification-rule-runs-and-undelivered-pages.md) | C-32 | Pages by Mention in the Threads of their own chains, the runs of Notification rules, and undelivered Pages (BE) | be | S-152, S-164, S-165, S-169 |
 | [S-168](S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md) | C-32 | Assignees — the people the chains Paged last — in the Root message and the layout, the Owner's Team, and the Assignee filter (BE) | be | S-126, S-155 |
@@ -631,7 +631,7 @@ it. S-163 was split from S-118, which with it touched about 50 files: S-118 keep
 the Teams of Alerts and Alert Groups, and S-163 takes the values of the Team label seen without a Team and the
 evaluation of open Alert Groups when a Team is saved; it follows S-118, and S-121 and S-120 depend on it. S-121 and
 S-122 come before S-119, whose Team page shows the Destinations of a Team. S-166 was added by the review of those
-contracts: the web tests build Destination and Connection reads by hand, so every backend story that adds a required
+contracts: the web tests build Destination, Connection and Alert Group reads by hand, so every backend story that adds a required
 field to them would break the TypeScript check of its own pull request; S-166 moves those reads into shared builders
 that later stories extend, and it comes first. In the stage "L2 On call", S-164 was split from S-133 at the contract
 boundary of C-27.FR-8 — the gaps, the gap scan and "On call now" need no messenger, while the warnings about

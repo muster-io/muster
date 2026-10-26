@@ -1217,7 +1217,7 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-13.FR-8 | S-140 | complete | Mattermost groups for group entries and Team mentions |
 | C-13.FR-9 | S-114 (part), S-143 (part) | complete | the button set (S-114) and the Mention entries (S-143); the Route and Team forms with Severity conditions are S-123's, under C-26.FR-1 |
 | C-14.FR-16 | S-125 | complete |  |
-| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the L2 events in events mode, each with the extension of the `webhook_events` CHECK for its events (S-118, S-121, S-148, S-169, S-155); the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156) |
+| C-15.FR-2 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the L2 events in events mode (S-118, S-121, S-148, S-169, S-155), the `webhook_events` CHECK extended by S-118, S-121 and S-148; the Assignees in `alert_group` (S-168); `escalation_webhook` only to its own Destination (S-156) |
 | C-15.FR-11 | S-140 (part), S-155 | complete | Teams and the On-call as targets (S-140); the people that `paged` names (S-155) |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
 | C-17.FR-1 | S-169 | complete | the first chain stops the ack timeout |

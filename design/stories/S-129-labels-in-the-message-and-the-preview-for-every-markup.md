@@ -4,7 +4,7 @@ title: "\"Labels in the message\" on the Route form, and the preview of the comp
 capability: C-29
 kind: fe
 layer: L2
-depends_on: [S-126]
+depends_on: [S-123, S-126]
 covers: [C-29.FR-2, C-29.AC-7]
 files_touched:
   - web/src/components/route-policy-message.tsx

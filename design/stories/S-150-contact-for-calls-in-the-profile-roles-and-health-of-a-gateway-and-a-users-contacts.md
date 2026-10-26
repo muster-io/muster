@@ -150,6 +150,7 @@ None.
 
 ## Notes
 
+- The Russian texts follow the vocabulary of S-162's Open question 1.
 - Suggested commit: `feat(web): confirm a contact for calls and show notification gateways`.
 - The profile mockup also shows a theme switch; it is specified later in L2 and is not part of this story.
 - The Notification rules of the profile are placed above this section by S-153, after "Linked accounts", as the mockup

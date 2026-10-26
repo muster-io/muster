@@ -44,14 +44,16 @@ files_touched:
   - internal/fakes/fakemattermost/fakemattermost_test.go
   - test/e2e/routing_teams_test.go
   - web/src/test/fixtures/destinations.ts
+  - web/src/test/fixtures/alert-groups.ts
   - docs/concepts/routing-to-teams.md
   - mkdocs.yml
   - docs/install/versions.md
+  - AGENTS.md
 acceptance:
   - "[C-26.FR-1, C-08.FR-1] Routes take `destination_entries` — each a Destination with a `severity_condition`, `any` by default, `critical` or `below_critical` — and Teams the same as the Destinations of the Team; a Destination may be named by several Routes and Teams, each with its own condition; `destination_ids` stays on Routes, derived from the entries, and a request with only `destination_ids` keeps the stored conditions of the Destinations it keeps and gives new ones `any`; every change is in the Audit log diff (`routes_test.go`, `teams_test.go`)."
   - "[C-26.FR-2, C-26.AC-1, C-26.AC-2] With the Route \"Infrastructure\" naming `infra-critical` for critical and `infra-notice` below critical with `deliver_to_teams` on, and the Team \"payments\" naming `payments-critical` and `payments-notice` the same way, a warning Alert of `team=\"payments\"` makes one Alert Group with one Root message in `infra-notice` and one in `payments-notice` and none in the critical channels; Acknowledge from `payments-notice` edits both with the same Owner; with `deliver_to_teams` off the same Alert reaches only `infra-notice` (`routing_teams_test.go`)."
   - "[C-26.FR-3, C-26.AC-3] A Destination named by the Route for `critical` and by a Team for `below_critical` receives a warning and a critical Alert Group, each with one Root message; `listAlertGroupDeliveries` names for each Destination the entries that reached it — the Route, or the Team — with their conditions (`reach_test.go`)."
-  - "[C-26.FR-4, C-26.FR-5, C-26.AC-4, C-26.AC-5, C-09.FR-22] An Alert of \"search\" joining a firing, unowned Alert Group of \"payments\" records `destination_joined` (Timeline kind `system`) for `search-notice` with `loudness` `loud` and `mentions` `[new_alert_group]` and a new Root message there; joining an acknowledged one records it Quiet with a Quiet Root message; a rise from warning to critical publishes the Alert Group in the critical Destinations with `destination_joined` and keeps the Root messages below critical, which stay and are edited to the current state after the critical Alert resolves; a Destination that a Team or a rise adds before the first Publication is part of it (`enqueue_test.go`, `routing_teams_test.go`)."
+  - "[C-26.FR-4, C-26.FR-5, C-26.AC-4, C-26.AC-5, C-09.FR-22, C-11.FR-20] An Alert of \"search\" joining a firing, unowned Alert Group of \"payments\" records `destination_joined` (Timeline kind `system`) for `search-notice` with `loudness` `loud` and `mentions` `[new_alert_group]` and a new Root message there; joining an acknowledged one records it Quiet with a Quiet Root message; a rise from warning to critical publishes the Alert Group in the critical Destinations with `destination_joined` and keeps the Root messages below critical, which stay and are edited to the current state after the critical Alert resolves; a Destination that a Team or a rise adds before the first Publication is part of it (`enqueue_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-5, C-11.FR-6] During a Storm of the Route, a Team Destination counts a non-Urgent Alert Group in its own Storm summary, and an Urgent one is published there on its own (`storm_test.go`)."
   - "[C-26.FR-6, C-26.AC-6, C-11.FR-14, C-25.FR-10] Changing a Route Destination's condition from `critical` to `any` publishes the Route's open warning Alert Groups there Quietly, within its limiters, and records no `destination_joined`; changing it back removes none; naming a Destination of a Team or turning `deliver_to_teams` on publishes the open Alert Groups it now reaches Quietly through an `open_group_updates` row of the kind `team_destinations` or the Route's membership hook; a Destination taken off a Route or a Team, or reached no longer because `deliver_to_teams` was turned off, gets the final edit \"No longer updated here\" for each open Alert Group for which no entry that still exists — of its Route or, with `deliver_to_teams`, of its Teams — names that Destination, met or not; deleting a Team does the same for the Team's Destinations; a Destination whose remaining entry is named but not met now keeps its Root message, current until the final state (`membership_test.go`, `updates_test.go`)."
   - "[C-26.FR-7, C-26.AC-10] A Route owned by \"payments\" without `deliver_to_teams` delivers an Alert Group of `team=\"payments\"` only to its own Destinations (`reach_test.go`)."
@@ -118,7 +120,8 @@ issue: null
     replaced by `_v3` ones with `destination_joined` (kind `system`, the same `system_event`), as S-118's `_v2`.
   - `webhook_events_event_v3_check` adds `destination_joined` to S-118's `_v2`, `NOT VALID`, validated, the old one
     dropped, so that events mode can store it.
-  - The CHECK of `open_group_updates.kind` gains `team_destinations` (with the Team); `NOT VALID`, then validated.
+  - `open_group_updates_kind_v4_check` lists every kind of `_v3` and `team_destinations` (with the Team); `NOT VALID`,
+    then validated, the old one dropped.
 - **Reach** (`internal/groups/reach.go`): the Destinations an Alert Group reaches now — its Route's entries whose
   condition its Severity level meets and, with `deliver_to_teams`, the entries of each of its Teams (C-25.FR-6) whose
   condition it meets — keyed by Destination, with the entries of each. The owning Team of the Route adds nothing
@@ -153,7 +156,10 @@ issue: null
 - **Fake Mattermost server** (`internal/fakes/fakemattermost`): the channels `ch-infra-critical`, `ch-infra-notice`,
   `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice`, with the bot a member, for the checks of this
   capability.
-- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `teams` (`[]`), so `make generate` leaves the TypeScript check of the web tests green.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `teams` (`[]`), so `make generate` leaves the TypeScript check of the web tests green; the builder of delivery reads in
+  `web/src/test/fixtures/alert-groups.ts` sets `entries` to `[]` for the same reason.
+- **AGENTS.md**: the paragraph on development mode names the channels `ch-infra-critical`, `ch-infra-notice`,
+  `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice` of the fake Mattermost server.
 - **Settings**: `route.deliver_to_teams`, `route.run_team_chains`, the Severity condition of a Route's or a Team's
   Destination (`any`), `route.storm_threshold`.
 - **Log events, metrics**: none new.
@@ -244,6 +250,9 @@ None.
   Group is in a channel after its Severity level fell or its Team's Alerts resolved.
 - `run_team_chains` is stored and returned now and acts once Escalation chains run (S-169).
 - `destination_ids` stays in the API until 0.3.0 (L2.md §2 "Expand and contract").
+- Migration `0027` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+  when it merges (S-131's Notes).
 
 ## Coverage
 

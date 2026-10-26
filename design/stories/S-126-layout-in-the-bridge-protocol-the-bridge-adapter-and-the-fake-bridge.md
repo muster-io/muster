@@ -22,8 +22,9 @@ files_touched:
   - internal/fakes/fakebridge/fakebridge_test.go
   - test/e2e/bridge_layout_test.go
   - docs/messengers/bridge.md
+  - AGENTS.md
 acceptance:
-  - "[C-29.FR-8, C-22.FR-4] `api/bridge.yaml` gives `MessageContent` the optional `layout` (`Layout`), additively in protocol version 1: `number` (the Alert Group's number alone), `title` (without the number), `status` {`key` — `firing`, `acknowledged`, `snoozed`, `resolved`; `word`, in the Route's language}, `fields` ({`name`, `value`}[]), `summary`, `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`}, `notices` (string[]), `assignees` and `owner` (each person {`name`, `ref`} with `ref` the `ref` of their entry in the envelope's `mentions`, or null), and `links` ({`label`, `url`}[]); every value is plain text, never CommonMark; `make lint` passes Redocly and oasdiff reports no breaking change."
+  - "[C-29.FR-8, C-22.FR-4] `api/bridge.yaml` gives `MessageContent` the optional `layout` (`Layout`), additively in protocol version 1: `number` (the Alert Group's number alone), `title` (without the number), `status` {`key` — `firing`, `acknowledged`, `snoozed`, `resolved`; `word`, in the Route's language}, `fields` ({`name`, `value`}[]), `summary`, `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`}, `notices` (string[]), `assignees` and `owner` (each person {`name`, `ref`, `team`} with `ref` the `ref` of their entry in the envelope's `mentions`, or null, and the optional `team` {`name`} that S-168 fills, C-32.FR-12), and `links` ({`label`, `url`}[]); every value is plain text, never CommonMark; `make lint` passes Redocly and oasdiff reports no breaking change."
   - "[C-29.FR-1, C-29.FR-4, C-29.AC-6, C-12.FR-1] For a firing Root message the fake bridge receives `body` and `layout`, whose `number` is the number alone, whose `title` has no `#`, whose values carry no CommonMark escapes and whose `alerts.total` is the number of Alerts, also when fewer values are listed; a test message carries `layout` too, Storm summaries and Thread replies do not (`envelope_test.go`, `testmsg_test.go`, `bridge_layout_test.go`)."
   - "[C-29.AC-6] After an Acknowledge by a User linked through the Bridge, a new Root message to a bridge with `native_mentions` names the Owner in `layout.owner` with the `ref` of their Mention entry, and an edit, which carries no Mentions, names them with the `ref` null; through a bridge without `native_mentions` the Owner has the `ref` null (`envelope_test.go`)."
   - "[C-29.FR-6] When the body must be cut below `max_body_length`, `layout` keeps the title, the status, the fields, the people and the links, and its description, Alerts, summary and labels shrink in that order with the body's, so that the two never disagree; the buttons stay in the envelope's `buttons` (`delivery_test.go`)."
@@ -57,7 +58,8 @@ issue: null
 ## Contracts
 
 - **Protocol** (`api/bridge.yaml`, MIT): new schemas `Layout`, `LayoutStatus`, `LayoutField`, `LayoutLabel`,
-  `LayoutAlerts`, `LayoutAlertValue`, `LayoutPerson`, `LayoutLink`; `MessageContent` gains the optional `layout`, so
+  `LayoutAlerts`, `LayoutAlertValue`, `LayoutPerson` (`name`, `ref`, and the optional `team` {`name`} that stays
+  absent until S-168 names the Teams of the Assignees and the Owner), `LayoutLink`; `MessageContent` gains the optional `layout`, so
   that `postMessage` and `editMessage` carry it; the description of `MessageContent` says that a bridge renders either
   `body` or `layout` and that a bridge that ignores `layout` is unaffected. The shape is the `MessageLayout` of
   `openapi.yaml` (S-125). `protocol_version` stays 1.
@@ -72,6 +74,8 @@ issue: null
   as before.
 - **Fake bridge** (`internal/fakes/fakebridge/messages.go`): each recorded message and edit keeps its `layout`, shown in
   `/_fake/messages`; the fake renders nothing from it.
+- **AGENTS.md**: the paragraph on development mode names that the fake bridge records `layout` with every message and
+  edit.
 - **Settings**: `message.compact_alerts_listed`; the bridge's `max_body_length` and `native_mentions` (C-22).
 - **Log events, metrics**: none new.
 - **Documentation**: Connect a messenger through a bridge — "What Muster posts" names `layout`; the reference page of

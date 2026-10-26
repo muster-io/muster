@@ -43,6 +43,7 @@ files_touched:
   - docs/sign-in/oidc-keycloak.md
   - docs/concepts/teams.md
   - docs/install/versions.md
+  - AGENTS.md
 acceptance:
   - "[C-03.FR-5, C-03.AC-28] Every entry of the Role mapping (`OidcGroupMapping`) takes an optional `claim`, by default `groups_claim`; a claim is read from the ID token, then from userinfo; an entry `a/b/*` matches `a/b` and every group below it at `/` boundaries only, any other entry matches exactly, and the highest Role found over all entries wins: against the fake OIDC server in its GitLab mode, `https://gitlab.org/claims/groups/owner` `example/platform/infra` → Admin and `groups` `example/platform/*` → Viewer make an Owner of `example/platform/infra` an Admin and a person in `example/platform/apps` a Viewer, whether the claim comes in the ID token or in userinfo, and `example/platformx` matches neither (`claims_test.go`, `oidc_test.go`)."
   - "[C-03.FR-6] `getOidcSettings` carries one warning `groups_claim_missing` per claim that an entry names, the groups claim included, each with `claim`; a connection check that finds a claim not listed in discovery's `claims_supported` raises its warning, one that finds it listed clears it, and a sign-in whose tokens carry it clears it for good; `claims_supported` of the last check is read back on the settings for the editors to suggest (`settings_test.go`)."
@@ -121,6 +122,8 @@ issue: null
   `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, placed in the ID token, in userinfo or in
   both as the facts say, and configurable per user through `/_fake/next-user` (`role_claims`, `role_claims_in`) so that
   a test can put them in either; discovery lists them in `claims_supported` as the facts say.
+- **AGENTS.md**: the paragraph on development mode names the GitLab mode of the fake OIDC server and the role claims it
+  serves.
 - **Settings**: `oidc.sync_role`, `oidc.unmatched_role`, `auth.oidc_recheck_interval`.
 - **Log events, metrics**: none new; `muster_oidc_checks_total` counts the re-checks as before.
 - **Documentation**: `docs/sign-in/oidc-gitlab.md` — "Map groups to Roles" with the role claims and subtrees;
@@ -209,6 +212,8 @@ request (S-116).
   added (C-25.FR-4).
 - A change of a Team's entries is not applied to everyone at once: membership changes at each User's next sign-in or
   re-check, as the Role mapping does (C-25.FR-4).
+- Migration `0024` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request (S-131's Notes).
 
 ## Coverage
 

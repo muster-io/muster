@@ -45,8 +45,8 @@ files_touched:
   - docs/configure/messages-and-templates.md
   - docs/install/versions.md
 acceptance:
-  - "[C-29.FR-1, C-29.AC-1, C-25.FR-6, C-12.FR-1] The Root message of a firing Alert Group of three `KubernetesContainerOOMKilled` Alerts with three `pod` values, on a Route with the Group key `alertname`, `system`, `team`, shows in order: the title `#N` with the Alert Group's title linked to its page and the status as a word, \"Firing\", with the status colour; the fields Severity, Route, Teams and Started (absolute, in the Organization's time zone); the summary and the description as plain text; `system=kubernetes · team=payments · namespace=checkout`; the line \"pod:\" with the three values; the notices; the footer; the buttons of the Destination's set; and the links, \"Open in Muster\" first — in Mattermost as the attachment's short `fields`, in Slack as a `section` with `fields`, in Telegram as lines \"{name}: {value}\" (`default_test.go`, `layout_test.go` of each adapter, `compact_layout_test.go`)."
-  - "[C-29.FR-2, C-29.AC-2] `route.message_labels` defaults to the labels of the Group key without `alertname` and the severity label, plus the Team label and `namespace`, computed from the current settings until the Route has its own list (`own_message_labels`); a label is shown as `name=value` when every firing Alert has that value, as `name: 2 values` when they differ, and not at all when no Alert has it; on a Route whose Group key holds `severity` the line has no `severity`; one Alert shows no Alerts line (`default_test.go`)."
+  - "[C-29.FR-1, C-29.AC-1, C-25.FR-6, C-12.FR-1, C-29.FR-4, C-13.FR-3, C-14.FR-16, C-24.FR-4] The Root message of a firing Alert Group of three `KubernetesContainerOOMKilled` Alerts with three `pod` values, on a Route with the Group key `alertname`, `system`, `team`, shows in order: the title `#N` with the Alert Group's title linked to its page and the status as a word, \"Firing\", with the status colour; the fields Severity, Route, Teams and Started (absolute, in the Organization's time zone); the summary and the description as plain text; `system=kubernetes · team=payments · namespace=checkout`; the line \"pod:\" with the three values; the notices; the footer; the buttons of the Destination's set; and the links, \"Open in Muster\" first — in Mattermost as the attachment's short `fields`, in Slack as a `section` with `fields`, in Telegram as lines \"{name}: {value}\" (`default_test.go`, `layout_test.go` of each adapter, `compact_layout_test.go`)."
+  - "[C-29.FR-2, C-29.AC-2, C-08.FR-1] `route.message_labels` defaults to the labels of the Group key without `alertname` and the severity label, plus the Team label and `namespace`, computed from the current settings until the Route has its own list (`own_message_labels`); a label is shown as `name=value` when every firing Alert has that value, as `name: 2 values` when they differ, and not at all when no Alert has it; on a Route whose Group key holds `severity` the line has no `severity`; one Alert shows no Alerts line (`default_test.go`)."
   - "[C-29.FR-3, C-29.AC-3] The Alerts are named by their distinguishing label — the first of `organization.instance_labels` whose values differ, else the first differing label by name — with up to `message.compact_alerts_listed` values, firing ones first and resolved ones struck through, then \"…and K more\": twelve Alerts list five values and \"…and 7 more\" (`default_test.go`)."
   - "[C-29.FR-6, C-29.AC-3, C-12.FR-11] Rendered with a limit of 4,096 characters and a long description and summary, the message is cut in the order description, Alerts, summary, key labels, and always keeps the title, the status, the fields, the people, the buttons and the link to Muster; an Alert Group whose Alerts have only a `description` shows it, and one with neither annotation shows no text (`shorten_test.go`)."
   - "[C-29.FR-5, C-29.AC-5, C-12.FR-2] A Route with its own Root message template keeps its body in place of items 3 to 5 under Muster's title, fields, notices, people, buttons and links; a line template renders each listed Alert on a line of its own; the Fallback template keeps every label (`render_test.go`)."
@@ -92,11 +92,12 @@ issue: null
     Route's Alert Groups of `routing.group_key_preview_period`, most frequent first, at most 50.
   - New schema `MessageLayout` — `number`, `title`, `status` {`key`, `word`}, `fields` ({`name`, `value`}[], `summary`,
     `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`},
-    `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`}), `links` ({`label`, `url`}[]) — the same
+    `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`, and the optional `team` {`name`}}), `links` ({`label`, `url`}[]) — the same
     content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains `layout` (for `root_message`), `length` and
     `messenger_limit`.
 - **Schema** (migration `0028_route_message_labels`, expand only; `schema.md` §4.8): `routes.message_labels text[]`
-  (null = computed); the CHECK of `open_group_updates.kind` gains `route_message_labels` (`NOT VALID`, validated).
+  (null = computed); `open_group_updates_kind_v5_check` lists every kind of `_v4` and `route_message_labels` (`NOT VALID`,
+  validated, the old one dropped).
 - **Messages** (`internal/messages`): `Message` gains `StatusWord`, `Fields`, `Description`, `KeyLabels`, `AlertsLine`
   (the distinguishing label, its values with their state, the total) and keeps `Footer`, `Notices`, `Buttons`,
   `Links`; the default body no longer fills `Environment`, `GroupLabels`, `CommonLabels` and `CommonAnnotations`, which
@@ -183,6 +184,9 @@ None.
   not this story.
 - `MessageLayout` in `openapi.yaml` is the content S-126 sends to bridges, so the preview shows a bridge author the same
   structure.
+- Migration `0028` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+  when it merges (S-131's Notes).
 
 ## Coverage
 

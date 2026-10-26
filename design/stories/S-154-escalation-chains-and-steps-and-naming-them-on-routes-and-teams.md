@@ -4,7 +4,7 @@ title: Escalation chains and their steps, naming them on Routes and Teams with S
 capability: C-32
 kind: be
 layer: L2
-depends_on: [S-140, S-145]
+depends_on: [S-140, S-148, S-152]
 covers: [C-32.FR-1, C-32.FR-2, C-32.FR-3, C-32.FR-17, C-32.FR-19, C-32.AC-15, C-30.FR-9, C-25.FR-1, C-25.FR-2, C-25.FR-9, C-25.FR-10, C-27.FR-12, C-27.AC-8, C-08.FR-1]
 files_touched:
   - api/openapi.yaml
@@ -53,7 +53,7 @@ acceptance:
   - "[C-32.FR-2, C-08.FR-1] Routes and Teams take `chain_entries` — each a chain with a `severity_condition`, `any` by default — in their inputs, reads and Audit log diffs, with `routes:write` and `teams:write`; the chain reads its `referrers` (each Route and Team with its condition) and `destinations` (those of its Routes and Teams, where it writes); `deleteEscalationChain` of a named chain answers `409` `chain_in_use` naming them in `in_use_by` (`routes_test.go`, `teams_test.go`, `chains_test.go`)."
   - "[C-32.FR-17] A chain reads `warnings`: `everyone_unsupported` for a `page_team` step whose Team mention or token one of its Destinations' Connections cannot mention, with the Destination and the reason of `MentionUnavailableReason` — such as a Telegram Destination — and `gateway_deleted` and `destination_deleted` for steps whose gateway or webhook Destination is gone (`warnings_test.go`)."
   - "[C-32.AC-15] A Responder gets `403` on `createEscalationChain`, `updateEscalationChain` and `deleteEscalationChain`; a Viewer reads chains with `escalation-chains:read`; naming a chain on a Route needs `routes:write` (`escalationchains_test.go`)."
-  - "[C-25.FR-10, C-25.FR-1] `deleteTeam` of a Team that owns a chain answers `409` `team_in_use` naming the chain in `in_use_by` (`type` `escalation_chain`); a Team's chains are in its read as `chains`; a step limited to Working hours uses those of the chain's owning Team, else the Organization's (`teams_test.go`, `steps_test.go`)."
+  - "[C-25.FR-10, C-25.FR-1, C-25.FR-9] `deleteTeam` of a Team that owns a chain answers `409` `team_in_use` naming the chain in `in_use_by` (`type` `escalation_chain`); a Team's chains are in its read as `chains`; a step limited to Working hours uses those of the chain's owning Team, else the Organization's (`teams_test.go`, `steps_test.go`)."
   - "[C-27.FR-12, C-27.AC-8] `deleteSchedule` of a Schedule that a step names answers `409` `schedule_in_use` naming the chain, through `schedules.Referrers` (`schedules_integration_test.go`)."
   - "The migration adds the Permissions `escalation-chains:read` (every Role) and `escalation-chains:write` (Admin); reference.md moves them and `muster_escalation_chain_info` into the main tables; P-84 is confirmed in defaults.md and L2.md §5.3; Concepts → Escalation chains has \"What an Escalation chain is\", \"Steps\" and \"Naming chains on Routes and Teams\" in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -109,8 +109,8 @@ issue: null
   - `Permission` gains `escalation-chains:read` and `escalation-chains:write`; `HintEvent.type` gains
     `escalation-chain`; `PublicId` and `api/README.md` gain the prefix `EC`; `Problem.in_use_by[].type` gains
     `escalation_chain`, `route` and `team`.
-  - Problem codes: `chain_in_use` (`409` `conflict`, with `in_use_by`); `gateway_required` and
-    `webhook_events_required` (`validation-failed`); `not_pageable` (S-131) at `/steps/{i}/user_ids/{j}`; `name_taken`;
+  - Problem codes: `chain_in_use` (`409` `conflict`, with `in_use_by`); `webhook_events_required`
+    (`validation-failed`); `gateway_required` (declared by S-152); `not_pageable` (S-131) at `/steps/{i}/user_ids/{j}`; `name_taken`;
     `out_of_range`; `unknown_id` at the step's reference.
 - **Schema** (migration `0040_escalation_chains`, expand only; `schema.md` §2, §4.8, §4.15 and §4.18):
   - `escalation_chains`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^EC[0-9A-HJKMNP-TV-Z]{12}$')`), `name`,

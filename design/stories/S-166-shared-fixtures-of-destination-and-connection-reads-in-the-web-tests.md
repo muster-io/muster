@@ -1,6 +1,6 @@
 ---
 id: S-166
-title: Shared fixtures of Destination and Connection reads in the web tests
+title: Shared fixtures of Destination, Connection and Alert Group reads in the web tests
 capability: C-28
 kind: infra
 layer: L2
@@ -9,6 +9,7 @@ covers: []
 files_touched:
   - web/src/test/fixtures/destinations.ts
   - web/src/test/fixtures/connections.ts
+  - web/src/test/fixtures/alert-groups.ts
   - web/src/components/bridge-destination-fields.test.tsx
   - web/src/components/destination-form.test.tsx
   - web/src/components/destination-label.test.ts
@@ -24,9 +25,13 @@ files_touched:
   - web/src/components/connection-form.test.tsx
   - web/src/components/slack-connection-fields.test.tsx
   - web/src/components/telegram-connection-fields.test.tsx
+  - web/src/components/alert-group-header.test.tsx
+  - web/src/components/command-buttons.test.tsx
+  - web/src/components/alert-group-deliveries.test.tsx
+  - web/src/components/integration-alerts.test.tsx
 acceptance:
-  - "`web/src/test/fixtures/destinations.ts` exports one builder per Destination type — `mattermostDestination`, `telegramDestination`, `slackDestination`, `bridgeDestination`, `webhookDestination` — each returning a complete read of the generated type with every required field set to a neutral value and taking the fields a test cares about as overrides; `web/src/test/fixtures/connections.ts` does the same for `mattermostConnection`, `telegramConnection`, `slackConnection` and `bridgeConnection`."
-  - "The ten test files that built Destination reads by hand and the five that built Connection reads by hand build them through the builders only, with the same assertions as before; no other web test builds a Destination or Connection read by hand (`grep` of the read types' required fields outside `web/src/test/fixtures/` finds none); `make ci` passes without a change of behaviour."
+  - "`web/src/test/fixtures/destinations.ts` exports one builder per Destination type — `mattermostDestination`, `telegramDestination`, `slackDestination`, `bridgeDestination`, `webhookDestination` — each returning a complete read of the generated type with every required field set to a neutral value and taking the fields a test cares about as overrides; `web/src/test/fixtures/connections.ts` does the same for `mattermostConnection`, `telegramConnection`, `slackConnection` and `bridgeConnection`, and `web/src/test/fixtures/alert-groups.ts` for `alertGroup`, `alertGroupDelivery` and `integrationAlert` (the reads of `AlertGroup`, `AlertGroupDelivery` and `IntegrationAlert`)."
+  - "The ten test files that built Destination reads by hand, the five that built Connection reads by hand and the four that built Alert Group, delivery or Alert reads by hand — `alert-group-header`, `command-buttons`, `alert-group-deliveries` and `integration-alerts` — build them through the builders only, with the same assertions as before; no other web test builds one of these reads by hand (`grep` of the read types' required fields outside `web/src/test/fixtures/` finds none); `make ci` passes without a change of behaviour."
 verify: "make ci"
 operator_attention: false
 issue: null
@@ -38,8 +43,8 @@ issue: null
 
 **IN**
 
-- One builder per Destination type and per Connection type for the web tests, under `web/src/test/fixtures/`, and the
-  conversion of every test that builds such a read by hand.
+- One builder per Destination type and per Connection type, and builders of Alert Group, delivery and Alert reads, for
+  the web tests, under `web/src/test/fixtures/`, and the conversion of every test that builds such a read by hand.
 
 **OUT**
 
@@ -53,13 +58,15 @@ issue: null
   Routes, `mentions` from `defaultMentions` — overridable field by field. A story that adds a required field to a
   Destination or Connection read sets its neutral value here, in the same pull request, and lists the builder in its
   `files_touched`: S-113 (`buttons`), S-115 (`owning_team`), S-121 (`teams`), S-140 (`mention_entries`), S-165
-  (`mention_warnings`), S-139 (`usergroups_read`, `groups_read`). Tests written from this story on build these reads
-  only through the builders.
+  (`mention_warnings`), S-139 (`usergroups_read`, `groups_read`). `alert-groups.ts` is extended the same way by S-118
+  (`teams` on Alert Groups and Alerts), S-121 (`entries` on deliveries), S-169 (`escalation_chains`) and S-168
+  (`assignees`, `owner_teams`). Tests written from this story on build these reads only through the builders.
 - **Tests converted**: the Destination reads of `bridge-destination-fields`, `destination-form`, `destination-label`,
   `destination-preview-panel`, `destination-secrets`, `destination-test-panel`, `route-destinations`,
   `slack-destination-fields`, `telegram-destination-fields` and `webhook-destination-fields`; the Connection reads of
   those of them that build one and of `account-links-table`, `bridge-connection-fields`, `connection-form`,
-  `slack-connection-fields` and `telegram-connection-fields`.
+  `slack-connection-fields` and `telegram-connection-fields`; the Alert Group reads of `alert-group-header` and
+  `command-buttons`, the delivery reads of `alert-group-deliveries` and the Alert reads of `integration-alerts`.
 
 ## Steps
 

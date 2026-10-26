@@ -46,6 +46,7 @@ files_touched:
   - internal/internalalerts/registry.go
   - internal/archlint/archlint.go
   - AGENTS.md
+  - web/src/test/fixtures/alert-groups.ts
   - test/e2e/team_label_test.go
   - docs/concepts/teams.md
   - docs/outgoing-webhooks/events.md
@@ -53,7 +54,7 @@ acceptance:
   - "[C-25.FR-5, C-20.FR-1] `getOrganization` carries `team_label` `team`; `updateOrganization` changes it, recorded in the diff of `organization.updated`, and refuses with `422` `reserved_label` at `/team_label` the name of a label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the registry, `schedule` and `team_id` among them (`organization_test.go`)."
   - "[C-25.FR-1, C-25.FR-5, C-25.FR-11] A Team takes `matchers` in the syntax of Route Matchers, saved with `If-Match` and recorded in the diff of `team.updated`; an invalid regular expression is refused with `422` `invalid_regex` at its pointer (`teams_test.go`)."
   - "[C-25.FR-5, C-25.AC-1, C-25.AC-2] When an Alert starts firing, Muster records on it the Teams it belongs to: by the Team label, with the Static labels of its Integration, equal to a Team's slug exactly, or by any one of a Team's matchers, with the rule — `label`, or `matcher` with its text; with the Team \"payments\" a newly firing Alert with `team=\"payments\"` belongs to it by the label and `team=\"Payments\"` to no Team; a Team with `namespace=~\"checkout|billing\"` and `pod=~\"checkout-.*\"` gets an Alert with `namespace=\"billing\"` and one with `pod=\"checkout-api-1\"`, each with its matcher, and not one with `namespace=\"search\"`; an Alert that the slug of one Team and a matcher of another pick belongs to both (`classify_test.go`, `evaluate_test.go`, `team_label_test.go`)."
-  - "[C-25.FR-6, C-25.AC-5, C-09.FR-1, C-09.FR-22] The Teams of an Alert Group are those of all the Alerts that ever joined it and only grow: each Team that joins records the Quiet lifecycle event `team_joined` (Timeline kind `alerts`) naming the Team and the rule; an Alert Group of \"payments\" later joined by an Alert of \"search\" lists both with two `team_joined` entries, and still lists both after the Alert of \"search\" resolves (`teams_test.go`, `team_label_test.go`)."
+  - "[C-25.FR-6, C-25.AC-5, C-09.FR-1, C-09.FR-22, C-11.FR-20] The Teams of an Alert Group are those of all the Alerts that ever joined it and only grow: each Team that joins records the Quiet lifecycle event `team_joined` (Timeline kind `alerts`) naming the Team and the rule; an Alert Group of \"payments\" later joined by an Alert of \"search\" lists both with two `team_joined` entries, and still lists both after the Alert of \"search\" resolves (`teams_test.go`, `team_label_test.go`)."
   - "[C-25.FR-7, C-25.AC-1] A value of the Team label that names no Team adds nothing and records the Quiet `unknown_team_value` (Timeline kind `system`) with the value, once per value per Alert Group; the Alert Group goes to its Route's Destinations as before (`teams_test.go`)."
   - "[C-25.FR-6, C-06.FR-19, C-09.FR-11, C-09.FR-13] `getAlertGroup` and `listAlertGroups` carry `teams` — each with the Team, the rule, the matcher and when it joined, a deleted Team marked `deleted` with its name; `listAlertGroupAlerts` and `listIntegrationAlerts` carry the `teams` of each Alert; `listAlertGroups` and `getAlertGroupCounts` take `team` (a Team's `public_id` or `mine`) and match the Alert Groups that have it among their Teams (`alertgroups_test.go`)."
   - "[C-25.FR-2, C-25.AC-11] With `team=mine`, a User in \"payments\" and not in \"search\" lists the Alert Groups that have \"payments\" among their Teams and not those of \"search\"."
@@ -140,6 +141,8 @@ issue: null
   `alert_group_teams` and `teams` (`filters.go`, `read.go`, `query.sql`); "My Teams" is the caller's `team_users`.
   The table joins the list of lint 2 (`internal/archlint/archlint.go`, AGENTS.md).
 - **Alerts view** (`internal/ingest/alertsview.go`): the Teams of each Alert from `alert_teams`.
+- **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): the builders of Alert Group and Alert reads
+  set `teams` to `[]`, so that `make generate` keeps the TypeScript check of the web tests green.
 - **Outgoing webhooks** (`internal/webhooks/body.go`): `alert_group.teams`; the two events one to one in events mode.
 - **Organization**: `team_label` in the read, update, defaults and diff; the reserved names come from
   `internalalerts.ReservedLabels()` — `alertname`, `severity` and every entity and name label of the registry, with
@@ -230,6 +233,9 @@ None.
   which shows Teams from S-125 on.
 - With 42 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
   were split into S-163 when the contract was written.
+- Migration `0025` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+  when it merges (S-131's Notes).
 
 ## Coverage
 

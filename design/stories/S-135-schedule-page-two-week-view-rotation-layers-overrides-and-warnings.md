@@ -175,7 +175,7 @@ English and in Russian:
   §5.2, journal D567).
 - The form never sends a span outside the picked segment, but the API takes any span (C-27.AC-2 is an Override across
   two segments), so a script can still make one.
-- Depends on S-164 for the unreachable marks and on S-119 for the Team pages and the Team filter.
+- Depends on S-164 for the unreachable marks and on S-119 for the Team pages and the filter by Team.
 
 ## Coverage
 

@@ -44,9 +44,9 @@ files_touched:
   - docs/concepts/escalation-chains.md
 acceptance:
   - "[C-32.FR-12, C-32.AC-6] A Page by Mention whose Thread reply is delivered makes the person an Assignee of its chain, shown with the chain's owning Team; for each chain, the Assignees are the people that its latest step Paging people by name reached — a later step that reaches someone replaces them, the later Mentions of one step's rules add to them, and a step that reached none of its people leaves them as they were; a `page_team` step changes nothing; a person whose Page was not delivered never becomes an Assignee (`assignees_test.go`)."
-  - "[C-32.FR-12, C-32.AC-2, C-10.FR-1, C-09.FR-22] Each change of the Assignees records the Quiet `assignees_changed` (Timeline kind `escalation`) with the Assignees after it; Acknowledge, Snooze and Resolve clear them with `assignees_changed`; they change only through system transitions of the dispatcher, and no operation sets them (`assignees_test.go`, `events_test.go`)."
-  - "[C-29.FR-1, C-32.AC-13, C-12.FR-12] Before an acknowledgement, item 7 of the Root message is \"Assignees: @ivan (devops), @petr (payments)\", each a Mention where the person has an Account link in the Destination's Identity space and their plain name otherwise; `assignees_changed` edits the Root messages Quietly; a new Quiet message carries them as Mentions; after an Acknowledge that stopped running chains, item 7 reads \"Acknowledged by @ivan (devops) · Escalation chains stopped\", and without chains as in L1, with the Owner's Team (`default_test.go`)."
-  - "[C-32.FR-12, C-32.AC-13] The `layout` sent to a bridge names each Assignee in `assignees` with the `ref` of their entry in the envelope's `mentions` where the message carries their Mention — a new message to a bridge with `native_mentions` — and `null` otherwise, and `owner` with their Team (`layout_test.go`, `envelope_test.go`)."
+  - "[C-32.FR-12, C-32.AC-2, C-10.FR-1, C-09.FR-22, C-32.AC-11] Each change of the Assignees records the Quiet `assignees_changed` (Timeline kind `escalation`) with the Assignees after it; Acknowledge, Snooze and Resolve clear them with `assignees_changed`; they change only through system transitions of the dispatcher, and no operation sets them (`assignees_test.go`, `events_test.go`)."
+  - "[C-29.FR-1, C-32.AC-13, C-12.FR-12, C-11.FR-20, C-12.FR-3] Before an acknowledgement, item 7 of the Root message is \"Assignees: @ivan (devops), @petr (payments)\", each a Mention where the person has an Account link in the Destination's Identity space and their plain name otherwise; `assignees_changed` edits the Root messages Quietly; a new Quiet message carries them as Mentions; after an Acknowledge that stopped running chains, item 7 reads \"Acknowledged by @ivan (devops) · Escalation chains stopped\", and without chains as in L1, with the Owner's Team (`default_test.go`)."
+  - "[C-32.FR-12, C-32.AC-13] The `layout` sent to a bridge names each Assignee in `assignees` with the `ref` of their entry in the envelope's `mentions` where the message carries their Mention — a new message to a bridge with `native_mentions` — and `null` otherwise, each Assignee and the Owner with their Team in the optional `team` of `LayoutPerson` (S-126) (`layout_test.go`, `envelope_test.go`)."
   - "[C-32.FR-12] The Owner is named with the Teams they are in among the Teams of the Alert Group, its Route's owning Team and its chains' owning Teams, and with none when there is no such Team (P-89) (`default_test.go`, `assignees_test.go`)."
   - "[C-32.FR-18, C-32.AC-10, C-09.FR-1, C-09.FR-13] `getAlertGroup` and `listAlertGroups` read `assignees` ({`user`, `team`, `chain`, `since`}[]) and `owner_teams`; `listAlertGroups` takes `assignee` — a User's `public_id` or `me`, `422` for a Service account token — and returns the open Alert Groups where that User is an Assignee, which leave it once acknowledged (`list_integration_test.go`)."
   - "[C-15.FR-2] The `alert_group` of every outgoing webhook event carries `assignees` and the Owner's `teams` (`body_test.go`)."
@@ -100,13 +100,13 @@ issue: null
   person a delivered reply mentioned, as S-155 does; the Desired state carries the Assignees and the Owner's Teams, so
   `assignees_changed` edits the Root messages, and a new message names them as Mentions where linked.
 - **Messages** (`internal/messages`): `Message` gains `Assignees` and `OwnerTeams`; item 7 of the default layout
-  (C-29.FR-1); `layout.go` fills `assignees` and `owner` of `layout` (S-126's shape); the texts "Assignees: {people}",
+  (C-29.FR-1); `layout.go` fills `assignees` and `owner` of `layout` (S-126's shape), with each person's `team`; the texts "Assignees: {people}",
   "{person} ({team})", "· Escalation chains stopped" in English and Russian (C-12.FR-3 revised).
 - **Bridge** (`internal/bridge/envelope.go`): the `ref` of each Assignee's Mention entry in `layout`, as S-126 does for
   the Owner.
 - **Webhooks** (`internal/webhooks/body.go`): `assignees` and `owner_teams` in `alert_group`; `assignees_changed` in
   events mode.
-- **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-169): `assignees` `[]` and `owner_teams` `[]`.
+- **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): `assignees` `[]` and `owner_teams` `[]`.
 - **Shared tables**: L2.md §5.3 moves P-89 to "Decided since they were first listed".
 - **Log events, metrics**: none new.
 - **Documentation**: Concepts → Escalation chains gains "Assignees": who they are, how they change, that any Responder

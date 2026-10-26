@@ -29,6 +29,7 @@ files_touched:
   - internal/fakes/faketelegram/faketelegram_test.go
   - test/e2e/schedule_reach_test.go
   - docs/concepts/schedules.md
+  - AGENTS.md
 acceptance:
   - "[C-27.FR-8, C-27.AC-6] An On-call without a Mattermost Account link for the Connection of a Mattermost Destination of their Team has, in `getScheduleOnCall`, a warning `unreachable` with the person, the Destination, the messenger `mattermost` and the reason `no_account_link` for the current segment and for each segment of the next `schedule.gap_view` in which they are On-call, and `getOnCallNow` marks the Team's On-call `unreachable` with the same; an On-call with the link has none (`reach_test.go`, `oncallnow_test.go`, `schedule_reach_test.go`)."
   - "[C-27.FR-8] The reasons follow the Destination: `no_account_link` for a Mattermost, Slack, Telegram or Bridge Destination without the person's Account link in the Identity space of its Connection; `bridge_no_native_mentions` for a Bridge Destination whose bridge does not declare `native_mentions`; `webhook_no_thread_reply` for an outgoing webhook Destination in template mode without a \"reply in thread\" request; `not_in_discussion_group` for a Telegram Destination whose last Destination check saw the person outside its discussion group; an outgoing webhook in events mode has no warning (`reach_test.go`)."
@@ -89,6 +90,8 @@ issue: null
 - **Fake Telegram server** (`internal/fakes/faketelegram/chats.go`): `getChatMember` answers a person who never joined
   a chat as the facts of S-132 say — `left` until then, as today — and `PUT /_fake/chats/{chat}/members/{user}` sets a
   person's membership.
+- **AGENTS.md**: the paragraph on development mode names the answers of `getChatMember` and `PUT
+  /_fake/chats/{chat}/members/{user}` of the fake Telegram server.
 - **Settings**: `schedule.gap_view`.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/schedules.md` — "Unreachable On-calls": the reasons, linking an account in the

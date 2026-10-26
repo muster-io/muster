@@ -48,8 +48,9 @@ files_touched:
   - docs/messengers/slack.md
   - docs/messengers/mattermost.md
   - docs/install/versions.md
+  - AGENTS.md
 acceptance:
-  - "[C-25.FR-8, C-25.AC-7] A Team takes `team_mentions` — one per Connection, each a group's name and, for Slack, the user group's id — saved with `If-Match` and recorded in the diff of `team.updated`; one for a Mattermost Connection is saved; one for a Telegram Connection, for a Slack Connection whose last check found no `usergroups:read`, or for a Bridge Connection whose bridge does not declare group mentions is refused with `422` `group_mentions_unsupported` at `/team_mentions/{i}/connection_id` (`mentions_test.go`, `teams_test.go`)."
+  - "[C-25.FR-8, C-25.AC-7, C-25.FR-1] A Team takes `team_mentions` — one per Connection, each a group's name and, for Slack, the user group's id — saved with `If-Match` and recorded in the diff of `team.updated`; one for a Mattermost Connection is saved; one for a Telegram Connection, for a Slack Connection whose last check found no `usergroups:read`, or for a Bridge Connection whose bridge does not declare group mentions is refused with `422` `group_mentions_unsupported` at `/team_mentions/{i}/connection_id` (`mentions_test.go`, `teams_test.go`)."
   - "[C-25.FR-8] `getTeam` lists under `mention_connections` every Connection that may have a Destination, with its Team mention or none, `available`, and for the unavailable ones the `MentionUnavailableReason` `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`; a Team mention whose Connection later loses the ability stays, reads `available` false with the reason, and mentions nobody (`mentions_test.go`)."
   - "[C-24.FR-1, C-24.FR-2] The Slack Connection check's step `scopes` reports `usergroups:read` as present or missing without failing, `getConnection` of a Slack Connection carries `usergroups_read` from its last successful check, and a check that no longer finds the scope sets it false; the bot needs no other new scope (`check_test.go`)."
   - "[C-25.FR-8] The Mattermost Connection check gains the step `groups` (`ConnectionCheckStep.name`), which reads the groups as F-NNN of S-138 says and passes with a warning when the bot may not read them; `getConnection` of a Mattermost Connection carries `groups_read` (`check_test.go`)."
@@ -146,6 +147,9 @@ issue: null
   scopes include `usergroups:read`, and `missing_scope` otherwise, and `/_fake/config` takes `usergroups` by app key; the fake bridge's `/_fake/config` takes
   `capabilities.group_mentions` and `capabilities.everyone_mentions` through the generated types, and its test checks
   them.
+- **AGENTS.md**: the paragraph on development mode names the groups of the fake Mattermost server, the user groups and
+  scopes of the fake Slack server set through `/_fake/config`, and the group mentions and mentions of everyone that the
+  fake bridge's `info` declares.
 - **Settings**: none new; `connection.slack.*` unchanged.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/teams.md` — "Team mentions"; `docs/messengers/slack.md` — the manifest with

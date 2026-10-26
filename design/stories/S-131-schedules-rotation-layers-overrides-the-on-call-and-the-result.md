@@ -40,11 +40,11 @@ files_touched:
   - docs/concepts/schedules.md
   - mkdocs.yml
 acceptance:
-  - "[C-27.FR-1, C-27.FR-13] `createSchedule` makes a Schedule of a Team with a name unique in that Team (`409` `name_taken`), a time zone — the Organization's when omitted (`schedule.time_zone`) — and its Rotation layers; the first Schedule of a Team reads `main` true and a later one `main` false; `updateSchedule` with `main` true makes it the Team's main Schedule and the previous one not main in one transaction; `getSchedule`, `updateSchedule` with `If-Match` (`412` when stale, `428` without) and `deleteSchedule` work as for Teams; every change is an Audit log entry `schedule.created`, `schedule.updated` or `schedule.deleted` with a before/after diff, and `muster_schedule_info{schedule,name}` has one series per Schedule (`schedules_test.go`, `schedules_integration_test.go`)."
+  - "[C-27.FR-1, C-27.FR-13, C-25.FR-1, C-25.FR-2] `createSchedule` makes a Schedule of a Team with a name unique in that Team (`409` `name_taken`), a time zone — the Organization's when omitted (`schedule.time_zone`) — and its Rotation layers; the first Schedule of a Team reads `main` true and a later one `main` false; `updateSchedule` with `main` true makes it the Team's main Schedule and the previous one not main in one transaction; `getSchedule`, `updateSchedule` with `If-Match` (`412` when stale, `428` without) and `deleteSchedule` work as for Teams; every change is an Audit log entry `schedule.created`, `schedule.updated` or `schedule.deleted` with a before/after diff, and `muster_schedule_info{schedule,name}` has one series per Schedule (`schedules_test.go`, `schedules_integration_test.go`)."
   - "[C-27.FR-2, C-27.AC-1] With the two Rotation layers of scenario 1 in Europe/Berlin — below, weekly Shifts handed over on Monday at 10:00 among petr, sergey and olga; above, weekly Shifts limited to Monday to Friday 11:00–19:00 among olga and petr — `getScheduleOnCall` gives the upper Rotation layer's person on a Wednesday at 15:00 and the lower one's at 21:00 and on the Saturday at 15:00; the lower Rotation layer's handover is at 09:00Z on the Monday before the last Sunday of March and at 08:00Z on the Monday after it, 10:00 in Berlin both times (`rotation_test.go`, `schedules_test.go`)."
   - "[C-27.FR-2, C-27.AC-3] Saving a Rotation layer that names a Viewer, a disabled User or a User who is not in the Team is refused with `422` `not_pageable` at the person's pointer, `/rotation_layers/{i}/user_ids/{j}`, with the `reason` `viewer`, `disabled` or `not_in_team`, for the people the save adds to the Rotation layer; a person already in it whom the stored version keeps — one disabled since — does not refuse the save, so a rename of the Schedule still saves; a Shift length other than a day or a week takes whole hours from 1 (`422` `out_of_range` otherwise) (`schedules_test.go`)."
   - "[C-27.FR-3, C-27.FR-6, C-27.AC-2, C-27.AC-10] An Override that makes petr On-call on a Wednesday 11:00–21:00 makes him On-call from 11:00 to 19:00 over the upper Rotation layer and from 19:00 to 21:00 over the lower one, and leaves the On-call of 10:00 and 22:00 unchanged; it records `schedule_override.created` with its people and span, and the fake Mattermost, Telegram, Slack and bridge servers record no new message or direct message; of two Overrides that overlap, the person of the one created last is On-call in the overlap; an Override with `replaces_user_id` changes nothing in the On-call (`result_test.go`, `overrides_test.go`, `schedules_test.go`)."
-  - "[C-27.FR-6, C-27.AC-3] `createScheduleOverride` by a Responder who is not in the Team gets `409` `not_in_team`, by a Viewer `403`; an Override whose person who takes the Shift is a Viewer, disabled or outside the Team gets `422` `not_pageable` at `/user_id`, while one whose `replaces_user_id` names a disabled User or someone outside the Team is saved; an Admin who is not in the Team creates one; `updateScheduleOverride` with a stale `If-Match` gets `412`; an Override that ends before the business clock's now, or whose end is not after its start, gets `422` `out_of_range` at `/end` (`overrides_test.go`, `schedules_test.go`)."
+  - "[C-27.FR-6, C-27.AC-3] `createScheduleOverride` by a Responder who is not in the Team gets `409` `not_in_team`, by a Viewer `403`; an Override whose person who takes the Shift is a Viewer, disabled or outside the Team gets `422` `not_pageable` at `/user_id`, while one whose `replaces_user_id` names a disabled User or someone outside the Team is saved; an Admin who is not in the Team creates one; `updateScheduleOverride` with a stale `If-Match` gets `412`; an Override that ends before the business clock's now, or whose end is not after its start, gets `422` `out_of_range` at `/end`; changing or deleting an Override that has ended gets `409` `override_ended` (`overrides_test.go`, `schedules_test.go`)."
   - "[C-27.FR-4, C-27.FR-5, C-27.AC-4] After a User of the upper Rotation layer is disabled — or turned into a Viewer, or taken out of the Team — the On-call during their Shifts is the person of the lower Rotation layer, `getScheduleOnCall` lists the warning `disabled`, `viewer` or `not_in_team` with the person and the Rotation layer, and where no Override and no other Rotation layer has a Shift with someone who may be Paged the segment has no person: a gap; an Override whose person may not be Paged is skipped the same way (`result_test.go`)."
   - "[C-27.FR-13, C-27.AC-10] A Responder gets `403` on `createSchedule`, `updateSchedule` and `deleteSchedule`; a Viewer reads Schedules, Overrides and the On-call with `schedules:read` (`schedules_test.go`)."
   - "[C-27.FR-12, C-27.AC-8] Making another Schedule main changes the Team's On-call that `getScheduleOnCall` of the new main Schedule gives; deleting the main Schedule leaves the Team without one — no Schedule reads `main` true — until an Admin marks another; `deleteSchedule` checks the `schedule_in_use` refusal through `schedules.Referrers`, which names no chain until S-154 (`schedules_integration_test.go`)."
@@ -72,7 +72,7 @@ issue: null
 - Schedule deletion with P-66 and the code `schedule_in_use` declared for S-154; the refusal `team_in_use` of a Team
   that has Schedules (C-27.FR-12, C-25.FR-10).
 - The Permissions `schedules:read`, `schedules:write`, `schedule-overrides:write`, the metric `muster_schedule_info`,
-  the public id prefixes `SC`, `RL` and `OV`, the live hint `schedule`, and the first sections of the documentation page
+  the public id prefixes `SC`, `RY` and `VR`, the live hint `schedule`, and the first sections of the documentation page
   on Schedules (C-27.FR-13, FR-14).
 
 **OUT**
@@ -116,7 +116,7 @@ issue: null
     (`EntityRef` or null), `override_id` (or null)}. The warnings of this story list each person of a Rotation layer or
     of an Override in the period who may not be Paged, once per person and Rotation layer.
   - `Permission` gains `schedules:read`, `schedules:write`, `schedule-overrides:write`; `HintEvent.type` gains
-    `schedule`; `PublicId` and `api/README.md` gain the prefixes `SC` (Schedule), `RL` (Rotation layer) and `OV`
+    `schedule`; `PublicId` and `api/README.md` gain the prefixes `SC` (Schedule), `RY` (Rotation layer) and `VR`
     (Override), and the tag list "Schedules".
   - Problem codes: `not_pageable` (`validation-failed`, in `errors[].code`, with `reason` — `viewer`, `disabled`,
     `not_in_team` — in the error item; reused by the Escalation steps of S-154); `not_in_team` (`409` `conflict`);
@@ -124,19 +124,20 @@ issue: null
     optional property of `Problem`: `{type, id, name}[]`, the kind of each object that holds the resource (`schedule`
     here, `escalation_chain` from S-154), its `public_id` and its name; `team_in_use` (declared
     in S-115) raised for a Team with Schedules, naming them in `in_use_by`; `name_taken`; `out_of_range` at `/end`,
-    `/to`, `/rotation_layers/{i}/shift_hours` and `/rotation_layers/{i}/limits/end`.
+    `/to`, `/rotation_layers/{i}/shift_hours` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
+    `conflict`) for a change or a deletion of an Override that has ended.
 - **Schema** (migration `0029_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
   - `schedules`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^SC[0-9A-HJKMNP-TV-Z]{12}$')`), `team_id` (FK
     `teams`), `name`, `time_zone`, `main boolean NOT NULL DEFAULT false`, `version`, `created_at`, `updated_at`;
     unique `(team_id, lower(name))`; unique partial index `(team_id) WHERE main` — one main Schedule per Team.
-  - `rotation_layers`: `id`, `org_id`, `public_id` (`RL`), `schedule_id` (FK, `ON DELETE CASCADE`), `position`
+  - `rotation_layers`: `id`, `org_id`, `public_id` (`RY`), `schedule_id` (FK, `ON DELETE CASCADE`), `position`
     (1 for the lowest), `name`, `shift_length` (`CHECK IN ('day', 'week', 'hours')`), `shift_hours` (set exactly with
     `hours`, ≥ 1), `handover_time` (`HH:MM` pattern), `handover_day` (set exactly with `week`), `start_date date`,
     `limit_days text[]`, `limit_start`, `limit_end` (`limit_end > limit_start` when both are set); unique
     `(schedule_id, position)`.
   - `rotation_layer_users`: `org_id`, `rotation_layer_id` (FK, cascade), `position`, `user_id` (FK `users`); primary
     key `(rotation_layer_id, position)`.
-  - `schedule_overrides`: `id`, `org_id`, `public_id` (`OV`), `schedule_id` (FK, cascade), `user_id`,
+  - `schedule_overrides`: `id`, `org_id`, `public_id` (`VR`), `schedule_id` (FK, cascade), `user_id`,
     `replaces_user_id` (nullable), `starts_at`, `ends_at` (`CHECK (ends_at > starts_at)`), `created_by_user_id`,
     `created_by_service_account_id` (exactly one, by a CHECK), `version`, `created_at`, `updated_at`; index
     `(org_id, schedule_id, ends_at)` for the period reads.
@@ -156,7 +157,8 @@ issue: null
     are joined. The business clock (`clock.Business`) is the only time it reads (C-02).
   - `overrides.go` — the precondition, checked after the Permission: the caller is in the Team or is an Admin, else
     `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`; the end is after the start and not
-    before the business clock's now (P-91); the same for changes and deletes (Open question 3).
+    before the business clock's now (P-91), checked on create and change; an Override that has ended can be neither
+    changed nor deleted, `409` `override_ended` (Open question 3).
   - `schedules.go` — the people of a Rotation layer are validated against the stored version (Open question 6): the
     people a save adds must be able to be Paged, those it keeps need not;
   - `schedules.go` — the main Schedule: the first Schedule of a Team is created main (P-90); `main` true on another
@@ -278,8 +280,8 @@ Override and an Admin outside the Team who makes one.
 3. **Overrides that have ended.** P-91 says an Override may not end in the past. Options: (a) creating and changing
    check the new end, and an Override that has ended may be neither changed nor deleted (`409` `override_ended`), so
    the past Result stays as it was; (b) only creating and changing check the end, and deleting is always allowed.
-   Recommended: (a); the contract applies the end check to creating and changing, and adds `override_ended` once
-   decided.
+   Recommended: (a); the contract follows it: the end check on creating and changing, and `override_ended` for
+   changing or deleting an Override that has ended.
 4. **Moving a Schedule to another Team.** C-27.FR-1 says a Schedule belongs to one Team. Options: (a) `team_id` is set
    on creation only, and a different one on update is refused with `422` `unsupported` at `/team_id`; (b) an Admin may
    move it, which revalidates every person and clears `main`. Recommended: (a).

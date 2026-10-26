@@ -65,7 +65,7 @@ issue: null
   `window_days`, `items` — `TeamLabelValue` {`value`, `last_seen_at`, `alert_count`, `valid_slug`}}, the most recently
   seen first, at most 500, like `listSeverityValues`.
 - **Schema** (migration `0026_team_evaluation`, expand only; `schema.md` §4.15 and §5): `open_group_updates.team_id`
-  (nullable foreign key to `teams`) and the kind `team_evaluation` in its CHECK, `NOT VALID` and validated in a second
+  (nullable foreign key to `teams`) and `open_group_updates_kind_v3_check` with every kind of `_v2` and `team_evaluation`, `NOT VALID` and validated in a second
   transaction. The values are read from `alerts` through `alerts_org_last_seen_idx`, as the severity values are; no
   table is added for them.
 - **Teams** (`internal/teams`): `labelvalues.go` — the values, their last time seen, their count and `valid_slug`,
@@ -140,6 +140,9 @@ None.
 - The evaluation only adds (C-25.FR-13): a Team stays in an Alert Group, and on its Alerts, after a change that would no
   longer bring it, as the Teams of an Alert Group only grow (C-25.FR-6).
 - Depends on S-111 for `open_group_updates`.
+- Migration `0026` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+  when it merges (S-131's Notes).
 
 ## Coverage
 

@@ -35,7 +35,7 @@ files_touched:
   - web/e2e/teams.spec.ts
   - web/e2e/docs-links-forms.spec.ts
 acceptance:
-  - "[C-32.FR-1, C-32.FR-3, C-32.AC-14] In a real browser an Admin builds the payments chain of scenario 1 of C-32 on its page: \"Steps\" numbered, each with its target, normal or important, and its limits as chips (\"Severity: any\", \"always\", \"only in the working hours of payments (Mon–Fri 11–19)\", \"Severity = critical\"), and \"Add step\" with \"Page the On-call of a Schedule\", \"Page people\", \"Page the whole Team\", \"Wait\", \"Send to an outgoing webhook\", \"Repeat from step\" and \"Call through the Notification gateway\" — the last greyed with \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\" when there is none — the hint about limits, \"Whom 'Page the whole Team' calls\" with the unavailable choices greyed with their reason, and \"Normal and important\" with its text; saved, it reads back the same, in English and in Russian (`escalation-chain-form.test.tsx`, `escalation-steps-editor.test.tsx`, `escalation-chains.spec.ts`)."
+  - "[C-32.FR-1, C-32.FR-3, C-32.AC-14, C-30.FR-9] In a real browser an Admin builds the payments chain of scenario 1 of C-32 on its page: \"Steps\" numbered, each with its target, normal or important, and its limits as chips (\"Severity: any\", \"always\", \"only in the working hours of payments (Mon–Fri 11–19)\", \"Severity = critical\"), and \"Add step\" with \"Page the On-call of a Schedule\", \"Page people\", \"Page the whole Team\", \"Wait\", \"Send to an outgoing webhook\", \"Repeat from step\" and \"Call through the Notification gateway\" — the last greyed with \"Unavailable: a Notification gateway is needed (a bridge for calls and SMS)\" when there is none — the hint about limits, \"Whom 'Page the whole Team' calls\" with the unavailable choices greyed with their reason, and \"Normal and important\" with its text; saved, it reads back the same, in English and in Russian (`escalation-chain-form.test.tsx`, `escalation-steps-editor.test.tsx`, `escalation-chains.spec.ts`)."
   - "[C-32.FR-2, C-32.FR-17] The chain page says \"Writes only in the Threads of payments-critical and payments-notice. Starts at publication.\" and when it stops and starts over, \"Run for\" with \"any severity\", \"Severity = critical\" and \"Severity < critical\" for the Team's reference, whose Alert Groups it runs on, and the chain's warnings, such as a Telegram Destination that cannot be mentioned for everyone (`escalation-chain-form.test.tsx`)."
   - "[C-32.AC-17] \"How it went\" lists the recent runs with their Alert Groups, Pages, undelivered Pages, skipped steps with their reasons and the acknowledgement that stopped the chain (`escalation-chain-runs.test.tsx`, `escalation-chains.spec.ts`)."
   - "[C-32.FR-2, C-32.FR-17, C-32.AC-17, C-08.FR-1] The Route form's \"Escalation chains\" names chains with their Severity conditions and the hint \"Pages only in the Threads of the Route's Destinations. The Teams from the label Page with their own chains.\"; a Route with a chain, no Destination and \"Also to the Teams from the label\" off shows \"Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination.\", which goes once a Destination is named; the Routes list shows each Route's chains (`route-chains.test.tsx`, `routes.spec.ts`)."
@@ -69,7 +69,7 @@ issue: null
 - **API used**: `listEscalationChains`, `createEscalationChain`, `getEscalationChain`, `updateEscalationChain`,
   `deleteEscalationChain`, `listEscalationChainRuns`, `getRoute`, `updateRoute`, `getTeam`, `updateTeam`,
   `listSchedules`, `listTeams`, `listUsers`, `listDestinations`, `listConnections` (`role=gateway`).
-- **Routes**: `/escalation-chains` (the list, with the Team filter of S-119), `/escalation-chains/new` and
+- **Routes**: `/escalation-chains` (the list, with the filter by Team of S-119), `/escalation-chains/new` and
   `/escalation-chains/$chainId`; the Teams list and the Team page link to them, and the main navigation keeps its
   entries (S-072).
 - **Components**: `escalation-chain-form.tsx` — name, description, owning Team, the Destinations it writes in, the start
@@ -139,6 +139,7 @@ the demo gateway removed for step 1 (S-145). In Playwright at 1280 × 800, in En
 
 ## Notes
 
+- The Russian texts follow the vocabulary of S-162's Open question 1.
 - Suggested commit: `feat(web): build escalation chains and name them on routes and teams`.
 - The approved Route mockup chooses one chain; the form names several, as C-26.FR-2 and C-32.FR-2 do (L2.md §5.2).
 - The chip of a step limited to Working hours names the Organization when the chain has no owning Team (C-25.FR-9).

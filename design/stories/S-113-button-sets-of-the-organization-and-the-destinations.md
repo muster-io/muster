@@ -100,7 +100,8 @@ issue: null
 - **Schema** (migration `0022_button_sets`, expand only; `schema.md` §4.2 and §4.5): `organizations.buttons jsonb NOT
   NULL DEFAULT '{"all": true}'` with `CHECK (jsonb_typeof(buttons) = 'object')`; `destinations.buttons jsonb` (null =
   "As in the Organization") with `CHECK (buttons IS NULL OR jsonb_typeof(buttons) = 'array')`; the CHECK of
-  `open_group_updates.kind` gains `destination_buttons` and `organization_buttons`, and a CHECK that the first names a
+  `open_group_updates.kind` is replaced by `open_group_updates_kind_v2_check`, which lists every kind present —
+  `route_minimum_severity`, `destination_buttons` and `organization_buttons` — and a CHECK that `destination_buttons` names a
   Destination (new nullable column `open_group_updates.destination_id`), all `NOT VALID` and validated in a second
   transaction, as 0018 does. The down migration drops the columns and restores the kind CHECK.
 - **Buttons** (`internal/buttons/set.go`): `Set` — all, or a list of items — with `Shows(Button, durations)`: Acknowledge
@@ -208,6 +209,9 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
 - A press on a button that a set no longer shows still runs its Command: the action id stays valid, and the Command is
   checked as any other (C-28.FR-9).
 - Depends on S-111 for `open_group_updates`; it needs neither Teams nor Schedules.
+- Migration `0022` follows the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+  when it merges (S-131's Notes).
 
 ## Coverage
 
