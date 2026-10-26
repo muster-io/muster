@@ -2677,8 +2677,16 @@ is never lost.
 
 **Check connection** tells you which applies: when the bot's roles do not grant `create_post_ephemeral`, the check
 passes with a warning that answers will show in the Thread of the Root message, and `muster doctor` prints the
-Connection as a `WARN` line. To show answers in the channel, give the bot that permission, for example the system admin
-role. Otherwise keep the role Member and let people read the answers in the Thread.
+Connection as a `WARN` line. The warning names the bot whose token the Connection holds, as `@username`, and the roles
+Muster read for it, for example `system_user`, so you can see which account the token belongs to. To show answers in
+the channel, give the bot that permission, for example the system admin role. Otherwise keep the role Member and let
+people read the answers in the Thread.
+
+Promote the bot account itself, not the person who owns it, and check that it is the bot the warning names: a bot of
+another Connection, or an older token of another bot, keeps its own roles. As a system admin, open **Integrations →
+Bot Accounts** from the product menu, select **Edit** on the bot, set **Role** to **System Admin** and select
+**Update**; or run `mmctl roles system-admin <bot-username>`. Then run **Check connection** again: the warning is gone
+once the bot's roles grant the permission.
 
 ## Rate limit
 
