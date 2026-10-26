@@ -355,6 +355,189 @@ func TestURLDefaultsAndIgnoredPasswordFile(t *testing.T) {
 	}
 }
 
+// TestSSLModeKeepsTheQuery: the default sslmode is appended to the raw query, whose pairs keep their order and their
+// encoding, and the reported mode is the one pgx uses, the last sslmode of the query.
+func TestSSLModeKeepsTheQuery(t *testing.T) {
+	const (
+		options = "postgres://u:p@db:5432/m?options=-c%20statement_timeout%3D5000"
+		semi    = "postgres://u:p@db:5432/m?application_name=a;b"
+	)
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		session bool // check the session connection instead of the main one
+		wantURL string
+		wantSSL string
+		params  map[string]string // run-time parameters pgx reads from the URL
+	}{
+		{
+			name:    "encoded options",
+			vars:    with(base(), "MUSTER_DATABASE_URL", options),
+			wantURL: options + "&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"options": "-c statement_timeout=5000"},
+		},
+		{
+			name:    "a pair with a semicolon",
+			vars:    with(base(), "MUSTER_DATABASE_URL", semi),
+			wantURL: semi + "&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"application_name": "a;b"},
+		},
+		{
+			name:    "no query",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m"),
+			wantURL: "postgres://u:p@db:5432/m?sslmode=prefer",
+			wantSSL: "prefer",
+		},
+		{
+			name:    "a trailing ampersand",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?application_name=x&"),
+			wantURL: "postgres://u:p@db:5432/m?application_name=x&sslmode=prefer",
+			wantSSL: "prefer",
+		},
+		{
+			name:    "an empty sslmode last",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=disable&sslmode="),
+			wantURL: "postgres://u:p@db:5432/m?sslmode=disable&sslmode=&sslmode=prefer",
+			wantSSL: "prefer",
+		},
+		{
+			name:    "the last sslmode wins",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=require&sslmode=disable"),
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require&sslmode=disable",
+			wantSSL: "disable",
+		},
+		{
+			name:    "ssl=true",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?ssl=true"),
+			wantURL: "postgres://u:p@db:5432/m?ssl=true",
+			wantSSL: "require",
+		},
+		{
+			name:    "ssl=true after sslmode",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=disable&ssl=true"),
+			wantURL: "postgres://u:p@db:5432/m?sslmode=disable&ssl=true",
+			wantSSL: "require",
+		},
+		{
+			name:    "sslmode after ssl=true",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?ssl=true&sslmode=disable"),
+			wantURL: "postgres://u:p@db:5432/m?ssl=true&sslmode=disable",
+			wantSSL: "disable",
+		},
+		{
+			name:    "spaces around the value",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=require "),
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require ",
+			wantSSL: "require",
+		},
+		{
+			name:    "an sslmode inside a value",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?application_name=a;sslmode%3Ddisable"),
+			wantURL: "postgres://u:p@db:5432/m?application_name=a;sslmode%3Ddisable&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"application_name": "a;sslmode=disable"},
+		},
+		{
+			name:    "ssl=true then ssl=false",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?ssl=true&ssl=false"),
+			wantURL: "postgres://u:p@db:5432/m?ssl=true&ssl=false&sslmode=prefer",
+			wantSSL: "prefer",
+		},
+		{
+			name:    "a plus sign",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?options=a+b"),
+			wantURL: "postgres://u:p@db:5432/m?options=a+b&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"options": "a+b"},
+		},
+		{
+			name:    "session host",
+			vars:    with(base(), "MUSTER_DATABASE_URL", options, "MUSTER_DATABASE_SESSION_HOST", "pg-direct"),
+			session: true,
+			wantURL: "postgres://u:p@pg-direct:5432/m?options=-c%20statement_timeout%3D5000&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"options": "-c statement_timeout=5000"},
+		},
+		{
+			name: "explicit session URL",
+			vars: with(base(), "MUSTER_DATABASE_SESSION_URL",
+				"postgres://a@b/c?options=-c%20statement_timeout%3D5000&application_name=a;b"),
+			session: true,
+			wantURL: "postgres://a@b:5432/c?options=-c%20statement_timeout%3D5000&application_name=a;b&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"options": "-c statement_timeout=5000", "application_name": "a;b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := load(t, tt.vars)
+			db := c.Database
+			if tt.session {
+				db = c.Session
+			}
+			if string(db.URL) != tt.wantURL || db.SSLMode != tt.wantSSL {
+				t.Errorf("URL %q (%s), want %q (%s)", string(db.URL), db.SSLMode, tt.wantURL, tt.wantSSL)
+			}
+			parsed, err := pgx.ParseConfig(string(db.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range tt.params {
+				if got := parsed.RuntimeParams[name]; got != want {
+					t.Errorf("run-time parameter %s %q, want %q", name, got, want)
+				}
+			}
+			reported := db.SSLMode
+			if reported == "verify-ca" || reported == "verify-full" {
+				reported = "require" // pgxSSLMode sees only whether TLS is used, not how the certificate is checked
+			}
+			if got := pgxSSLMode(parsed); got != reported {
+				t.Errorf("pgx connects as with sslmode %s, but the reported sslmode is %s", got, db.SSLMode)
+			}
+		})
+	}
+}
+
+// TestStrictURLRejected: a value with a raw '=' is kept as written, with the default sslmode appended, and pgx then
+// refuses the URL with an error that names the parameter.
+func TestStrictURLRejected(t *testing.T) {
+	for _, tt := range []struct{ raw, param string }{
+		{"postgres://u@db:5432/m?options=-cstatement_timeout=5000", "options"},
+		{"postgres://u@db:5432/m?application_name=a;sslmode=disable", "application_name"},
+	} {
+		c := load(t, with(base(), "MUSTER_DATABASE_URL", tt.raw))
+		if string(c.Database.URL) != tt.raw+"&sslmode=prefer" || c.Database.SSLMode != "prefer" {
+			t.Errorf("URL %q (%s), want %q (prefer)", string(c.Database.URL), c.Database.SSLMode, tt.raw+"&sslmode=prefer")
+		}
+		_, err := pgx.ParseConfig(string(c.Database.URL))
+		if err == nil || !strings.Contains(err.Error(), `"`+tt.param+`"`) {
+			t.Errorf("%s: pgx error %v, want one that names %s", tt.raw, err, tt.param)
+		}
+	}
+}
+
+// pgxSSLMode names the mode pgx connects with, from TLS on the first attempt and on the fallbacks: disable, allow,
+// prefer or require (verify-ca and verify-full appear as require).
+func pgxSSLMode(c *pgx.ConnConfig) string {
+	plainFallback, tlsFallback := false, false
+	for _, f := range c.Fallbacks {
+		plainFallback = plainFallback || f.TLSConfig == nil
+		tlsFallback = tlsFallback || f.TLSConfig != nil
+	}
+	switch {
+	case c.TLSConfig == nil && tlsFallback:
+		return "allow"
+	case c.TLSConfig == nil:
+		return "disable"
+	case plainFallback:
+		return "prefer"
+	default:
+		return "require"
+	}
+}
+
 func TestSecretFiles(t *testing.T) {
 	keys := writeFile(t, "a2V5LXR3bw==\r\n")
 	admin := writeFile(t, "admin-pw")
