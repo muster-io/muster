@@ -18,6 +18,10 @@
 - Amended: 2026-10-21 — a `hello` that counts more connections than the holder's own shows that another Connection or
   installation shares the Slack app, not only another installation: each Slack Connection needs its own app (journal
   D414)
+- Amended: 2026-10-26 — for L2 (journal D479, D502, D513, D532, D535): four scans join the closed list of Leader tasks —
+  the gaps of Schedules, the `info` of every Bridge, the daily telemetry report and polling Alertmanager in the `pull`
+  Connection mode — each safe to run twice; Bridge polling also takes the events of Notification gateways; everything
+  with a deadline, Escalation steps and Maintenance windows included, stays a timer row on any replica
 
 ## Context
 
@@ -44,7 +48,13 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 - the check of the OIDC client secret's expiry date, which raises the Internal alert `MusterOIDCSecretExpiring`
   (ADR-0014);
 - after a master key rotation, recomputing the Desired state of the open Alert Groups whose buttons an older key
-  signed, so their Root messages are re-signed (ADR-0011).
+  signed, so their Root messages are re-signed (ADR-0011);
+- from L2, finding the gaps of Schedules ahead, which the Schedule page shows for two weeks and an Internal alert
+  reports within a horizon the L2 PRD sets (ADR-0018);
+- from L2, re-reading the `info` of every Bridge Connection, Notification gateways included, once its copy is older than
+  `bridge.info_max_age`, so that a Connection's page is current without deliveries (ADR-0017);
+- from L2, sending the daily telemetry report where an Admin opted in (ADR-0019);
+- from L2, polling Alertmanager in the `pull` Connection mode.
 
 Muster runs under docker-compose as well as on Kubernetes, often with PgBouncer in front of PostgreSQL. PgBouncer in
 transaction pooling mode breaks session-level features: session advisory locks and `LISTEN/NOTIFY` do not survive
@@ -57,17 +67,19 @@ still be running and believe it leads.
 
 ## Decision
 
-**All replicas are active.** Every replica serves HTTP and runs the ingestion, delivery and timer workers. Timer rows are
-claimed like any other row, with `SKIP LOCKED` and a lease, so a timer fires on whichever replica is free and a stalled
-replica delays nothing beyond its lease.
+**All replicas are active.** Every replica serves HTTP and runs the ingestion, delivery and timer workers. Timer rows
+are claimed like any other row, with `SKIP LOCKED` and a lease, so a timer fires on whichever replica is free and a
+stalled replica delays nothing beyond its lease. From L2, Escalation steps, the start and end of Maintenance windows and
+the deadlines of Inbound webhook Alerts are timer rows too; nothing with a deadline becomes Leader work (journal D513,
+D535).
 
 **One Leader** holds a **session advisory lock with a constant key** on a dedicated connection and runs only the tasks
 listed in the Context: Telegram polling, Bridge polling, Slack's Socket Mode connections, the Heartbeat lost and Stale
 checks, partition maintenance, the retention deletes, the pruning of short-lived rows, of the records of gone replicas
-and of the Request log, database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the
-re-render after a key rotation (later also polling Alertmanager in the `pull` Connection mode). This list is closed: new
-singleton work is added to it by a reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops
-when no replica leads.
+and of the Request log, database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check, the
+re-render after a key rotation and, from L2, the Schedule gap scan, the refresh of Bridge `info`, the telemetry report
+and polling Alertmanager in the `pull` Connection mode. This list is closed: new singleton work is added to it by a
+reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica leads.
 
 **A bounded lease on leadership.** The Leader proves it still holds the lock by pinging over the lock's own session at a
 fixed interval. The lock session sets `idle_session_timeout` (which is why PostgreSQL 14 is the oldest supported
@@ -78,10 +90,14 @@ again later. So the old Leader normally stops before PostgreSQL can hand the loc
 for longer than the bound can still overlap with its successor for a moment, so every singleton task must be safe to run
 twice: Telegram rejects a second poller with `409 Conflict`, which the poller answers by backing off — it never counts
 against the Connection or marks anything Broken; a Bridge event polled twice is handled once by its id; two Slack
-connections of one Connection share its presses, each press reaching one of them; partition
-changes, Stale resolutions and deletes past a bound are idempotent, Internal alerts are deduplicated by fingerprint, and
-an extra outgoing heartbeat is harmless. Defaults: a ping every 5 seconds, a fencing deadline of 15 seconds and a
-server-side bound of 30 seconds, so a handover after a node loss takes well under a minute.
+connections of one Connection share its presses, each press reaching one of them; partition changes, Stale resolutions
+and deletes past a bound are idempotent, Internal alerts are deduplicated by fingerprint, and an extra outgoing
+heartbeat is harmless. From L2, a second gap scan finds the same gaps and raises the same deduplicated Internal alert, a
+second read of a bridge's `info` only stores another fresh copy, a telemetry report carries the installation id and its
+day, which the collector keeps once, and a second poll of Alertmanager is ingested idempotently on
+`fingerprint + status + startsAt`. Bridge polling also takes the events of Bridge Connections in the role `gateway`, so
+Notification gateways need no task of their own (journal D532). Defaults: a ping every 5 seconds, a fencing deadline of
+15 seconds and a server-side bound of 30 seconds, so a handover after a node loss takes well under a minute.
 
 **Downtime.** The Leader writes an "alive" mark every 30 seconds. After a full outage, the next Leader learns how long
 Muster was down and adds a Timeline entry to open Alert Groups; overdue timer rows are claimed like any others and fire
@@ -101,8 +117,8 @@ without anyone having to run HA in production.
 raise alerts; they do not take replicas out of load balancing. The `muster_leader` metric shows which replica leads. The
 chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram and Bridge polling,
 Slack's Socket Mode connections, the Heartbeat lost and Stale checks, partition maintenance, retention and pruning, the
-database gauges, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key rotation have
-stopped, while ingestion, delivery and timers keep working.
+database gauges, the outgoing heartbeat, the OIDC secret expiry check, the re-render after a key rotation and the scans
+of L2 have stopped, while ingestion, delivery and timers keep working.
 
 ## Consequences
 
