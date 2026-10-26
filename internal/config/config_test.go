@@ -338,6 +338,19 @@ func TestSSLModeKeepsTheQuery(t *testing.T) {
 			wantSSL: "require",
 		},
 		{
+			name:    "an sslmode inside a value",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?application_name=a;sslmode%3Ddisable"),
+			wantURL: "postgres://u:p@db:5432/m?application_name=a;sslmode%3Ddisable&sslmode=prefer",
+			wantSSL: "prefer",
+			params:  map[string]string{"application_name": "a;sslmode=disable"},
+		},
+		{
+			name:    "ssl=true then ssl=false",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?ssl=true&ssl=false"),
+			wantURL: "postgres://u:p@db:5432/m?ssl=true&ssl=false&sslmode=prefer",
+			wantSSL: "prefer",
+		},
+		{
 			name:    "a plus sign",
 			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?options=a+b"),
 			wantURL: "postgres://u:p@db:5432/m?options=a+b&sslmode=prefer",
@@ -381,10 +394,32 @@ func TestSSLModeKeepsTheQuery(t *testing.T) {
 					t.Errorf("run-time parameter %s %q, want %q", name, got, want)
 				}
 			}
-			if got := pgxSSLMode(parsed); got != db.SSLMode {
+			reported := db.SSLMode
+			if reported == "verify-ca" || reported == "verify-full" {
+				reported = "require" // pgxSSLMode sees only whether TLS is used, not how the certificate is checked
+			}
+			if got := pgxSSLMode(parsed); got != reported {
 				t.Errorf("pgx connects as with sslmode %s, but the reported sslmode is %s", got, db.SSLMode)
 			}
 		})
+	}
+}
+
+// TestStrictURLRejected: a value with a raw '=' is kept as written, with the default sslmode appended, and pgx then
+// refuses the URL with an error that names the parameter.
+func TestStrictURLRejected(t *testing.T) {
+	for _, tt := range []struct{ raw, param string }{
+		{"postgres://u@db:5432/m?options=-cstatement_timeout=5000", "options"},
+		{"postgres://u@db:5432/m?application_name=a;sslmode=disable", "application_name"},
+	} {
+		c := load(t, with(base(), "MUSTER_DATABASE_URL", tt.raw))
+		if string(c.Database.URL) != tt.raw+"&sslmode=prefer" || c.Database.SSLMode != "prefer" {
+			t.Errorf("URL %q (%s), want %q (prefer)", string(c.Database.URL), c.Database.SSLMode, tt.raw+"&sslmode=prefer")
+		}
+		_, err := pgx.ParseConfig(string(c.Database.URL))
+		if err == nil || !strings.Contains(err.Error(), `"`+tt.param+`"`) {
+			t.Errorf("%s: pgx error %v, want one that names %s", tt.raw, err, tt.param)
+		}
 	}
 }
 
