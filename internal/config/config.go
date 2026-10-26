@@ -563,7 +563,7 @@ func mainDatabase(r *raw) (*url.URL, error) {
 }
 
 func sslMode(u *url.URL) string {
-	return cmp.Or(u.Query().Get("sslmode"), DefaultDatabaseSSLMode)
+	return cmp.Or(querySSLMode(u.RawQuery), DefaultDatabaseSSLMode)
 }
 
 // withSSLMode writes the default port and sslmode into a URL that names none, so that the mode in effect is the one
@@ -572,9 +572,36 @@ func withSSLMode(u *url.URL) {
 	if u.Port() == "" && !strings.Contains(u.Host, ",") {
 		u.Host = net.JoinHostPort(u.Hostname(), DefaultDatabasePort)
 	}
-	q := u.Query()
-	if q.Get("sslmode") == "" {
-		q.Set("sslmode", DefaultDatabaseSSLMode)
-		u.RawQuery = q.Encode()
+	if querySSLMode(u.RawQuery) == "" {
+		if u.RawQuery != "" && !strings.HasSuffix(u.RawQuery, "&") {
+			u.RawQuery += "&"
+		}
+		u.RawQuery += "sslmode=" + DefaultDatabaseSSLMode
 	}
+}
+
+// querySSLMode reads the sslmode of a raw query as pgx does: pairs split on '&', keys and values trimmed of spaces and
+// percent-decoded without turning '+' into a space, the last one winning, and ssl=true meaning require when no sslmode
+// follows it. Reading the raw pairs leaves the others untouched, where url.Values would re-encode spaces as '+', which
+// pgx keeps, and drop the pairs with a ';'.
+func querySSLMode(rawQuery string) string {
+	mode, alias := "", false
+	for pair := range strings.SplitSeq(rawQuery, "&") {
+		k, v, _ := strings.Cut(pair, "=")
+		key, err := url.PathUnescape(strings.Trim(k, " "))
+		if err != nil {
+			continue
+		}
+		value, _ := url.PathUnescape(strings.Trim(v, " ")) // pgx refuses a malformed escape
+		switch key {
+		case "sslmode":
+			mode, alias = value, false
+		case "ssl":
+			alias = value == "true"
+		}
+	}
+	if alias {
+		return "require"
+	}
+	return mode
 }
