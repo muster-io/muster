@@ -14,7 +14,7 @@ value of a secret, a variable marked so below.
 
 no default · secret
 
-The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none.
+The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none. Its `pool_*` parameters apply to the main pool only; a session connection derived from it drops them.
 
 ### `MUSTER_DATABASE_HOST`
 
@@ -56,19 +56,19 @@ The `sslmode` of the database connections, when `MUSTER_DATABASE_URL` is not set
 
 no default · secret
 
-The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection.
+The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection without its `pool_*` parameters. A session connection has no pool, so `pool_*` parameters in this URL are ignored.
 
 ### `MUSTER_DATABASE_SESSION_HOST`
 
 no default
 
-The host of the session connection; its other fields are those of the main connection.
+The host of the session connection; its other fields are those of the main connection, without the `pool_*` parameters.
 
 ### `MUSTER_DATABASE_SESSION_PORT`
 
 no default
 
-The port of the session connection; its other fields are those of the main connection.
+The port of the session connection; its other fields are those of the main connection, without the `pool_*` parameters.
 
 ### `MUSTER_SECRET_KEYS`
 

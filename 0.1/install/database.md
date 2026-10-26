@@ -21,7 +21,10 @@ Fields
 When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every `PG*` variable,
 such as `PGHOST`, `PGSSLMODE`, `PGSSLROOTCERT`, `PGOPTIONS` and `PGPASSFILE`, and the password file `~/.pgpass`. Give
 any other libpq setting as a parameter of the URL instead, such as `sslrootcert`, `options` or `target_session_attrs`.
-Only libpq's default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
+Percent-encode the values as libpq requires, `=` as `%3D` and a space as `%20`, for example
+`options=-c%20search_path%3Dmuster`. A URL that libpq rejects stops Muster at start with an error that names the
+parameter; the URL in the error includes the `sslmode` that Muster appends when the URL names none. Only libpq's
+default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
 `~/.postgresql/postgresql.crt` with `postgresql.key`; these are files, not variables, and the Muster image has none. Any
 secret can come from a `*_FILE` variable.
 
@@ -31,9 +34,10 @@ and the password from a key of the Secret as `MUSTER_DATABASE_PASSWORD_FILE`. Us
 has no field, such as `pool_max_conns` or `sslrootcert`; in the chart, `database.urlKey` names the key of the Secret that
 holds the whole URL, and the field values are then ignored.
 
-A replica's main pool holds `max(10, CPUs)` connections unless the URL sets `pool_max_conns`. On top of that, each
-replica keeps about three session connections (see [PgBouncer](#pgbouncer)). Size `max_connections` of PostgreSQL for all
-replicas together.
+A replica's main pool holds `max(10, CPUs)` connections unless the URL sets `pool_max_conns`. The `pool_*` parameters
+size the main pool only: a session connection derived from the URL drops them, and one given by
+`MUSTER_DATABASE_SESSION_URL` ignores them. On top of that, each replica keeps about three session connections (see
+[PgBouncer](#pgbouncer)). Size `max_connections` of PostgreSQL for all replicas together.
 
 Create the database and its user before the first start. The user owns the database, because Muster creates its tables,
 indexes and partitions itself:
@@ -140,7 +144,8 @@ PostgreSQL directly or through a pooler in session mode:
 
 `MUSTER_DATABASE_SESSION_HOST`
 `MUSTER_DATABASE_SESSION_PORT`
-:   Only the host and the port; the user, password, database and `sslmode` are those of the main connection.
+:   Only the host and the port; the user, password, database, `sslmode` and the other parameters are those of the main
+    connection, without its `pool_*` parameters.
 
 In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
 use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the

@@ -3245,7 +3245,7 @@ forms is an error. An invalid value stops the start with an error that names the
 value of a secret, a variable marked so below.</p>
 <h3 id="muster_database_url"><code>MUSTER_DATABASE_URL</code><a class="headerlink" href="#muster_database_url" title="Permanent link">&para;</a></h3>
 <p>no default · secret</p>
-<p>The main database connection as a <code>postgres://</code> or <code>postgresql://</code> URL with the host, the user, the password and the database. Required unless <code>MUSTER_DATABASE_HOST</code>, <code>MUSTER_DATABASE_NAME</code> and <code>MUSTER_DATABASE_USER</code> are set; when both are given, the URL is used and the fields are ignored with a warning. Its <code>pool_max_conns</code> sets the size of a replica's main pool, max(10, CPUs) when it sets none.</p>
+<p>The main database connection as a <code>postgres://</code> or <code>postgresql://</code> URL with the host, the user, the password and the database. Required unless <code>MUSTER_DATABASE_HOST</code>, <code>MUSTER_DATABASE_NAME</code> and <code>MUSTER_DATABASE_USER</code> are set; when both are given, the URL is used and the fields are ignored with a warning. Its <code>pool_max_conns</code> sets the size of a replica's main pool, max(10, CPUs) when it sets none. Its <code>pool_*</code> parameters apply to the main pool only; a session connection derived from it drops them.</p>
 <h3 id="muster_database_host"><code>MUSTER_DATABASE_HOST</code><a class="headerlink" href="#muster_database_host" title="Permanent link">&para;</a></h3>
 <p>no default</p>
 <p>The database host, when <code>MUSTER_DATABASE_URL</code> is not set.</p>
@@ -3266,13 +3266,13 @@ value of a secret, a variable marked so below.</p>
 <p>The <code>sslmode</code> of the database connections, when <code>MUSTER_DATABASE_URL</code> is not set: <code>disable</code>, <code>allow</code>, <code>prefer</code>, <code>require</code>, <code>verify-ca</code> or <code>verify-full</code>. <code>muster doctor</code> and the startup log report whether each connection is encrypted.</p>
 <h3 id="muster_database_session_url"><code>MUSTER_DATABASE_SESSION_URL</code><a class="headerlink" href="#muster_database_session_url" title="Permanent link">&para;</a></h3>
 <p>no default · secret</p>
-<p>The session connection, for advisory locks and LISTEN, as a <code>postgres://</code> URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection.</p>
+<p>The session connection, for advisory locks and LISTEN, as a <code>postgres://</code> URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection without its <code>pool_*</code> parameters. A session connection has no pool, so <code>pool_*</code> parameters in this URL are ignored.</p>
 <h3 id="muster_database_session_host"><code>MUSTER_DATABASE_SESSION_HOST</code><a class="headerlink" href="#muster_database_session_host" title="Permanent link">&para;</a></h3>
 <p>no default</p>
-<p>The host of the session connection; its other fields are those of the main connection.</p>
+<p>The host of the session connection; its other fields are those of the main connection, without the <code>pool_*</code> parameters.</p>
 <h3 id="muster_database_session_port"><code>MUSTER_DATABASE_SESSION_PORT</code><a class="headerlink" href="#muster_database_session_port" title="Permanent link">&para;</a></h3>
 <p>no default</p>
-<p>The port of the session connection; its other fields are those of the main connection.</p>
+<p>The port of the session connection; its other fields are those of the main connection, without the <code>pool_*</code> parameters.</p>
 <h3 id="muster_secret_keys"><code>MUSTER_SECRET_KEYS</code><a class="headerlink" href="#muster_secret_keys" title="Permanent link">&para;</a></h3>
 <p>no default · file form: <code>MUSTER_SECRET_KEYS_FILE</code> · secret</p>
 <p>The master keys of the Keyring, which protect the secrets stored in the database: base64 keys of 32 bytes separated by commas, such as the output of <code>openssl rand -base64 32</code>; the file form holds one key per line. Required.</p>

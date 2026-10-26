@@ -100,7 +100,7 @@ Download the compose example into a new directory:
 <!-- quickstart -->
 ```sh
 mkdir muster && cd muster
-curl -fsSLO https://raw.githubusercontent.com/muster-io/muster/v0.1.3/deploy/compose/docker-compose.yml # x-release-please-version
+curl -fsSLO https://raw.githubusercontent.com/muster-io/muster/v0.1.4/deploy/compose/docker-compose.yml # x-release-please-version
 ```
 
 Write its settings into `.env` next to it, with a generated master key and generated passwords:
@@ -765,7 +765,10 @@ Fields
 When both forms are set, the URL wins and Muster logs a warning that names both. Muster ignores every `PG*` variable,
 such as `PGHOST`, `PGSSLMODE`, `PGSSLROOTCERT`, `PGOPTIONS` and `PGPASSFILE`, and the password file `~/.pgpass`. Give
 any other libpq setting as a parameter of the URL instead, such as `sslrootcert`, `options` or `target_session_attrs`.
-Only libpq's default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
+Percent-encode the values as libpq requires, `=` as `%3D` and a space as `%20`, for example
+`options=-c%20search_path%3Dmuster`. A URL that libpq rejects stops Muster at start with an error that names the
+parameter; the URL in the error includes the `sslmode` that Muster appends when the URL names none. Only libpq's
+default certificate files still apply when the URL names none: `~/.postgresql/root.crt`, and
 `~/.postgresql/postgresql.crt` with `postgresql.key`; these are files, not variables, and the Muster image has none. Any
 secret can come from a `*_FILE` variable.
 
@@ -775,9 +778,10 @@ and the password from a key of the Secret as `MUSTER_DATABASE_PASSWORD_FILE`. Us
 has no field, such as `pool_max_conns` or `sslrootcert`; in the chart, `database.urlKey` names the key of the Secret that
 holds the whole URL, and the field values are then ignored.
 
-A replica's main pool holds `max(10, CPUs)` connections unless the URL sets `pool_max_conns`. On top of that, each
-replica keeps about three session connections (see [PgBouncer](https://muster-io.github.io/muster/0.1/install/database.md#pgbouncer)). Size `max_connections` of PostgreSQL for all
-replicas together.
+A replica's main pool holds `max(10, CPUs)` connections unless the URL sets `pool_max_conns`. The `pool_*` parameters
+size the main pool only: a session connection derived from the URL drops them, and one given by
+`MUSTER_DATABASE_SESSION_URL` ignores them. On top of that, each replica keeps about three session connections (see
+[PgBouncer](https://muster-io.github.io/muster/0.1/install/database.md#pgbouncer)). Size `max_connections` of PostgreSQL for all replicas together.
 
 Create the database and its user before the first start. The user owns the database, because Muster creates its tables,
 indexes and partitions itself:
@@ -884,7 +888,8 @@ PostgreSQL directly or through a pooler in session mode:
 
 `MUSTER_DATABASE_SESSION_HOST`
 `MUSTER_DATABASE_SESSION_PORT`
-:   Only the host and the port; the user, password, database and `sslmode` are those of the main connection.
+:   Only the host and the port; the user, password, database, `sslmode` and the other parameters are those of the main
+    connection, without its `pool_*` parameters.
 
 In the chart, these are `database.sessionHost` and `database.sessionPort`. With CloudNativePG, the main connection can
 use a `Pooler` object in transaction mode, whose Service takes the `Pooler`'s name, here `muster-db-pooler-rw`, and the
@@ -11810,7 +11815,7 @@ value of a secret, a variable marked so below.
 
 no default · secret
 
-The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none.
+The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none. Its `pool_*` parameters apply to the main pool only; a session connection derived from it drops them.
 
 ### `MUSTER_DATABASE_HOST`
 
@@ -11852,19 +11857,19 @@ The `sslmode` of the database connections, when `MUSTER_DATABASE_URL` is not set
 
 no default · secret
 
-The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection.
+The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection without its `pool_*` parameters. A session connection has no pool, so `pool_*` parameters in this URL are ignored.
 
 ### `MUSTER_DATABASE_SESSION_HOST`
 
 no default
 
-The host of the session connection; its other fields are those of the main connection.
+The host of the session connection; its other fields are those of the main connection, without the `pool_*` parameters.
 
 ### `MUSTER_DATABASE_SESSION_PORT`
 
 no default
 
-The port of the session connection; its other fields are those of the main connection.
+The port of the session connection; its other fields are those of the main connection, without the `pool_*` parameters.
 
 ### `MUSTER_SECRET_KEYS`
 
