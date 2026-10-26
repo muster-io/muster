@@ -136,7 +136,8 @@ var descriptions = map[string]string{
 	"MUSTER_DATABASE_URL": "The main database connection as a `postgres://` or `postgresql://` URL with the host, " +
 		"the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` " +
 		"and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a " +
-		"warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none.",
+		"warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none. " +
+		"Its `pool_*` parameters apply to the main pool only; a session connection derived from it drops them.",
 	"MUSTER_DATABASE_HOST":     "The database host, when `MUSTER_DATABASE_URL` is not set.",
 	"MUSTER_DATABASE_PORT":     "The database port, when `MUSTER_DATABASE_URL` is not set.",
 	"MUSTER_DATABASE_NAME":     "The database name; required unless `MUSTER_DATABASE_URL` is set.",
@@ -147,11 +148,12 @@ var descriptions = map[string]string{
 		"report whether each connection is encrypted.",
 	"MUSTER_DATABASE_SESSION_URL": "The session connection, for advisory locks and LISTEN, as a `postgres://` URL. " +
 		"Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main " +
-		"connection.",
+		"connection without its `pool_*` parameters. A session connection has no pool, so `pool_*` parameters in " +
+		"this URL are ignored.",
 	"MUSTER_DATABASE_SESSION_HOST": "The host of the session connection; its other fields are those of the main " +
-		"connection.",
+		"connection, without the `pool_*` parameters.",
 	"MUSTER_DATABASE_SESSION_PORT": "The port of the session connection; its other fields are those of the main " +
-		"connection.",
+		"connection, without the `pool_*` parameters.",
 	"MUSTER_SECRET_KEYS": "The master keys of the Keyring, which protect the secrets stored in the database: " +
 		"base64 keys of 32 bytes separated by commas, such as the output of `openssl rand -base64 32`; the file " +
 		"form holds one key per line. Required.",
@@ -520,14 +522,12 @@ func build(r *raw, conflicts []Conflict) (Config, error) {
 	}
 	withSSLMode(main)
 	c.Database = Database{URL: logging.Secret(main.String()), SSLMode: sslMode(main)}
-	session := main
+	session := withoutPoolSettings(main)
 	if r.SessionURL != "" {
 		if session, err = url.Parse(r.SessionURL); err != nil {
 			return Config{}, errors.New("invalid MUSTER_DATABASE_SESSION_URL: the value is not a URL")
 		}
 	} else if r.SessionHost != "" || r.SessionPort != "" {
-		copied := *main
-		session = &copied
 		host := cmp.Or(r.SessionHost, main.Hostname())
 		if port := cmp.Or(r.SessionPort, main.Port()); port != "" {
 			session.Host = net.JoinHostPort(host, port)
@@ -564,6 +564,20 @@ func mainDatabase(r *raw) (*url.URL, error) {
 
 func sslMode(u *url.URL) string {
 	return cmp.Or(querySSLMode(u.RawQuery), DefaultDatabaseSSLMode)
+}
+
+// withoutPoolSettings copies the main connection's URL for a session connection derived from it, without its pool_*
+// parameters: they size the main pool, and PostgreSQL rejects them as run-time parameters of a session. It filters the
+// raw pairs, so the other parameters keep their order and their encoding. It only keeps the derived URL clean: db.Open
+// is the final guard, for an explicit session URL and a percent-encoded key alike.
+func withoutPoolSettings(main *url.URL) *url.URL {
+	session := *main
+	pairs := strings.Split(main.RawQuery, "&")
+	kept := slices.DeleteFunc(slices.Clone(pairs), func(p string) bool { return strings.HasPrefix(p, "pool_") })
+	if len(kept) != len(pairs) {
+		session.RawQuery = strings.Join(kept, "&")
+	}
+	return &session
 }
 
 // withSSLMode writes the default port and sslmode into a URL that names none, so that the mode in effect is the one
