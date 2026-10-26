@@ -16,6 +16,13 @@
   when the bridge did not recognise it; a Root message past the bridge's edit window is republished on a change of
   status instead of edited; answers to presses and Text commands are interactive calls that the bridge places privately
   or in the Thread
+- Amended: 2026-10-26 — for L2 (journal D477, D503, D505, D512, D519, D529, D532, D533, D546): a Page in a messenger is
+  a Mention in a Thread reply that delivery sends, and Muster sends no direct messages to page people; calls through a
+  Notification gateway get a send path of their own — rows with retries, outside reconciliation; the Lifecycle event
+  `destination_joined` publishes an Alert Group into a Destination it reaches later; a Storm summary is kept per Route
+  and Destination and counts only the Alert Groups sent there; a Destination's Mentions become a list of entries with
+  the Loud events they apply to, `storm_started` among them; the Loud/Quiet matrix becomes a Route setting; Telegram
+  Destinations in one chat share its limiter
 
 ## Context
 
@@ -52,6 +59,15 @@ which calls nothing (ADR-0013). A test
 message is a single create request to the chosen Destination; reconciliation never sees it. An architecture lint allows
 messenger send and edit calls only from these two places (ADR-0016).
 
+**Notification gateways (L2).** Calls through a Notification gateway (ADR-0017, ADR-0018) are neither Root messages nor
+Thread replies and have no Desired state, so they are not reconciled. Each Page through a gateway is a row with
+`next_attempt_at` and a lease, sent at least once under an `Idempotency-Key` and retried within an attempt and a time
+budget like a delivery, through the gateway Connection's limiter, with critical Alert Groups first; the test call and
+the confirmation code of a contact, which a person waits for, take the interactive path. The architecture lint allows
+calls through a gateway only from that sender and the interactive path. A gateway that keeps failing becomes Broken, is
+probed through its `info` and raises an Internal alert; its failures never make a Destination Broken. Muster sends no
+direct messages to Page people: a Page in a messenger is a Mention in a Thread reply (journal D503, D505, D532).
+
 **Rate limiting.** Each Destination has a limiter, and each Connection has one too, because a messenger limits a bot as
 a whole as well as each chat; a delivery waits for both. The limiters are shared by all replicas: their token buckets
 live in PostgreSQL, so adding a replica never raises the rate a messenger sees. A call on the interactive path takes a
@@ -59,7 +75,8 @@ token from the same limiters ahead of every waiting delivery, never queues, and 
 no token is free within its budget of a few seconds (ADR-0015). Limits default to half of the messenger's documented
 limit. Every call takes a token, a send and an edit alike: Telegram counts both against one budget of about 20 per
 minute per chat. Outgoing webhooks have no Connection and are limited per Destination. Urgent Alert Groups go first in
-the queue but never bypass a limiter.
+the queue but never bypass a limiter. From L2, Telegram Destinations that post into one chat, such as the topics of one
+forum, share a limiter for that chat, because Telegram's budget is per chat (journal D519).
 
 **Threads.** Follow-ups — new Alerts, ack timeout notices, Reminders — go to the Root message's Thread. New Alerts are
 batched with a leading and a trailing edge: the first is sent immediately and opens the Thread batching window (default
@@ -75,6 +92,12 @@ until then, or if nobody comments, Thread replies go to the discussion group as 
 post, and the UI marks that Thread as unattached. A copy deleted later loses the Thread the same way: Telegram refuses
 replies to it, and the replies go to the discussion group unattached.
 
+**Pages (L2).** A Page by Mention is a follow-up too: a Thread reply that names the person, in the Threads that ADR-0018
+gives each Escalation chain; it is Loud and is never combined with the Pages of other Alert Groups. A Page with no Root
+message to reply to, or whose reply ends Not delivered or is held back, is recorded as not delivered, and the Thread
+replies that come due while a Destination is Broken, Pages among them, are not replayed after recovery (journal D528,
+D529).
+
 **Storm.** A Storm is counted per Route: when a Route produces more than N new Alert Groups per minute (default 20, a
 Route setting), each of its Destinations receives one Storm summary for that Route — the number of Alert Groups, how
 many are Urgent, and a link to Muster — kept current by reconciliation. Urgent Alert Groups are still published
@@ -83,14 +106,18 @@ state, the Alert Groups that are still open are published gradually and Quietly 
 resolved are not published at all. The ack timeout of an Alert Group from a Storm starts at its own publication; the
 summary is Loud only on its first publication and has no timer of its own. A Destination shared by several Routes may
 receive one summary per Route; its limiters, not the Storm, protect it from the sum. Storms apply to messengers and to
-the template mode of outgoing webhooks; the events mode is not subject to them (see below).
+the template mode of outgoing webhooks; the events mode is not subject to them (see below). From L2, the Destinations
+that a Route reaches through Teams take part in its Storm, and each pair of Route and Destination has a Storm summary of
+its own that counts only the Alert Groups sent to that Destination. The first publication of a summary may mention
+people through the event `storm_started` of the Destination's Mentions; a summary starts no Escalation chain (journal
+D519, D533).
 
 **Loud and Quiet.** Because edits notify nobody, **every Loud event is a new message** — a new Root message or a Thread
-reply — and an edit of a Root message is always Quiet. L1 uses a fixed matrix; making it configurable per Route comes
-later. Loud is everything that needs a reaction: a new Alert Group, a Reopen into firing or into acknowledged, an ack
-timeout notice, a Reminder, a Takeover, a Snooze ending while firing, a rise to Urgent that removes the acknowledgement
-or the Snooze, an auto-unacknowledge after unanswered Reminders (ADR-0004), the first publication of a Storm summary,
-and new Alerts in a firing Alert Group. Everything else is Quiet: new Alerts in acknowledged or snoozed Alert Groups,
+reply — and an edit of a Root message is always Quiet. L1 uses a fixed matrix; from L2 it is a Route setting (below).
+Loud is everything that needs a reaction: a new Alert Group, a Reopen into firing or into acknowledged, an ack timeout
+notice, a Reminder, a Takeover, a Snooze ending while firing, a rise to Urgent that removes the acknowledgement or the
+Snooze, an auto-unacknowledge after unanswered Reminders (ADR-0004), the first publication of a Storm summary, and new
+Alerts in a firing Alert Group. Everything else is Quiet: new Alerts in acknowledged or snoozed Alert Groups,
 Replacements, status changes made by people, resolution by the system, a Reopen into snoozed, a `startsAt` continuation,
 updates of annotations or counters, the Publication of open Alert Groups into a newly added Destination (ADR-0003), and
 the gradual Publication of open Alert Groups after a Storm, whose summary has already rung. A Reopen into acknowledged
@@ -100,6 +127,24 @@ message rings them even when the Root message is Quiet — a limitation the docu
 reply notifies the Thread's followers according to their own settings, so there Quiet means "without a Mention"; this
 limitation is documented. Each Destination chooses whom to mention on Loud events — nobody by default, everyone in the
 chat, Muster users or messenger groups, separately per event — and templates can use the trusted `mention` function.
+
+**Loud events and Mentions per Route and Destination (L2).** For each Loud event — a new Alert Group, new Alerts, a
+Reopen, an ack timeout notice, the end of a Snooze, a rise to critical and the start of a Storm — the Route says whether
+it rings; the Route profile pre-fills the choice, the On-call profile with the table above and the Informational profile
+ringing only for a new Alert Group. A change applies to later events: an event that no longer rings is still delivered,
+Quietly, and edits never ring. Whether new Alerts remove an acknowledgement is part of the same settings, off by default
+(ADR-0004). Whom to mention stays with each Destination, as one list of entries — everyone in the chat, people,
+messenger groups, Teams or the On-call of Teams (ADR-0018) — each with the Loud events it applies to; the list offers
+only what the Destination's Connection can mention, and the settings of L1 move into such entries unchanged (journal
+D477, D519, D540, D546).
+
+**Joining a Destination later (L2).** An Alert Group can reach a Destination after its first Publication elsewhere, when
+its Severity level rises into the Destination's condition or a Team joins it (ADR-0018). The Lifecycle event
+`destination_joined` publishes it there: Loudly, with the Mentions of a new Alert Group, if it is firing; Quietly if it
+is acknowledged or snoozed; and under a Maintenance window only once the window ends. Nothing removes a Destination this
+way: a Severity level that falls again, or a Team whose Alerts resolved, leaves the Root message in place and keeps it
+current. An Admin who changes a Severity condition adds Destinations as a newly added Destination does, Quietly (journal
+D469, D512).
 
 **Output safety** is the adapter's job: all alert data is escaped for the messenger's markup, `@` in alert data is
 neutralized, links are `http(s)` only and values are truncated to 4 KB. If the messenger rejects the markup, the same
@@ -188,6 +233,8 @@ or `503` with `Retry-After` — `RetryAfter`; `408`, other `5xx`, timeouts and n
   webhook has none and recovers with its next request or a test.
 - Receivers of the events mode get every event at least once and must drop duplicates by `webhook-id`; one stuck event
   holds back the later events of its Alert Group, never those of other Alert Groups.
+- From L2 a Page in a messenger is only as reliable as the messenger's push for Mentions in Threads; Pages through a
+  Notification gateway have a queue of their own and do not depend on a messenger.
 
 ## Alternatives considered
 
@@ -227,3 +274,8 @@ or `503` with `Retry-After` — `RetryAfter`; `408`, other `5xx`, timeouts and n
   own state machine or audit trail needs; reconciliation is kept for the template mode, which edits one message.
 - **Stop updating as soon as a Root message is deleted.** Leaves an Alert Group that is still firing without a visible
   message and tells nobody; one Quiet republication is the better default.
+- **Direct messages for Pages** (L2), as a third path beside delivery and the interactive path. It would need a queue of
+  its own, a choice of Connection for people linked in several messengers and a rule for a person who blocked the bot; a
+  Mention in the Thread is already a delivery (journal D503).
+- **Reconciling calls through a Notification gateway.** A call has no message to bring to a Desired state; a row per
+  Page with retries is all it needs (journal D505).

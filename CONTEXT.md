@@ -55,6 +55,12 @@ _Avoid_: Source, Input, Receiver
 The secret an Integration uses to send alerts to Muster. It allows nothing else.
 _Avoid_: API key
 
+**Inbound webhook**:
+An Integration that takes Alerts in the format of Alertmanager's API from senders without Alertmanager, such as
+scripts, CI jobs or a rule evaluator. A request reports Alerts one by one, not as a Snapshot: each Alert stays open
+for as long as its last report says, and then becomes Stale.
+_Avoid_: Event, Generic webhook, Snapshot (for its requests)
+
 **Alerts view**:
 The list of an Integration's current Alerts with their state, Route and Alert Group.
 
@@ -62,10 +68,10 @@ The list of an Integration's current Alerts with their state, Route and Alert Gr
 Labels an Integration adds to every Alert before routing, such as `cluster=prod`.
 
 **Connection mode**:
-How an Integration learns about Alerts from Alertmanager: webhook-only, pull or agent.
+How an Integration learns about Alerts from Alertmanager: webhook-only, pull or agent. An Inbound webhook has none.
 
 **Stored Snapshot**:
-A Snapshot kept exactly as received, for debugging, previews and replay.
+A Snapshot, or a request to an Inbound webhook, kept exactly as received, for debugging, previews and replay.
 _Avoid_: Raw webhook, raw body
 
 **Truncated Snapshot**:
@@ -84,7 +90,9 @@ How close in time two Snapshots of the same Alertmanager group must arrive to co
 ### Routing
 
 **Route**:
-A rule that picks Alerts by their labels and decides how their Alert Groups are handled and where they are delivered.
+A rule that picks Alerts by their labels and decides how their Alert Groups are handled and where they are delivered:
+to its own Destinations and, where the Route asks for it, to those of the Teams its Alerts belong to. A Route may
+belong to a Team, which owns it but adds no delivery.
 _Avoid_: Policy, Rule, Direction
 
 **Default route**:
@@ -100,12 +108,18 @@ The labels whose values split a Route's Alerts into Alert Groups.
 _Avoid_: Group by, Fingerprint
 
 **Severity level**:
-The organization's normalized severity of an Alert, such as critical or warning.
+The organization's normalized severity of an Alert, such as critical or warning. An Alert Group's Severity level is
+the highest of its firing Alerts, raised to its Route's Minimum severity.
 _Avoid_: Priority
 
+**Minimum severity**:
+The lowest Severity level a Route gives its Alert Groups, such as critical on a Route whose every Alert needs someone
+at once. It raises the Severity level of the Alert Group, never that of its Alerts.
+_Avoid_: Urgent mark, Severity override
+
 **Urgent**:
-An Alert Group that must not wait: its Route is marked urgent or its Severity level is critical.
-_Avoid_: Critical (as a synonym), High urgency
+An Alert Group whose Severity level, with its Route's Minimum severity, is critical; it must not wait.
+_Avoid_: High urgency
 
 **Route profile**:
 A starting set of Route settings for a kind of traffic, such as On-call or Informational.
@@ -150,6 +164,11 @@ A Snooze that ends at the next start of the working day ("Until tomorrow 09:00")
 the first day of the week ("Until Monday 09:00"), in the person's time zone; the Organization sets both.
 _Avoid_: Calendar snooze, Snooze template
 
+**Attach** / **Detach**:
+Put an Alert Group under another one that stands for the same problem, so that it follows that Alert Group's status /
+let it live on its own again.
+_Avoid_: Merge, Link
+
 **Reopen**:
 Muster bringing a Resolved Alert Group back on its own because an Alert with the same Route and Group key values fired
 shortly after it closed.
@@ -160,8 +179,8 @@ A request from a person or automation to change an Alert Group, such as Acknowle
 _Avoid_: Operation
 
 **Transport**:
-The way a Command reaches Muster: the web UI, the API, Mattermost, Telegram, Slack or a Bridge, or Muster itself
-(`system`) for transitions it starts on its own.
+The way a Command reaches Muster: the web UI, the API, the MCP server, Mattermost, Telegram, Slack, a Bridge or a
+Notification gateway, or Muster itself (`system`) for transitions it starts on its own.
 _Avoid_: Channel
 
 **Text command**:
@@ -180,16 +199,18 @@ An acknowledgement by another user, which moves ownership of the Alert Group to 
 _Avoid_: Reassign, Steal
 
 **Ack timeout**:
-How long a Firing Alert Group may wait for someone to take it before Muster calls for attention again.
+How long a Firing Alert Group may wait for someone to take it before Muster calls for attention again. Where an
+Escalation chain runs, the chain takes its place.
 _Avoid_: Escalation
 
 **Unclaimed**:
-An Alert Group that is still Firing after every ack timeout notice has been sent.
+An Alert Group that is still Firing after every ack timeout notice has been sent, or after every Escalation chain
+started on it has run out.
 _Avoid_: Abandoned, Orphaned
 
 **Reminder**:
 A periodic nudge to the Owner that an Alert Group they acknowledged is still open.
-_Avoid_: Ack timeout, Escalation
+_Avoid_: Ack timeout, Escalation chain
 
 **Auto-unacknowledge**:
 Muster removing an acknowledgement after the Owner leaves Reminders unanswered, where the Route allows it.
@@ -208,17 +229,92 @@ _Avoid_: Notification, Activity
 Text a person adds to a Timeline.
 _Avoid_: Comment
 
-**Assignee** _(reserved for a later layer)_:
-A person put on an Alert Group by a schedule or an escalation before anyone has acknowledged it.
-_Avoid_: Owner
+**Assignees**:
+The people whom the Escalation chains running on an Alert Group have Paged last by name, one or more for each chain,
+while nobody has acknowledged it. Acknowledge, Snooze and Resolve clear them; there may be several Assignees, but only
+one Owner.
+_Avoid_: Responder, Assigned
 
-**Schedule** _(reserved for a later layer)_:
-A plan of who is on call and when.
+### Teams and on-call
+
+**Team**:
+A set of Users that owns Routes, Destinations, Schedules and Escalation chains, and to which Alerts belong by their
+Team label or its Team matchers. It gives no access of its own: Roles stay global. A User may be in several Teams,
+added by hand or through the groups of the identity provider; a Team may have nobody in it and serve only as a name
+for Alerts, with its own Destinations and Team mention.
+_Avoid_: Squad, Group
+
+**Team label**:
+The label whose value names the Team an Alert belongs to, by the Team's slug. The Organization chooses the label,
+`team` by default.
+_Avoid_: Team tag
+
+**Team matcher**:
+A Matcher of a Team that makes an Alert belong to the Team without the Team label, for Alerts whose rules do not set
+it.
+_Avoid_: Team filter, Team selector
+
+**Team mention**:
+The Mention that stands for a whole Team in the messenger of one Connection, such as a Mattermost group or a Slack
+user group. Mentioning a Team that has none for that Connection mentions nobody; it never falls back to the Team's
+On-call.
+_Avoid_: Team tag
+
+**Working hours**:
+The days and hours, in a time zone, that count as working time: the Organization's, or a Team's own. An Escalation
+step may be limited to the Working hours of the Team that owns its chain.
+_Avoid_: Business hours
+
+**Schedule**:
+A Team's plan of who is On-call and when: Rotation layers with Overrides on top. A Team may have several; its main
+Schedule names the Team's On-call. A time in which nobody has a Shift is a gap.
 _Avoid_: Rota, Calendar
 
-**Escalation** _(reserved for a later layer)_:
-A sequence of steps that calls more people when an Alert Group stays Firing.
-_Avoid_: Ack timeout, Reminder
+**Rotation layer**:
+One layer of a Schedule in which people take Shifts in turn, with a Shift length, a handover time and optional limits
+such as weekdays 9–18. Where a higher Rotation layer has a Shift, it overrides those below.
+_Avoid_: Rotation (on its own), Layer (on its own)
+
+**Shift**:
+A span of time during which one person is On-call in a Schedule.
+_Avoid_: Duty
+
+**Override**:
+A one-off change of a Schedule that puts another person On-call for a span of time, on top of its Rotation layers.
+_Avoid_: Swap
+
+**On-call**:
+The person who has the current Shift of a Schedule. A Team's On-call is the one of its main Schedule.
+_Avoid_: Responder (that is a Role)
+
+### Paging
+
+**Escalation chain**:
+An ordered list of Escalation steps that Pages more and more people while an Alert Group stays Firing. It is attached
+to a Route or to a Team, optionally for some Severity levels; several may run on one Alert Group, and acknowledging it
+stops them all.
+_Avoid_: Escalation policy, Escalation (on its own)
+
+**Escalation step**:
+One step of an Escalation chain: Page the On-call of a Schedule, chosen people, a whole Team or everyone in the chat;
+call a person through a Notification gateway; wait; send an event to an outgoing webhook; or repeat earlier steps. A
+step may be limited to Working hours and to some Severity levels.
+_Avoid_: Escalation rule
+
+**Page**:
+A call for attention made by an Escalation step: a Mention in the Alert Group's Thread, or a call through a
+Notification gateway.
+_Avoid_: Alert (as a verb)
+
+**Notification rules**:
+A person's own two sequences, normal and important, that say how to Page them, such as a Mention in the Thread and a
+call through a Notification gateway five minutes later. An Escalation step Pages a person by one of the two.
+_Avoid_: Notification policy, Contact method
+
+**Notification gateway**:
+A Bridge in the role `gateway` that Pages people outside messengers, by phone call or SMS for example, at the contact
+each person confirmed in their profile, and reports when one of them acknowledges. It is never a Destination.
+_Avoid_: Notifier, Pager
 
 ### When alerts stop or return
 
@@ -255,18 +351,20 @@ app in one workspace, or a Bridge.
 _Avoid_: Notification integration, Provider, Bot (on its own)
 
 **Bridge**:
-A Connection through which Muster reaches a messenger it has no native support for: Muster talks to a separate
-service, the bridge, over the Bridge protocol, and the bridge talks to the messenger. Anyone can write a bridge for
-their messenger.
+A Connection through which Muster reaches a messenger it has no native support for, or a Notification gateway: Muster
+talks to a separate service, the bridge, over the Bridge protocol, and the bridge talks to the messenger or places the
+calls. Anyone can write a bridge for their messenger or gateway.
 _Avoid_: Plugin, Adapter, Custom messenger, Integration
 
 **Bridge protocol**:
 The HTTP protocol between Muster and a bridge, specified in `api/bridge.yaml`: what a bridge offers, how Muster posts,
-edits and replies through it, and how it reports presses, Thread messages and Account link requests back.
+edits and replies through it, and how it reports presses, Thread messages, Account link requests and acknowledgements
+from a Notification gateway back.
 _Avoid_: Bridge API, Plugin API
 
 **Destination**:
 A place where Alert Groups are delivered: a messenger channel reached through a Connection, or an outgoing webhook.
+Routes and Teams name the Destinations they deliver to, each optionally for some Severity levels.
 _Avoid_: Receiver, Recipient, Channel, Notification channel
 
 **Outgoing webhook**:
@@ -327,6 +425,13 @@ _Avoid_: Flood
 **Storm summary**:
 The single message that stands for the Alert Groups of a Storm.
 
+**Maintenance window**:
+A span of time, current or planned, during which Muster delivers nothing about the Alert Groups of an Integration, a
+Route or a Team and runs no Escalation chains for them, while ingestion and grouping go on. Alert Groups still firing
+when it ends are published with a mark. A Team's window holds an Alert Group only while every Team of its Alerts is in
+a window.
+_Avoid_: Silence, Mute, Downtime
+
 **Destination check**:
 A test of whether Muster can still reach and post to a Destination, without sending a message.
 
@@ -342,7 +447,7 @@ _Avoid_: Request history, Traffic log, Access log
 
 **Broken**:
 A Destination that keeps failing or has used up its retry budget. Muster probes it and sends the current state once it
-recovers.
+recovers. A Notification gateway can be Broken too.
 _Avoid_: Down, Failed
 
 ### Access

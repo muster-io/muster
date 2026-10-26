@@ -72,10 +72,11 @@ a schema change is a new expand/contract migration plus an update of `schema.md`
 `api/openapi.yaml`.
 
 A story whose frontmatter names a `repository` — the bridge libraries `muster-io/muster-bridge-go` and
-`muster-io/muster-bridge-python` — is worked in that repository: its branch, `files_touched`, `verify` and pull request
-are there, that repository's own AGENTS.md and licence (MIT, no CLA) apply, and the pull request says
-`Part of muster-io/muster#<issue>`: a pull request in another repository does not close an issue here, so the issue is
-closed by hand once that pull request merges. Its contract and its issue stay here.
+`muster-io/muster-bridge-python`, and the Terraform provider `muster-io/terraform-provider-muster` — is worked in that
+repository: its branch, `files_touched`, `verify` and pull request are there, that repository's own AGENTS.md and
+licence (MIT, no CLA) apply, and the pull request says `Part of muster-io/muster#<issue>`: a pull request in another
+repository does not close an issue here, so the issue is closed by hand once that pull request merges. Its contract and
+its issue stay here.
 
 Issues are generated from the story files by `scripts/stories-sync`. Edit the files, never the issues, and never edit
 the `issue:` field by hand.
@@ -289,7 +290,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 - Change an ADR, the PRD, the spec or the schema silently. The spec and the schema change in the story's pull request
   when the contract is wrong (the schema through a new migration, never by editing an applied one); a change to an ADR
   or to the PRD is proposed in the pull request for the maintainer to decide.
-- Add telemetry, analytics or email: Muster sends none (NFR-7).
+- Add telemetry, analytics or email: Muster sends none except the opt-in telemetry of ADR-0019, and never email (NFR-7).
 - Add a dependency without the licence statement above, or any web framework, router, ORM, cache or message queue.
 - Log, return or print a secret, a token or a URL that carries one.
 - Wait for real time in tests or checks: use a manual clock in tests and the development clock live.

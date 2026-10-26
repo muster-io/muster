@@ -23,6 +23,12 @@
   `1.x` with Muster's first release; every library release speaks the protocol versions Muster supports at that time,
   today protocol version 1, and a breaking change of the protocol is a new protocol version, not a new major version of
   a library
+- Amended: 2026-10-26 — for L2 (journal D479, D505, D516, D517, D532, D542): `info` declares the bridge's roles,
+  `messenger` by default; a bridge in the role `gateway` is a Notification gateway, implements `info`,
+  `POST /v1/notifications`, the answer to the person and the event `notification_acknowledged`, and on its own cannot be
+  a Destination; a bridge may declare group mentions in `info`, which Muster sends as tokens the bridge renders; Muster
+  drops its copy of `info` when a bridge answers again after being unreachable, and the Leader re-reads every bridge's
+  `info` once its copy is older than `bridge.info_max_age`
 
 ## Context
 
@@ -62,23 +68,26 @@ messengers: everything a messenger does differently is the bridge's job, and the
 Mattermost and Telegram stay native.
 
 **Versioning.** Every path is under `/v1/`. `GET /v1/info` returns `protocol_version` (`"1"`), the bridge's name and
-version, the messenger's name, the optional features the bridge offers and its limits. Additive changes — a new
-optional field or feature — keep version `1`; a change that breaks existing bridges is a new major path, and CI
-compares every change of `api/bridge.yaml` with its base and fails on a breaking one. That check starts when the
-protocol reference is published on the documentation site: until then nothing is released, no bridge depends on the
-protocol, and the stories that implement it for the first time may still correct it. Muster refuses
-a Connection whose bridge speaks no version it knows, and re-reads `info` on every Connection check and when its copy
-is older than a few minutes.
+version, the messenger's name, the optional features the bridge offers and its limits. Additive changes — a new optional
+field or feature — keep version `1`; a change that breaks existing bridges is a new major path, and CI compares every
+change of `api/bridge.yaml` with its base and fails on a breaking one. That check starts when the protocol reference is
+published on the documentation site: until then nothing is released, no bridge depends on the protocol, and the stories
+that implement it for the first time may still correct it. Muster refuses a Connection whose bridge speaks no version it
+knows, and re-reads `info` on every Connection check and when its copy is older than a few minutes. From L2 it also
+drops its copy when a bridge answers again after being unreachable, and the Leader re-reads the `info` of every Bridge
+Connection once its copy is older than `bridge.info_max_age`, so that a Connection's page is current without deliveries;
+Muster does not re-read `info` and retry a call that a bridge refused for a limit; the next scheduled read picks up new
+limits. The guide for bridge authors says when Muster reads `info` (journal D479).
 
-**What every bridge implements**: `info`; posting a message to a channel; editing it; replying in its Thread; checking a
-channel without posting (whether the bot can post and edit there); answering the person behind an event; and inbound
-events in at least one of the two delivery modes below, Account link requests at least. **What a bridge may offer**,
-declared in `info`: buttons (with their count limits, the `data_max_bytes` they carry — at least 64 — and the style
-hints its messenger can show); forwarding people's Thread messages to Muster (all of them, or only those that mention
-the bot); direct messages from the bot, and whether the bot may start a direct chat; private answers (ephemeral messages
-or pop-ups); native mentions; Quiet messages; a status colour; deleting its own messages, unused by L1; and
-`message_deleted` events. `info` also declares `max_body_length`, `edit_max_age_seconds` (`null` when edits never
-expire), the kind of handle it looks people up by (`email`, `login`, `username`, `user_id` or `none`), the event
+**What every bridge in the role `messenger` implements**: `info`; posting a message to a channel; editing it; replying
+in its Thread; checking a channel without posting (whether the bot can post and edit there); answering the person behind
+an event; and inbound events in at least one of the two delivery modes below, Account link requests at least. **What a
+bridge may offer**, declared in `info`: buttons (with their count limits, the `data_max_bytes` they carry — at least 64
+— and the style hints its messenger can show); forwarding people's Thread messages to Muster (all of them, or only those
+that mention the bot); direct messages from the bot, and whether the bot may start a direct chat; private answers
+(ephemeral messages or pop-ups); native mentions; Quiet messages; a status colour; deleting its own messages, unused by
+L1; and `message_deleted` events. `info` also declares `max_body_length`, `edit_max_age_seconds` (`null` when edits
+never expire), the kind of handle it looks people up by (`email`, `login`, `username`, `user_id` or `none`), the event
 delivery modes it offers, an optional deep-link template for Account links, and optional rate hints.
 
 **Content.** Muster sends a JSON envelope and lets the bridge render it in its messenger's markup: the kind of message,
@@ -94,9 +103,10 @@ the closest style its messenger has or ignores — and opaque data of at most 64
 and the signature with the button-signature key (ADR-0011). The bridge returns the data unchanged with the press, and
 Muster verifies it and checks that it belongs to the pressed message, as for Mattermost and Telegram.
 
-**Mentions** name linked people only, as `{external_id, display_name}` in the envelope, each placed in the body by a
-marker that reads as the plain name where the bridge cannot mention natively. Mentions never appear in an edit
-(ADR-0005).
+**Mentions** name linked people, as `{external_id, display_name}` in the envelope, each placed in the body by a marker
+that reads as the plain name where the bridge cannot mention natively. From L2 a bridge may also declare in `info` the
+group mentions its messenger has; Muster then sends a Team mention (ADR-0018) as a group token that the bridge renders
+itself (journal D516). Mentions never appear in an edit (ADR-0005).
 
 **Idempotency.** Every request that creates a message carries an `Idempotency-Key`; the bridge stores the key with its
 successful result and answers a repeated key with that result, marked as replayed, without posting again — whatever
@@ -117,17 +127,17 @@ a bridge needs no store of its own to map posts to Threads.
 `GET /v1/events` with the last cursor and a wait, handles the batch, then stores the next cursor; **push** — the bridge
 posts each event to Muster's callback at `MUSTER_INGEST_URL`, signed as Standard Webhooks do (`webhook-id`,
 `webhook-timestamp`, `webhook-signature`, HMAC-SHA256 with the Connection's push secret). Every event has a stable id;
-Muster handles each id once and acknowledges only what it handled, so delivery is at least once in both modes. It
-claims the id under a transaction-scoped advisory lock — so two copies of one event, from overlapping polls or retried
-pushes, run one after the other — runs the event's Command through the dispatcher in the Command's own transaction,
-then records the id and answers. A crash between the Command and the record leaves the id unrecorded: the event comes
-again and its Command runs a second time, which the dispatcher's preconditions turn into a refusal or a no-op, so the
-worst case is a second answer to the person. Recording the id inside the Command's transaction would need a hook in the
-dispatcher for one transport; the claim keeps the dispatcher as it is. The event types are a press, a Thread message,
-an Account link request and a deleted message; Muster handles every type it knows whatever `info` declares, so an event
-sent just after a bridge switched a feature on is not lost. Each Connection has a token
-of its own, and a bridge that serves several Connections keeps their events apart by token; Muster ignores, without
-answering, an event about a message it did not post through that Connection.
+Muster handles each id once and acknowledges only what it handled, so delivery is at least once in both modes. It claims
+the id under a transaction-scoped advisory lock — so two copies of one event, from overlapping polls or retried pushes,
+run one after the other — runs the event's Command through the dispatcher in the Command's own transaction, then records
+the id and answers. A crash between the Command and the record leaves the id unrecorded: the event comes again and its
+Command runs a second time, which the dispatcher's preconditions turn into a refusal or a no-op, so the worst case is a
+second answer to the person. Recording the id inside the Command's transaction would need a hook in the dispatcher for
+one transport; the claim keeps the dispatcher as it is. The event types are a press, a Thread message, an Account link
+request, a deleted message and, from a Notification gateway, `notification_acknowledged`; Muster handles every type it
+knows whatever `info` declares, so an event sent just after a bridge switched a feature on is not lost. Each Connection
+has a token of its own, and a bridge that serves several Connections keeps their events apart by token; Muster ignores,
+without answering, an event about a message it did not post through that Connection.
 
 **Trust.** Muster authenticates to the bridge with the Connection's token as a bearer token; the bridge authenticates
 pushed events with the signature above; button data is signed by Muster. The token and the push secret are Secrets,
@@ -177,6 +187,19 @@ counters — do not republish: they reach the Thread as the Loud/Quiet table say
 last status until the next change of status. The old Root message keeps working: a press on its buttons and a Text
 command in its Thread act on the Alert Group as before. An edit refused as `gone` with the reason
 `edit_window_closed` — a window shorter than the bridge declared — is handled the same way.
+
+**Roles (L2).** `info` declares the bridge's roles: `messenger`, the default, which is everything above, and `gateway`,
+which makes the bridge a Notification gateway (ADR-0018) that reaches people outside messengers — by phone call or SMS,
+for example. A bridge may have both. A gateway implements `info`; `POST /v1/notifications`, which takes the person's
+contact, a text, signed action data like a button's and an `Idempotency-Key`; answering the person behind an event,
+which during a call needs the push mode, so that the answer comes while the person is still on the line; and the event
+`notification_acknowledged`, which returns the action data when the person acknowledges. Muster takes the actor from its
+own signature on that data, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only
+role is `gateway` cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing
+becomes Broken and raises an Internal alert. Its events in the poll mode come through Bridge polling, its calls go
+through a queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same
+`POST /v1/notifications` (ADR-0013). The bridge libraries for Go and Python support the role in releases of their own
+(journal D505, D517, D532, D542).
 
 **Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
 through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are
@@ -271,6 +294,7 @@ and the example bridge.
 - The protocol is a public contract from its first release; breaking it means a new major path, so its first version
   has to be right in the parts every bridge implements.
 - Polling adds one more Leader task, paused like Telegram polling while no replica leads.
+- From L2 a provider of phone calls or SMS is reached by writing a gateway bridge; Muster ships none.
 
 ## Alternatives considered
 
@@ -314,3 +338,6 @@ and the example bridge.
 - **Libraries for more languages from the start.** Go and Python cover the bridges the maintainers expect; a bridge in
   any other language speaks the protocol directly, as "Write a bridge" describes, and a library for it can follow the
   same pattern later.
+- **A Connection type of its own for Notification gateways** (L2), with a second specification. A gateway needs the
+  transport, the idempotency, the signed data and the events that a bridge already has; a role keeps one protocol and
+  one pair of libraries (journal D505).

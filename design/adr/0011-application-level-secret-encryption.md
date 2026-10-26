@@ -9,6 +9,9 @@
 - Amended: 2026-10-13 — `rotate-key` activates the key, re-encrypts and notifies the replicas; the Leader recomputes
   the Desired state of open Alert Groups (ADR-0007), because the CLI has no renderer; only a key that was active before
   is reported as removable
+- Amended: 2026-10-26 — for L2 (journal D517): the contact a person gives a Notification gateway is personal data, not a
+  Secret: readable by that person and Admins, masked in the Request log and erased when the User is deleted; the token
+  of a person's iCal feed is issued by Muster, so it is hashed, with a prefix of its own, shown once and revocable
 
 ## Context
 
@@ -84,7 +87,15 @@ the previous secret still signs, and since when. Master key rotation does not ch
 A CI test pushes known secret values through the code and fails if any of them reaches a log line (ADR-0016).
 
 **Tokens Muster issues are hashed, not encrypted.** Personal access tokens and Service account tokens (prefix `mstr_`
-and the kind: `mstr_pat_`, `mstr_sat_`) and Integration tokens (`mstr_int_`) are stored only as hashes and shown once, when created.
+and the kind: `mstr_pat_`, `mstr_sat_`) and Integration tokens (`mstr_int_`) are stored only as hashes and shown once,
+when created. From L2 the token of a person's iCal feed of their Shifts is one of them: it has a prefix of its own, is
+shown once, can be revoked, and is masked wherever a URL that carries it would be logged, because calendar applications
+send it in the URL (journal D517).
+
+**Personal data that is not secret (L2).** The contact a person gives a Notification gateway, such as a phone number, is
+read by that person, by Admins and by the gateway, so it is not a Secret and is not encrypted under the Keyring. Muster
+masks it in the Request log and erases it when the User is deleted, so that Audit log diffs show it as `[erased]`
+(ADR-0013; journal D517).
 
 **Key provider interface.** Key material is obtained through an interface. The first implementation reads the
 environment; external providers such as Vault transit or a cloud KMS can be added later without changing the callers.
