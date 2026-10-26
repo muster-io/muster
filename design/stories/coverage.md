@@ -47,12 +47,12 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090, S-097, S-100, S-101 | yes | 13 of 13 |
 | C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
-| C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124, S-125, S-131, S-133, S-135, S-138, S-139, S-140, S-141, S-142, S-143, S-144, S-154, S-169, S-158 | yes | 26 of 26 |
-| C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-119, S-121, S-122, S-123, S-124, S-140, S-169 | yes | 24 of 24 |
-| C-27 Schedules | L2 On call | 24 | S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137, S-167, S-150, S-154, S-155 | yes | 24 of 24 |
-| C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114, S-138, S-139, S-140, S-165, S-141, S-142, S-143, S-144 | yes | 20 of 20 |
+| C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-121, S-170, S-119, S-120, S-124, S-125, S-131, S-133, S-135, S-138, S-139, S-140, S-171, S-141, S-142, S-143, S-144, S-154, S-169, S-158 | yes | 26 of 26 |
+| C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169 | yes | 24 of 24 |
+| C-27 Schedules | L2 On call | 24 | S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137, S-167, S-150, S-154, S-172 | yes | 24 of 24 |
+| C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114, S-138, S-139, S-140, S-171, S-165, S-141, S-142, S-143, S-144 | yes | 20 of 20 |
 | C-29 Compact message layout | L2 Teams | 16 | S-125, S-126, S-127, S-128, S-129, S-130, S-168 | yes | 16 of 16 |
-| C-30 Notification gateways | L2 Paging | 18 | S-145, S-167, S-146, S-147, S-148, S-149, S-150, S-151, S-153, S-154, S-157, S-158 | yes | 18 of 18 |
+| C-30 Notification gateways | L2 Paging | 18 | S-145, S-167, S-146, S-147, S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158 | yes | 18 of 18 |
 | C-31 Notification rules | L2 Paging | 12 | S-152, S-153, S-155, S-157, S-161 | yes | 12 of 12 |
 | C-32 Escalation chains and Assignees | L2 Paging | 38 | S-148, S-154, S-169, S-155, S-168, S-156, S-157, S-158, S-159, S-160, S-161 | yes | 38 of 38 |
 
@@ -918,18 +918,18 @@ of the L2 core that own each change:
 | NFR | Owned by | What each story contributes |
 |---|---|---|
 | NFR-2 Latency, NFR-4 Availability | S-133, S-145, S-148, S-149, S-155, S-169 | the Leader's scan for gaps (S-133) and gauge of Broken gateways (S-149), its only additions; the events of a gateway in the poll mode through Bridge polling (S-145); calls claimed by any replica (S-148); Pages by Mention as Thread replies of delivery (S-155); Escalation steps as timer rows that any replica claims, so a lost Leader never stops a chain (S-169) |
-| NFR-6 Security | S-134, S-167, S-148 | the iCal token hashed, shown once and masked where its URL would be logged (S-134); a gateway contact set only by its person from the web session and confirmed by a code through the gateway (S-167); an acknowledgement through a gateway acting as the person Muster's signed action data names (S-148) |
+| NFR-6 Security | S-134, S-167, S-173 | the iCal token hashed, shown once and masked where its URL would be logged (S-134); a gateway contact set only by its person from the web session and confirmed by a code through the gateway (S-167); an acknowledgement through a gateway acting as the person Muster's signed action data names (S-173) |
 | NFR-7 Privacy | S-115, S-131, S-133, S-149, S-154, S-155, S-167 | Teams, Schedules, chains and gateways in metric labels by their ids (S-115, S-131, S-133, S-149, S-154, S-155); gateway contacts erased with their User and masked in the Request log (S-167) |
-| NFR-8 Internationalization | S-143, S-148, S-155, S-168 | the texts of undelivered Mentions (S-143), calls and their answers (S-148), Pages and undelivered Pages (S-155) and Assignees (S-168) in English and Russian |
+| NFR-8 Internationalization | S-143, S-148, S-173, S-155, S-168 | the texts of undelivered Mentions (S-143), calls (S-148) and their answers (S-173), Pages and undelivered Pages (S-155) and Assignees (S-168) in English and Russian |
 | NFR-11 Upgrades | S-111, S-121, S-125, S-140, S-162 | the urgent mark and "critical is Urgent" stopped, read-only until 0.3.0 (S-111); `destination_ids` derived (S-121); the default layout changed (S-125); the Mention settings moved into entries (S-140); the profile On-call renamed Paging (S-162); each in the upgrade notes of 0.2.0 |
-| NFR-12 Compatibility | S-126, S-139, S-140, S-145 | the optional scope `usergroups:read` and group mentions in `info` (S-139); `Mention.kind` (S-140); `layout` (S-126); the roles `messenger` and `gateway` (S-145) — all additive in version 1 of the Bridge protocol |
+| NFR-12 Compatibility | S-126, S-139, S-171, S-145 | the optional scope `usergroups:read` and group mentions in `info` (S-139); `Mention.kind` (S-171); `layout` (S-126); the roles `messenger` and `gateway` (S-145) — all additive in version 1 of the Bridge protocol |
 | NFR-15 Phone width | S-120, S-136, S-159 | the Teams on the Alert Group page (S-120); the Home page (S-136); the Assignees and running chains on the Alert Group page and "I am an Assignee" (S-159), at 360 CSS pixels |
 
 ## C-25
 
 [Teams](../prd/l2/C-25-teams.md) · L2 Teams, L2 On call (Team mentions), L2 Paging (chains) · stories: S-115, S-116,
-S-117, S-118, S-163, S-119, S-120, S-121, S-124, S-125, S-131, S-133, S-138, S-139, S-140, S-141, S-142, S-143, S-144,
-S-154, S-169, S-158
+S-117, S-118, S-163, S-121, S-170, S-119, S-120, S-124, S-125, S-131, S-133, S-135, S-138, S-139, S-140, S-171, S-141,
+S-142, S-143, S-144, S-154, S-169, S-158
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -940,9 +940,9 @@ S-154, S-169, S-158
 | C-25.FR-5 | S-118 (part), S-163 (part), S-120 (part), S-133 (part) | complete | the Team's slug under the Team label on `MusterScheduleGap` (S-133) |
 | C-25.FR-6 | S-118 (part), S-120 (part), S-125 (part) | complete |  |
 | C-25.FR-7 | S-118 (part), S-163 (part), S-120 (part) | complete |  |
-| C-25.FR-8 | S-138 (part), S-139 (part), S-140 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; Mentions of the Team in messages S-140; the bridge libraries S-141, S-142 |
+| C-25.FR-8 | S-138 (part), S-139 (part), S-140 (part), S-171 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; Mentions of the Team in messages S-140, in Slack and through bridges S-171; the bridge libraries S-141, S-142 |
 | C-25.FR-9 | S-115 (part), S-119 (part), S-154 (part), S-169 (part) | complete | Escalation steps limited to Working hours: the chain's owning Team's (S-154), skipped outside them (S-169) |
-| C-25.FR-10 | S-115 (part), S-118 (part), S-121 (part), S-131 (part), S-154 (part) | complete | the refusal `team_in_use` for chains (S-154); P-64 confirmed with S-131 |
+| C-25.FR-10 | S-115 (part), S-118 (part), S-170 (part), S-131 (part), S-154 (part) | complete | the refusal `team_in_use` for chains (S-154); P-64 confirmed with S-131 |
 | C-25.FR-11 | S-115 (part), S-117 (part), S-118 (part), S-139 (part) | complete |  |
 | C-25.FR-12 | S-115 (part), S-117 (part), S-118 (part), S-124 (part), S-139 (part), S-144 (part) | complete |  |
 | C-25.FR-13 | S-163 (part), S-121 (part) | complete |  |
@@ -963,7 +963,7 @@ S-154, S-169, S-158
 ## C-26
 
 [Routing to Teams and by Severity](../prd/l2/C-26-routing-to-teams-and-by-severity.md) · L2 Teams · stories: S-111,
-S-162, S-112, S-119, S-121, S-122, S-123, S-124, S-140, S-169
+S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -972,30 +972,30 @@ S-162, S-112, S-119, S-121, S-122, S-123, S-124, S-140, S-169
 | C-26.FR-3 | S-121 | complete |  |
 | C-26.FR-4 | S-121 | complete |  |
 | C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); the delay by Maintenance windows is specified later |
-| C-26.FR-6 | S-121 | complete |  |
-| C-26.FR-7 | S-119 (part), S-121 (part) | complete |  |
+| C-26.FR-6 | S-170 | complete |  |
+| C-26.FR-7 | S-121 (part), S-119 (part) | complete |  |
 | C-26.FR-8 | S-111 (part), S-112 (part) | complete |  |
 | C-26.FR-9 | S-111 (part), S-112 (part), S-121 (part) | complete | "starts no Escalation chain" holds while chains do not run; S-169 keeps it (C-32.AC-18) |
 | C-26.FR-10 | S-111 (part), S-112 (part) | complete |  |
 | C-26.FR-11 | S-162 | complete |  |
 | C-26.FR-12 | S-122 (part), S-123 (part) | complete |  |
-| C-26.FR-13 | S-111 (part), S-121 (part), S-122 (part), S-124 (part) | complete |  |
+| C-26.FR-13 | S-111 (part), S-121 (part), S-170 (part), S-122 (part), S-124 (part) | complete |  |
 | C-26.AC-1 | S-121 | complete |  |
 | C-26.AC-2 | S-121 | complete |  |
 | C-26.AC-3 | S-121 | complete |  |
 | C-26.AC-4 | S-121 | complete |  |
 | C-26.AC-5 | S-121 | complete |  |
-| C-26.AC-6 | S-121 | complete |  |
+| C-26.AC-6 | S-170 | complete |  |
 | C-26.AC-7 | S-111 | complete |  |
 | C-26.AC-8 | S-111 (part), S-162 (part) | complete |  |
 | C-26.AC-9 | S-123 | complete |  |
-| C-26.AC-10 | S-121 | complete |  |
+| C-26.AC-10 | S-121 (part), S-170 (part) | complete |  |
 | C-26.AC-11 | S-111 (part), S-121 (part) | complete |  |
 
 ## C-27
 
 [Schedules](../prd/l2/C-27-schedules.md) · L2 On call · stories: S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137,
-S-167, S-150, S-154, S-155
+S-167, S-150, S-154, S-172
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -1006,7 +1006,7 @@ S-167, S-150, S-154, S-155
 | C-27.FR-5 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 and P-88 stay provisional until the test environment confirms them |
-| C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-167 (part), S-150 (part), S-155 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API (S-167) and on the pages (S-150); the Threads of the chains that Page the Schedule (S-155) |
+| C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-167 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API (S-167) and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
 | C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
 | C-27.FR-11 | S-131 | complete |  |
@@ -1027,12 +1027,12 @@ S-167, S-150, S-154, S-155
 ## C-28
 
 [Mentions and buttons of a Destination](../prd/l2/C-28-mentions-and-buttons-of-a-destination.md) · L2 Teams (buttons),
-L2 On call (Mentions) · stories: S-113, S-114, S-138, S-139, S-140, S-165, S-141, S-142, S-143, S-144
+L2 On call (Mentions) · stories: S-113, S-114, S-138, S-139, S-140, S-171, S-165, S-141, S-142, S-143, S-144
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-28.FR-1 | S-140 (part), S-143 (part) | complete |  |
-| C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the bridge libraries S-141, S-142 |
+| C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-171 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the validation S-140; writing groups and everyone in Slack and bridges S-171; the bridge libraries S-141, S-142 |
 | C-28.FR-3 | S-140 (part), S-165 (part), S-143 (part) | complete |  |
 | C-28.FR-4 | S-140 | complete |  |
 | C-28.FR-5 | S-140 | complete |  |
@@ -1079,25 +1079,25 @@ S-129, S-130, S-168
 ## C-30
 
 [Notification gateways](../prd/l2/C-30-notification-gateways.md) · L2 Paging · stories: S-145, S-167, S-146, S-147,
-S-148, S-149, S-150, S-151, S-153, S-154, S-157, S-158
+S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-30.FR-1 | S-145 (part), S-150 (part) | complete |  |
-| C-30.FR-2 | S-145 (part), S-146 (part), S-147 (part), S-148 (part) | complete | the protocol, the check and the fake gateway (S-145); the libraries in `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python` (S-146, S-147); the event acting on Alert Groups (S-148) |
+| C-30.FR-2 | S-145 (part), S-146 (part), S-147 (part), S-148 (part), S-173 (part) | complete | the protocol, the check and the fake gateway (S-145); the libraries in `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python` (S-146, S-147); the event acting on Alert Groups (S-173) |
 | C-30.FR-3 | S-167 (part), S-150 (part) | complete | P-86 stays provisional until the test environment confirms it |
 | C-30.FR-4 | S-148 (part), S-157 (part) | complete | the queue (S-148); the calls of steps and rules (S-157); P-87 stays provisional until the test environment confirms it |
 | C-30.FR-5 | S-145 (part), S-148 (part) | complete |  |
-| C-30.FR-6 | S-148 | complete |  |
+| C-30.FR-6 | S-173 | complete |  |
 | C-30.FR-7 | S-148 (part), S-157 (part) | complete |  |
 | C-30.FR-8 | S-149 (part), S-150 (part) | complete | P-88 confirmed with S-149, for the chart rules of C-27 and C-30 |
 | C-30.FR-9 | S-167 (part), S-150 (part), S-153 (part), S-154 (part), S-157 (part), S-158 (part) | complete | the profile (S-150), the rules (S-153), the steps (S-154, S-157) and the chain form (S-158) |
-| C-30.FR-10 | S-145 (part), S-167 (part), S-148 (part) | complete |  |
+| C-30.FR-10 | S-145 (part), S-167 (part), S-148 (part), S-173 (part) | complete |  |
 | C-30.FR-11 | S-151 | complete | until S-160 settles the push of Mentions, the page says that at night only a Notification gateway is reliable |
 | C-30.AC-1 | S-145 (part), S-150 (part) | complete |  |
 | C-30.AC-2 | S-167 | complete |  |
 | C-30.AC-3 | S-148 | complete |  |
-| C-30.AC-4 | S-148 | complete |  |
+| C-30.AC-4 | S-173 | complete |  |
 | C-30.AC-5 | S-149 | complete |  |
 | C-30.AC-6 | S-150 | complete |  |
 | C-30.AC-7 | S-148 | complete |  |
@@ -1181,7 +1181,7 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-03 UI | S-119 | complete | the claim of each entry in the group mapping editor |
 | C-03.AC-28 | S-117 | complete | added for L2 |
 | C-03.FR-13 | S-115 (part), S-167 (part) | complete | out of every Team (S-115); the gateway contacts erased (S-167) |
-| C-03.FR-14 | S-148 | complete | the Transport `gateway` |
+| C-03.FR-14 | S-173 | complete | the Transport `gateway` |
 | C-03.FR-30 | S-117 | complete |  |
 | C-06.FR-19 | S-118 (part), S-120 (part) | complete |  |
 | C-08 scenario 2 | S-111, S-112 | complete | the Minimum severity instead of the urgent mark |
@@ -1197,18 +1197,18 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-09.FR-14 | S-120 (part), S-123 (part), S-159 | complete | the Teams in the header (S-120), the entries of each Destination (S-123), the running chains, Assignees and escalation entries (S-159) |
 | C-09.FR-22 | S-118 (part), S-121 (part), S-148 (part), S-169 (part), S-155 (part), S-168 (part), S-156 (part) | complete | the events of C-25 and C-26 (S-118, S-121) and of C-30 and C-32 (S-148, S-169, S-155, S-168, S-156) |
 | C-09.AC-8 | S-111 | complete |  |
-| C-10.FR-1 | S-148 (part), S-169 (part), S-168 (part) | complete | an Acknowledge through a gateway only while nobody owns the Alert Group (S-148); chains stop (S-169); Assignees clear (S-168) |
-| C-10.FR-3 | S-148 | complete | the Transport `gateway` |
+| C-10.FR-1 | S-173 (part), S-169 (part), S-168 (part) | complete | an Acknowledge through a gateway only while nobody owns the Alert Group (S-173); chains stop (S-169); Assignees clear (S-168) |
+| C-10.FR-3 | S-173 | complete | the Transport `gateway` |
 | C-10.AC-23 | S-162 (part), S-113 (part) | complete |  |
 | C-11.FR-2 | S-148 (part), S-155 (part) | complete | calls have a sender of their own (S-148); Pages are Thread replies of delivery (S-155) |
 | C-11.FR-3 | S-111 | complete |  |
 | C-11.FR-6 | S-121 (part), S-140 (part), S-169 (part) | complete | Storms with Team Destinations (S-121); `storm_started` (S-140); the chains of an Alert Group that a summary stood for start at its own Publication (S-169) |
-| C-11.FR-14 | S-121 | complete |  |
+| C-11.FR-14 | S-170 | complete |  |
 | C-11.FR-20 | S-118 (part), S-121 (part), S-140 (part), S-155 (part), S-168 (part) | complete | the L2 lifecycle events of C-25 and C-26 (S-118, S-121); the Mentions of the entries (S-140); `paged` as Thread replies (S-155) and `assignees_changed` as a Root message update (S-168) |
 | C-11.FR-21 | S-165 | complete | the delivery event "Mention not delivered" |
 | C-12.FR-1 | S-125 (part), S-126 (part) | complete |  |
 | C-12.FR-2 | S-125 | complete |  |
-| C-12.FR-3 | S-125 (part), S-143 (part), S-148 (part), S-155 (part), S-168 (part) | complete | the layout (S-125), undelivered Mentions (S-143), calls (S-148), Pages (S-155), Assignees (S-168) |
+| C-12.FR-3 | S-125 (part), S-143 (part), S-148 (part), S-173 (part), S-155 (part), S-168 (part) | complete | the layout (S-125), undelivered Mentions (S-143), calls (S-148), their answers (S-173), Pages (S-155), Assignees (S-168) |
 | C-12.FR-8 | S-140 (part), S-143 (part) | complete | the Mention entries in delivery and on the form |
 | C-12.FR-11 | S-125 | complete |  |
 | C-12.FR-12 | S-140 (part), S-165 (part), S-168 (part) | complete | an unlinked person left out and recorded (S-140, S-165); the Assignees named like the footer's people (S-168) |
@@ -1231,11 +1231,11 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-22.FR-2 | S-139 (part), S-145 (part) | complete | group mentions and mentions of everyone in `info` (S-139); the roles (S-145) |
 | C-22.FR-3 | S-140 (part), S-145 (part) | complete | the Mention entries of a Bridge Destination (S-140); no Destination for a gateway-only Connection (S-145) |
 | C-22.FR-4 | S-126 | complete |  |
-| C-22.FR-11 | S-145 (part), S-148 (part) | complete | the event `notification_acknowledged` read (S-145) and handled once per id (S-148) |
-| C-22.FR-16 | S-140 (part), S-165 (part) | complete | group and everyone entries in `mentions` (S-140); the record of a linked person named by the plain name (S-165) |
+| C-22.FR-11 | S-145 (part), S-173 (part) | complete | the event `notification_acknowledged` read (S-145) and handled once per id (S-173) |
+| C-22.FR-16 | S-171 (part), S-165 (part) | complete | group and everyone entries in `mentions` (S-171); the record of a linked person named by the plain name (S-165) |
 | C-22.FR-21 | S-126 (part), S-145 (part) | complete | the check accepts `layout` (S-126) and checks the role `gateway` (S-145) |
 | C-23.FR-3 | S-167 | complete | the Request log masks gateway contacts |
 | C-24.FR-1 | S-139 | complete | the optional scope `usergroups:read` |
 | C-24.FR-2 | S-139 | complete | the step `scopes` reports it and the Connection keeps it |
 | C-24.FR-4 | S-125 | complete |  |
-| C-24.FR-6 | S-140 | complete | `<!everyone>` and `<!subteam^ID>` |
+| C-24.FR-6 | S-171 | complete | `<!everyone>` and `<!subteam^ID>` |

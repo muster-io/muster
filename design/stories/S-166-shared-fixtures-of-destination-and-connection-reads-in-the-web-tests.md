@@ -37,7 +37,7 @@ operator_attention: false
 issue: null
 ---
 
-# S-166. Shared fixtures of Destination and Connection reads in the web tests
+# S-166. Shared fixtures of Destination, Connection and Alert Group reads in the web tests
 
 ## Scope
 
@@ -61,6 +61,12 @@ issue: null
   (`mention_warnings`), S-139 (`usergroups_read`, `groups_read`). `alert-groups.ts` is extended the same way by S-118
   (`teams` on Alert Groups and Alerts), S-121 (`entries` on deliveries), S-169 (`escalation_chains`) and S-168
   (`assignees`, `owner_teams`). Tests written from this story on build these reads only through the builders.
+- **Rule for new enum values**: a story that adds a value to an enum of the API lists every exhaustive switch over it
+  in the SPA — a `switch` that ends in `unreachable`, or a `satisfies Record<…>` — with a minimal case and its texts,
+  because `make generate` rewrites `web/src/api/gen/` and the TypeScript check fails on each one it misses; for
+  example S-139 (`ConnectionCheckStep.name` `groups`, `connection-check.tsx`), S-164 (`DestinationCheckItem.name`
+  `discussion_group_members`, `destination-check.tsx`) and S-165 (`DeliveryEventKind` `mention_not_delivered`,
+  `timeline.tsx`).
 - **Tests converted**: the Destination reads of `bridge-destination-fields`, `destination-form`, `destination-label`,
   `destination-preview-panel`, `destination-secrets`, `destination-test-panel`, `route-destinations`,
   `slack-destination-fields`, `telegram-destination-fields` and `webhook-destination-fields`; the Connection reads of

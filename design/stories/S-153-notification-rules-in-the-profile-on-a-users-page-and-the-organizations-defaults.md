@@ -112,16 +112,13 @@ Run `make dev`; petr is a Responder with a Mattermost Account link. Remove the d
 
 ## Open questions
 
-1. **Editing the Organization's default rules in the UI.** C-31's UI places "the default rules" on Organization → Alert
-   handling, while L2.md §1.5 leaves "an editor of whole Notification rule sequences in the profile" for later. Options:
-   (a) the page shows the defaults in words and they change only through the API (`updateOrganization`) until the
-   editor of sequences comes later in L2 — clear of the deferral of L2.md §1.5; (b) a list editor of the two sequences
-   on the Organization page now, the profile keeping the switch only. The contract follows (a); the maintainer decides,
-   and (b) would add an editor component, its test and an end-to-end step to this story.
+1. **Editing the Organization's default rules in the UI.** Settled by the maintainer: in 0.2.0 Organization → Alert
+   handling shows the defaults in words and they change only through the API (`updateOrganization`); C-31's UI says so,
+   and the editor of whole sequences comes later in L2 (L2.md §1.5).
 
 ## Notes
 
-- The Russian texts follow the vocabulary of S-162's Open question 1.
+- The Russian texts follow the vocabulary settled in S-162 (Open question 1).
 - Suggested commit: `feat(web): show and switch notification rules in the profile and the organization`.
 - The rules in words follow the mockup's sentences and the sequence, so custom rules read naturally too; a call names
   the contact of its gateway, or "Notification gateway" for an action whose contact is gone, marked unavailable.

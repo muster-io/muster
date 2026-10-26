@@ -45,6 +45,7 @@ files_touched:
   - test/e2e/escalation_chains_test.go
   - docs/concepts/escalation-chains.md
   - mkdocs.yml
+  - internal/auth/auth_integration_test.go
 acceptance:
   - "[C-32.FR-1, C-32.FR-19, C-25.FR-2] `createEscalationChain` makes a chain with a name unique in the Organization (`409` `name_taken`), a description, an optional `owning_team_id` and its ordered steps; `getEscalationChain`, `updateEscalationChain` with `If-Match` (`412` when stale, `428` without) and `deleteEscalationChain` work as for Teams; `listEscalationChains` filters by `team` — a Team's `public_id` or `mine` — and `q`; every change is an Audit log entry `escalation_chain.created`, `escalation_chain.updated` or `escalation_chain.deleted` with a before/after diff, and `muster_escalation_chain_info{chain,name}` has one series per chain (`chains_test.go`, `chains_integration_test.go`)."
   - "[C-32.FR-3] A step is one of `page_on_call` (a Schedule of any Team, `normal` or `important`), `page_people` (`user_ids`, `normal` or `important`), `page_team` (a Team — the chain's owning Team when omitted — or `everyone` with `channel`, `here`, `all` or `everyone`), `call` (`call_target` `on_call` with a Schedule or `people` with `user_ids`, and `gateway_id` when more than one Notification gateway exists), `wait` (`minutes`), `webhook` (an outgoing webhook Destination in events mode or both) and `repeat` (`repeat_from`, an earlier step's number, and `repeat_times`); a step that Pages or sends takes `working_hours_only` and a `severity_condition`; other fields with a kind answer `422` at their pointer (`steps_test.go`)."
@@ -55,7 +56,7 @@ acceptance:
   - "[C-32.AC-15] A Responder gets `403` on `createEscalationChain`, `updateEscalationChain` and `deleteEscalationChain`; a Viewer reads chains with `escalation-chains:read`; naming a chain on a Route needs `routes:write` (`escalationchains_test.go`)."
   - "[C-25.FR-10, C-25.FR-1, C-25.FR-9] `deleteTeam` of a Team that owns a chain answers `409` `team_in_use` naming the chain in `in_use_by` (`type` `escalation_chain`); a Team's chains are in its read as `chains`; a step limited to Working hours uses those of the chain's owning Team, else the Organization's (`teams_test.go`, `steps_test.go`)."
   - "[C-27.FR-12, C-27.AC-8] `deleteSchedule` of a Schedule that a step names answers `409` `schedule_in_use` naming the chain, through `schedules.Referrers` (`schedules_integration_test.go`)."
-  - "The migration adds the Permissions `escalation-chains:read` (every Role) and `escalation-chains:write` (Admin); reference.md moves them and `muster_escalation_chain_info` into the main tables; P-84 is confirmed in defaults.md and L2.md §5.3; Concepts → Escalation chains has \"What an Escalation chain is\", \"Steps\" and \"Naming chains on Routes and Teams\" in the navigation; `make docs-check` passes."
+  - "The migration adds the Permissions `escalation-chains:read` (every Role) and `escalation-chains:write` (Admin), so that `TestIntegrationRoleMatrix` counts 38, 16 and 11 Permissions for Admin, Responder and Viewer instead of S-131's 36, 15 and 10 — no story between them adds one (`auth_integration_test.go`); reference.md moves them and `muster_escalation_chain_info` into the main tables; P-84 is confirmed in defaults.md and L2.md §5.3; Concepts → Escalation chains has \"What an Escalation chain is\", \"Steps\" and \"Naming chains on Routes and Teams\" in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
 issue: null
@@ -109,8 +110,8 @@ issue: null
   - `Permission` gains `escalation-chains:read` and `escalation-chains:write`; `HintEvent.type` gains
     `escalation-chain`; `PublicId` and `api/README.md` gain the prefix `EC`; `Problem.in_use_by[].type` gains
     `escalation_chain`, `route` and `team`.
-  - Problem codes: `chain_in_use` (`409` `conflict`, with `in_use_by`); `webhook_events_required`
-    (`validation-failed`); `gateway_required` (declared by S-152); `not_pageable` (S-131) at `/steps/{i}/user_ids/{j}`; `name_taken`;
+  - Problem codes: `chain_in_use` (`409` `conflict`, with `in_use_by`); `webhook_events_required` (`validation-failed`);
+    `gateway_required` (declared by S-152); `not_pageable` (S-131) at `/steps/{i}/user_ids/{j}`; `name_taken`;
     `out_of_range`; `unknown_id` at the step's reference.
 - **Schema** (migration `0040_escalation_chains`, expand only; `schema.md` §2, §4.8, §4.15 and §4.18):
   - `escalation_chains`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^EC[0-9A-HJKMNP-TV-Z]{12}$')`), `name`,
@@ -210,15 +211,11 @@ a person disabled after the save, which a rename of the chain still saves.
 
 ## Open questions
 
-1. **A `webhook` step whose Destination is deleted.** Deleting a Destination is always allowed (C-15,
-   `deleteDestination`) and C-32.FR-14 does not list this case among the skips. Options: (a) the step is skipped with
-   the reason `destination_deleted`, and the chain warns; (b) deleting such a Destination is refused with `409`, naming
-   the chain. Recommended: (a), which keeps `deleteDestination` as it is; the contract follows it, S-156 records the
-   skip.
-2. **People a step names who have since become Viewers or been disabled.** As in S-131's Open question 6 for Rotation
-   layers, the whole chain is saved at once, so refusing them would refuse even a rename. Options: (a) validate only the
-   people a save adds and keep the others, which C-32.FR-14 skips at run time; (b) refuse every save until an Admin
-   removes them. Recommended: (a); the contract follows it.
+1. **A `webhook` step whose Destination is deleted.** Settled by the maintainer: `deleteDestination` stays always
+   allowed, the step is skipped with the reason `destination_deleted` (S-156), and the chain warns.
+2. **People a step names who have since become Viewers or been disabled.** Settled by C-32.FR-14, which skips at run
+   time a person who has become a Viewer or been disabled since the step was saved: a save validates only the people it
+   adds, as S-131 does for Rotation layers.
 
 ## Notes
 

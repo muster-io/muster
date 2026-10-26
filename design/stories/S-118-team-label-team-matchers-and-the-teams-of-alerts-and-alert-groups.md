@@ -36,6 +36,7 @@ files_touched:
   - internal/ingest/alertsview.go
   - internal/ingest/query.sql
   - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
   - internal/organization/organization.go
@@ -137,7 +138,8 @@ issue: null
   `reopened`, a Replacement — the dispatcher adds the Teams of the joining Alerts that the Alert Group lacks to
   `alert_group_teams` and records one Quiet `team_joined` per Team, and one Quiet `unknown_team_value` per value not
   yet in `unknown_team_values`; both are rows of the closed table of `events.go` and of delivery's `Table`
-  (`team_joined`: a Root message update; `unknown_team_value`: nothing). The list, counts and reads join
+  (`team_joined`: a Root message update; `unknown_team_value`: nothing) — `Enqueue` refuses an event without a row,
+  and `enqueue_test.go` counts the rows of `Table`, so both change with them. The list, counts and reads join
   `alert_group_teams` and `teams` (`filters.go`, `read.go`, `query.sql`); "My Teams" is the caller's `team_users`.
   The table joins the list of lint 2 (`internal/archlint/archlint.go`, AGENTS.md).
 - **Alerts view** (`internal/ingest/alertsview.go`): the Teams of each Alert from `alert_teams`.
@@ -231,7 +233,7 @@ None.
 - `alert_group_teams` is written only by `groups`, like the Alert Group's other tables, so it joins lint 2.
 - `team_joined` and `unknown_team_value` are Quiet and never ring anyone; `team_joined` re-renders the Root message,
   which shows Teams from S-125 on.
-- With 42 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
+- With 44 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
   were split into S-163 when the contract was written.
 - Migration `0025` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present

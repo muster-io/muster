@@ -47,7 +47,7 @@ acceptance:
   - "[C-30.FR-1, C-30.AC-1, C-22.FR-3] A Bridge Connection whose stored `info` declares only `gateway` reads `roles` `[\"gateway\"]`; `createDestination` and `updateDestination` naming it are refused with `422` `gateway_only` at `/connection_id`; a Connection whose `info` declares both roles reads `[\"messenger\", \"gateway\"]` and takes a Destination; one without `roles` in `info` reads `[\"messenger\"]`; `listConnections` takes `role` (`messenger`, `gateway`): `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has it, `gateway` only the Bridge Connections whose stored `info` has it (`bridge_test.go`, `write_test.go`)."
   - "[C-30.FR-2, C-22.FR-21] `muster bridge check` reads the roles: a bridge without `gateway` skips the gateway steps; with `gateway`, the step `notification` sends one `sendNotification` to the contact given by `--contact` (skipped without it) with a test text and test action data, and passes on `201`; a repeated call with the same key must answer `replayed` true; in interactive mode the step `notification_acknowledged` waits for that event carrying the same `data` and answers it with `answerEvent`; against the fake bridge's gateway bot every step passes (`conformance_test.go`, `bridge_test.go` of `internal/cli`)."
   - "[C-30.FR-5] `delivery.Gateway` is an interface with the one method `Notify`, which the Bridge adapter implements by `sendNotification` through the Connection's limiter; lint 3 fails a call of `Notify` outside `internal/delivery/interactive.go` (and, from S-148, the gateway sender), with its fixture `testdata/rule3/internal/gateways/calls.go` (`archlint_test.go`)."
-  - "[C-30.FR-2, C-22.FR-11] `DecodeEvent` reads `notification_acknowledged` and keeps it for its handler, which until S-148 logs `bridge_event_unhandled` — a new log event of the registry — and acknowledges the event; Bridge polling takes the events of a Connection whose only role is `gateway` like any other's (`events_test.go`)."
+  - "[C-30.FR-2, C-22.FR-11] `DecodeEvent` reads `notification_acknowledged` and keeps it for its handler, which until S-173 logs `bridge_event_unhandled` — a new log event of the registry — and acknowledges the event; Bridge polling takes the events of a Connection whose only role is `gateway` like any other's (`events_test.go`)."
   - "[C-30.FR-2] The fake bridge serves the bot `muster-dev-gateway-token` whose `info` declares only `gateway`; `/_fake/config` sets the roles of any bot; `sendNotification` records each request in `/_fake/notifications` with its key and answers a repeated key as replayed; `/_fake/faults` scripts its answers like those of messages; `POST /_fake/acknowledge` with a recorded `notification_id` queues `notification_acknowledged` with that request's `data` and records the answer of `answerEvent` in `/_fake/answers` (`fakebridge_test.go`)."
   - "[C-30.FR-1] `muster dev` creates the demo Connection \"Example Gateway\" of the fake bridge's gateway bot in poll mode, checked at start so that it reads `roles` `[\"gateway\"]` (`devmode_test.go`); `web/src/test/fixtures/connections.ts` gives Bridge Connection reads `roles` `[\"messenger\"]`, so the TypeScript check of the web tests passes."
   - "[C-30.FR-10] A request to a gateway is recorded in the Request log like any request to a bridge, and `sendNotification` logs `gateway_notification_sent` with the Connection, the key and the outcome class, never the contact or the text; the log event is in the registry and its reference page."
@@ -77,7 +77,7 @@ issue: null
 - Contacts, their code and its limits, their masking in the Request log and the gateway note of the unreachable
   warnings: S-167.
 - The queue of calls, their text, combining, retries, `notification_acknowledged` acting on Alert Groups and the
-  Transport `gateway`: S-148. Broken gateways: S-149.
+  Transport `gateway`: S-148 and S-173. Broken gateways: S-149.
 - The roles and health on the Connection page and the gateway-only Connections left out of the Destination form: S-150.
 - The libraries: S-146 (Go), S-147 (Python). The documentation for gateway authors: S-151.
 
@@ -105,7 +105,7 @@ issue: null
 - **Bridge** (`internal/bridge`): `info.go` — `Info.Roles` and `HasRole`; `client.go` — `SendNotification(ctx, conn,
   key, NotificationInput)` with the classification of `classify.go`; `delivery.go` — the Bridge adapter's `Notify`,
   through the Connection's limiter (`connection.bridge.limiter`) in the client class of its caller; `events.go` —
-  `TypeNotificationAcknowledged`, decoded and validated (the `data` at most 64 bytes), handed to a handler that S-148
+  `TypeNotificationAcknowledged`, decoded and validated (the `data` at most 64 bytes), handed to a handler that S-173
   registers; `conformance.go` — the steps `notification` and `notification_acknowledged`.
 - **Delivery** (`internal/delivery`): `delivery.go` declares `Gateway` {`Notify(ctx, Call, Notification) Outcome`},
   which `*bridge.Adapter` implements; `interactive.go` gains `Notify` on the interactive path, for the confirmation
@@ -183,10 +183,9 @@ and a fault scripted on `sendNotification` that the check reports.
 
 ## Open questions
 
-1. **A Destination whose bridge later declares only `gateway`.** C-30.FR-1 refuses creating one; a Destination saved
-   while the bridge was a messenger may remain after its `info` changes. Options: (a) it stays, its deliveries fail as
-   the bridge answers, and the Connection page warns; (b) the next check marks such Destinations Broken. Recommended:
-   (a); this story only refuses new saves, and S-150 shows the warning on the Connection page.
+1. **A Destination whose bridge later declares only `gateway`.** Settled by C-30.FR-1, which refuses only creating a
+   Destination for such a Connection: a Destination saved while the bridge was a messenger stays, its deliveries fail as
+   the bridge answers, and S-150 warns about it on the Connection page.
 
 ## Notes
 
@@ -202,11 +201,11 @@ and a fault scripted on `sendNotification` that the check reports.
 | ID | Covered | Note |
 |---|---|---|
 | C-30.FR-1 | partial | the roles and the refusal; the Connection page shows them from S-150 |
-| C-30.FR-2 | partial | the protocol, the check and the fake; handling the event is S-148, the libraries S-146 and S-147 |
+| C-30.FR-2 | partial | the protocol, the check and the fake; handling the event is S-173, the libraries S-146 and S-147 |
 | C-30.FR-5 | partial | the interface and lint 3; the text of a call and the sender are S-148 |
-| C-30.FR-10 | partial | requests to a gateway in the Request log and the log event; masking is S-167, the metrics S-148 |
+| C-30.FR-10 | partial | requests to a gateway in the Request log and the log event; masking is S-167, the metrics S-148 and S-173 |
 | C-30.AC-1 | partial | the API; "shown as a Notification gateway" on the page is S-150 |
 | C-22.FR-2 | partial | revised for L2: the roles of `info`; group mentions are S-139 |
 | C-22.FR-3 | partial | revised for L2: no Destination for a gateway-only Connection; the Mention entries are S-140 |
-| C-22.FR-11 | partial | revised for L2: the event `notification_acknowledged` is read; S-148 acts on it |
+| C-22.FR-11 | partial | revised for L2: the event `notification_acknowledged` is read; S-173 acts on it |
 | C-22.FR-21 | partial | revised for L2: the check of the role `gateway`; `layout` is S-126 |

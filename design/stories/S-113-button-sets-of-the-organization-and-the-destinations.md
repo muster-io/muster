@@ -195,10 +195,9 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
 
 ## Open questions
 
-1. **A button set on outgoing webhooks?** C-28.FR-10 puts the button set on "the Destination form of every type", but
-   an outgoing webhook sends no buttons in either mode. Options: (a) no `buttons` on outgoing webhooks, and the form of
-   S-114 shows no Buttons section for them; (b) the field on every type, ignored for outgoing webhooks. Recommended:
-   (a), and C-28.FR-10 is read as "every messenger type" in the pull request; the contract above follows (a).
+1. **A button set on outgoing webhooks?** Settled: no. An outgoing webhook sends no buttons in either mode, so it has
+   no `buttons` field and the form of S-114 shows no Buttons section for it; C-28.FR-10's "every type" is read as every
+   messenger type. The contract above follows it.
 
 ## Notes
 

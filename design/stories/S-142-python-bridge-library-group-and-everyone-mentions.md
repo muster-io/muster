@@ -5,7 +5,7 @@ capability: C-28
 kind: be
 layer: L2
 repository: muster-io/muster-bridge-python
-depends_on: [S-140, S-128]
+depends_on: [S-171, S-128]
 covers: [C-28.FR-2, C-25.FR-8]
 files_touched:
   - api/bridge.yaml
@@ -35,19 +35,19 @@ issue: null
 
 **IN**
 
-- The library's copy of `api/bridge.yaml` with the `info` fields of S-139 and the `kind` of a Mention of S-140, the
+- The library's copy of `api/bridge.yaml` with the `info` fields of S-139 and the `kind` of a Mention of S-171, the
   generated models, their configuration, the kind in `replace_mentions`, and their documentation (ADR-0017).
 
 **OUT**
 
-- Muster's side: S-139 and S-140. The Go library: S-141. The documentation on Muster's site: S-144. The role `gateway`:
+- Muster's side: S-139 and S-171. The Go library: S-141. The documentation on Muster's site: S-144. The role `gateway`:
   S-147.
 
 ## Contracts
 
 - **Repository** `muster-io/muster-bridge-python` (MIT, no CLA, ADR-0017), its AGENTS.md and Makefile; the pull request
   says `Part of muster-io/muster#<issue>` and `Story: S-142`, and the issue here is closed by hand once it merges.
-- **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-140, which also carries the
+- **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-171, which also carries the
   `layout` that S-128 took; `src/muster_bridge/models.py` is regenerated (never listed).
 - **Package**: `Config.group_mentions` and `Config.everyone_mentions` go into `info.capabilities` and are validated as
   the specification does (`config.py`); `replace_mentions(body, mentions, render)` passes the entry with its `kind`
@@ -83,5 +83,5 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-28.FR-2 | partial | the Python library; Muster's side is S-139 and S-140 |
+| C-28.FR-2 | partial | the Python library; Muster's side is S-139 and S-171 |
 | C-25.FR-8 | partial | a bridge built on the library can declare the group mentions that Team mentions need |

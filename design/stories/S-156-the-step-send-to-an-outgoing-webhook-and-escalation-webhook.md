@@ -22,6 +22,12 @@ files_touched:
   - test/e2e/escalation_webhook_test.go
   - docs/outgoing-webhooks/events.md
   - docs/concepts/escalation-chains.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/groups/query.sql
+  - internal/groups/read.go
+  - internal/api/alertgroups.go
+  - web/src/components/timeline.tsx
 acceptance:
   - "[C-32.FR-13, C-32.AC-9, C-32.FR-3] A `webhook` step sends one event `escalation_webhook` — the Alert Group as in every event, `chain` and `step` — to the outgoing webhook Destination it names, in events mode or both, whether or not the Alert Group is delivered there; that Destination, on none of the Alert Group's Routes or Teams, receives no other event of the Alert Group; the event is signed with its Signing secret, ordered by the Alert Group's event sequence and delivered at least once like the other events of C-15.FR-2 (`webhook_test.go`, `webhookevents_test.go`, `escalation_webhook_test.go`)."
   - "[C-32.FR-13] A Destination that is also one of the Alert Group's receives `escalation_webhook` among its other events, in order (`webhookevents_test.go`)."
@@ -50,9 +56,10 @@ issue: null
 
 ## Contracts
 
-- **Spec** (`api/openapi.yaml`): `LifecycleEvent` and `WebhookEventName` gain `escalation_webhook`; `WebhookEvent`
-  gains, for it, `escalation` {`chain` (`EscalationChainRef`), `step` (number)}; `TimelineEscalationEntry` uses
-  `destination` (S-121) for it; `EscalationSkipReason` gains `destination_deleted` and `webhook_events_required`.
+- **Spec** (`api/openapi.yaml`): `LifecycleEvent` and `WebhookEventName` gain `escalation_webhook`;
+  `OutgoingWebhookEvent` gains the optional `escalation` {`chain` (`EscalationChainRef`), `step` (number)}, set on that
+  event only; `TimelineEscalationEntry` uses `destination` (S-121) for it; `EscalationSkipReason` gains
+  `destination_deleted` and `webhook_events_required`.
 - **Schema**: none new — the Timeline accepts the event since `_v4` and `webhook_events` since S-148; a row of
   `webhook_events` for a Destination that has no delivery of the Alert Group is allowed as it is.
 - **Packages**: as S-169 and S-155 state them; `escalation` reads the Destination through its own query and imports
@@ -64,6 +71,11 @@ issue: null
   `escalation`, nothing in a messenger, and, unlike every other event, sent only to the step's Destination.
 - **Delivery** (`internal/delivery/webhookevents.go`): the event is enqueued for the step's Destination only, with the
   Alert Group's next sequence of that Destination, and the events-mode fan-out skips it for every other Destination.
+- **Timeline read and SPA** (`internal/groups/query.sql`, `read.go`, `internal/api/alertgroups.go`,
+  `web/src/components/timeline.tsx`): the `destination` of the entry read into `TimelineEscalationEntry`, and a case
+  for `escalation_webhook` in `entryText` with S-148's generic text.
+- **Delivery's event table** (`internal/delivery/enqueue.go`): the row of `escalation_webhook`, sent only to its
+  Destination; `enqueue_test.go` counts it.
 - **Webhooks** (`internal/webhooks/body.go`): the body of `escalation_webhook` — the Alert Group as in every event —
   and `escalation`; S-168 adds the Assignees to the `alert_group` of every event, this one included.
 - **Log events, metrics**: none new; the deliveries of webhook events keep their own.

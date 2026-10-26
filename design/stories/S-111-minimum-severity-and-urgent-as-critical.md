@@ -38,6 +38,7 @@ files_touched:
   - internal/groups/groups_integration_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - web/src/components/timeline.tsx
   - test/e2e/routing_test.go
   - test/e2e/minimum_severity_test.go
   - docs/concepts/routes-and-group-keys.md
@@ -66,8 +67,8 @@ issue: null
   read-only or ignored fields until 0.3.0, and are written so that a 0.1 replica of a rolling update computes the same
   urgency; the migration that converts urgent Routes and recomputes the open Alert Groups once.
 - Applying a changed Minimum severity to the open Alert Groups of the Route (C-26.FR-9), through a durable row that any
-  replica claims with a lease — the `open_group_updates` mechanism that S-113, S-118 and S-125 reuse with kinds of
-  their own.
+  replica claims with a lease — the `open_group_updates` mechanism that S-113, S-163, S-121 (with S-170) and S-125
+  reuse with kinds of their own.
 - The parts of the documentation that this changes: the section on urgency of Routes and Group keys and the upgrade
   notes of 0.2.0.
 
@@ -102,6 +103,10 @@ issue: null
     `urgency_raised` does on `TimelineStatusEntry`.
   - The descriptions of `AgUrgent`, `AlertGroup.urgent`, `AlertGroup.severity_level` and `WebhookAlertGroup.urgent` say
     the new rule. No operation is added.
+- **SPA type check** (`web/src/components/timeline.tsx`): `changeReason` switches over every
+  `NullableStatusChangeReason` and ends in `unreachable`, so `make generate` would fail the TypeScript check without a
+  case for `minimum_severity`; the case returns the server's `reason` text until S-112 translates it. No other
+  exhaustive switch of the SPA covers a value this story adds.
 - **Schema** (migration `0021_minimum_severity`, expand only; `schema.md` §4.8, §4.9 and §5):
   - `routes.minimum_severity text NOT NULL DEFAULT 'none' CHECK (minimum_severity IN ('none', 'warning',
     'critical'))`; the up migration sets it to `critical` where `urgent`.
@@ -228,8 +233,9 @@ None.
 
 - Suggested commit: `feat(routing): replace the urgent mark with a minimum severity on routes`.
 - `open_group_updates` is the one mechanism for changes of configuration that must reach the open Alert Groups after
-  the save — this story's Minimum severity, the button sets (S-113), the evaluation of Teams on save (S-118) and "Labels
-  in the message" (S-125): each adds its kind to the CHECK and its handler to the worker. It is not a Leader task, and
+  the save — this story's Minimum severity, the button sets (S-113), the evaluation of Teams on save (S-163), the
+  Destinations of a Team (the kind of S-121, handled by S-170) and "Labels in the message" (S-125): each adds its kind
+  to the CHECK and its handler to the worker. It is not a Leader task, and
   each row is safe to run twice, as ADR-0007 asks of claimed rows.
 - The lowering of a Minimum severity records nothing, as C-26.FR-9 says; the level falls as a falling Severity level
   does in L1, and the Root messages show it.

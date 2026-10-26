@@ -10,6 +10,7 @@ files_touched:
   - design/facts.md
   - design/stories/S-139-team-mentions-with-the-connections-checks-and-connection-groups.md
   - design/stories/S-140-mention-entries-their-resolution-the-migration-of-the-l1-settings-and-storm-started.md
+  - design/stories/S-171-group-and-everyone-mentions-in-slack-and-through-bridges.md
   - design/stories/S-143-mentions-grid-of-the-destination-form-and-how-to-mention-the-team.md
   - design/stories/S-144-documentation-whom-a-message-mentions-and-team-mentions.md
 acceptance:
@@ -17,7 +18,7 @@ acceptance:
   - "[C-25.FR-8] `design/facts.md` has a new entry F-NNN that says which Mattermost editions and licences have custom groups and LDAP-synced groups, and how a bot reads them — `GET /api/v4/groups` with which parameters and which permission or role of the bot — and what the call answers to a bot without it."
   - "[C-25.FR-8, C-28.FR-2] `design/facts.md` has a new entry F-NNN that says what `usergroups.list` answers with the scope `usergroups:read` (the fields Muster needs: `id`, `handle`, `name`, `date_delete`, `user_count`) and without it, and whether an app that gained the scope in its manifest lacks it in `x-oauth-scopes` until it is reinstalled."
   - "[C-28.FR-2] `design/facts.md` has a new entry F-NNN that says whether `<!subteam^ID>` from a bot notifies the members of a Slack user group in a Thread reply and in the blocks of a Root message, and whether `<!everyone>` from a bot notifies anyone outside the workspace's general channel, and how it renders elsewhere."
-  - "[C-25.FR-8, C-28.FR-2] The items \"Mattermost groups\" and \"Slack user groups\" leave Pending in `design/facts.md`, and S-139 and S-140 cite the new entries: the fake Mattermost and Slack servers, the Connections' checks and the rendering of group mentions follow the facts, any assumption the facts contradict is corrected in those contracts or proposed as a change of C-25.FR-8 or C-28.FR-2 in the pull request; S-143 gains the reasons and texts the facts call for, such as Mattermost groups that need a licence, and S-144 cites what the documentation must say."
+  - "[C-25.FR-8, C-28.FR-2] The items \"Mattermost groups\" and \"Slack user groups\" leave Pending in `design/facts.md`, and S-139, S-140 and S-171 cite the new entries: the fake Mattermost and Slack servers, the Connections' checks and the rendering of group mentions follow the facts, any assumption the facts contradict is corrected in those contracts or proposed as a change of C-25.FR-8 or C-28.FR-2 in the pull request; S-143 gains the reasons and texts the facts call for, such as Mattermost groups that need a licence, and S-144 cites what the documentation must say."
 verify: "make lint"
 operator_attention: true
 issue: null
@@ -35,7 +36,7 @@ issue: null
 
 **OUT**
 
-- Team mentions and the Connections' checks: S-139. The Mention entries and how delivery writes group mentions: S-140.
+- Team mentions and the Connections' checks: S-139. The Mention entries: S-140; how Slack and bridges write group mentions: S-171.
 - Telegram: S-132. Push of Mentions in Thread replies: S-160. GitLab's claims: S-116.
 
 ## Contracts
@@ -45,7 +46,7 @@ issue: null
   the items "Mattermost groups" and "Slack user groups" leave Pending.
 - **Story contracts**: S-139 assumes that a Mattermost bot reads groups with `GET /api/v4/groups` (and reports in the
   check whether it may), that a Slack bot with `usergroups:read` reads user groups with `usergroups.list`, and that
-  `x-oauth-scopes` reports the scope only after a reinstall; S-140 assumes that `@<group>` in a Mattermost message and
+  `x-oauth-scopes` reports the scope only after a reinstall; S-140 (Mattermost) and S-171 (Slack) assume that `@<group>` in a Mattermost message and
   `<!subteam^ID>` in a Slack one notify the group's members, and `<!everyone>` everyone of the workspace in its general
   channel. Each differing fact corrects the contract, or the pull request proposes the change of the requirement.
 
@@ -54,7 +55,7 @@ issue: null
 1. The maintainer runs the checks of Verification on the test stands, with scripts an agent may prepare outside the
    repository. Check: the observations of each step are written down with the raw answers, tokens removed.
 2. Write the facts and move the items out of Pending. Check: `make lint`.
-3. Correct S-139's, S-140's and S-143's contracts and add the citations to S-144. Check: `scripts/stories-sync --dry-run`
+3. Correct S-139's, S-140's, S-171's and S-143's contracts and add the citations to S-144. Check: `scripts/stories-sync --dry-run`
    parses the files.
 
 ## Verification

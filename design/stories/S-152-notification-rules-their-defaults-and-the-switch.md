@@ -162,11 +162,9 @@ Organization whose important rule calls, `call` on one that already calls throug
 
 ## Open questions
 
-1. **"Don't call" on an Organization's rule made only of calls.** C-31.FR-2 says "Don't call" keeps the Organization's
-   rules without any call, and C-31.FR-1 requires an action that Pages, so a rule such as "call, wait 5, call" would be
-   left with none. Options: (a) a Mention takes the place of its first call, keeping the waits; (b) `no_call` is refused
-   with `422` while such a rule exists. Recommended: (a), so that every person can opt out of calls; the contract
-   follows it.
+1. **"Don't call" on an Organization's rule made only of calls.** Settled by the maintainer: a Mention takes the place
+   of its first call and the waits stay, so that every person can opt out of calls and the rule keeps an action that
+   Pages (C-31.FR-1).
 
 ## Notes
 

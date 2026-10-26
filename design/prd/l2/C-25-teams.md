@@ -39,9 +39,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Permission and limits none: every check stays a check of the User's Role (C-03.FR-2), and the only check that looks at
   a Team is the precondition of Overrides (C-27.FR-6).
 - **C-25.FR-2** Ownership and delivery are two relations. Routes, Destinations and Escalation chains may name the Team
-  that owns them, and every Schedule belongs to one; the owning Team only organizes: lists of these objects and of Alert
-  Groups filter by Team and by "My Teams" — the Teams the signed-in User is in. Owning a Destination never makes it one
-  of the Team's Destinations, and a Route's owning Team never adds delivery (C-26.FR-7).
+  that owns them, in the field `owning_team_id` — distinct from `team_id` of a Mattermost Destination, which names the
+  Mattermost team of its channel — and every Schedule belongs to one; the owning Team only organizes: lists of these
+  objects and of Alert Groups filter by Team and by "My Teams" — the Teams the signed-in User is in. Owning a
+  Destination never makes it one of the Team's Destinations, and a Route's owning Team never adds delivery (C-26.FR-7).
 - **C-25.FR-3** An Admin adds Users to a Team and removes them, in the UI or through the API. A User may be in several
   Teams. Deleting a User removes them from every Team; disabling a User keeps them in their Teams, where their Shifts
   are skipped (C-27.FR-4).
@@ -138,9 +139,9 @@ Routes, Destinations, Schedules, Escalation chains and Alert Groups gain the fil
 the Mattermost groups or Slack user groups that a Connection reads, for the Team mention and the group entries of C-28;
 its exact form follows the spikes on groups in [facts, Pending](../../facts.md#pending)); identity provider entries,
 Team matchers, Team mentions and Working hours as fields of `teams`; `team-label-values` (list the values seen without a
-Team); the owning Team as a field of `routes`, `destinations` and `escalation-chains`; the Teams of an Alert and of an
-Alert Group, with the rule that brought each, on `alert-groups` and `alerts`; the filters by Team of the list
-operations.
+Team); the owning Team as the field `owning_team_id` of `routes`, `destinations` and `escalation-chains` (never
+`team_id`, which a Mattermost Destination already uses for its Mattermost team); the Teams of an Alert and of an Alert
+Group, with the rule that brought each, on `alert-groups` and `alerts`; the filters by Team of the list operations.
 
 ## Acceptance
 

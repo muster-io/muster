@@ -46,6 +46,7 @@ acceptance:
   - "[C-27.FR-7] `Schedule` carries `gap_alert` — `by_default`, `on` or `off`, `by_default` on a new Schedule and after the migration — and the derived read-only `gap_alert_active`, true for `on`, and for `by_default` while the Schedule is its Team's main one; `updateSchedule` changes it, recorded in the diff of `schedule.updated` (`schedules_test.go`)."
   - "[C-27.FR-7] `getScheduleOnCall` lists a warning `gap` with its `start` and `end` for each gap of the period, and `Schedule.next_gap` is the first gap within `schedule.gap_view` from the business clock's now, or null (`gaps_test.go`)."
   - "[C-27.FR-7, C-27.AC-5, C-25.FR-5] With a gap 5 days ahead in a Team's main Schedule, the next run of the Leader task `schedule_gap_scan` raises `MusterScheduleGap` with the labels `schedule`, `schedule_name`, `team_id`, `team_name` and, under the Organization's Team label, the Team's slug outside the fingerprint, and the annotation of when the nearest gap starts; `muster_schedule_gap{schedule}` is 1; the Alert belongs to the Team by the Team label and its Alert Group records no `unknown_team_value`; a run of the task twice in a row raises it once (`scan_integration_test.go`)."
+  - "[C-27.FR-7] With a Rotation layer limited to Friday 19:00–09:00 as the only one of a Schedule, its gaps run from Saturday 09:00 to Friday 19:00 and the night from Friday to Saturday is no gap, which `next_gap` and the gap warnings show (`gaps_test.go`)."
   - "[C-27.FR-7, C-27.AC-5] Once the gap has started the alert stays raised; an Override that closes the gap resolves it at the next run, and so does the end of the gap; a gap 8 days ahead raises nothing yet; a second Schedule of the Team with a gap raises nothing and exports `muster_schedule_gap` 0 until an Admin sets its `gap_alert` to `on` (`scan_integration_test.go`, `schedule_gaps_test.go`)."
   - "[C-27.AC-8] With `gap_alert` `by_default` on two Schedules of a Team, making the second one main moves the gap alert to it at the next run and resolves the first one's; with `on` on the first one it stays raised there (`scan_integration_test.go`)."
   - "[C-27.FR-7] Renaming a Schedule or its Team updates the name labels of the open `MusterScheduleGap`, a changed slug or Team label its Team label, and deleting a Schedule resolves its alert, without a second Alert (`scan_integration_test.go`)."
@@ -75,8 +76,8 @@ issue: null
 
 - The marks of an unreachable On-call, in the warnings and in "On call now": S-164.
 - The pages: S-135 (the Schedule page with its gaps and warnings) and S-136 ("On call now").
-- The provisional thresholds of the chart rules of L2 (P-88) and the scan interval (P-80), which the test environment
-  confirms; both stay provisional.
+- The confirmation of the thresholds and windows of the chart rules of L2 (P-88): S-149 confirms them, once both rules
+  of L2 exist, as L2.md §5.3 says. The scan interval (P-80) is confirmed by the test environment.
 
 ## Contracts
 
@@ -104,7 +105,7 @@ issue: null
   - the raise is skipped when the alert is firing with the same labels and annotation, and the Internal alert is
     deduplicated by its fingerprint anyway, so a second run raises nothing new (ADR-0007);
   - `muster_schedule_gap{schedule}` is set to 1 for each Schedule with such a gap, and to 0 for every other Schedule,
-    those whose alert is not active included (Open question 1); the series of a deleted Schedule is removed;
+    those whose alert is not active included (settled 1); the series of a deleted Schedule is removed;
   - the log events `schedule_gap_detected` (warn, with `schedule`, `team` and the gap's start) when a Schedule's alert
     is raised and `schedule_gap_cleared` (info) when it is resolved, C-27, in `internal/logging/events.go`.
   The Leader adds only this task and the gauge (NFR-2, NFR-4).
@@ -117,7 +118,9 @@ issue: null
 - **Chart** (`deploy/helm/muster/files/rules.yaml`, `values.yaml`, `values.schema.json`): the rule `MusterScheduleGap`
   of reference.md — `max by (schedule) (muster_schedule_gap{job="muster"}) == 1`, `for` `0m`, severity `warning`
   (P-88) — with its threshold and `for` as chart values and its `runbook_url`; `tests/rules/MusterScheduleGap.yaml`.
-- **Metric** (`internal/metrics/catalogue.go`): `muster_schedule_gap{schedule}` (gauge, Leader), C-27.
+- **Metric** (`internal/metrics/catalogue.go`): `muster_schedule_gap` — gauge (Leader), labels `schedule` — 1 while
+  there is a gap now or one that starts within `schedule.gap_alert_horizon`; C-27 — the row of reference.md "Metrics
+  added in L2", which moves into the catalogue with "of a Schedule whose gap alert is active" added (settled 1).
 - **On call now** (`internal/schedules/oncallnow.go`): per Team, sorted by name, the main Schedule's current segment of
   the Result and the next one; Teams the caller is in for `mine`.
 - **Shared tables**: reference.md moves `MusterScheduleGap` from "Internal alerts added in L2" and "Chart rules added in
@@ -186,6 +189,15 @@ TO "$(date -u -d "$G2 -6 days" +%FT%TZ)"; GAPALERT                              
 TO "$(date -u -d "$G2 +2 hours" +%FT%TZ)"; GAPALERT                                  # 1   (inside the gap)
 TO "$(date -u -d "$G2 +1 day +1 hour" +%FT%TZ)"; GAPALERT                            # 0   (past it; the next one, at TODAY +26 days, is 13 days out)
 
+# C-27.FR-2, C-27.FR-7: a Rotation layer of Friday 19:00–09:00 crosses midnight; its gaps are the rest of the week
+FRI=$(date -u -d "$(date -u -d "$(curl -s $CLK | jq -r .now)" +%F) +$(( (12 - $(date -u -d "$(curl -s $CLK | jq -r .now)" +%u)) % 7 + 7 )) days" +%F)   # a Friday 7 to 13 days ahead
+SN=$(curl -s "${A[@]}" $API/schedules -d "{\"team_id\":\"$TP\",\"name\":\"Nights\",\"time_zone\":\"UTC\",\"rotation_layers\":[
+  {\"name\":\"Friday night\",\"user_ids\":[\"$OLGA\"],\"shift_length\":\"day\",\"handover_time\":\"00:00\",\"start_date\":\"$TODAY\",
+  \"limits\":{\"days\":[\"friday\"],\"start\":\"19:00\",\"end\":\"09:00\"}}]}" | jq -r .id)
+curl -s "${A[@]}" "$API/schedules/$SN/on-call?from=${FRI}T00:00:00Z&to=$(date -u -d "$FRI +2 days" +%F)T00:00:00Z" |
+  jq -c '[.warnings[] | select(.kind == "gap") | [.start, .end]]'
+# [["<FRI>T00:00:00Z","<FRI>T19:00:00Z"],["<FRI +1>T09:00:00Z","<FRI +2>T00:00:00Z"]]
+
 # C-27.FR-9: On call now
 curl -s "${A[@]}" "$API/on-call-now" | jq -c '[.items[] | {t: .team.slug, s: .schedule.name, u: .user.login, no_schedule}]'
 # [{"t":"payments","s":"Main","u":"olga","no_schedule":false}, … Teams without a Schedule with "no_schedule":true]
@@ -200,11 +212,11 @@ clock moves past `auth.session_idle_timeout`, which is why the checks use the Pe
 
 ## Open questions
 
-1. **`muster_schedule_gap` of a Schedule whose gap alert is off.** C-27.FR-7 says the gauge is 1 "while there is a gap
-   now or within the horizon", for the chart rule of the same name, which is the backup of the Internal alert. Options:
-   (a) the gauge is 1 only for Schedules whose `gap_alert` is active, so that the chart rule follows the same setting
-   and a second line in working hours does not page through the chart; (b) the gauge is 1 for every Schedule with a
-   gap, and the chart rule fires for Schedules whose Internal alert is off. Recommended: (a); the contract follows it.
+None open. Settled:
+
+1. **Settled: `muster_schedule_gap` is 1 only for a Schedule whose gap alert is active**, so that the chart rule, the
+   backup of the Internal alert, follows the same setting, and a second line in working hours does not page through
+   the chart; it is 0 for the others.
 
 ## Notes
 

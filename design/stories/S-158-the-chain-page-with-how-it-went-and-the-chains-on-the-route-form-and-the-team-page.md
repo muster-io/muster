@@ -96,7 +96,7 @@ issue: null
   important" / «Обычно и важно», its text / «Что именно происходит, решают личные правила уведомлений человека. Личных
   сообщений Muster не шлёт: призыв — это упоминание в треде корневого сообщения.», "How it went" / «Как прошла»,
   "Escalation chains" / «Цепочки эскалации», the Route hint / «Зовёт только в тредах мест доставки маршрута. Команды из
-  лейбла зовут своими цепочками.», the warning of a Route without a Destination / «Только шлюз оповещений может до
+  метки зовут своими цепочками.», the warning of a Route without a Destination / «Только шлюз оповещений может до
   кого-то дозвониться из этой цепочки: у маршрута нет места доставки.».
 
 ## Steps
@@ -132,14 +132,13 @@ the demo gateway removed for step 1 (S-145). In Playwright at 1280 × 800, in En
 
 ## Open questions
 
-1. **Where the list of Escalation chains is reached.** The approved mockups reach a chain from its Team, and the main
-   navigation has eight entries (S-072). Options: (a) no new entry in the main navigation; the list at
-   `/escalation-chains` is linked from the Teams list, each Team page and the Route form; (b) an entry "Escalation
-   chains" in the main navigation. Recommended: (a); the contract follows it.
+1. **Where the list of Escalation chains is reached.** Settled: no entry in the main navigation, which keeps its eight
+   entries (S-072), as the approved mockups reach a chain from its Team; the list at `/escalation-chains` is linked from
+   the Teams list, each Team page and the Route form.
 
 ## Notes
 
-- The Russian texts follow the vocabulary of S-162's Open question 1.
+- The Russian texts follow the vocabulary settled in S-162 (Open question 1).
 - Suggested commit: `feat(web): build escalation chains and name them on routes and teams`.
 - The approved Route mockup chooses one chain; the form names several, as C-26.FR-2 and C-32.FR-2 do (L2.md §5.2).
 - The chip of a step limited to Working hours names the Organization when the chain has no owning Team (C-25.FR-9).

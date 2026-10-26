@@ -4,7 +4,7 @@ title: "Documentation: connecting a Notification gateway, confirming a contact a
 capability: C-30
 kind: docs
 layer: L2
-depends_on: [S-130, S-146, S-147, S-150]
+depends_on: [S-130, S-146, S-147, S-150, S-173]
 covers: [C-30.FR-11]
 files_touched:
   - docs/messengers/notification-gateways.md

@@ -1,11 +1,11 @@
 ---
 id: S-148
-title: The queue of calls through Notification gateways with combining and retries, and the Acknowledge of the Transport gateway (BE)
+title: The queue of calls through Notification gateways with combining and retries (BE)
 capability: C-30
 kind: be
 layer: L2
 depends_on: [S-167]
-covers: [C-30.FR-2, C-30.FR-4, C-30.FR-5, C-30.FR-6, C-30.FR-7, C-30.FR-10, C-30.AC-3, C-30.AC-4, C-30.AC-7, C-03.FR-14, C-10.FR-1, C-10.FR-3, C-11.FR-2, C-09.FR-22, C-12.FR-3, C-15.FR-2, C-22.FR-11, C-32.FR-19]
+covers: [C-30.FR-2, C-30.FR-4, C-30.FR-5, C-30.FR-7, C-30.FR-10, C-30.AC-3, C-30.AC-7, C-11.FR-2, C-09.FR-22, C-12.FR-3, C-15.FR-2, C-32.FR-19]
 files_touched:
   - api/openapi.yaml
   - api/README.md
@@ -20,15 +20,9 @@ files_touched:
   - internal/gateways/sender.go
   - internal/gateways/sender_test.go
   - internal/gateways/calls_integration_test.go
-  - internal/gateways/acknowledge.go
-  - internal/gateways/acknowledge_test.go
   - internal/gateways/query.sql
   - internal/buttons/buttons.go
   - internal/buttons/buttons_test.go
-  - internal/bridge/events.go
-  - internal/bridge/events_test.go
-  - internal/groups/commands.go
-  - internal/groups/commands_test.go
   - internal/groups/pages.go
   - internal/groups/events.go
   - internal/groups/events_test.go
@@ -45,20 +39,27 @@ files_touched:
   - design/prd/l1/reference.md
   - test/e2e/gateway_calls_test.go
   - AGENTS.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/groups/query.sql
+  - internal/groups/read.go
+  - internal/api/alertgroups.go
+  - web/src/components/timeline.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
 acceptance:
   - "[C-30.FR-4, C-30.AC-3] A Page through a gateway to a person with a confirmed contact there is a row of `gateway_calls` with a `public_id`, its Alert Groups and `next_attempt_at`; the first call to a person through a gateway goes at once; of three Pages to one person within `gateway.combine_window`, the first reaches the fake gateway at once and the other two as one call with both Alert Groups once the window after the first one ended has passed; when the second Alert Group is acknowledged meanwhile, that call is about the third only; a call whose Alert Groups were all acknowledged before its first attempt is not sent and ends `dropped`; after a call that ends Not delivered, the next one goes once the window after it has passed; calls about critical Alert Groups are claimed first; Mentions are never joined (`calls_test.go`, `calls_integration_test.go`)."
   - "[C-30.FR-4, C-30.AC-3, C-11.FR-2] A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` and the same text within `delivery.transient_backoff` and `delivery.transient_budget` until it is accepted, through the Connection's limiter, on any replica that claims it; once every Alert Group of a call being retried has stopped, its retries end and it ends `dropped`; a call takes no Alert Group after its first attempt (`sender_test.go`)."
   - "[C-30.FR-2, C-30.FR-5, C-30.AC-3, C-12.FR-3] The text of a call names each Alert Group by number, title and Severity level and says how to acknowledge, in the language of the person's profile, in English and Russian; its action data names the call — the subject `call` with the call's `public_id`, signed with the button-signature key — and is at most 64 bytes for a call about any number of Alert Groups; lint 3 allows `Notify` in `internal/gateways/sender.go` (`buttons_test.go`, `sender_test.go`)."
-  - "[C-30.FR-6, C-30.AC-4, C-10.FR-1, C-22.FR-11] `notification_acknowledged` whose data verifies runs Acknowledge with the Transport `gateway` as the person the call was for, for each Alert Group of the call: a firing or snoozed one becomes acknowledged, with `gateway` in the Timeline and the Audit log, and the answer through `answerEvent` names what was acknowledged; one that another User or the same person owns stays as it is, the refusal `already_owned` is logged as a refused Command and the answer says \"Already taken by\" that User; a resolved one is answered \"Already resolved\"; a Takeover is never made; a disabled person or a Viewer is refused as for a press; replaying the event changes nothing and answers once (`acknowledge_test.go`, `commands_test.go`, `gateway_calls_test.go`)."
   - "[C-30.FR-7, C-30.AC-7, C-09.FR-22, C-15.FR-2, C-32.FR-19] A call that the fake gateway answers with the class `invalid`, an unknown answer or a used-up budget ends Not delivered and records, for each of its Alert Groups, the Quiet `page_not_delivered` (Timeline kind `escalation`) naming the person in `paged_users` and the gateway, with the reason; outgoing webhooks in events mode receive it (`pages.go` via `events_test.go`, `body_test.go`)."
-  - "[C-30.FR-10, C-03.FR-14, C-10.FR-3] An Acknowledge through the gateway counts in `muster_commands_total{transport=\"gateway\"}`, and every ended attempt of a call in `muster_gateway_calls_total{connection,outcome}` with `accepted`, `retry_after`, `transient`, `fatal` or `unknown`; `Transport` gains `gateway` in the API, the Timeline and the Audit log; reference.md moves `muster_gateway_calls_total` into the catalogue (`catalogue.go`, `metrics_test.go`)."
+  - "[C-30.FR-10] Every ended attempt of a call counts in `muster_gateway_calls_total{connection,outcome}` with `accepted`, `retry_after`, `transient`, `fatal` or `unknown`; reference.md moves `muster_gateway_calls_total` into the catalogue (`catalogue.go`, `metrics_test.go`)."
   - "[C-30.FR-4] Under `muster dev`, `POST localhost:8082/_dev/gateway-calls` with a User, a gateway and Alert Groups queues their Pages as a Notification rule's call would, and is refused outside development mode (`devmode_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
 issue: null
 ---
 
-# S-148. The queue of calls through Notification gateways with combining and retries, and the Acknowledge of the Transport gateway (BE)
+# S-148. The queue of calls through Notification gateways with combining and retries (BE)
 
 ## Scope
 
@@ -71,14 +72,14 @@ issue: null
   after the previous one ended; Alert Groups that stopped are dropped before the first attempt, and retries end once
   all have stopped (C-30.FR-4).
 - The text of a call and its signed action data naming the call (C-30.FR-2, FR-5).
-- `notification_acknowledged` acting as the person the call was for, with the Transport `gateway` and a precondition of
-  its own, answered on the interactive path (C-30.FR-6; C-10.FR-1, C-10.FR-3, C-03.FR-14, C-22.FR-11 revised).
 - `page_not_delivered` for a call that ends Not delivered (C-30.FR-7), and the expand step of the Timeline for the
   events of C-30 and C-32 (C-32.FR-19).
 - The metrics and log events of calls (C-30.FR-10), and a development hook that queues a call for the live check.
 
 **OUT**
 
+- `notification_acknowledged` acting on Alert Groups, the Acknowledge of the Transport `gateway` and its answers:
+  S-173.
 - Broken gateways, their probe and the calls due while Broken: S-149.
 - The calls that Notification rules and Escalation steps make, `paged` for a call, and what "stopped" means for a
   chain or a rule that started over: S-157. Until then the hook of `muster dev` and the tests queue calls directly, as
@@ -88,11 +89,11 @@ issue: null
 ## Contracts
 
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
-  - `Transport` gains `gateway`; `LifecycleEvent` gains `page_not_delivered` (`x-event-kinds` `escalation`) and the
+  - `LifecycleEvent` gains `page_not_delivered` (`x-event-kinds` `escalation`) and the
     Timeline kind `escalation`; `TimelineEscalationEntry` {`paged_users` (`UserRef`[]), `gateway` (`EntityRef` or null),
     `reason` (`PageNotDeliveredReason`: `call_refused`, `call_unknown`, `call_budget_used`, `no_confirmed_contact`, more
-    from S-149, S-155 and S-157)}; `WebhookEventName` gains `page_not_delivered`, whose `WebhookEvent` carries `page`
-    {`users`, `gateway`, `reason`}.
+    from S-149, S-155 and S-157)}; `WebhookEventName` gains `page_not_delivered`, and `OutgoingWebhookEvent` gains the
+    optional `page` {`users`, `gateway`, `reason`}, set on that event only, as `test` is on its own.
   - `PublicId` and `api/README.md` gain the prefix `CA` (call).
 - **Schema** (migration `0037_gateway_calls`, expand only; `schema.md` §4.9, §4.13, §4.17, §5):
   - `gateway_calls`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^CA[0-9A-HJKMNP-TV-Z]{12}$')`), `connection_id`,
@@ -115,7 +116,8 @@ issue: null
     VALID`, validated in a second transaction, the old ones dropped in a third, as S-121's `_v3`; the later stories of
     C-32 record their events without a new version. New columns: `paged_user_ids bigint[]` (the people a Page names,
     C-32.FR-19) and `gateway_connection_id`.
-  - `timeline_entries_transport_v4_check` and `audit_log_transport_v4_check` add `gateway`, as `0018` added `slack`.
+  - `timeline_entries_transport_v4_check` and `audit_log_transport_v4_check` add `gateway`, as `0018` added `slack`,
+    for the Acknowledge of S-173, so that it needs no migration.
   - `webhook_events_event_v4_check` adds the five `escalation` events above to S-121's `_v3`, in the same three
     transactions.
   - The down migration drops the tables and columns and restores the previous CHECKs after deleting the rows they
@@ -133,37 +135,31 @@ issue: null
     every Alert Group stopped; Not delivered with its reason, which records `page_not_delivered` for each Alert Group
     through the dispatcher. A person without a confirmed contact at the first attempt ends the call Not delivered with
     `no_confirmed_contact`. Calls are never reconciled (ADR-0005).
-  - `acknowledge.go` — the handler of `notification_acknowledged` that S-145 left open: the data is verified with the
-    key it names and must be a call's (`buttons.SubjectCall`) of this Connection; the actor is the call's User, never
-    the contact (ADR-0013); for each Alert Group of the call — every one it carried from its first attempt, as C-30.FR-6
-    says, also one whose chain stopped meanwhile — the dispatcher runs Acknowledge with the Transport `gateway` under
-    its precondition; the answer — "Acknowledged: #12, #13", "Already taken by {name}", "Already resolved", or the
-    refusal of a disabled person or a Viewer — goes through `answerEvent` on the interactive path, in the person's
-    language.
+- **Timeline read** (`internal/groups/query.sql`, `read.go`, `internal/api/alertgroups.go`): the kind `escalation`,
+  `paged_user_ids` and `gateway_connection_id` are read into `TimelineEscalationEntry` by
+  `getAlertGroupTimeline`.
+- **Delivery's event table** (`internal/delivery/enqueue.go`): the row of `page_not_delivered` (nothing in a
+  messenger), since `Enqueue` refuses an event without a row; `enqueue_test.go` counts `delivery.Table` again.
+- **SPA** (`web/src/components/timeline.tsx`, locales): `entryText` gains the kind `escalation`, whose branch has a case
+  for each of its events that exists, here `page_not_delivered`, with the generic text `timeline.escalation.event`
+  "{{event}}" / «{{event}}», so that the TypeScript check passes after `make generate`; S-155, S-156, S-168 and S-169
+  add a case per event they add, and S-159 renders them fully.
 - **Buttons** (`internal/buttons`): the subject `call` (code `c`), whose public id is a call's; `LooksSigned` knows it.
-- **Groups** (`internal/groups`): `commands.go` — Acknowledge with the Transport `gateway` has the precondition of
-  C-30.FR-6: firing or snoozed → acknowledged; acknowledged by anyone → refused `already_owned` with the Owner; resolved
-  → refused `already_resolved`; never a Takeover; the Role and state of the person as for a press (C-18.FR-8).
-  `pages.go` — the system transition `PageNotDelivered` that records `page_not_delivered`; `events.go` — its row (Quiet,
-  no Mentions, kind `escalation`, nothing in a messenger).
+- **Groups** (`internal/groups`): `pages.go` — the system transition `PageNotDelivered` that records
+  `page_not_delivered`; `events.go` — its row (Quiet, no Mentions, kind `escalation`, nothing in a messenger).
 - **Packages**: `gateways` imports `groups` and `delivery` and none of the packages that import it; `groups` imports
   no package of Paging (S-169 states the direction for all of them).
-- **Bridge** (`internal/bridge/events.go`): `notification_acknowledged` is handed, once per event id under the claim of
-  C-22.FR-11, to `bridge.NotificationAcks`, an interface declared here that `gateways` implements and
-  `internal/runtime` wires, so that `bridge` does not import `gateways`.
 - **Webhooks** (`internal/webhooks/body.go`): `page_not_delivered` in events mode, with `page`.
 - **Texts** (`internal/messages/texts`): the call ("Muster: {count} Alert Group(s) need you.", "#{number} {title},
-  {severity}", "Press 1 to acknowledge."), and the answers, in English and Russian with their plurals (C-12.FR-3
+  {severity}", "Press 1 to acknowledge."), in English and Russian with their plurals (C-12.FR-3
   revised).
 - **Lint 3** (`internal/archlint/archlint.go`): `internal/gateways/sender.go` joins the files allowed to call
   `delivery.Gateway.Notify`.
-- **Metrics** (`internal/metrics/catalogue.go`): `muster_gateway_calls_total{connection,outcome}` (counter, C-30), and
-  `gateway` among the `transport` values of `muster_commands_total`; reference.md moves `muster_gateway_calls_total`
-  into the catalogue, adds `gateway` to the `transport` values of the row of `muster_commands_total`, and drops the
-  sentence about it under "Metrics added in L2".
+- **Metrics** (`internal/metrics/catalogue.go`): `muster_gateway_calls_total{connection,outcome}` (counter, C-30);
+  reference.md moves it into the catalogue.
 - **Log events** (`internal/logging/events.go`): `gateway_call_queued` (debug), `gateway_call_attempted` (info; the
   call, the Connection, the outcome class), `gateway_call_not_delivered` (warn; the reason), `gateway_call_dropped`
-  (info), `gateway_acknowledge_refused` (info; the call, the reason), C-30; none carries the contact or the text.
+  (info), C-30; none carries the contact or the text.
 - **Development mode** (`internal/devmode/devmode.go`): `POST /_dev/gateway-calls` {`user_id`, `connection_id`,
   `alert_group_ids`} on the internal listener, served only under `muster dev` like `/_dev/clock`, calls `gateways.Page`
   for each Alert Group with the stop check of this story.
@@ -179,11 +175,9 @@ issue: null
    joining a waiting call, the window after an accepted and after a Not delivered call, a call being retried, and the
    drop before the first attempt.
 3. Write the sender, the text and the signed data. Check: `sender_test.go`, `buttons_test.go`; `make lint-arch`.
-4. Write the Acknowledge of the Transport `gateway`, its precondition and the answers. Check: `commands_test.go`,
-   `acknowledge_test.go`.
-5. Record `page_not_delivered`, the webhook event, the metrics and the log events; add the hook of `muster dev`. Check:
+4. Record `page_not_delivered`, the webhook event, the metrics and the log events; add the hook of `muster dev`. Check:
    `events_test.go`, `body_test.go`, `devmode_test.go`; `calls_integration_test.go` runs two senders on two replicas.
-6. Write `test/e2e/gateway_calls_test.go`. Check: the Verification below.
+5. Write `test/e2e/gateway_calls_test.go`. Check: the Verification below.
 
 ## Verification
 
@@ -204,32 +198,18 @@ curl -s $FB/notifications | jq -r 'last.text'
 # Muster: 1 Alert Group needs you. #… Disk3, critical. Press 1 to acknowledge.
 curl -s $FB/notifications | jq -r 'last.action.data | length <= 64'                            # true
 
-# petr presses 1 in the second call: G3 becomes his; G2 is ivan's
-N=$(curl -s $FB/notifications | jq -r 'last.notification_id')
-curl -s -X POST $FB/acknowledge -d "{\"notification_id\":\"$N\"}"; sleep 2
-curl -s "${A[@]}" $API/alert-groups/$G3 | jq -c '{status, o: .owner.login}'                   # {"status":"acknowledged","o":"petr"}
-curl -s "${A[@]}" "$API/alert-groups/$G3/timeline?limit=1" | jq -r '.items[0].transport'      # gateway
-# an Alert Group already owned: the call of G1 acknowledged after ivan took it
-curl -s "${I[@]}" -X POST $API/alert-groups/$G1/acknowledge > /dev/null
-curl -s -X POST $FB/acknowledge -d "{\"notification_id\":\"$(curl -s $FB/notifications | jq -r 'first.notification_id')\"}"; sleep 2
-curl -s $FB/answers | jq -r 'last.text'                                                       # Already taken by Ivan
-curl -s "${A[@]}" $API/alert-groups/$G1 | jq -r .owner.login                                  # ivan
-
 # a call refused as invalid ends Not delivered
-curl -s "${I[@]}" -X POST $API/alert-groups/$G1/unacknowledge > /dev/null
 curl -s -X POST $FB/faults -d '{"path":"/v1/notifications","status":400,"times":1,
   "body":"{\"type\":\"about:blank\",\"title\":\"Bad number\",\"status\":400,\"class\":\"invalid\"}"}' > /dev/null
 curl -s -X POST $CLK -d '{"advance_seconds": 61}' > /dev/null; CALL $G1; sleep 2
 curl -s "${A[@]}" "$API/alert-groups/$G1/timeline?kind=escalation" | jq -c '[.items[] | {event, u: [.paged_users[].login], g: .gateway.name, reason}]'
 # [{"event":"page_not_delivered","u":["petr"],"g":"Example Gateway","reason":"call_refused"}]
-curl -s localhost:8082/metrics | grep -E '^muster_commands_total\{.*transport="gateway"'      # … 1
 curl -s localhost:8082/metrics | grep -c '^muster_gateway_calls_total{'                        # 2 or more
 ```
 
 `test/e2e/gateway_calls_test.go` repeats these checks and adds a call retried after `transient` with the same key and
 text, the retries that end once its Alert Groups were acknowledged, a call whose Alert Groups were all acknowledged
-before its first attempt, critical calls claimed first, a resolved Alert Group answered "Already resolved", a replayed
-event, a Viewer's acknowledgement refused, and two replicas (`E2E_REPLICAS=2`) sending each call once.
+before its first attempt, critical calls claimed first, and two replicas (`E2E_REPLICAS=2`) sending each call once.
 
 ## Open questions
 
@@ -237,7 +217,9 @@ None.
 
 ## Notes
 
-- Suggested commit: `feat(gateways): queue calls with combining and acknowledge through a gateway`.
+- Suggested commit: `feat(gateways): queue calls through notification gateways with combining and retries`.
+- The Acknowledge through a gateway was split off into S-173 when the review added the Timeline read path and the
+  SPA's switches to this story; S-173 follows it.
 - The Timeline's `_v4` takes all five `escalation` events at once, because they are one closed group of the L2 event
   table; S-152 to S-157 add only the columns they need.
 - `paged` for a call (Quiet), the call's Assignees and "stopped" for a chain or a rule that started over come with
@@ -251,21 +233,15 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-30.FR-2 | partial | the event acts on Alert Groups and Bridge polling takes it; the protocol is S-145 |
+| C-30.FR-2 | partial | the action data that names the call; the protocol is S-145, the event's handling S-173 |
 | C-30.FR-4 | partial | the queue, combining, retries and the drop; the calls of rules and steps are S-157 |
 | C-30.FR-5 | partial | the text and the sender's place under lint 3; the interface is S-145 |
-| C-30.FR-6 | full | |
 | C-30.FR-7 | partial | `page_not_delivered` for a call; that the chain and the rules go on is S-157 |
-| C-30.FR-10 | partial | the Transport in the metric and `muster_gateway_calls_total`; masking is S-167 |
+| C-30.FR-10 | partial | `muster_gateway_calls_total`; masking is S-167, the Transport in the metric S-173 |
 | C-30.AC-3 | full | |
-| C-30.AC-4 | full | |
 | C-30.AC-7 | full | |
 | C-32.FR-19 | partial | the expand step of the Timeline: the kind `escalation`, `paged` and the field of its people |
-| C-03.FR-14 | full | revised for L2: the Transport `gateway` in the Audit log |
-| C-10.FR-1 | partial | revised for L2: the Acknowledge through a gateway; chains stop from S-169, Assignees clear from S-168 |
-| C-10.FR-3 | full | revised for L2 |
 | C-11.FR-2 | partial | revised for L2: calls have a sender of their own; Pages as Thread replies are S-155 |
 | C-09.FR-22 | partial | revised for L2: `page_not_delivered` of a call; the other events of C-32 come with S-155, S-156, S-168, S-169 |
-| C-12.FR-3 | partial | revised for L2: the texts of calls and their answers |
+| C-12.FR-3 | partial | revised for L2: the texts of calls; their answers are S-173 |
 | C-15.FR-2 | partial | revised for L2: `page_not_delivered` in events mode |
-| C-22.FR-11 | partial | revised for L2: `notification_acknowledged` handled once per id |

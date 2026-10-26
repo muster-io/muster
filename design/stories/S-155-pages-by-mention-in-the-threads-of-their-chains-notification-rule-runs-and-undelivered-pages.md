@@ -4,8 +4,8 @@ title: Pages by Mention in the Threads of their own chains, the runs of Notifica
 capability: C-32
 kind: be
 layer: L2
-depends_on: [S-152, S-164, S-165, S-169]
-covers: [C-32.FR-3, C-32.FR-8, C-32.FR-9, C-32.FR-10, C-32.FR-11, C-32.FR-19, C-32.AC-1, C-32.AC-6, C-32.AC-7, C-32.AC-11, C-32.AC-13, C-32.AC-16, C-32.AC-17, C-31.FR-3, C-31.AC-1, C-27.FR-8, C-09.FR-22, C-11.FR-2, C-11.FR-20, C-12.FR-3, C-15.FR-2, C-15.FR-11, C-18.FR-4]
+depends_on: [S-152, S-164, S-165, S-169, S-171]
+covers: [C-32.FR-3, C-32.FR-8, C-32.FR-9, C-32.FR-10, C-32.FR-11, C-32.FR-19, C-32.AC-1, C-32.AC-6, C-32.AC-7, C-32.AC-11, C-32.AC-13, C-32.AC-16, C-32.AC-17, C-31.FR-3, C-31.AC-1, C-09.FR-22, C-11.FR-2, C-11.FR-20, C-12.FR-3, C-15.FR-2, C-15.FR-11, C-18.FR-4]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0042_pages.up.sql
@@ -36,15 +36,18 @@ files_touched:
   - internal/messages/texts/ru.json
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
-  - internal/schedules/reach.go
-  - internal/schedules/reach_test.go
-  - internal/schedules/query.sql
   - internal/timers/query.sql
   - internal/metrics/catalogue.go
   - internal/runtime/runtime.go
   - design/prd/l1/reference.md
   - test/e2e/pages_test.go
   - docs/concepts/escalation-chains.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/groups/query.sql
+  - internal/groups/read.go
+  - internal/api/alertgroups.go
+  - web/src/components/timeline.tsx
 acceptance:
   - "[C-32.FR-8, C-32.AC-1, C-32.AC-16] On the setup of scenario 1 of C-32, a warning Alert Group published in `infra-notice` and `payments-notice` gets \"Step 1\" in each Thread from its own chain only — the Route's chain in the Route's Destinations, the Team's chain in the Team's — and a Team's chain whose Team has no Destination with the Root message writes in the Route's; a chain that the Route and a Team both name Pages once in the Threads of both (`where_test.go`, `pages_test.go`, `pages_test.go` of e2e)."
   - "[C-32.FR-3, C-31.FR-3, C-31.AC-1] A `page_on_call` step Pages the On-call of its Schedule at that moment and a `page_people` step each person it names, each by their Notification rule of the step's importance: with the default rules a normal Page makes one Thread reply that mentions the person, an important Page a second one 5 minutes later, and none when the Alert Group was acknowledged in between; the run of a rule stops when the Alert Group is acknowledged, snoozed or resolved, and when its chain starts over or stops (`runs_test.go`, `pages_integration_test.go`)."
@@ -54,7 +57,6 @@ acceptance:
   - "[C-32.FR-19, C-32.AC-11, C-09.FR-22, C-11.FR-20] Every Page by Mention records one Loud `paged` (Timeline kind `escalation`) with `mentions` `[\"paged\"]` and its people in `paged_users`, or the Team or token of a `page_team` step; together with `page_not_delivered` and `escalation_step_skipped`, each row of the L2 lifecycle event table produces exactly one Timeline entry with its event, kind, loudness and Mentions (a table-driven test, `events_test.go`)."
   - "[C-32.FR-19] Pages count in `muster_pages_total{chain,kind,outcome}` with `kind` `mention` and `outcome` `delivered` or `not_delivered`; reference.md moves the metric into the catalogue (`catalogue.go`, `metrics_test.go`)."
   - "[C-32.FR-11, C-15.FR-2, C-15.FR-11] Outgoing webhooks in events mode receive `paged` with its people as `mentions` data, and `page_not_delivered`; a template-mode webhook among a chain's Destinations gets the Page through its \"reply in thread\" request when it has one; a Bridge Destination gets the Page with the Mention marker of C-22.FR-16 (`body_test.go`, `pages_test.go`)."
-  - "[C-27.FR-8] The unreachable warnings of a Schedule cover, besides the Destinations of its Team, every Destination in whose Threads a chain with a step that Pages that Schedule writes (`reach_test.go`)."
   - "[C-32.AC-17] `listEscalationChainRuns` lists, with each step made, its Pages with their people and outcome (`pages_integration_test.go`); Concepts → Escalation chains has \"Where chains Page\" and \"How a Page reaches a person\" with the table of C-32.FR-11 and the note that the push of Mentions in Threads is still to be verified; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -75,13 +77,15 @@ issue: null
 - The Page as a Loud Thread reply of delivery with its text, its Mentions only through Account links, and the line of an
   unlinked person (C-32.FR-9; C-11.FR-2, C-18.FR-4 revised).
 - Undelivered Pages and `page_not_delivered` (C-32.FR-10), `paged` with its people (C-32.FR-19), the metric of Pages,
-  `paged` in events mode, and the chains' Destinations in the unreachable warnings of Schedules (C-27.FR-8).
+  `paged` in events mode.
 
 **OUT**
 
 - Assignees, "Assignees: …" in the Root message and the layout, and the Owner's Team: S-168.
 - Calls — the `call` step and a rule's call actions, which this story's runs hand to the `CallPages` interface wired to
   nothing until S-157 — and the row "Notification gateway" of C-32.FR-11: S-157.
+- The chains' Destinations in the unreachable warnings of Schedules, with the Telegram discussion group check for
+  them: S-172.
 - The `webhook` step: S-156. The pages of the Alert Group and the chain: S-158, S-159. The push facts: S-160.
 
 ## Contracts
@@ -89,9 +93,9 @@ issue: null
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
   - `LifecycleEvent` gains `paged` (`x-event-kinds` `escalation`); `TimelineEscalationEntry` gains `team`
     (`TeamRef`), `everyone` and `importance`; `PageNotDeliveredReason` gains `no_root_message`, `no_account_link` and
-    `not_delivered`; `EscalationSkipReason` gains `no_mention_possible`; `WebhookEventName` gains `paged`, whose
-    `WebhookEvent` carries `mentions` (`WebhookMentionTarget`[], the people as `user` targets) and `page` {`chain`,
-    `step`, `importance`}.
+    `not_delivered`; `EscalationSkipReason` gains `no_mention_possible`; `WebhookEventName` gains `paged`, for which
+    `OutgoingWebhookEvent` carries its people in `mentions` (`WebhookMentionTarget`[], as `user` targets) and `page`
+    gains `chain`, `step` and `importance`.
   - `EscalationRun.steps[]` gains `pages` ({`kind` `mention`, `users` (`UserRef`[]), `team`, `everyone`, `outcome` —
     `pending`, `delivered`, `not_delivered` —, `reason`}[]).
 - **Schema** (migration `0042_pages`, expand only; `schema.md` §4.9, §4.10, §4.11, §4.18):
@@ -143,6 +147,11 @@ issue: null
   the Assignees) and `PageNotDelivered` — any delivered reply that mentions a person delivers the Page to them, and all
   of a person's replies Not delivered or withheld make it `not_delivered`. Replies withheld while a Destination is
   Broken are dropped at recovery (C-11.FR-19).
+- **Timeline read and SPA** (`internal/groups/query.sql`, `read.go`, `internal/api/alertgroups.go`,
+  `web/src/components/timeline.tsx`): `team`, `everyone` and `importance` read into `TimelineEscalationEntry`;
+  `entryText` gains a case for `paged` with S-148's generic text.
+- **Delivery's event table** (`internal/delivery/enqueue.go`): the row of `paged` (a Thread reply in the Threads of
+  the chain); `enqueue_test.go` counts it.
 - **Messages** (`internal/messages/page.go`): the text of a Page reply — "Step {n}: {Mentions}, you are needed" when it
   mentions anyone, "Chain
   of the Route {Route}" or "Chain of the Team {Team}", "On-call of {Team} {Schedule}" or the people, "normal" or
@@ -150,8 +159,6 @@ issue: null
   account" — in the Route's language, in English and Russian (C-12.FR-3 revised).
 - **Webhooks** (`internal/webhooks/body.go`): `paged` in events mode with the people as `mentions` data (C-15.FR-11
   revised); a template-mode Destination's "reply in thread" request carries a Page like any Thread reply.
-- **Schedules** (`internal/schedules/reach.go`, `query.sql`): the Destinations of the reach of a Schedule add, through
-  a query of its own, the Destinations of the Routes and Teams that name a chain with a step that Pages the Schedule.
 - **Metric** (`internal/metrics/catalogue.go`): `muster_pages_total{chain,kind,outcome}` (counter, C-32), moved in
   reference.md from "Metrics added in L2".
 - **Settings**: `delivery.transient_budget`, `route.language`; the rules of `organization.notification_rules`.
@@ -168,7 +175,7 @@ issue: null
 3. Write the runs of Notification rules with their waits and stops. Check: `runs_test.go` with a manual clock.
 4. Enqueue Page replies, their text and their outcomes; record `paged` and `page_not_delivered`. Check: `page_test.go`,
    `pages_test.go` of delivery, `events_test.go` (one Timeline entry per row of the L2 table so far).
-5. Add the webhook event, the metric, the reach and the runs' Pages. Check: `body_test.go`, `reach_test.go`,
+5. Add the webhook event, the metric and the runs' Pages. Check: `body_test.go`,
    `pages_integration_test.go`.
 6. Write `test/e2e/pages_test.go` and the documentation. Check: the Verification below; `make docs-check`.
 
@@ -211,19 +218,15 @@ N=$(curl -s $FMM/posts | jq length); curl -s -X POST $CLK -d '{"advance_seconds"
 Threads, a Route with a chain and no Destination (`no_root_message`), a reply that the fake server refuses until it ends
 Not delivered, a Destination Broken while a Page comes due and the reply not sent after recovery, `page_team` with a
 Team mention and with `here`, `page_team` on a Telegram-only chain (`no_mention_possible`), a Bridge Destination without
-`native_mentions`, the `paged` event in an events-mode webhook, and the Schedule warning for a chain's Destination.
+`native_mentions`, the `paged` event in an events-mode webhook, and the read of the escalation entries.
 
 ## Open questions
 
-1. **One Thread reply or one per person.** C-32.FR-9 shows "Step {n}: @ivan, you are needed" and the reference table
-   "Step {n}: {Mentions}, you are needed", while each person runs their own rule. Options: (a) the first actions of the
-   people a step Pages that come due together make one reply per Destination naming them all, and each later action of a
-   rule a reply of its own; (b) one reply per person always. Recommended: (a), which matches the table and keeps a
-   Thread short; the contract follows it.
-2. **The text of a later Mention of a rule.** C-32.FR-9 gives the text of a step's Page. Options: (a) a later Mention
-   of the person's rule repeats "Step {n}: @ivan, you are needed" with "· important, again" and no further repeat
-   announced; (b) a text of its own, such as "Reminder of step {n}". Recommended: (a); the contract follows it, and the
-   texts are confirmed in the pull request.
+1. **One Thread reply or one per person.** Settled by reference.md (banners: "Step {n}: {Mentions}, you are needed"):
+   the first actions of the people a step Pages that come due together make one reply per Destination naming them all,
+   and each later action of a rule a reply of its own.
+2. **The text of a later Mention of a rule.** Settled by the maintainer: it repeats "Step {n}: @ivan, you are needed"
+   with "· important, again", and announces no further repeat.
 
 ## Notes
 
@@ -253,7 +256,6 @@ Team mention and with `here`, `page_team` on a Telegram-only chain (`no_mention_
 | C-32.AC-17 | partial | the Pages of the runs |
 | C-31.FR-3 | partial | runs with Mentions and waits; call actions are S-157 |
 | C-31.AC-1 | full | |
-| C-27.FR-8 | partial | the Destinations of the chains |
 | C-09.FR-22 | partial | revised for L2: `paged` |
 | C-11.FR-2 | partial | revised for L2: Pages as Thread replies of delivery |
 | C-11.FR-20 | partial | revised for L2: `paged` as Thread replies; `assignees_changed` is S-168 |

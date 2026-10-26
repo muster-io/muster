@@ -5,7 +5,7 @@ capability: C-26
 kind: be
 layer: L2
 depends_on: [S-111, S-118, S-163]
-covers: [C-26.FR-1, C-26.FR-2, C-26.FR-3, C-26.FR-4, C-26.FR-5, C-26.FR-6, C-26.FR-7, C-26.FR-9, C-26.FR-13, C-26.AC-1, C-26.AC-2, C-26.AC-3, C-26.AC-4, C-26.AC-5, C-26.AC-6, C-26.AC-10, C-26.AC-11, C-25.FR-10, C-25.FR-13, C-25.AC-13, C-08.FR-1, C-09.FR-22, C-11.FR-6, C-11.FR-14, C-11.FR-20, C-15.FR-2]
+covers: [C-26.FR-1, C-26.FR-2, C-26.FR-3, C-26.FR-4, C-26.FR-5, C-26.FR-7, C-26.FR-9, C-26.FR-13, C-26.AC-1, C-26.AC-2, C-26.AC-3, C-26.AC-4, C-26.AC-5, C-26.AC-10, C-26.AC-11, C-25.FR-13, C-25.AC-13, C-08.FR-1, C-09.FR-22, C-11.FR-6, C-11.FR-20, C-15.FR-2]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0027_destination_entries_and_teams.up.sql
@@ -27,12 +27,8 @@ files_touched:
   - internal/groups/dispatcher.go
   - internal/groups/events.go
   - internal/groups/query.sql
-  - internal/groups/updates.go
-  - internal/groups/updates_test.go
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
-  - internal/delivery/membership.go
-  - internal/delivery/membership_test.go
   - internal/delivery/storm.go
   - internal/delivery/storm_test.go
   - internal/delivery/query.sql
@@ -55,9 +51,8 @@ acceptance:
   - "[C-26.FR-3, C-26.AC-3] A Destination named by the Route for `critical` and by a Team for `below_critical` receives a warning and a critical Alert Group, each with one Root message; `listAlertGroupDeliveries` names for each Destination the entries that reached it — the Route, or the Team — with their conditions (`reach_test.go`)."
   - "[C-26.FR-4, C-26.FR-5, C-26.AC-4, C-26.AC-5, C-09.FR-22, C-11.FR-20] An Alert of \"search\" joining a firing, unowned Alert Group of \"payments\" records `destination_joined` (Timeline kind `system`) for `search-notice` with `loudness` `loud` and `mentions` `[new_alert_group]` and a new Root message there; joining an acknowledged one records it Quiet with a Quiet Root message; a rise from warning to critical publishes the Alert Group in the critical Destinations with `destination_joined` and keeps the Root messages below critical, which stay and are edited to the current state after the critical Alert resolves; a Destination that a Team or a rise adds before the first Publication is part of it (`enqueue_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-5, C-11.FR-6] During a Storm of the Route, a Team Destination counts a non-Urgent Alert Group in its own Storm summary, and an Urgent one is published there on its own (`storm_test.go`)."
-  - "[C-26.FR-6, C-26.AC-6, C-11.FR-14, C-25.FR-10] Changing a Route Destination's condition from `critical` to `any` publishes the Route's open warning Alert Groups there Quietly, within its limiters, and records no `destination_joined`; changing it back removes none; naming a Destination of a Team or turning `deliver_to_teams` on publishes the open Alert Groups it now reaches Quietly through an `open_group_updates` row of the kind `team_destinations` or the Route's membership hook; a Destination taken off a Route or a Team, or reached no longer because `deliver_to_teams` was turned off, gets the final edit \"No longer updated here\" for each open Alert Group for which no entry that still exists — of its Route or, with `deliver_to_teams`, of its Teams — names that Destination, met or not; deleting a Team does the same for the Team's Destinations; a Destination whose remaining entry is named but not met now keeps its Root message, current until the final state (`membership_test.go`, `updates_test.go`)."
   - "[C-26.FR-7, C-26.AC-10] A Route owned by \"payments\" without `deliver_to_teams` delivers an Alert Group of `team=\"payments\"` only to its own Destinations (`reach_test.go`)."
-  - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined` (`updates_test.go`, `routing_teams_test.go`)."
+  - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined`: a reached Destination without a delivery after a system transition of a change of configuration gets a Quiet Publication (`enqueue_test.go`, `routing_teams_test.go`)."
   - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined; `webhook_events_event_v3_check` accepts it (`db_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-13] The documentation has the page Concepts → Routing to Teams with the operations and team channels by Severity, the note that the feature is optional, one status in every channel, the Team label in the Group key for teams that want their own Alert Groups, and a Route for test clusters; the upgrade notes of 0.2.0 say that `destination_ids` is derived from `destination_entries` until 0.3.0; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -77,9 +72,9 @@ issue: null
 - The Destinations an Alert Group reaches: one Root message per Destination, Destinations that only grow, and the
   lifecycle event `destination_joined` (C-26.FR-3 to FR-5, C-09.FR-22 revised).
 - Storms per Route and Destination, Team Destinations included (C-11.FR-6, revised).
-- Configuration changes that add Destinations Quietly and remove none by a condition, and the final edit where an entry
-  is taken away (C-26.FR-6, C-11.FR-14 revised), including those that S-111's Minimum severity and S-163's evaluation
-  bring about.
+- The Quiet Publication in a Destination that the reach of an open Alert Group gains through a system transition of a
+  change of configuration — S-111's changed Minimum severity and S-163's evaluation on save — without
+  `destination_joined` (C-26.FR-9, C-25.FR-13).
 - The entries that reached each Destination in the delivery state of an Alert Group, and the Teams that name a
   Destination.
 - The documentation page "Routing to Teams" in a first form, which S-124 completes.
@@ -91,6 +86,12 @@ issue: null
 - The Mention entry "Team {Team}" that naming a Destination of the Team adds (C-28.FR-6): S-140.
 - The Escalation chains of Teams: S-154; `run_team_chains` acting on them: S-169.
 - How a Maintenance window delays `destination_joined`: specified later in L2.
+- The changes of configuration that move the reach of open Alert Groups without a transition of their own — a Route's
+  entries, their conditions and `deliver_to_teams`, a Team's Destination entries and its deletion — with their Quiet
+  Publications and the final edits of Destinations no entry names any more (C-26.FR-6, C-11.FR-14): S-170.
+- Interim state until S-170: saving such a change reaches an open Alert Group only at its next re-render, and the
+  Route's membership hook of L1 still publishes a Destination added to a Route in every open Alert Group of the Route,
+  whatever its condition.
 
 ## Contracts
 
@@ -120,8 +121,8 @@ issue: null
     replaced by `_v3` ones with `destination_joined` (kind `system`, the same `system_event`), as S-118's `_v2`.
   - `webhook_events_event_v3_check` adds `destination_joined` to S-118's `_v2`, `NOT VALID`, validated, the old one
     dropped, so that events mode can store it.
-  - `open_group_updates_kind_v4_check` lists every kind of `_v3` and `team_destinations` (with the Team); `NOT VALID`,
-    then validated, the old one dropped.
+  - `open_group_updates_kind_v4_check` lists every kind of `_v3` and `team_destinations` (with the Team), the kind
+    whose handler S-170 writes; `NOT VALID`, then validated, the old one dropped.
 - **Reach** (`internal/groups/reach.go`): the Destinations an Alert Group reaches now — its Route's entries whose
   condition its Severity level meets and, with `deliver_to_teams`, the entries of each of its Teams (C-25.FR-6) whose
   condition it meets — keyed by Destination, with the entries of each. The owning Team of the Route adds nothing
@@ -131,28 +132,16 @@ issue: null
   has no delivery yet, when the Alert Group was already published elsewhere (`first_published_at` set): Loud with
   `new_alert_group` when it is firing, Quiet when it is acknowledged or snoozed; the reach goes to the re-render step in
   `Rendering`. A system transition of a configuration change (S-111's `MinimumSeverityChanged`, S-163's
-  `TeamsEvaluated`, this story's `team_destinations`) records none.
-- **Delivery** (`enqueue.go`, `membership.go`, `storm.go`): `Enqueue` delivers to the reached Destinations instead of
+  `TeamsEvaluated`, S-170's `team_destinations`) records none.
+- **Delivery** (`enqueue.go`, `storm.go`): `Enqueue` delivers to the reached Destinations instead of
   the Route's list: a missing delivery is created as the Publication of `destination_joined` (Loud or Quiet by its
   row), as part of the first Publication, or as a Quiet Publication of a configuration change, within the limiters,
   and its `entries` are appended; a Destination no longer reached keeps its delivery and is kept current until its
-  final state (C-26.FR-4). The Route's membership hook (`RouteDestinationsChanged`) also handles changed conditions and
-  `deliver_to_teams`: open Alert Groups now reached are published Quietly, and a Destination no entry reaches any more
-  because the entry or the option went gets the final edit of C-11.FR-14; a condition that is no longer met removes
-  nothing. "No other entry still sends there" (C-26.FR-6) is decided per delivery: the deliveries whose `entries` hold
-  the entry taken away are the candidates, and each gets the final edit only when no entry that still exists names its
-  Destination for the Alert Group — an entry of its Route, or, while `deliver_to_teams` is on, of one of its Teams —
-  whether or not that entry's Severity condition is met now; a delivery that such an entry still names stays and is
-  kept current until its final state (C-26.FR-4). Storms: the summary of a Route's Storm is rendered in each Destination its Alert Groups reach, Team
+  final state (C-26.FR-4). Storms: the summary of a Route's Storm is rendered in each Destination its Alert Groups reach, Team
   Destinations included, and an Urgent Alert Group is published there on its own (C-11.FR-6). Events-mode outgoing
   webhooks reached through a Team receive their events.
-- **Teams** (`internal/teams/destinations.go`): the entries in the Team's input, view and Audit log diff; a save that
-  adds, removes or changes an entry writes an `open_group_updates` row `team_destinations`, whose handler runs the
-  dispatcher's re-render without a lifecycle event for each open Alert Group that has the Team, and then the final edits
-  of C-26.FR-6 where a Destination is reached no more, by the rule above. From this story on, `deleteTeam` takes the
-  Team's entries away in its transaction (C-25.FR-10) and writes the same row, so the Destinations of a deleted Team
-  get their final edit wherever no other entry still names them; the row keeps the Team's id, since the soft-deleted
-  row stays, and the handler finds its Alert Groups through `alert_group_teams`.
+- **Teams** (`internal/teams/destinations.go`): the entries in the Team's input, view and Audit log diff; the row that
+  a save of them writes, and the deletion of a Team's entries, are S-170's.
 - **Fake Mattermost server** (`internal/fakes/fakemattermost`): the channels `ch-infra-critical`, `ch-infra-notice`,
   `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice`, with the bot a member, for the checks of this
   capability.
@@ -175,11 +164,8 @@ issue: null
    `teams_test.go` cover `destination_ids` alone, `destination_entries` alone and both.
 3. Write the reach and `destination_joined` in the dispatcher. Check: `reach_test.go` covers every condition at every
    level, Teams with and without `deliver_to_teams`, a Destination named twice and the owning Team.
-4. Deliver to the reach: Publications, the joined Destinations, Storms and the membership changes. Check:
-   `enqueue_test.go`, `storm_test.go`, `membership_test.go`, `updates_test.go` — among them a Destination named by
-   the Route for `critical` and by a Team for `below_critical`, whose Team entry is removed while the Alert Group is
-   warning: the Route's unmet entry still names it, so it gets no final edit and its Root message stays current; and
-   a deleted Team whose Destinations get the final edit.
+4. Deliver to the reach: Publications, the joined Destinations, the Quiet Publications of the system transitions of
+   a change of configuration, and Storms. Check: `enqueue_test.go`, `storm_test.go`.
 5. Extend the fake Mattermost server, write the end-to-end test and the documentation. Check: the Verification below;
    `make docs-check`.
 
@@ -223,17 +209,17 @@ ROOTS $G         # ["ch-infra-critical","ch-infra-notice","ch-payments-critical"
 curl -s -X DELETE $FAM/groups/o1/alerts/c > /dev/null; NOTIFY o1 '{"reason":"resolved"}'; sleep 1
 curl -s "${A[@]}" "$API/alert-groups/$G/deliveries" | jq -r '[.items[].state] | unique | join(",")'      # delivered
 
-# C-26.AC-2, C-26.AC-10: the option off gives the final edit in the Team Destinations
-E=$(curl -s "${A[@]}" $API/routes/$R | jq -r .etag)
-curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/routes/$R -d "$(curl -s "${A[@]}" $API/routes/$R | jq -c 'del(.id, .etag, .position,
-  .is_default, .destinations, .storm_active, .open_alert_group_count, .created_at, .urgent, .destination_ids, .owning_team) | .deliver_to_teams = false')" > /dev/null; sleep 1
-curl -s $FMM/posts | jq -r '[.[] | select(.channel_id == "ch-payments-notice") | .props.attachments[0].text // ""] | last | test("No longer updated here")'   # true
+# C-26.AC-2, C-26.AC-10: a Route without deliver_to_teams, owned by "payments", reaches only its own Destinations
+R2=$(curl -s "${A[@]}" $API/routes -d "{\"name\":\"Platform\",\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"platform\"}],
+  \"group_key\":[\"alertname\"],\"owning_team_id\":\"$TP\",\"destination_entries\":[{\"destination_id\":\"$IN\",\"severity_condition\":\"any\"}],\"policy\":$P}" | jq -r .id)
+curl -s -X PUT $FAM/groups/p1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"DiskFull"}}' > /dev/null
+PUTA p1 a '{"labels":{"category":"platform","team":"payments","severity":"warning"}}'; NOTIFY p1 '{"reason":"first notification"}'
+G2=$(AG 'category%3D%22platform%22'); sleep 1; ROOTS $G2                                          # ["ch-infra-notice"]
 ```
 
 `test/e2e/routing_teams_test.go` repeats these checks and adds C-26.AC-3 (a Destination named by the Route for
-critical and by a Team for below critical), C-26.AC-6 (a condition changed from `critical` to `any` and back), an
-acknowledged Alert Group that a Team joins Quietly, a Storm with a Team Destination, the Minimum severity raised to
-critical and the Team "checkout" created for an open Alert Group.
+critical and by a Team for below critical), an acknowledged Alert Group that a Team joins Quietly, a Storm with a Team
+Destination, the Minimum severity raised to critical and the Team "checkout" created for an open Alert Group.
 
 ## Open questions
 
@@ -250,6 +236,9 @@ None.
   Group is in a channel after its Severity level fell or its Team's Alerts resolved.
 - `run_team_chains` is stored and returned now and acts once Escalation chains run (S-169).
 - `destination_ids` stays in the API until 0.3.0 (L2.md §2 "Expand and contract").
+- The review of the contracts split S-170 from this story: S-121 keeps the reach and `destination_joined`, and S-170
+  takes the changes of configuration that move the reach of open Alert Groups, with their Quiet Publications and the
+  final edits. The migration stays here, the kind `team_destinations` included, so that S-170 needs none.
 - Migration `0027` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present
   when it merges (S-131's Notes).
@@ -263,24 +252,20 @@ None.
 | C-26.FR-3 | full | |
 | C-26.FR-4 | full | |
 | C-26.FR-5 | partial | `destination_joined` and Storms; the Mentions of the entries for `new_alert_group` are S-140 |
-| C-26.FR-6 | full | |
 | C-26.FR-7 | partial | the owning Team adds nothing; the hint on the form is S-119 |
 | C-26.FR-9 | partial | the Destinations a raised Minimum severity brings; the rest is S-111 |
-| C-26.FR-13 | partial | the first form of the routing page; S-124 completes it |
+| C-26.FR-13 | partial | the first form of the routing page; S-170 and S-124 complete it |
 | C-26.AC-1 | full | |
 | C-26.AC-2 | full | |
 | C-26.AC-3 | full | |
 | C-26.AC-4 | full | |
 | C-26.AC-5 | full | |
-| C-26.AC-6 | full | |
-| C-26.AC-10 | full | |
+| C-26.AC-10 | partial | the owning Team adds nothing; the final edit when `deliver_to_teams` is turned off is S-170 |
 | C-26.AC-11 | partial | the Quiet publication; the Timeline entry is S-111 |
-| C-25.FR-10 | partial | the final edits in the Destinations of a deleted Team |
 | C-25.FR-13 | partial | the Destinations a saved Team brings, Quietly |
 | C-25.AC-13 | partial | the Quiet publication in the Team's Destinations |
 | C-08.FR-1 | partial | revised for L2: Destination entries and the option |
 | C-09.FR-22 | partial | revised for L2: `destination_joined` |
 | C-11.FR-20 | partial | revised for L2: delivery publishes `destination_joined` as a new Root message; its Mentions are S-140 |
 | C-11.FR-6 | partial | revised for L2: Storms with Team Destinations; `storm_started` is S-140 |
-| C-11.FR-14 | full | revised for L2 |
 | C-15.FR-2 | partial | revised for L2: `destination_joined` in events mode |

@@ -29,6 +29,9 @@ files_touched:
   - internal/fakes/faketelegram/faketelegram_test.go
   - test/e2e/schedule_reach_test.go
   - docs/concepts/schedules.md
+  - web/src/components/destination-check.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
   - AGENTS.md
 acceptance:
   - "[C-27.FR-8, C-27.AC-6] An On-call without a Mattermost Account link for the Connection of a Mattermost Destination of their Team has, in `getScheduleOnCall`, a warning `unreachable` with the person, the Destination, the messenger `mattermost` and the reason `no_account_link` for the current segment and for each segment of the next `schedule.gap_view` in which they are On-call, and `getOnCallNow` marks the Team's On-call `unreachable` with the same; an On-call with the link has none (`reach_test.go`, `oncallnow_test.go`, `schedule_reach_test.go`)."
@@ -58,7 +61,7 @@ issue: null
 **OUT**
 
 - The Destinations in whose Threads the Escalation chains that Page a Schedule write (C-32.FR-8), which the warning
-  covers from S-155; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-167.
+  covers from S-172; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-167.
 - The pages that show the warnings: S-135 and S-136.
 
 ## Contracts
@@ -92,6 +95,12 @@ issue: null
   person's membership.
 - **AGENTS.md**: the paragraph on development mode names the answers of `getChatMember` and `PUT
   /_fake/chats/{chat}/members/{user}` of the fake Telegram server.
+- **Imports** (ADR-0016): `schedules` imports `mentions` for `IdentitySpace`; `mentions` never imports `schedules`
+  (S-140 declares the interface `OnCalls` there, which `schedules` satisfies and `internal/runtime` wires).
+- **Exhaustive switches of the SPA** (S-166's rule): `checkItemName` of `web/src/components/destination-check.tsx`
+  gains the case `discussion_group_members` with the text "Members of the discussion group" / «Участники группы
+  обсуждения» in `en.json` and `ru.json`; `ReachReason` and the `unreachable` warnings meet no exhaustive switch until
+  S-135 and S-136 show them.
 - **Settings**: `schedule.gap_view`.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/schedules.md` — "Unreachable On-calls": the reasons, linking an account in the
@@ -141,12 +150,12 @@ thread" (`webhook_no_thread_reply`), and a Telegram Destination of the Team with
 
 ## Open questions
 
-1. **Whom the Telegram Destination check looks at, and when.** C-27.FR-8 says "as the Destination check sees it" without
-   naming the people. Options: (a) the people with a Telegram Account link for the Connection who are in a Team that
-   names the Destination, at each check on save, on "Check" and in `muster doctor`, so the warning may be as old as the
-   last check, which the warning's time shows; (b) every person with a Telegram Account link for the Connection; (c) a
-   periodic check by the Leader. Recommended: (a) — the On-call of a Schedule is always in its Team (C-27.FR-2,
-   FR-6), and the Leader adds only the gap scan and the gauges (L2.md NFR-2, NFR-4); the contract follows it.
+None open. Settled:
+
+1. **Settled: the Telegram Destination check looks at the people with a Telegram Account link for the Connection who
+   are in a Team that names the Destination**, at each check on save, on "Check" and in `muster doctor`, so the
+   warning may be as old as the last check, which its time shows; the On-call of a Schedule is always in its Team
+   (C-27.FR-2, FR-6), and the Leader adds only the gap scan and the gauges (L2.md NFR-2, NFR-4).
 
 ## Notes
 
@@ -164,7 +173,7 @@ thread" (`webhook_no_thread_reply`), and a Telegram Destination of the Team with
 
 | ID | Covered | Note |
 |---|---|---|
-| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-155, gateway calls S-167, the pages S-135 and S-136 |
+| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-172, gateway calls S-167, the pages S-135 and S-136 |
 | C-27.FR-9 | partial | the unreachable marks in the API; the pages are S-136 |
 | C-27.FR-14 | partial | "Unreachable On-calls" |
 | C-27.AC-6 | partial | the API; the marks on the Schedule page S-135 and in "On call now" S-136 |

@@ -33,6 +33,7 @@ files_touched:
   - internal/teams/query.sql
   - internal/teams/teams_test.go
   - internal/metrics/catalogue.go
+  - internal/auth/auth_integration_test.go
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
   - design/prd/L2.md
@@ -41,6 +42,7 @@ files_touched:
   - mkdocs.yml
 acceptance:
   - "[C-27.FR-1, C-27.FR-13, C-25.FR-1, C-25.FR-2] `createSchedule` makes a Schedule of a Team with a name unique in that Team (`409` `name_taken`), a time zone — the Organization's when omitted (`schedule.time_zone`) — and its Rotation layers; the first Schedule of a Team reads `main` true and a later one `main` false; `updateSchedule` with `main` true makes it the Team's main Schedule and the previous one not main in one transaction; `getSchedule`, `updateSchedule` with `If-Match` (`412` when stale, `428` without) and `deleteSchedule` work as for Teams; every change is an Audit log entry `schedule.created`, `schedule.updated` or `schedule.deleted` with a before/after diff, and `muster_schedule_info{schedule,name}` has one series per Schedule (`schedules_test.go`, `schedules_integration_test.go`)."
+  - "[C-27.FR-2] A Rotation layer limited to Friday 19:00–09:00 has its Shift from Friday 19:00 to Saturday 09:00, which belongs to Friday: its person is On-call on Friday at 23:00 and on Saturday at 08:00, nobody on Saturday at 10:00 and on Thursday at 23:00; a window whose end equals its start is refused with `422` `out_of_range` at `/rotation_layers/{i}/limits/end` (`rotation_test.go`, `schedules_test.go`)."
   - "[C-27.FR-2, C-27.AC-1] With the two Rotation layers of scenario 1 in Europe/Berlin — below, weekly Shifts handed over on Monday at 10:00 among petr, sergey and olga; above, weekly Shifts limited to Monday to Friday 11:00–19:00 among olga and petr — `getScheduleOnCall` gives the upper Rotation layer's person on a Wednesday at 15:00 and the lower one's at 21:00 and on the Saturday at 15:00; the lower Rotation layer's handover is at 09:00Z on the Monday before the last Sunday of March and at 08:00Z on the Monday after it, 10:00 in Berlin both times (`rotation_test.go`, `schedules_test.go`)."
   - "[C-27.FR-2, C-27.AC-3] Saving a Rotation layer that names a Viewer, a disabled User or a User who is not in the Team is refused with `422` `not_pageable` at the person's pointer, `/rotation_layers/{i}/user_ids/{j}`, with the `reason` `viewer`, `disabled` or `not_in_team`, for the people the save adds to the Rotation layer; a person already in it whom the stored version keeps — one disabled since — does not refuse the save, so a rename of the Schedule still saves; a Shift length other than a day or a week takes whole hours from 1 (`422` `out_of_range` otherwise) (`schedules_test.go`)."
   - "[C-27.FR-3, C-27.FR-6, C-27.AC-2, C-27.AC-10] An Override that makes petr On-call on a Wednesday 11:00–21:00 makes him On-call from 11:00 to 19:00 over the upper Rotation layer and from 19:00 to 21:00 over the lower one, and leaves the On-call of 10:00 and 22:00 unchanged; it records `schedule_override.created` with its people and span, and the fake Mattermost, Telegram, Slack and bridge servers record no new message or direct message; of two Overrides that overlap, the person of the one created last is On-call in the overlap; an Override with `replaces_user_id` changes nothing in the On-call (`result_test.go`, `overrides_test.go`, `schedules_test.go`)."
@@ -51,7 +53,7 @@ acceptance:
   - "[C-25.FR-10, C-25.AC-9] `deleteTeam` of a Team with a Schedule is refused with `409` `team_in_use` naming the Schedule in `in_use_by`; after the Schedule is deleted the Team is deleted (`teams_test.go`)."
   - "[C-27.FR-11] Creating, changing and deleting Schedules, Rotation layers and Overrides sends nothing to any messenger or outgoing webhook: the fake servers record no new message, direct message or webhook request (`test/e2e/schedules_test.go`)."
   - "[C-27.FR-14] The documentation has the page Concepts → Schedules with \"What a Schedule is\", \"Rotation layers\", \"Several Schedules\" and \"Overrides\", in the navigation; `make docs-check` passes."
-  - "The migration adds the Permissions `schedules:read` (Admin, Responder, Viewer), `schedules:write` (Admin) and `schedule-overrides:write` (Admin, Responder), and reference.md moves them, and `muster_schedule_info`, from their tables of L2 into the main tables; P-64, P-65, P-66, P-77, P-90 and P-91 are confirmed in defaults.md and L2.md §5.3 (Notes)."
+  - "The migration adds the Permissions `schedules:read` (Admin, Responder, Viewer), `schedules:write` (Admin) and `schedule-overrides:write` (Admin, Responder), and reference.md moves them, and `muster_schedule_info`, from their tables of L2 into the main tables, so that `TestIntegrationRoleMatrix`, which reads the matrix from reference.md and the seeded allocation, counts 36, 15 and 10 Permissions for Admin, Responder and Viewer instead of S-115's 33, 13 and 9 (`auth_integration_test.go`); P-64, P-65, P-66, P-77, P-90 and P-91 are confirmed in defaults.md and L2.md §5.3 (Notes)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
 issue: null
@@ -96,14 +98,17 @@ issue: null
     (`POST`, `schedule-overrides:write`), `updateScheduleOverride` (`PUT` with `If-Match`) and `deleteScheduleOverride`
     (`DELETE` with optional `If-Match`) on `/schedules/{schedule_id}/overrides/{override_id}`. Session or token,
     `x-listener: app`; the path parameters `ScheduleId` and `OverrideId`.
-  - Schemas: `ScheduleInput` {`team_id` (required on create; see Open question 4), `name`, `time_zone` (optional on
+  - Schemas: `ScheduleInput` {`team_id` (required on create, fixed afterwards: a different one on update is refused
+    with `422` `unsupported` at `/team_id`, settled 4; `main` false on the main Schedule is refused the same way at
+    `/main`, settled 5), `name`, `time_zone` (optional on
     create), `main` (optional), `rotation_layers` (`RotationLayerInput`[], from the lowest to the highest)};
     `Schedule` = `ScheduleInput` + `id`, `team` (`TeamRef`), `rotation_layers` (`RotationLayer`[]), `created_at`,
     `etag`; `ScheduleList`; `ScheduleRef` {`id`, `name`, `team` (`TeamRef`)}; `RotationLayerInput` {`id` (optional, an
     existing Rotation layer's, which keeps its identity), `name`, `user_ids` (`PublicId`[], at least one, in turn),
     `shift_length` (`day`, `week`, `hours`), `shift_hours` (integer ≥ 1, required with `hours`), `handover_time`
     (`HH:MM`), `handover_day` (`Weekday`, required with `week`), `start_date` (a date), `limits` (`RotationLimits` or
-    null)}; `RotationLimits` {`days` (`Weekday`[], at least one), `start` and `end` (`HH:MM`, optional together)};
+    null)}; `RotationLimits` {`days` (`Weekday`[], at least one), `start` and `end` (`HH:MM`, optional together; an
+    `end` earlier than `start` crosses midnight, and an `end` equal to `start` is refused)};
     `RotationLayer` = `RotationLayerInput` + `id`, `number` (1 for the lowest), `users` (`UserRef`[]);
     `ScheduleOverrideInput` {`user_id` (who takes the Shift), `replaces_user_id` (nullable), `start`, `end`};
     `ScheduleOverride` = it + `id`, `user`, `replaces_user` (`UserRef` or null), `created_by` (`ActorRef`),
@@ -133,8 +138,8 @@ issue: null
   - `rotation_layers`: `id`, `org_id`, `public_id` (`RY`), `schedule_id` (FK, `ON DELETE CASCADE`), `position`
     (1 for the lowest), `name`, `shift_length` (`CHECK IN ('day', 'week', 'hours')`), `shift_hours` (set exactly with
     `hours`, ≥ 1), `handover_time` (`HH:MM` pattern), `handover_day` (set exactly with `week`), `start_date date`,
-    `limit_days text[]`, `limit_start`, `limit_end` (`limit_end > limit_start` when both are set); unique
-    `(schedule_id, position)`.
+    `limit_days text[]`, `limit_start`, `limit_end` (`limit_end <> limit_start` when both are set — an end earlier than
+    the start crosses midnight); unique `(schedule_id, position)`.
   - `rotation_layer_users`: `org_id`, `rotation_layer_id` (FK, cascade), `position`, `user_id` (FK `users`); primary
     key `(rotation_layer_id, position)`.
   - `schedule_overrides`: `id`, `org_id`, `public_id` (`VR`), `schedule_id` (FK, cascade), `user_id`,
@@ -149,7 +154,9 @@ issue: null
   - `rotation.go` — the Shifts of a Rotation layer over a period: the first Shift starts on `start_date` at the
     handover time with the first person and each lasts a day, a week (handed over on `handover_day`) or `shift_hours`
     of wall-clock time; times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00
-    across a change of the clocks; the limits cut each Shift to their days and time of day.
+    across a change of the clocks; the limits cut each Shift to their days and time of day: a window whose end is
+    earlier than its start runs until the end on the next day, and with days of the week each window belongs to the day
+    it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00 (C-27.FR-2).
   - `result.go` — `OnCallAt(schedule, t)` and `Result(schedule, from, to)`: the Override of the moment, the one
     created last where they overlap (P-65), when its person may be Paged; otherwise the highest Rotation layer with a
     Shift whose person may be Paged; else nobody (a gap). "May be Paged" is read once per call from the current state:
@@ -158,9 +165,9 @@ issue: null
   - `overrides.go` — the precondition, checked after the Permission: the caller is in the Team or is an Admin, else
     `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`; the end is after the start and not
     before the business clock's now (P-91), checked on create and change; an Override that has ended can be neither
-    changed nor deleted, `409` `override_ended` (Open question 3).
-  - `schedules.go` — the people of a Rotation layer are validated against the stored version (Open question 6): the
-    people a save adds must be able to be Paged, those it keeps need not;
+    changed nor deleted, `409` `override_ended` (settled 3).
+  - `schedules.go` — the people of a Rotation layer are validated against the stored version (settled 6, C-27.FR-2):
+    the people a save adds must be able to be Paged, those it keeps need not;
   - `schedules.go` — the main Schedule: the first Schedule of a Team is created main (P-90); `main` true on another
     clears it on the previous one in the same transaction, each with its Audit log entry; deleting the main Schedule
     leaves the Team without one (P-66); `Referrers(schedule)` lists what names it — empty until S-154 adds the
@@ -184,12 +191,12 @@ issue: null
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up on PostgreSQL 14 and 17;
    the Permissions of each Role read from `role_permissions` as in the acceptance.
 2. Write the Shifts of a Rotation layer and the Result. Check: `rotation_test.go` covers a day, a week and 12 hours,
-   limits with and without a time, a start date in the future, both changes of the clocks in Europe/Berlin and a
+   limits with and without a time, a window across midnight with and without days of the week, a start date in the future, both changes of the clocks in Europe/Berlin and a
    zone without them; `result_test.go` covers every row of C-27.FR-4 and FR-5 with a manual clock.
 3. Write the Schedules and Overrides with their Permissions, precondition, Audit log, metric and hint; add the spec.
    Check: `make generate-check`; `schedules_test.go`, `overrides_test.go`, `schedules_integration_test.go`.
 4. Refuse the deletion of a Team with Schedules. Check: `teams_test.go`.
-5. Move the shared rows, confirm the provisional values, write the documentation and `test/e2e/schedules_test.go`.
+5. Move the shared rows and update the counts of `TestIntegrationRoleMatrix`, confirm the provisional values, write the documentation and `test/e2e/schedules_test.go`.
    Check: `make docs-check`; the Verification below.
 
 ## Verification
@@ -222,6 +229,13 @@ curl -s "${A[@]}" "$API/schedules/$SC/on-call?from=$(date -u -d "$LS -7 days" +%
   jq -r '[.rotation_layers[0].shifts[].start] | map(select(test("T0[89]:00"))) | .[]'
 # <the Monday before>T09:00:00Z
 # <the Monday after>T08:00:00Z
+
+# C-27.FR-2: a Rotation layer of Friday 19:00–09:00 crosses midnight; its window belongs to Friday
+SN=$(curl -s "${A[@]}" $API/schedules -d "{\"team_id\":\"$TP\",\"name\":\"Nights\",\"time_zone\":\"Europe/Berlin\",\"rotation_layers\":[
+  {\"name\":\"Friday night\",\"user_ids\":[\"$OLGA\"],\"shift_length\":\"week\",\"handover_time\":\"10:00\",\"handover_day\":\"monday\",
+  \"start_date\":\"$MON\",\"limits\":{\"days\":[\"friday\"],\"start\":\"19:00\",\"end\":\"09:00\"}}]}" | jq -r .id)
+WHON() { curl -s "${A[@]}" "$API/schedules/$SN/on-call?from=$1&to=$(date -u -d "$1 +1 minute" +%FT%TZ)" | jq -r '.segments[0].user.login // "gap"'; }
+WHON $(AT "$(DAY 4) 23:00"); WHON $(AT "$(DAY 5) 08:00"); WHON $(AT "$(DAY 5) 10:00"); WHON $(AT "$(DAY 3) 23:00")   # olga olga gap gap
 
 # C-27.FR-2, C-27.AC-3: a Viewer in a Rotation layer
 curl -s "${A[@]}" $API/schedules -d "{\"team_id\":\"$TP\",\"name\":\"Bad\",\"rotation_layers\":[{\"name\":\"x\",\"user_ids\":[\"$VIC\"],
@@ -257,10 +271,10 @@ curl -s "${A[@]}" "$API/schedules/$SC/on-call?from=$(DAY 0)T00:00:00Z&to=$(DAY 2
 curl -s -o /dev/null -w '%{http_code}\n' "${O[@]}" -X DELETE $API/schedules/$SC                                   # 403
 
 # C-25.AC-9, C-27.AC-8: the Team with a Schedule; the main Schedule deleted
-curl -s "${A[@]}" -X DELETE $API/teams/$TP | jq -c '{status, code, n: [.in_use_by[].name]}'   # {"status":409,"code":"team_in_use","n":["Main"]}
+curl -s "${A[@]}" -X DELETE $API/teams/$TP | jq -c '{status, code, n: [.in_use_by[].name] | sort}'   # {"status":409,"code":"team_in_use","n":["Main","Nights"]}
 curl -s -o /dev/null -w '%{http_code}\n' "${A[@]}" -X DELETE $API/schedules/$SC                                   # 204
 curl -s "${A[@]}" "$API/schedules?team=$TP" | jq '[.items[] | select(.main)] | length'                           # 0
-curl -s localhost:8082/metrics | grep -c '^muster_schedule_info{'                                                 # 0
+curl -s localhost:8082/metrics | grep -c '^muster_schedule_info{'                                                 # 1   ("Nights" is left)
 ```
 
 `test/e2e/schedules_test.go` repeats these checks and adds a second Schedule made main, two overlapping Overrides
@@ -269,31 +283,22 @@ Override and an Admin outside the Team who makes one.
 
 ## Open questions
 
-1. **A Schedule's time zone when the Organization's changes.** `schedule.time_zone` defaults to the Organization's
-   (P-77). Options: (a) a Schedule created without one stores the Organization's zone of that moment; (b) it follows
-   the Organization's zone until an Admin sets its own. Recommended: (a) — the handover times of a Schedule must not
-   move when someone changes an Organization setting; the contract follows it.
-2. **Limits of a Rotation layer across midnight.** C-27.FR-2 allows a time of day, such as 11:00–19:00, without saying
-   whether 19:00–09:00 is allowed. Options: (a) the end is later than the start on the same day, as Working hours
-   (P-63), and a night is the lower Rotation layer's; (b) an end before the start spans midnight. Recommended: (a), the
-   simpler rule that the scenario needs; the contract follows it.
-3. **Overrides that have ended.** P-91 says an Override may not end in the past. Options: (a) creating and changing
-   check the new end, and an Override that has ended may be neither changed nor deleted (`409` `override_ended`), so
-   the past Result stays as it was; (b) only creating and changing check the end, and deleting is always allowed.
-   Recommended: (a); the contract follows it: the end check on creating and changing, and `override_ended` for
-   changing or deleting an Override that has ended.
-4. **Moving a Schedule to another Team.** C-27.FR-1 says a Schedule belongs to one Team. Options: (a) `team_id` is set
-   on creation only, and a different one on update is refused with `422` `unsupported` at `/team_id`; (b) an Admin may
-   move it, which revalidates every person and clears `main`. Recommended: (a).
-5. **Unmarking the main Schedule.** Options: (a) `main` false on the main Schedule is refused with `422` `unsupported`
-   at `/main` — an Admin marks another Schedule main instead, and a Team is without one only after its main Schedule
-   is deleted (P-66); (b) it is allowed and leaves the Team without an On-call. Recommended: (a).
-6. **Saving Rotation layers that keep people who may no longer be Paged.** C-27.FR-2 refuses saving a Rotation layer
-   with a Viewer, a disabled User or someone outside the Team, while C-27.FR-5 keeps such people in the Rotation layers
-   until an Admin removes them; the whole Schedule is saved at once, so even a rename would be refused. Options: (a)
-   validate only the people that the save adds to a Rotation layer, compared with the stored version, and keep the
-   others with their warnings; (b) refuse every save until the Admin removes them. Recommended: (a); the contract
-   follows it.
+None open. Settled:
+
+1. **Settled: a Schedule's time zone is stored when it is created** — the Organization's zone of that moment when none
+   is given — and does not follow later changes of the Organization's (P-77).
+2. **Settled: a Rotation layer's time window may cross midnight** (maintainer's decision): an end earlier than the start
+   runs until the next day, and with days of the week the window belongs to the day it starts on, so Friday 19:00–09:00
+   runs until Saturday 09:00 (C-27.FR-2, amended). P-63 is about Working hours and stays as it is.
+3. **Settled: an Override that has ended may be neither changed nor deleted** (`409` `override_ended`), and creating
+   and changing check the new end (P-91), so the past Result stays as it was.
+4. **Settled: a Schedule stays in its Team**: `team_id` is set on creation only, and a different one on update is
+   refused with `422` `unsupported` at `/team_id`.
+5. **Settled: the main Schedule cannot be unmarked**: `main` false on it is refused with `422` `unsupported` at `/main`;
+   an Admin marks another Schedule main, and a Team is without one only after its main Schedule is deleted (P-66).
+6. **Settled: a save validates only the people it adds to a Rotation layer**, compared with the stored version, and
+   keeps the others with their warnings (C-27.FR-2: "the warnings of FR-5 are for people who became one of these
+   later").
 
 ## Notes
 
@@ -303,8 +308,8 @@ Override and an Admin outside the Team who makes one.
   `schema.md`, as S-092 did.
 - The maintainer confirms provisional values with this story (operator attention): P-64, deleting a Team with Schedules
   is refused (the rest of P-64 was implemented by S-115 and S-118); P-65, the Override created last wins; P-66,
-  deleting the main Schedule leaves the Team without one; P-77, a Schedule's time zone defaults to the Organization's
-  (with Open question 1); P-90, a Team's first Schedule is its main one; P-91, an Override may not end in the past.
+  deleting the main Schedule leaves the Team without one; P-77, a Schedule's time zone defaults to the Organization's,
+  stored at creation; P-90, a Team's first Schedule is its main one; P-91, an Override may not end in the past.
 - "May be Paged" is the current state of the person, not their state at the time of a past segment: the Result of a
   week after someone was disabled shows the Rotation layer below for the whole week, which is what the warnings say.
 - The only check that looks at a Team (C-25.FR-1) is the precondition of Overrides; every other check is the Role's.

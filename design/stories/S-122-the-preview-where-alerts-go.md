@@ -20,7 +20,7 @@ files_touched:
   - docs/concepts/routing-to-teams.md
 acceptance:
   - "[C-26.FR-12] `previewGroupKey` takes, besides the Matchers and the proposed Group key, the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of the Route — the saved Route's when a field is absent and `route_id` is given — and answers `delivery`: the `routing.group_key_preview_examples` largest Alert Groups that the Alerts of the period would form under the proposed key, each with its Group key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams by the Team label and Team matchers as saved, and the Destinations it would reach with the entries that reach each; and `destination_counts`, for every Destination any of those Alert Groups reaches, how many reach it (`preview_test.go`)."
-  - "[C-26.FR-12] With the Route \"Infrastructure\" of S-121 unsaved, Alerts of `team=\"payments\"` (warning) and `team=\"devops\"` (critical) in the period, and the Team \"payments\" with `payments-notice` below critical, the preview lists the Alert Group of payments reaching `infra-notice` (the Route) and `payments-notice` (the Team), and that of devops reaching `infra-critical` only; with `deliver_to_teams` false the first reaches `infra-notice` only; the preview writes nothing (`routing_preview_test.go`)."
+  - "[C-26.FR-12] With the settings of S-121's Route \"Infrastructure\" sent unsaved, Alerts of `team=\"payments\"` (warning) and `team=\"devops\"` (critical) in the period, and the Team \"payments\" with `payments-notice` below critical, the preview lists the Alert Group of payments reaching `infra-notice` (the Route) and `payments-notice` (the Team), and that of devops reaching `infra-critical` only; with `deliver_to_teams` false the first reaches `infra-notice` only; the preview writes nothing (`routing_preview_test.go`)."
   - "[C-26.FR-12] A preview without a Team label value in the proposed Group key and `deliver_to_teams` true answers `shared_key_warning` true, so that the form can show the hint of reference.md and offer to add the Team label (`preview_test.go`)."
   - "[C-26.FR-13] Routing to Teams has the section \"Preview where alerts go\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -88,6 +88,7 @@ curl -s -X PUT $FAM/groups/w1 -d '{"receiver":"sev","route":"{}","labels":{"aler
 PUTA w1 a '{"labels":{"category":"infra","system":"k8s","team":"payments","severity":"warning"}}'
 PUTA w1 b '{"labels":{"category":"infra","system":"k8s","team":"devops","severity":"critical"}}'
 NOTIFY w1 '{"reason":"first notification"}'
+N0=$(psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) || '/' || coalesce(sum(version), 0) FROM routes")   # before the previews
 PREVIEW() { curl -s "${A[@]}" $API/group-key-previews -d "{\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
   \"proposed_group_key\":[\"alertname\",\"system\",\"team\"],\"deliver_to_teams\":$1,\"destination_entries\":[
   {\"destination_id\":\"$IC\",\"severity_condition\":\"critical\"},{\"destination_id\":\"$IN\",\"severity_condition\":\"below_critical\"}]}"; }
@@ -96,18 +97,16 @@ PREVIEW true | jq -c '[.delivery.alert_groups[] | {t: [.teams[].slug], l: .sever
 PREVIEW false | jq -c '[.delivery.alert_groups[] | select(.teams | length > 0) | [.destinations[].destination.name]]'   # [["infra-notice"]]
 curl -s "${A[@]}" $API/group-key-previews -d "{\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
   \"proposed_group_key\":[\"alertname\"],\"deliver_to_teams\":true}" | jq .delivery.shared_key_warning              # true
-psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) FROM routes WHERE name = 'Infrastructure'"                     # 0
+[ "$(psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) || '/' || coalesce(sum(version), 0) FROM routes")" = "$N0" ] && echo unchanged   # unchanged
 ```
 
 `test/e2e/routing_preview_test.go` repeats these checks.
 
 ## Open questions
 
-1. **How many Alert Groups the preview lists.** C-26.FR-12 says the preview "shows the Alert Groups they would form";
-   with many recent Alerts that can be hundreds. Options: (a) the `routing.group_key_preview_examples` largest (5), with
-   `destination_counts` for all of them; (b) a new built-in value, such as 20, with the counts; (c) every Alert Group,
-   paginated. Recommended: (a), which keeps one preview value for the Route form and still shows every Destination the
-   Route would reach; the contract above follows it.
+1. **How many Alert Groups the preview lists.** Settled: the `routing.group_key_preview_examples` largest Alert Groups
+   (5), with `destination_counts` for every Alert Group the Alerts would form, as C-26.FR-12 now says; the contract
+   above follows it.
 
 ## Notes
 

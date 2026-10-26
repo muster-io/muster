@@ -41,6 +41,7 @@ files_touched:
   - internal/api/organization.go
   - internal/users/admin.go
   - internal/users/admin_integration_test.go
+  - internal/auth/auth_integration_test.go
   - internal/metrics/catalogue.go
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
@@ -58,7 +59,7 @@ acceptance:
   - "[C-25.FR-9, C-25.AC-8, C-20.FR-9, C-20.FR-1] `getOrganization` carries `working_days` (Monday to Friday) and `workday_end` (`18:00`) and the derived read-only `working_hours` {days, start = `workday_start`, end, time_zone = `time_zone`}; a Team without its own Working hours reads the Organization's, so a change of `workday_start` moves their start; a Team with `own_working_hours` true takes days, start, end and an IANA time zone; an end not later than the start on the same day is refused with `422` `out_of_range` at `/working_hours/end`, on a Team and on the Organization (`organization_test.go`, `teams_test.go`)."
   - "[C-25.FR-10, C-25.AC-9] Deleting a Team removes its people and its Working hours, leaves the Routes and Destinations it owned without an owner, frees its slug for a new Team and keeps the row, marked deleted, for the names that point at it; the Audit log records `team.deleted` (`teams_integration_test.go`)."
   - "[C-25.FR-12] The documentation has the page Concepts → Teams with what a Team owns and what it does not grant, people added by hand, and Working hours, in the navigation; `make docs-check` passes."
-  - "The migration adds the Permissions `teams:read` (Admin, Responder, Viewer) and `teams:write` (Admin), and reference.md moves them, and `muster_team_info`, from their tables of L2 into the main tables; the provisional values P-63 (Working hours end later than they start) and P-74 (the slug format) are confirmed in defaults.md and L2.md §5.3 (Notes)."
+  - "The migration adds the Permissions `teams:read` (Admin, Responder, Viewer) and `teams:write` (Admin), and reference.md moves them, and `muster_team_info`, from their tables of L2 into the main tables, so that the matrix `TestIntegrationRoleMatrix` reads from reference.md and the migrations seed has 33, 13 and 9 Permissions for Admin, Responder and Viewer instead of 31, 12 and 8 (`auth_integration_test.go`); the provisional values P-63 (Working hours end later than they start) and P-74 (the slug format) are confirmed in defaults.md and L2.md §5.3 (Notes)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
 issue: null
@@ -227,12 +228,9 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
 
 ## Open questions
 
-1. **The end of the Organization's working day where the start is late.** `organization.workday_start` may already be
-   any time (P-58), but the Organization's Working hours must end later than they start (P-63), and their end is new.
-   Options: (a) the migration sets `workday_end` to `23:59` where the start is 18:00 or later, and later updates must
-   keep the end after the start, refused with `422` `out_of_range` otherwise; (b) no rule across the two fields, and
-   Working hours whose end is not after their start end at midnight; (c) the migration sets the end nine hours after
-   the start, capped at `23:59`. Recommended: (a), the plain reading of P-63; the contract above follows it, and the
+1. **The end of the Organization's working day where the start is late.** Settled: the migration sets `workday_end` to
+   `23:59` where `workday_start` is 18:00 or later, and from then on the end must be later than the start — an update
+   that breaks it is refused with `422` `out_of_range` at the field it changes. The contract above follows it, and the
    upgrade notes of 0.2.0 name the Organizations it changes.
 
 ## Notes
@@ -247,7 +245,7 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 43 files (the builder of S-166 included) the story is at the edge of the size signal; the Working hours of the Organization and of a Team are
+- With 44 files (the builder of S-166 and the Role matrix test included) the story is at the edge of the size signal; the Working hours of the Organization and of a Team are
   one rule (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
 - Migration `0023` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).

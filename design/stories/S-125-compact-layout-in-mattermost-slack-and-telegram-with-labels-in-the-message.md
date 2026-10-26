@@ -42,6 +42,10 @@ files_touched:
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - test/e2e/compact_layout_test.go
+  - test/e2e/mattermost_test.go
+  - test/e2e/telegram_test.go
+  - test/e2e/slack_test.go
+  - test/e2e/bridge_test.go
   - docs/configure/messages-and-templates.md
   - docs/install/versions.md
 acceptance:
@@ -106,6 +110,10 @@ issue: null
   with its length and the adapter's limit. The distinguishing label follows C-29.FR-3 (provisional, P-67) and the count
   `message.compact_alerts_listed` (P-83). Built-in texts: the status words, the field names "Severity", "Route",
   "Teams", "Started", "{label}: {n} values", "…and {k} more", in English and Russian.
+- **End-to-end tests of L1** that assert the L1 layout assert the compact one instead: `mattermost_test.go` (the
+  shortened Root message of 600 Alerts, "+590 more", "+27 more" and "Full list in Muster"), `telegram_test.go` (the
+  labels in `<blockquote expandable>`), `slack_test.go` (the blocks `section`, `section`, `context`, `actions`) and
+  `bridge_test.go` (the Alert lines and "+30 more" of `TestBridgeBodyLimit`'s body).
 - **Adapters**: Mattermost — the one attachment of C-13.FR-3 with the title, the four fields as short `fields`, items 3
   to 7 as its text, the links as its last line, the buttons after it; Slack — the blocks of C-24.FR-4, the fields as one
   `section`'s `fields`, the key labels and the people as `context` blocks, the buttons as `actions`; Telegram — one HTML
@@ -182,6 +190,8 @@ None.
 - The status emoji of L1 stays beside the word in Telegram (L2.md §5.2).
 - The distinguishing label (P-67) and the count of values (P-83) stay provisional; the test environment confirms them,
   not this story.
+- With 41 files the story is at the edge of the size signal: four of them are end-to-end tests of L1 that asserted
+  the old layout, which the review of the contracts added.
 - `MessageLayout` in `openapi.yaml` is the content S-126 sends to bridges, so the preview shows a bridge author the same
   structure.
 - Migration `0028` follows the story map; a story merged out of that order renumbers its migration to the next free

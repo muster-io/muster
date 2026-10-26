@@ -64,7 +64,7 @@ issue: null
 
 **OUT**
 
-- The API: S-121, S-122. The Minimum severity and the owning Team on the form: S-112, S-119.
+- The API: S-121, S-170, S-122. The Minimum severity and the owning Team on the form: S-112, S-119.
 - The Escalation chains of the Route and of the Routes list: S-158.
 - The documentation of routing to Teams beyond the sections of S-121 and S-122: S-124.
 
@@ -98,12 +98,12 @@ issue: null
 - **Texts** (EN / RU), from C-26's UI, reference.md and the approved mockups: "Route Destinations" / «Места доставки
   маршрута», its hint / «Куда маршрут отправляет сообщения своих групп алертов. У каждого места доставки может быть
   условие по важности.», "Any severity" / «любая важность», "Severity = critical" / «важность = critical», "Severity <
-  critical" / «важность < critical», "Also to the Teams from the label {{label}}" / «Ещё командам из лейбла {{label}}»,
+  critical" / «важность < critical», "Also to the Teams from the label {{label}}" / «Ещё командам из метки {{label}}»,
   its hint / «Группа приходит и в места доставки команд, чьи значения {{label}} есть в её алертах, с их условиями
   важности. Новая команда добавляет места доставки, ничего не убирает.», "Run the Teams' Escalation chains" / «Запускать цепочки
   эскалации команд», "Add {{label}} to the key" / «Добавить {{label}} в ключ», "Where alerts go" / «Куда придут
   алерты», "Destinations of the Team" / «Места доставки команды», the Team line / «Сюда приходят группы команды
-  {{team}} из маршрутов, где отмечено «ещё командам из лейбла {{label}}»: {{routes}}.».
+  {{team}} из маршрутов, где отмечено «ещё командам из метки {{label}}»: {{routes}}.».
 
 ## Steps
 

@@ -230,9 +230,9 @@ Text a person adds to a Timeline.
 _Avoid_: Comment
 
 **Assignees**:
-The people whom the Escalation chains running on an Alert Group have Paged last by name, one or more for each chain,
-while nobody has acknowledged it. Acknowledge, Snooze and Resolve clear them; there may be several Assignees, but only
-one Owner.
+The people whom the Escalation chains started on an Alert Group have Paged last by name, one or more for each chain,
+also after a chain has run out, while nobody has acknowledged it. Only Acknowledge, Snooze and Resolve clear them; there
+may be several Assignees, but only one Owner.
 _Avoid_: Responder, Assigned
 
 ### Teams and on-call

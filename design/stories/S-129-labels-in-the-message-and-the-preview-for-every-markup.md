@@ -63,7 +63,7 @@ issue: null
   section of S-125).
 - **Texts** (EN / RU), from C-29's UI and the approved mockups: "Labels in the message" / «Метки в сообщении», "+ label" /
   «+ метка», "From recent Alert Groups of the Route" / «Из недавних групп маршрута», the hint / «По умолчанию: ключ
-  группировки без `alertname` и лейбла важности, лейбл команды и `namespace`. Метки без значения в группе не
+  группировки без `alertname` и метки важности, метку команды и `namespace`. Метки без значения в группе не
   показываются.», "Reset to default" / «Как по умолчанию», "{{length}} of {{limit}} characters" / «{{length}} из
   {{limit}} символов».
 

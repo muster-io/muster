@@ -27,12 +27,15 @@ files_touched:
   - web/e2e/schedules.spec.ts
   - web/e2e/navigation.spec.ts
   - web/e2e/phone-width.spec.ts
+  - web/e2e/sign-in.spec.ts
+  - web/e2e/oidc-settings.spec.ts
+  - web/e2e/alert-group-list.spec.ts
 acceptance:
   - "[C-27.FR-9, C-27.AC-9] In a real browser the Home page shows \"On call now\" with \"All Teams\" and \"By the main Schedule of each Team\": devops — @ivan, \"Main\", until Monday 10:00; payments — @petr with \"unreachable in Mattermost\" and \"next: gap\"; search — \"No Schedule\"; \"My Teams\" shows only the Teams of the signed-in User, in English and in Russian (`on-call-now.test.tsx`, `home.spec.ts`)."
   - "[C-27.FR-9, C-27.FR-8, C-27.AC-6] The Team page shows \"On call now\" for its Team with the same marks, and the Teams list shows each Team's On-call now, or \"No Schedule\" (`teams.spec.ts`)."
   - "[C-27.FR-1] The Team page's \"Schedules\" lists each Schedule with \"main\", its Rotation layers, its On-call now and its warnings, \"New Schedule\" for Admins, and the hint \"The main Schedule names the Team's On-call shown under 'On call now'; Escalation steps may Page the On-call of any of them.\" (`team-schedules.test.tsx`, `teams.spec.ts`)."
   - "[C-27.FR-10] The Schedule page's \"iCal subscription\" with the hint \"A personal link for your calendar application. It is shown once; a revoked link stops working at once.\" shows after \"New link\" the link once with \"Copy the link now: it will not be shown again\", which reloading the page does not show again; \"Revoke\" ends it, and the section then offers \"New link\" only (`ical-subscription.test.tsx`, `schedules.spec.ts`)."
-  - "The Home page is the first entry of the main navigation; at 360 CSS pixels it has no horizontal scrolling; every new text exists in English and Russian; \"On call now\" has \"Learn more\" to Concepts → Schedules and the iCal section to its section \"iCal feed\"; `make e2e` passes."
+  - "The Home page is at `/`, reached through the logo, with no entry of its own in the main navigation; signing in, locally and through OIDC, lands on it; the specs that expected the Alert Group list after signing in or at `/` — `sign-in.spec.ts`, `oidc-settings.spec.ts`, `alert-group-list.spec.ts` — expect the Home page or go to `/alert-groups`; at 360 CSS pixels the Home page has no horizontal scrolling; every new text exists in English and Russian; \"On call now\" has \"Learn more\" to Concepts → Schedules and the iCal section to its section \"iCal feed\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
 issue: null
@@ -49,7 +52,7 @@ issue: null
   Teams list (C-25 UI, from C-27 on).
 - The Team page's "Schedules" section with "New Schedule" for Admins (C-27 UI).
 - The iCal section of the Schedule page: "New link", the link shown once, "Revoke" (C-27.FR-10).
-- The Home page as a page of its own at `/` (Open question 1).
+- The Home page as a page of its own at `/`, reached through the logo (settled 1).
 
 **OUT**
 
@@ -61,9 +64,12 @@ issue: null
 - **API used**: `getOnCallNow` (`teams=all` or `mine`), `listSchedules` (`team`), `getScheduleOnCall` (the current
   segment and warnings of each Schedule on the Team page), `getMyIcalFeed`, `issueMyIcalFeed`, `revokeMyIcalFeed`,
   `listTeams`, `getMe`.
-- **Routes**: `/` (`index.tsx`) becomes the Home page instead of the redirect to `/alert-groups`; "Home" is the first
-  entry of `app-shell.tsx`, before "Alert Groups"; the Teams list and the Team page gain their sections; the Schedule
-  page gains "iCal subscription".
+- **Routes**: `/` (`index.tsx`) becomes the Home page instead of the redirect to `/alert-groups`; the logo of
+  `app-shell.tsx` links to it, and the main navigation gains no entry; signing in lands on `/` as before, which is now
+  the Home page; the Teams list and the Team page gain their sections; the Schedule page gains "iCal subscription".
+- **Specs that assumed the Alert Group list at `/`** (`grep` for `toHaveURL(\`${APP}/alert-groups\`)` and `goto("/")`
+  in `web/e2e/`): `sign-in.spec.ts` and `oidc-settings.spec.ts` expect the Home page after signing in;
+  `alert-group-list.spec.ts` goes to `/alert-groups`.
 - **Components**: `on-call-now.tsx` — one row per Team: the Team, the On-call by their login, the Schedule's name and
   "until {time}", "unreachable in {messenger}" for each mark, "next: gap" when a gap follows, "No Schedule"; the switch
   "All Teams" / "My Teams" on the Home page, and the Team's row alone on its page; `team-schedules.tsx` — each Schedule
@@ -96,7 +102,8 @@ until next Monday 10:00, "payments" whose main Schedule has petr — without a M
 Mattermost Destination `payments-notice` of the Team — On-call now and a gap after his Shift, and "search" without a
 Schedule; the Admin in "devops" only. Then in Playwright at 1280 × 800, in English and in Russian:
 
-1. Sign in as `admin@example.org`: the first entry of the navigation is "Home"; `/` shows "On call now" with "All Teams",
+1. Sign in as `admin@example.org`: the page after signing in is the Home page at `/`, the navigation has no "Home",
+   and the logo leads back to it; it shows "On call now" with "All Teams",
    "By the main Schedule of each Team", "devops — @ivan · Main · until Mon … 10:00", "payments — @petr", "unreachable
    in Mattermost", "next: gap", and "search — No Schedule".
 2. "My Teams" → only "devops".
@@ -108,15 +115,16 @@ Schedule; the Admin in "devops" only. Then in Playwright at 1280 × 800, in Engl
 6. At 360 × 740, the Home page has no horizontal scrolling.
 
 `make e2e` runs these steps in `home.spec.ts`, `teams.spec.ts` and `schedules.spec.ts`; `navigation.spec.ts` checks the
-new first entry and `phone-width.spec.ts` the Home page at 360 pixels.
+logo's link to Home, `phone-width.spec.ts` the Home page at 360 pixels, and `sign-in.spec.ts`, `oidc-settings.spec.ts`
+and `alert-group-list.spec.ts` are adjusted to the Home page at `/`.
 
 ## Open questions
 
-1. **The Home page.** C-27.FR-9 and C-32.FR-18 place sections on "the Home page", and the approved mockups draw it as a
-   page of its own, "Home", first in the navigation; in L1, `/` opens the Alert Group list. Options: (a) a Home page at
-   `/` with "On call now" (and "I am an Assignee" from S-159), the Alert Group list staying at `/alert-groups`; (b)
-   "On call now" as a section above the Alert Group list, which stays the start page. Recommended: (a), as the mockups
-   show; the contract follows it.
+None open. Settled:
+
+1. **Settled: the Home page is at `/`** (maintainer's decision), reached through the logo, with no entry of its own in
+   the main navigation; signing in lands on it, and the Alert Group list stays at `/alert-groups`. The approved mockups'
+   navigation starts with «Группы алертов», and their logo leads to Home.
 
 ## Notes
 

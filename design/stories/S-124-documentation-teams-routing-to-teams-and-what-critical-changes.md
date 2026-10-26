@@ -4,7 +4,7 @@ title: "Documentation: Teams with a worked example, Routing to Teams, and \"What
 capability: C-26
 kind: docs
 layer: L2
-depends_on: [S-123]
+depends_on: [S-123, S-170]
 covers: [C-26.FR-13, C-25.FR-12]
 files_touched:
   - docs/concepts/teams.md
@@ -44,7 +44,7 @@ issue: null
 
 - Team mentions per messenger, and whom a message mentions: S-144. Schedules: S-137. Escalation chains, Notification
   rules and "How an alert reaches people": S-161.
-- The sections that the BE stories already wrote (S-111, S-115, S-117, S-118, S-121, S-122), which this story keeps and
+- The sections that the BE stories already wrote (S-111, S-115, S-117, S-118, S-121, S-170, S-122), which this story keeps and
   joins into the pages.
 
 ## Contracts
@@ -93,5 +93,5 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-26.FR-13 | partial | the routing page, "What critical changes"; S-111, S-121 and S-122 wrote their sections |
+| C-26.FR-13 | partial | the routing page, "What critical changes"; S-111, S-121, S-170 and S-122 wrote their sections |
 | C-25.FR-12 | partial | the Teams page without Team mentions, which are S-144's |

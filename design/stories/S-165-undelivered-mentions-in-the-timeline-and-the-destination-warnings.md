@@ -32,6 +32,9 @@ files_touched:
   - test/e2e/mention_warnings_test.go
   - web/src/test/fixtures/destinations.ts
   - docs/concepts/mentions.md
+  - web/src/components/timeline.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
 acceptance:
   - "[C-28.FR-3, C-28.AC-4, C-11.FR-21, C-12.FR-12] When the On-call whom an entry names has no Account link in the Destination's Identity space, nothing is posted in the Thread for them, and the Alert Group's Timeline has one delivery event `mention_not_delivered` per person, entry and message, with the person, the entry, the Loud event and the reason `no_account_link` (`mentions_test.go`, `mention_warnings_test.go`)."
   - "[C-28.FR-3, C-28.AC-3, C-22.FR-16] Through a bridge without `native_mentions`, a linked person is sent by the plain name and the Timeline records `mention_not_delivered` with the reason `bridge_cannot_mention_people` (`mentions_test.go`)."
@@ -90,6 +93,10 @@ issue: null
   the Destination's delivery events still kept, those whose latest is `mention_not_delivered`.
 - **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): `mention_warnings` empty in the builders of
   Destination reads.
+- **Exhaustive switches of the SPA** (S-166's rule): the `delivery_event` switch of `web/src/components/timeline.tsx`
+  gains the case `mention_not_delivered` with the plain text "Mention not delivered in {{destination}}" / «Упоминание не
+  доставлено в {{destination}}» in `en.json` and `ru.json`; S-143 shows the person, the entry, the event and the
+  reason.
 - **Settings**: `retention.alert_details`.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/mentions.md` — "Undelivered Mentions".

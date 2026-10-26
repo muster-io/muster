@@ -88,8 +88,8 @@ issue: null
   громких событиях. Новая строка отмечена на всех событиях.», the seven event columns / «Новая группа», «Новые алерты»,
   «Переоткрытие», «Нет подтверждения», «Конец отложения», «Рост до critical», «Начало шторма», "Remove" / «Убрать»,
   "Add" / «Добавить», "Group…" / «Группа…», "Person…" / «Человек…», "Team…" / «Команда…», "Team from the label" /
-  «Команда из лейбла», "On-call of a Team…" / «Дежурный команды…», "On-call of the Team from the label" / «Дежурный
-  команды из лейбла», "now: {{who}}" / «сейчас: {{who}}», "Nobody is mentioned: messages arrive without Mentions." /
+  «Команда из метки», "On-call of a Team…" / «Дежурный команды…», "On-call of the Team from the label" / «Дежурный
+  команды из метки», "now: {{who}}" / «сейчас: {{who}}», "Nobody is mentioned: messages arrive without Mentions." /
   «Никого не упоминаем: сообщения приходят без упоминаний.», the notes / «„Команда“ — это упоминание команды для
   этого подключения, если оно задано; иначе никого. Дежурного вместо команды не зовём.», «Человека без привязки не упоминаем;
   об этом скажут хронология группы и эта страница.», «Напоминания и автоматическая отмена подтверждения всегда
@@ -142,11 +142,12 @@ Russian:
 
 ## Open questions
 
-1. **Texts of the other unavailable targets.** reference.md words three of the `MentionUnavailableReason` values; the
-   form also greys `@everyone` on Mattermost, `@all` on Slack (`messenger_has_no_token`) and a mention of everyone a
-   bridge did not declare (`bridge_not_declared`). Proposed, for reference.md in this pull request: "{messenger} has no
-   {token}" / «В {messenger} нет {token}» and "The bridge does not declare {token}" / «Мост не объявил {token}».
-   Recommended: take these texts.
+None open. Settled:
+
+1. **Settled: the texts of the other unavailable targets go into reference.md in this pull request**, in the row "Team
+   page, Team mention · Destination form, an unavailable Mention target": "{messenger} has no {token}" / «В {messenger}
+   нет {token}» for `messenger_has_no_token` (`@everyone` on Mattermost, `@all` on Slack), and "The bridge does not
+   declare {token}" / «Мост не объявил {token}» for `bridge_not_declared`. S-138 may add more reasons and texts.
 
 ## Notes
 

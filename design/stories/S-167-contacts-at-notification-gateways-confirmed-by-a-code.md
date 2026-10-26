@@ -4,7 +4,7 @@ title: Contacts at Notification gateways confirmed by a code, erased with their 
 capability: C-30
 kind: be
 layer: L2
-depends_on: [S-136, S-145]
+depends_on: [S-145, S-164]
 covers: [C-30.FR-3, C-30.FR-9, C-30.FR-10, C-30.AC-2, C-27.FR-8, C-03.FR-13, C-18.FR-6, C-23.FR-3]
 files_touched:
   - api/openapi.yaml
@@ -34,8 +34,6 @@ files_touched:
   - internal/schedules/reach.go
   - internal/schedules/reach_test.go
   - internal/schedules/oncallnow.go
-  - web/src/components/schedule-warnings.test.tsx
-  - web/src/components/on-call-now.test.tsx
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/logging/events.go
@@ -44,6 +42,7 @@ files_touched:
   - mkdocs.yml
 acceptance:
   - "[C-30.FR-3, C-30.AC-2] `createMyGatewayContact` with a Notification gateway's `connection_id` and a contact creates an unconfirmed contact of the caller and sends a code of `gateway.contact_code` through that gateway with `sendNotification` on the interactive path, without action data, in the language of the caller's profile; `confirmMyGatewayContact` with the code the fake gateway received confirms it; a wrong code answers `422` `contact_code_invalid` at `/code` with `attempts_remaining`, and after the last attempt, or once the code expired, the code is void (`contacts_test.go`, `gateway_contacts_test.go`)."
+  - "[C-30.FR-3] A code is tied to the web session that asked for it (ADR-0013): `confirmMyGatewayContact` with the right code from another session of the same person answers `422` `contact_code_invalid` and counts as an attempt; a session that ends voids its codes (`contacts_test.go`)."
   - "[C-30.FR-3] Code requests — creating a contact and `sendMyGatewayContactCode` — are limited by `gateway.contact_code_requests`: the sixth within an hour of one User, or the fourth within an hour for one contact, answers `429` `contact_code_requests_exceeded` with `Retry-After`; a `connection_id` that names no Connection in the role `gateway` answers `422` `unknown_id`; a contact that is empty or longer than 200 characters answers `422` `invalid_format` at `/contact` (`contacts_test.go`)."
   - "[C-30.FR-3, C-18.FR-6, C-30.AC-2] The operations that change `me/gateway-contacts` take only the web session: a Personal access token gets `403` `session_required`; `createUserGatewayContact` — an Admin's attempt to set a contact for another User — always answers `403` `forbidden` with the detail that only the person sets their contact, and changes nothing; `listUserGatewayContacts` (`users:read`) lists a User's contacts with their state and `deleteUserGatewayContact` (`users:write`) removes one; adding, confirming and removing are Audit log entries `gateway_contact.created`, `gateway_contact.confirmed` and `gateway_contact.deleted` (`gatewaycontacts_test.go`)."
   - "[C-30.FR-3] A new contact for a gateway at which the User has a confirmed one replaces it only when it is confirmed; until then the confirmed contact stays the one called, and both are listed (`contacts_integration_test.go`)."
@@ -99,9 +98,8 @@ issue: null
   - Problem codes: `contact_code_invalid` (`validation-failed`, with `attempts_remaining`),
     `contact_code_requests_exceeded` (`429`), `gateway_refused` (`502`), `unknown_id` at `/connection_id`,
     `invalid_format` at `/contact`.
-  - `ScheduleWarning` and `OnCallReach` gain the required `gateway_reaches` (boolean); the web tests that build them
-    by hand, `schedule-warnings.test.tsx` (S-135) and `on-call-now.test.tsx` (S-136), set it to false, so that `make
-    generate` keeps the TypeScript check green.
+  - `ScheduleWarning` and `OnCallReach` gain the optional `gateway_reaches` (boolean, not in `required`, present on
+    every `unreachable` warning), so that the web tests of S-135 and S-136 that build these reads by hand need no edit.
   - `PublicId` and `api/README.md` gain the prefix `GC` (gateway contact).
 - **Schema** (migration `0036_gateway_contacts`, expand only; `schema.md` §2 and a new §4.17 Notification gateways):
   - `gateway_contacts`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^GC[0-9A-HJKMNP-TV-Z]{12}$')`), `user_id`
@@ -109,19 +107,20 @@ issue: null
     `created_at`; unique partial index `(user_id, connection_id) WHERE confirmed_at IS NOT NULL` — one confirmed contact
     per person and gateway — and index `(org_id, connection_id)`.
   - `gateway_contact_codes`: `id`, `org_id`, `contact_id` (FK, `ON DELETE CASCADE`), `code_hash bytea NOT NULL`,
-    `attempts`, `expires_at`, `used_at`, `created_at`; index `(org_id, contact_id, created_at)` and a partial index of
+    `session_id` (FK `sessions`, `ON DELETE CASCADE` — the web session that asked for the code), `attempts`,
+    `expires_at`, `used_at`, `created_at`; index `(org_id, contact_id, created_at)` and a partial index of
     the requests per User through `contact_id` for the hourly limits. Pruned with the expired Account link requests.
   - The down migration drops both.
 - **Gateways** (`internal/gateways`, a new flat domain package, ADR-0016): `gateways.go` — the Notification gateways of
   the Organization (Bridge Connections whose stored `info` has `gateway`, not deleted) and `ConfirmedContact(user,
   gateway)`; `contacts.go` — create, send the code, confirm, list and delete, with the Audit log
   (`gateway_contact.created`, `gateway_contact.confirmed`, `gateway_contact.deleted`, each with `/contact` in its diff),
-  the code of `gateway.contact_code` hashed at rest, compared in constant time, its expiry and the hourly limits of
-  `gateway.contact_code_requests` per User and per contact text on the business clock, as the Account link codes and
-  their limits are (S-020), and the replacement on confirmation in one
-  transaction; the code goes out through `delivery`'s interactive `Notify` (S-145) with the key of the code request,
-  the text "Your Muster code: {code}. It is valid for 10 minutes. Do not share it." in the person's language
-  (`internal/messages/texts`), and no action.
+  the code of `gateway.contact_code` hashed at rest, compared in constant time and only in the session that asked for it
+  (ADR-0013), its expiry and the hourly limits of `gateway.contact_code_requests` per User and per contact text on the
+  business clock, as the Account link codes and their limits are (S-020), and the replacement on confirmation in one
+  transaction; the code goes out through `delivery`'s interactive `Notify` (S-145) with the key of the code request, the
+  text "Your Muster code: {code}. It is valid for {minutes} minutes. Do not share it.", {minutes} from
+  `gateway.contact_code` (P-86), in the person's language (`internal/messages/texts`), and no action.
 - **Users** (`internal/users/admin.go`): `Delete` erases the User's contacts and codes in its transaction (C-03.FR-13).
 - **Audit** (`internal/audit/list.go`): the entries about a gateway contact of a deleted User show `/contact` as
   `[erased]` when read, as the erased fields of a User are.
@@ -193,13 +192,11 @@ a confirmed contact.
 
 ## Open questions
 
-1. **A second contact for the same gateway.** C-30.FR-3 allows one contact per person and gateway; "Another number" on
-   the profile starts a new one. Options: (a) the confirmed contact stays the one called until the new one is
-   confirmed, then the new one replaces it; (b) the new contact replaces the old one at once, and calls stop until it is
-   confirmed. Recommended: (a), so that changing a number never leaves a person unreachable; the contract follows it.
-2. **What counts as "the same contact" for the limit of 3 per hour.** Options: (a) the contact text as typed, trimmed;
-   (b) a normalized phone number. Recommended: (a) — Muster does not check phone numbers (C-30 UI) and a gateway may
-   use any address; the contract follows it.
+1. **A second contact for the same gateway.** Settled by the maintainer: the confirmed contact stays the one called
+   until the new one is confirmed, and then the new one replaces it, so that changing a number never leaves a person
+   unreachable.
+2. **What counts as one contact for the limit of 3 per hour.** Settled by the maintainer: the contact text as typed,
+   trimmed — Muster does not check phone numbers (C-30 UI), and a gateway may use any address.
 
 ## Notes
 

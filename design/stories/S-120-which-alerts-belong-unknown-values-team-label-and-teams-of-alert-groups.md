@@ -97,12 +97,12 @@ issue: null
 - **Documentation links**: `field.team_label` → `concepts/teams.md#which-alerts-belong-to-a-team`,
   `fix.unknown_team_values` → `concepts/teams.md#values-without-a-team`; the anchors exist from S-118.
 - **Texts** (EN / RU), from C-25's UI, reference.md and the approved mockups: the hint above / «Алерт относится к
-  команде по значению лейбла команды или по её матчерам. Доступ команды не ограничивают: роли общие для Организации.»,
+  команде по значению метки команды или по её матчерам. Доступ команды не ограничивают: роли общие для Организации.»,
   "Unknown values of {{label}}" / «Неизвестные значения {{label}}», the banner / «Алерты приходили с этими значениями,
   но такой команды нет: места доставки команды не добавляются, никого не зовут.», "Create Team" / «Создать команду», "Which
-  Alerts belong to this Team" / «Какие алерты — этой команды», the two hints / «Матчер может смотреть на любой лейбл
+  Alerts belong to this Team" / «Какие алерты — этой команды», the two hints / «Матчер может смотреть на любую метку
   алерта, не только на namespace. Подходит любой из матчеров.» and «На стендах с общим namespace матчите по pod / app
-  или ставьте метку команды на поды.», "Teams" / «Команды», "My Teams" / «Мои команды», "Team label" / «Лейбл команды».
+  или ставьте метку команды на поды.», "Teams" / «Команды», "My Teams" / «Мои команды», "Team label" / «Метка команды».
 
 ## Steps
 

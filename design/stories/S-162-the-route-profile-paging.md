@@ -57,7 +57,7 @@ files_touched:
 acceptance:
   - "[C-26.FR-11, C-26.AC-8, C-08.FR-7, C-08.AC-11] `listRouteProfiles` returns the ids `paging` and `informational`, named \"Paging\" and \"Informational\", with the policy values of the Paging and Informational columns of defaults.md; the `RouteProfile.id` enum of the specification is `paging`, `informational`; the Default route created on a new database and both Route suggestions take the values of the Paging profile (`routes_test.go`, `suggestions_test.go`, `routing_test.go`)."
   - "[C-26.FR-11] Neither the id nor the name of the old profile is left: `grep -rnE 'on_call|onCall|On-call' internal test web/src web/e2e docs` lists only the upgrade notes and uses that mean the person On-call (CONTEXT.md) — the clicks on the button \"On-call\" and \"Profile: On-call\" of `route-preview.spec.ts`, `route-message.spec.ts` and `timers.spec.ts`, `gen.OnCall` of `routes_test.go`, the helpers `onCall()`, and every comment that names the profile, included — and `make e2e` passes."
-  - "[C-26.FR-11, C-10.AC-23] In a real browser, Routes → \"Create route\" offers \"Paging\" with \"For alerts someone must act on: ack timeout and Reminders on.\" and \"Informational\"; choosing \"Paging\" pre-fills the Snooze durations 1 h, 4 h and 24 h, and a firing Root message of such a Route in the fake Mattermost server still shows the Snooze presets after \"Snooze 24 h\"; in Russian the profile reads «Призыв» (`routes.spec.ts`, `commands.spec.ts`)."
+  - "[C-26.FR-11, C-10.AC-23] In a real browser, Routes → \"Create route\" offers \"Paging\" with \"For alerts someone must act on: ack timeout and Reminders on.\" and \"Informational\"; choosing \"Paging\" pre-fills the Snooze durations 1 h, 4 h and 24 h, and a firing Root message of such a Route in the fake Mattermost server still shows the Snooze presets after \"Snooze 24 h\"; in Russian the profile reads «С призывом» (`routes.spec.ts`, `commands.spec.ts`)."
   - "[C-26.FR-11] The documentation calls the profile Paging everywhere, and the upgrade notes of 0.2.0 in Requirements and tested versions say that `route-profiles` returns `paging` instead of `on_call`, which breaks clients that type the enum, and that nothing stored changes; `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
@@ -86,7 +86,7 @@ issue: null
 - **Routing** (`internal/routing`): `ProfilePaging = "paging"` replaces `ProfileOnCall`, the profile is named "Paging";
   the Default route created at first start (`routes.go`) and the suggestions (`suggestions.go`) take it, with the same
   values as before.
-- **SPA** (`profile-picker.tsx`, locales): the id `paging`; the keys `routes.profiles.paging` "Paging" / «Призыв»
+- **SPA** (`profile-picker.tsx`, locales): the id `paging`; the keys `routes.profiles.paging` "Paging" / «С призывом»
   and `routes.profiles.pagingLine` with the text of `onCallLine`, which replace `onCall` and `onCallLine`; the test id
   `route-profile-paging`.
 - **End-to-end suites**: `web/e2e/support.ts` and the specs that read the profile's policy by its id or click its
@@ -125,22 +125,16 @@ grep -rnE 'on_call|onCall|On-call' internal test web/src web/e2e docs | grep -v 
 ```
 
 Then in Playwright at 1280 × 800: Routes → "Create route" shows "Paging" with its line and "Informational"; "Paging" →
-the Snooze section shows "1 h", "4 h", "24 h"; switch the language to Russian → «Призыв». `make e2e` runs the
+the Snooze section shows "1 h", "4 h", "24 h"; switch the language to Russian → «С призывом». `make e2e` runs the
 suites with the new id.
 
 ## Open questions
 
-1. **The Russian words of Paging, used by every story of L2 that has Russian texts.** The PRD gives only English names;
-   the approved mockups say «Оповестить дежурного», «призыв», «позвать», «Назначено мне» and «Назначены», and the
-   existing translations call a Destination «место доставки». «Назначено»/«назначены» render "Assigned", which
-   `CONTEXT.md` avoids for Assignees, and «Оповещение» for the profile would collide with «шлюз оповещений» (Notification
-   gateway). Options: (a) one set — a Page «призыв», to Page «позвать», the profile Paging «Призыв», Assignees «позванные»
-   ("Assignees: …" «Позваны: …», "I am an Assignee" «Позвали меня»), Notification gateway «шлюз оповещений»,
-   Notification rules «правила уведомлений», Destination «место доставки», never «канал» for it; (b) the mockups' words —
-   «Оповещение», «Назначены», «Назначено мне»; (c) «вызов» / «вызвать» for a Page, the profile «Вызов», Assignees
-   «вызванные». Recommended: (a), the words of the mockups' chain page without the two that clash; this contract and
-   S-120, S-123, S-150, S-153, S-158 and S-159 follow it. «Дежурный», the L1 name, is ruled out because it is the
-   On-call person.
+1. **The Russian words of Paging, used by every story of L2 that has Russian texts.** Settled: the maintainer chose one
+   vocabulary for every Russian text of L2 — a Page «призыв», to Page «позвать», the profile Paging «С призывом»,
+   Assignees «Назначенные», "I am an Assignee" «Назначено мне», Notification gateway «шлюз оповещений», Destination
+   «место доставки» (never «канал» for it) and label «метка», as in L1. This contract uses «С призывом»; «Дежурный»,
+   the L1 name, stays the word for the On-call person.
 
 ## Notes
 

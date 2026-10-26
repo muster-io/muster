@@ -41,6 +41,10 @@ files_touched:
   - design/prd/L2.md
   - test/e2e/escalation_runs_test.go
   - docs/concepts/escalation-chains.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/groups/events_test.go
+  - web/src/components/timeline.tsx
 acceptance:
   - "[C-32.FR-4, C-26.FR-2, C-32.AC-12] The chains that apply to an Alert Group are those its Route names and — where the Route has `deliver_to_teams` and `run_team_chains` — those each of its Teams names, each whose Severity condition its Severity level meets; with `run_team_chains` off the Team's Destinations receive it and the Team's chain does not start; a chain that the Route and a Team both name runs once, with both as its sources (P-70) (`escalation_test.go`, `runs_integration_test.go`)."
   - "[C-32.FR-5, C-32.AC-3, C-09.FR-9, C-11.FR-6, C-10.FR-1] Every point of the table of C-32.FR-5 starts, starts over or stops the chains as its row says: the first Publication, an Alert Group's own Publication after a Storm summary stood for it and a delivered `created` event start them; an Alert Group created with no Destination that reaches it, or only Broken ones, starts them at once; a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge and its Owner disabled or deleted start them over; a rise of a firing Alert Group nobody owns starts only the chains for critical without restarting running ones; a Team that joins it then starts that Team's chains; Acknowledge, Snooze and Resolve stop every chain; a fall of the Severity level stops none (a table-driven test, `escalation_test.go`)."
@@ -122,7 +126,7 @@ issue: null
 - **Groups** (`internal/groups/escalation.go`, `timers.go`, `dispatcher.go`, `events.go`, `read.go`): the dispatcher,
   after each transition, compares the state before and after and, by the cause of the transition, asks
   `ChainRuns` in the same transaction to start the chains that apply, start them over, start only those newly met, or
-  stop every running one; a transition of a configuration change (S-111's, S-163's, S-121's) asks nothing
+  stop every running one; a transition of a configuration change (S-111's, S-163's, S-170's) asks nothing
   (C-32.FR-5). The first start removes the ack timeout timer; becoming firing again starts the ack timeout only when no
   chain starts (FR-6). The system transitions `EscalationStepSkipped` (records `escalation_step_skipped`: Quiet, no
   Mentions, kind `escalation`, nothing in a messenger) and `ChainsRanOut` (records `unclaimed` when every run of the
@@ -139,6 +143,10 @@ issue: null
   here, which this story wires to nothing.
 - **Timers** (`internal/timers`): the claim returns `escalation_run_id`; the kind is registered in the runtime with its
   handler.
+- **Event tables and SPA** (`internal/delivery/enqueue.go`, `internal/groups/events_test.go`,
+  `web/src/components/timeline.tsx`): the row of `escalation_step_skipped` (nothing in a messenger) in
+  `delivery.Table`, counted by `enqueue_test.go`; the table-driven test of the closed table covers it and `unclaimed`
+  of chains; a case for it in `entryText` with S-148's generic text.
 - **Webhooks** (`internal/webhooks/body.go`): `escalation_step_skipped` in events mode, with the chain, the step and the
   reason.
 - **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): the builder of Alert Group reads sets
@@ -209,10 +217,8 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
 
 ## Open questions
 
-1. **"How it went" for a run that started over.** C-32 UI lists "the recent Alert Groups with their Pages, skipped steps
-   and the acknowledgement that stopped the chain". Options: (a) each start is a run of its own, so an Alert Group whose
-   chains started over shows two runs; (b) one entry per Alert Group with its starts inside. Recommended: (a), the
-   simpler read; the contract follows it.
+1. **"How it went" for a run that started over.** Settled by the API surface of C-32, `escalation-chains/{id}/runs`,
+   whose runs are one per start: an Alert Group whose chains started over shows a run per start.
 
 ## Notes
 

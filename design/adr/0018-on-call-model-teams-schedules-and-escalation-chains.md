@@ -11,6 +11,8 @@
   Destinations Quietly, without `destination_joined`; only Alerts and Commands start chains and publish Loudly; the
   person who takes an Override may not be disabled either; the iCal feed shows the times when each person is On-call,
   not the whole Shifts of the Rotation layers
+- Amended: 2026-10-27 — with the review of the L2 story contracts: the Assignees of a chain that has run out stay until
+  Acknowledge, Snooze or Resolve clears them
 
 ## Context
 
@@ -101,8 +103,9 @@ D540). A Team is mentioned by its Team mention for that Connection — a Matterm
 Connection may read them, or a group mention that a bridge declares in `info` — and where it has none, nobody is
 mentioned and the message alone is enough, as in L1. A Team mention never falls back to the On-call; the On-call of a
 Team is mentioned only where an entry names it (journal D509, D516). Telegram has no group mentions. The Destinations of
-a Team mention the Team by default, which rings only where a Team mention is set. An entry may also apply to
-`storm_started`, the first publication of a Storm summary; a Storm summary starts no Escalation chain (journal D533).
+a Team mention the Team by default, which rings only where a Team mention is set; a Telegram Destination, which cannot
+mention a Team, does not. An entry may also apply to `storm_started`, the first publication of a Storm summary; a
+Storm summary starts no Escalation chain (journal D533).
 
 **Schedules.** A Schedule belongs to a Team and has Rotation layers — the people of a Rotation layer take Shifts in
 turn, a day, a week or a length of its own, with a handover time, optional limits such as "weekdays 9–18", and the
@@ -200,13 +203,13 @@ action in a messenger or the UI (journal D518). A call that nobody answers lets 
 out through a queue of their own with retries, outside reconciliation (ADR-0005); a gateway that keeps failing becomes
 Broken and raises an Internal alert (journal D532).
 
-**Assignees.** Until someone acknowledges, an Alert Group shows its Assignees: the people each running chain Paged last
-by name, one or more per chain — steps that Page a whole Team or everyone in the chat change nothing. The Root message
-and the UI list them with their Teams, and the UI filters by the Alert Groups where one is an Assignee (journal D474,
-D508). A change of Assignees is a Timeline entry; Acknowledge, Snooze and Resolve clear them, and they change only
-through system transitions of the dispatcher (ADR-0016). Nobody adds Assignees by hand, and any Responder may
-acknowledge. Assignees are written as Mentions where their account is linked, like the Owner, accepting that a new Quiet
-message may notify them (journal D521, D535).
+**Assignees.** Until someone acknowledges, an Alert Group shows its Assignees: the people each chain started on it Paged
+last by name, one or more per chain, also after the chain has run out — steps that Page a whole Team or everyone in the
+chat change nothing. The Root message and the UI list them with their Teams, and the UI filters by the Alert Groups
+where one is an Assignee (journal D474, D508). A change of Assignees is a Timeline entry; Acknowledge, Snooze and
+Resolve clear them, and they change only through system transitions of the dispatcher (ADR-0016). Nobody adds Assignees
+by hand, and any Responder may acknowledge. Assignees are written as Mentions where their account is linked, like the
+Owner, accepting that a new Quiet message may notify them (journal D521, D535).
 
 **One status, one acknowledgement.** One Acknowledge acknowledges the Alert Group everywhere and stops every chain on
 it; the Root message names the Owner with their Team. The buttons offer the same actions for a status in every

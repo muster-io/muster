@@ -42,6 +42,10 @@ files_touched:
   - design/prd/L2.md
   - test/e2e/assignees_test.go
   - docs/concepts/escalation-chains.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/groups/events_test.go
+  - web/src/components/timeline.tsx
 acceptance:
   - "[C-32.FR-12, C-32.AC-6] A Page by Mention whose Thread reply is delivered makes the person an Assignee of its chain, shown with the chain's owning Team; for each chain, the Assignees are the people that its latest step Paging people by name reached — a later step that reaches someone replaces them, the later Mentions of one step's rules add to them, and a step that reached none of its people leaves them as they were; a `page_team` step changes nothing; a person whose Page was not delivered never becomes an Assignee (`assignees_test.go`)."
   - "[C-32.FR-12, C-32.AC-2, C-10.FR-1, C-09.FR-22, C-32.AC-11] Each change of the Assignees records the Quiet `assignees_changed` (Timeline kind `escalation`) with the Assignees after it; Acknowledge, Snooze and Resolve clear them with `assignees_changed`; they change only through system transitions of the dispatcher, and no operation sets them (`assignees_test.go`, `events_test.go`)."
@@ -100,10 +104,15 @@ issue: null
   person a delivered reply mentioned, as S-155 does; the Desired state carries the Assignees and the Owner's Teams, so
   `assignees_changed` edits the Root messages, and a new message names them as Mentions where linked.
 - **Messages** (`internal/messages`): `Message` gains `Assignees` and `OwnerTeams`; item 7 of the default layout
-  (C-29.FR-1); `layout.go` fills `assignees` and `owner` of `layout` (S-126's shape), with each person's `team`; the texts "Assignees: {people}",
-  "{person} ({team})", "· Escalation chains stopped" in English and Russian (C-12.FR-3 revised).
+  (C-29.FR-1); `layout.go` fills `assignees` and `owner` of `layout` (S-126's shape), with each person's `team`; the
+  texts "Assignees: {people}", "{person} ({team})", "· Escalation chains stopped" in English and Russian (C-12.FR-3
+  revised).
 - **Bridge** (`internal/bridge/envelope.go`): the `ref` of each Assignee's Mention entry in `layout`, as S-126 does for
   the Owner.
+- **Event tables and SPA** (`internal/delivery/enqueue.go`, `internal/groups/events_test.go`,
+  `web/src/components/timeline.tsx`): the row of `assignees_changed` (a Root message update) in `delivery.Table`,
+  counted by `enqueue_test.go`; the table-driven test of the closed table covers it; a case for it in `entryText`
+  with S-148's generic text.
 - **Webhooks** (`internal/webhooks/body.go`): `assignees` and `owner_teams` in `alert_group`; `assignees_changed` in
   events mode.
 - **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): `assignees` `[]` and `owner_teams` `[]`.
@@ -153,10 +162,9 @@ with the `ref` of each Assignee, an Owner in none of the Alert Group's Teams nam
 
 ## Open questions
 
-1. **The Assignees of a chain that ran out.** C-32.FR-12 speaks of "each running chain", while CONTEXT.md says only
-   Acknowledge, Snooze and Resolve clear the Assignees. Options: (a) a chain that ran out keeps its Assignees until one
-   of them, so an Unclaimed Alert Group still shows whom it Paged and "I am an Assignee" still lists it; (b) its
-   Assignees go when it runs out. Recommended: (a); the contract follows it.
+1. **The Assignees of a chain that ran out.** Settled by the maintainer, with CONTEXT.md, ADR-0018 and C-32.FR-12
+   amended: a chain that ran out keeps its Assignees until Acknowledge, Snooze or Resolve, so an Unclaimed Alert Group
+   still shows whom it Paged and "I am an Assignee" still lists it.
 
 ## Notes
 

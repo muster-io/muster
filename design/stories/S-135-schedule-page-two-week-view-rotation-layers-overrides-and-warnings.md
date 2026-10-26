@@ -84,7 +84,7 @@ issue: null
     layer}", "@{login} is a Viewer", "@{login} is not in the Team", "Unreachable in {messenger}: no linked account.", and
     the texts of Open question 2 for the other reasons.
   - `rotation-layers-editor.tsx` — each Rotation layer with name, people in turn (ordered, from the Team), Shift length
-    (a day, a week, hours), handover time and day, start date, limits (days, from, to); "Add Rotation layer"; the order
+    (a day, a week, hours), handover time and day, start date, limits (days, from, to — a "to" earlier than "from" reads "until {to} the next day" / «до {to} следующего дня», C-27.FR-2); "Add Rotation layer"; the order
     top first.
   - `schedule-form.tsx` — name, time zone (the picker of `time-zone-picker.tsx`), "main", the gap alert "By default"
     ("On while this is the Team's main Schedule"), "On", "Off".
@@ -157,16 +157,16 @@ English and in Russian:
 
 ## Open questions
 
-1. **Where the Schedules list lives.** C-25's UI says the lists of Schedules gain the filter by Team and "My Teams", but
-   the approved mockups show Schedules only on the Team page and have no "Schedules" in the main navigation. Options:
-   (a) a Schedules list at `/schedules` linked from the Teams page as "All Schedules", not in the main navigation;
-   (b) "Schedules" in the main navigation; (c) no list, only the Team page. Recommended: (a); the contract follows it.
-2. **Texts of the other unreachable reasons.** reference.md gives only "Unreachable in {messenger}: no linked account.".
-   Proposed, for reference.md in this pull request: "Unreachable in {Destination}: the bridge cannot mention people." /
-   «Недостижим в {Destination}: мост не умеет упоминать людей.»; "Unreachable in {Destination}: the outgoing webhook has no
-   reply in thread." / «Недостижим в {Destination}: у исходящего вебхука нет ответа в тред.»; "Unreachable in
-   {Destination}: not in the discussion group." / «Недостижим в {Destination}: не состоит в группе обсуждения.».
-   Recommended: take these texts and add them to the row of reference.md.
+None open. Settled:
+
+1. **Settled: the Schedules list has no entry in the main navigation.** It is at `/schedules`, reached from the Teams
+   page as "All Schedules", because C-25's UI gives the lists of Schedules the filter by Team and "My Teams" while the
+   approved mockups show no navigation entry for Schedules.
+2. **Settled: the texts of the other unreachable reasons go into reference.md in this pull request**, in the row
+   "Schedule page, 'On call now'": "Unreachable in {Destination}: the bridge cannot mention people." / «Недостижим в
+   {Destination}: мост не умеет упоминать людей.»; "Unreachable in {Destination}: the outgoing webhook has no reply in
+   thread." / «Недостижим в {Destination}: у исходящего вебхука нет ответа в тред.»; "Unreachable in {Destination}: not
+   in the discussion group." / «Недостижим в {Destination}: не состоит в группе обсуждения.».
 
 ## Notes
 

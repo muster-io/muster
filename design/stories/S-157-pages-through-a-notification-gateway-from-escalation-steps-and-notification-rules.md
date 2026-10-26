@@ -4,7 +4,7 @@ title: Pages through a Notification gateway from Escalation steps and Notificati
 capability: C-32
 kind: be
 layer: L2
-depends_on: [S-149, S-156, S-168]
+depends_on: [S-149, S-156, S-168, S-173]
 covers: [C-32.FR-3, C-32.FR-10, C-32.FR-11, C-32.FR-12, C-32.FR-14, C-32.AC-7, C-30.FR-4, C-30.FR-7, C-30.FR-9, C-31.FR-3, C-31.AC-2, C-31.AC-6]
 files_touched:
   - api/openapi.yaml
@@ -57,7 +57,7 @@ issue: null
 
 **OUT**
 
-- The queue, combining, retries and the Acknowledge through a gateway: S-148. Broken gateways: S-149.
+- The queue, combining and retries: S-148; the Acknowledge through a gateway: S-173. Broken gateways: S-149.
 - The pages: S-158, S-159. The documentation of "How an alert reaches people": S-161.
 
 ## Contracts

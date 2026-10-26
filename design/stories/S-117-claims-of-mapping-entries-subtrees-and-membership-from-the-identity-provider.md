@@ -192,8 +192,10 @@ curl -s "${A[@]}" "$API/users?q=petr" | jq -r '.items[0].role'                  
 ```
 
 `test/e2e/oidc_test.go` and `test/e2e/team_membership_test.go` repeat these checks and add the re-check: with the
-Keycloak flavor and an offline token, the IdP's groups change and `UPDATE oidc_checks SET deadline = now()` makes the
-re-check due; the User leaves the Team without signing in.
+Keycloak flavor and an offline token, the IdP's groups change and an advance of the development clock by
+`auth.oidc_recheck_interval` (`curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 900}'`, after the
+Personal access token A was made) makes the re-check due, since `oidc_checks.deadline` is on the business clock; the
+User leaves the Team without signing in.
 
 ## Open questions
 

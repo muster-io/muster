@@ -69,9 +69,9 @@ issue: null
   Assignees for the tests.
 - **Documentation links** (`docs-links.json`): `field.alert_group_chains` → `concepts/escalation-chains.md#assignees`;
   the section exists from S-168.
-- **Texts** (EN / RU), from C-32's UI and the approved Home and Lifecycle mockups: "I am an Assignee" / «Позвали меня»,
+- **Texts** (EN / RU), from C-32's UI and the approved Home and Lifecycle mockups: "I am an Assignee" / «Назначено мне»,
   "Alert Groups that a running Escalation chain Paged you about. They leave this list once acknowledged." / «Группы,
-  куда вас позвала идущая цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Позваны», "Chain" /
+  куда вас позвала идущая цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Назначенные», "Chain" /
   «Цепочка», "step {{n}}" / «шаг {{n}}», "next step at {{time}}" / «следующий шаг в {{time}}», "ran out" /
   «закончилась», "stopped" / «остановлена», "Escalation chains" / «Цепочки эскалации» (the Timeline kind `escalation`),
   "Paged" / «Позвала», "Page not delivered" / «Призыв не доставлен», "skipped" / «пропущен», "Escalation chains stopped"
@@ -114,7 +114,7 @@ None.
 
 - Suggested commit: `feat(web): show running escalation chains and assignees and list what pages me`.
 - The approved Home mockup says «Назначено мне»; the English text is "I am an Assignee", since `CONTEXT.md` avoids
-  "Assigned" (L2.md §5.2), and the Russian follows the vocabulary of S-162's Open question 1.
+  "Assigned" (L2.md §5.2), and the Russian keeps «Назначено мне», as settled in S-162 (Open question 1).
 
 ## Coverage
 

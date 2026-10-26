@@ -80,7 +80,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   update mention as before; 0.3.0 removes the field and the column. The upgrade notes say so.
 - **C-28.FR-6** When a Destination becomes a Destination of a Team (C-26.FR-1) and has no entry naming that Team, Muster
   adds the entry "Team {Team}" for every Loud event, recorded in the Audit log; it mentions someone only where the Team
-  has a Team mention for the Destination's Connection. An Admin may remove it.
+  has a Team mention for the Destination's Connection. A Telegram Destination gets no such entry, since Telegram cannot
+  mention Teams (FR-2). An Admin may remove it.
 - **C-28.FR-7** The first publication of a Storm summary (C-11.FR-6) carries the Mentions of the entries for
   `storm_started` of that Destination, with "On-call of the Team from the label" and "Team from the label" taken from
   the Teams of the Alert Groups the summary counts; a Storm summary starts no Escalation chain.

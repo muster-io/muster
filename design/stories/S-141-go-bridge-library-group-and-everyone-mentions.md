@@ -5,7 +5,7 @@ capability: C-28
 kind: be
 layer: L2
 repository: muster-io/muster-bridge-go
-depends_on: [S-140, S-127]
+depends_on: [S-171, S-127]
 covers: [C-28.FR-2, C-25.FR-8]
 files_touched:
   - api/bridge.yaml
@@ -35,13 +35,13 @@ issue: null
 
 **IN**
 
-- The library's copy of `api/bridge.yaml` with the `info` fields of S-139 and the `kind` of a Mention of S-140, the
+- The library's copy of `api/bridge.yaml` with the `info` fields of S-139 and the `kind` of a Mention of S-171, the
   generated types, a way to declare them in the configuration, the kind in `ReplaceMentions`, and their documentation
   (ADR-0017: a bridge may declare group mentions and the mentions of everyone in the chat in `info`).
 
 **OUT**
 
-- Muster's side: S-139 (`info`) and S-140 (`Mention.kind`). The Python library: S-142. The documentation for bridge
+- Muster's side: S-139 (`info`) and S-171 (`Mention.kind`). The Python library: S-142. The documentation for bridge
   authors on Muster's site: S-144.
 - The role `gateway`: S-146.
 
@@ -49,7 +49,7 @@ issue: null
 
 - **Repository** `muster-io/muster-bridge-go` (MIT, no CLA, ADR-0017), its AGENTS.md and Makefile; the pull request says
   `Part of muster-io/muster#<issue>` and `Story: S-141`, and the issue here is closed by hand once it merges.
-- **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-140, which also carries S-126's
+- **Specification copy** (`api/bridge.yaml`): replaced by Muster's from `master` after S-171, which also carries S-126's
   `layout` that S-127 took; `models.gen.go` is regenerated (never listed).
 - **Package**: `Config.GroupMentions bool` and `Config.EveryoneMentions []string` go into `info.capabilities`;
   `bridge.New` validates them as the specification does; `ReplaceMentions(body, mentions, render)` passes the entry with
@@ -82,11 +82,11 @@ None.
 - **Maintainer** (operator attention): merges the release pull request that release-please opens, which releases a new
   `0.x` minor version; an agent never merges a release pull request.
 - The copy check fails on the library's `master` from S-139's merge until this story merges; that failure is expected,
-  and this story waits for S-140 so that it takes both changes of `api/bridge.yaml` at once.
+  and this story waits for S-171 so that it takes both changes of `api/bridge.yaml` at once.
 
 ## Coverage
 
 | ID | Covered | Note |
 |---|---|---|
-| C-28.FR-2 | partial | the Go library; Muster's side is S-139 and S-140 |
+| C-28.FR-2 | partial | the Go library; Muster's side is S-139 and S-171 |
 | C-25.FR-8 | partial | a bridge built on the library can declare the group mentions that Team mentions need |
