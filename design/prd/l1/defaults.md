@@ -17,8 +17,8 @@ table in the same pull request.
 | `MUSTER_DATABASE_HOST`, `_NAME`, `_USER`, `_PASSWORD` / `_PASSWORD_FILE` | unset | environment | C-02 | decided |
 | `MUSTER_DATABASE_PORT` | `5432` | environment | C-02 | decided |
 | `MUSTER_DATABASE_SSLMODE` | `prefer`; `muster doctor` and the startup log report whether each connection is encrypted | environment | C-02 | decided |
-| `MUSTER_DATABASE_SESSION_URL`, or `MUSTER_DATABASE_SESSION_HOST` and `_PORT` | the main connection; other fields inherited | environment | C-02 | decided |
-| `pool_max_conns` of `MUSTER_DATABASE_URL` | max(10, CPUs) connections in a replica's main pool when the URL sets none, also with the `MUSTER_DATABASE_*` fields; the session connections (the LISTEN connection, the Leader's and partition maintenance's) come on top, about 3 per replica | environment | C-02 | P-50 |
+| `MUSTER_DATABASE_SESSION_URL`, or `MUSTER_DATABASE_SESSION_HOST` and `_PORT` | the main connection; other fields inherited, without its `pool_*` parameters; `pool_*` parameters of an explicit session URL are ignored | environment | C-02 | decided |
+| `pool_max_conns` of `MUSTER_DATABASE_URL` | max(10, CPUs) connections in a replica's main pool when the URL sets none, also with the `MUSTER_DATABASE_*` fields; the session connections (the LISTEN connection, the Leader's and partition maintenance's) come on top, about 3 per replica; the `pool_*` parameters apply to the main pool only and are dropped from the session connection | environment | C-02 | P-50 |
 | `MUSTER_SECRET_KEYS` / `_FILE` | none (required) | environment | C-02 | decided |
 | `MUSTER_PUBLIC_URL` | none (required); plain `http` only on `localhost`, a name under `.localhost` or a loopback address, else the start logs `public_url_insecure` | environment | C-02 | decided |
 | `MUSTER_INGEST_URL` | `MUSTER_PUBLIC_URL` | environment | C-02 | decided |

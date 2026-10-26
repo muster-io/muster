@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/logging"
 )
@@ -238,6 +240,101 @@ func TestSession(t *testing.T) {
 			}
 			if len(c.Conflicts) != tt.wantConflicts {
 				t.Errorf("conflicts %+v", c.Conflicts)
+			}
+		})
+	}
+}
+
+// TestDerivedSessionDropsPoolSettings: a session connection derived from the main URL leaves out its pool_*
+// parameters, which PostgreSQL rejects, and keeps the others in their order and encoding; the main URL keeps them; an
+// explicit session URL stays as written.
+func TestDerivedSessionDropsPoolSettings(t *testing.T) {
+	const (
+		pooled = "postgres://muster:s3cret-pw@db.example:5432/muster?sslmode=require&pool_max_conns=5" +
+			"&application_name=x&pool_min_conns=1"
+		withOptions = "postgres://muster:s3cret-pw@db.example:5432/muster?sslmode=require" +
+			"&options=-c%20search_path%3Dx&pool_max_conns=5"
+	)
+	tests := []struct {
+		name    string
+		vars    map[string]string
+		main    string
+		wantURL string
+		derived bool
+	}{
+		{
+			name:    "no session setting",
+			vars:    with(base(), "MUSTER_DATABASE_URL", pooled),
+			main:    pooled,
+			wantURL: "postgres://muster:s3cret-pw@db.example:5432/muster?sslmode=require&application_name=x",
+			derived: true,
+		},
+		{
+			name:    "session host",
+			vars:    with(base(), "MUSTER_DATABASE_URL", pooled, "MUSTER_DATABASE_SESSION_HOST", "pg-direct"),
+			main:    pooled,
+			wantURL: "postgres://muster:s3cret-pw@pg-direct:5432/muster?sslmode=require&application_name=x",
+			derived: true,
+		},
+		{
+			name:    "session port",
+			vars:    with(base(), "MUSTER_DATABASE_URL", pooled, "MUSTER_DATABASE_SESSION_PORT", "5433"),
+			main:    pooled,
+			wantURL: "postgres://muster:s3cret-pw@db.example:5433/muster?sslmode=require&application_name=x",
+			derived: true,
+		},
+		{
+			name:    "options keep their encoding",
+			vars:    with(base(), "MUSTER_DATABASE_URL", withOptions),
+			main:    withOptions,
+			wantURL: "postgres://muster:s3cret-pw@db.example:5432/muster?sslmode=require&options=-c%20search_path%3Dx",
+			derived: true,
+		},
+		{
+			name:    "pool key first",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?pool_max_conns=5&sslmode=require"),
+			main:    "postgres://u:p@db:5432/m?pool_max_conns=5&sslmode=require",
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require",
+			derived: true,
+		},
+		{
+			// The raw filter keeps a percent-encoded key; db.Open drops it from the session connection.
+			name:    "percent-encoded key left for db.Open",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5"),
+			main:    "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5",
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5",
+		},
+		{
+			name: "explicit session URL",
+			vars: with(base(), "MUSTER_DATABASE_URL", pooled,
+				"MUSTER_DATABASE_SESSION_URL", "postgres://a@b:5432/c?sslmode=disable&pool_max_conns=2"),
+			main:    pooled,
+			wantURL: "postgres://a@b:5432/c?sslmode=disable&pool_max_conns=2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := load(t, tt.vars)
+			if string(c.Session.URL) != tt.wantURL {
+				t.Errorf("session %q, want %q", string(c.Session.URL), tt.wantURL)
+			}
+			if string(c.Database.URL) != tt.main {
+				t.Errorf("main connection %q, want %q", string(c.Database.URL), tt.main)
+			}
+			if !tt.derived {
+				return
+			}
+			parsed, err := pgx.ParseConfig(string(c.Session.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name := range parsed.RuntimeParams {
+				if strings.HasPrefix(name, "pool_") {
+					t.Errorf("the session connection sends %s", name)
+				}
+			}
+			if strings.Contains(tt.main, "options=") && parsed.RuntimeParams["options"] != "-c search_path=x" {
+				t.Errorf("options %q, want %q", parsed.RuntimeParams["options"], "-c search_path=x")
 			}
 		})
 	}
