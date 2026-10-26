@@ -237,10 +237,14 @@ returns in `roles` (`system_user` for the test stand's bot, read on 2026-10-08).
 names reads the same roles through the same `GetRolesByNames`, and needs only a session, no permission, so the bot can
 make the server's decision itself without trying an ephemeral post. On the test stand, `POST /api/v4/roles/names` with
 `["system_user"]` and the bot's token answered `200` with one role, not deleted, whose 13 permissions do not include
-`create_post_ephemeral`, and the Connection check of that bot passed with the warning `press_answers_in_thread`. —
+`create_post_ephemeral`, and the Connection check of that bot passed with the warning `press_answers_in_thread`. The
+warning names the bot it checked and the roles it read, since they are those of the account the token belongs to;
+after `mmctl roles system-admin` of that bot, `GET /api/v4/users/me` read `system_user system_admin` and the check
+passed with no warning. —
 _2026-10-08 · `SessionHasPermissionTo` and `RolesGrantPermission` in `server/channels/app/authorization.go` and
 `getRolesByNames` in `server/channels/api4/role.go` of the v11.2.2 source; `GET /api/v4/users/me` and
-`POST /api/v4/roles/names` with the bot token on the test stand, and Muster's Connection check against it ·
+`POST /api/v4/roles/names` with the bot token on the test stand, and Muster's Connection check against it;
+2026-10-22 · the same reads and check on the test stand again, after `mmctl roles system-admin` of the bot (#365) ·
 Mattermost 11.2.2_ · Used in C-13.FR-2.
 
 **F-054. A bot can press its own button.** `POST /api/v4/posts/{post_id}/actions/{action_id}` with the bot's token

@@ -23,7 +23,6 @@ import (
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
-	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/organization"
 )
 
@@ -204,7 +203,7 @@ func TestIntegrationDoctor(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("muster doctor with a Mattermost and a Telegram Connection:\n%s", out.String())
-		want := "WARN connection Example Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+		want := "WARN connection Example Mattermost: " + botHint + "\n" +
 			"OK   connection Example Telegram: ok\n" +
 			"OK   destination alerts: ok\n" +
 			"FAIL destination no-bot: The bot is not a member of this channel.\n" +

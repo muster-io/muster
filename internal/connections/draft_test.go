@@ -472,8 +472,9 @@ func TestCheckDraftStoresNothing(t *testing.T) {
 
 	res, err := e.svc.CheckDraft(t.Context(), of(mmDraft(e.mm2.URL()), "", fakemattermost.SecondBotToken))
 	if err != nil || !res.OK || stepsOf(res) != "token:ok" || res.BotName != fakemattermost.SecondBotUsername ||
-		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) || res.Bridge {
-		t.Errorf("new mattermost = %q %+v, %v", stepsOf(res), res.BotName, err)
+		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) ||
+		!slices.Equal(res.BotRoles, []string{"system_user"}) || res.Bridge {
+		t.Errorf("new mattermost = %q %+v %v, %v", stepsOf(res), res.BotName, res.BotRoles, err)
 	}
 	res, err = e.svc.CheckDraft(t.Context(), of(tgDraft(e.tg.URL()), "", faketelegram.SecondBotToken))
 	if err != nil || !res.OK || stepsOf(res) != "dry_probe:ok get_me:ok get_webhook_info:ok" ||

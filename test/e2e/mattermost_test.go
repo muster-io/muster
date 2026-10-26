@@ -874,10 +874,10 @@ func TestMattermost(t *testing.T) {
 	}
 
 	// C-02.FR-14: one line per Mattermost Connection and Destination; a bot that may not make ephemeral posts is a
-	// WARN with the hint that press answers show in the Thread (D284).
+	// WARN with the hint, naming the bot and the roles read, that press answers show in the Thread (D284).
 	code, out := h.runCLIStdout(t, "doctor")
-	hint := "WARN connection %s: " + mattermost.HintPressAnswersInThread
-	for _, want := range []string{fmt.Sprintf(hint, devmode.ConnectionName), fmt.Sprintf(hint, "mm"),
+	hint := ": " + mattermost.HintPressAnswersInThread(fakemattermost.BotUsername, []string{"system_user"})
+	for _, want := range []string{"WARN connection " + devmode.ConnectionName + hint, "WARN connection mm" + hint,
 		"OK   destination alerts: ok"} {
 		if !strings.Contains(out, want+"\n") {
 			t.Errorf("doctor (exit %d) has no line %q:\n%s", code, want, out)

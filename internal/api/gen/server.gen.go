@@ -4410,6 +4410,9 @@ type ConnectionCheckResult struct {
 	// BotName The bot's name or username.
 	BotName nullable.Nullable[string] `json:"bot_name,omitempty"`
 
+	// BotRoles Mattermost only. Set with the warning `press_answers_in_thread`, omitted otherwise — the system roles of the bot `bot_name` that Muster read from its user (`GET /api/v4/users/me`), none of which grants `create_post_ephemeral`, empty when the bot has none; clients name them with the bot, so that the operator sees which account the token belongs to.
+	BotRoles *[]string `json:"bot_roles,omitempty"`
+
 	// Info Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.
 	Info           nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
 	Ok             bool                          `json:"ok"`
@@ -4422,7 +4425,7 @@ type ConnectionCheckResult struct {
 	Slack nullable.Nullable[SlackCheckInfo] `json:"slack,omitempty"`
 	Steps []ConnectionCheckStep             `json:"steps"`
 
-	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader's; presses are shared between them at random — use one Slack app for each Connection and share it with no other Connection or installation.
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): none of the bot's roles, which `bot_roles` lists, grants `create_post_ephemeral`, so the bot `bot_name` may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting the bot account itself that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader's; presses are shared between them at random — use one Slack app for each Connection and share it with no other Connection or installation.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
 
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.
