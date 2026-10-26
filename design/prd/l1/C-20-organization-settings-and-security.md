@@ -32,6 +32,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   marks those without a mapping, which count as warning. On the Security page Admins also edit the grace period of
   Personal access tokens of OIDC users without an offline token (`auth.oidc_token_grace`, C-04.FR-8). The TOTP policy
   (C-03) and the outgoing heartbeat (C-19) are edited in their capabilities.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 "critical is Urgent" no longer acts and leaves the page (C-26.FR-10); L2
+  adds the Team label (`organization.team_label`, C-25.FR-5) and the Working hours (`organization.working_hours`,
+  C-25.FR-9) on the General page, and the button set (`organization.buttons`, C-28.FR-8) and the default Notification
+  rules (`organization.notification_rules`, C-31.FR-2) on the page Alert handling.
 - **C-20.FR-2** Changing Severity levels or Instance labels affects later evaluations only and never changes the status
   of an open Alert Group.
 - **C-20.FR-3** Admins edit the outbound address policy (standard or strict) and its lists of allowed and denied
@@ -53,6 +57,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   signed-in identity, so that the UI can label the presets; an update that omits one keeps it. A change applies to
   Snoozes set afterwards and never moves one already set; Root messages show the new labels from their next re-render
   (C-10.FR-18).
+  _Revised for L2 (2026-10-26):_ the start of the working day is also the start of the Organization's Working hours
+  (C-25.FR-9).
 
 ## UI
 

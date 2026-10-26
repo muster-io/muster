@@ -29,6 +29,10 @@
   a Destination; a bridge may declare group mentions in `info`, which Muster sends as tokens the bridge renders; Muster
   drops its copy of `info` when a bridge answers again after being unreachable, and the Leader re-reads every bridge's
   `info` once its copy is older than `bridge.info_max_age`
+- Amended: 2026-10-26 — with the L2 PRD (journal D559, D560): the envelope of a Root message may also carry a structured
+  `layout` beside its CommonMark body, with plain-text values, the Alert Group's number apart from its title, the Alerts
+  listed with their total, labels as key and value, and people as references to the Mentions, so that a bridge may
+  render the message natively instead of translating markup; additive in version 1
 
 ## Context
 
@@ -96,7 +100,11 @@ a body in CommonMark, the buttons, the Mentions and whether the message is Loud.
 between the heading and the buttons — the environment, labels, summary, Alerts, links, notices and footer — rendered
 from the Route's templates in CommonMark, with alert data escaped for CommonMark (output safety stays Muster's, as in
 ADR-0005). Muster shortens the body below `max_body_length`, counted in code points; the bridge makes the final cut
-safely for its markup and says when it did.
+safely for its markup and says when it did. From L2 a Root message also carries the same content as a structured
+`layout` — plain-text values that the bridge escapes itself, the number apart from the title because `#N` becomes a
+hashtag in some messengers, the Alerts with their total so that the bridge can cut further and count the rest, labels
+as key and value, and people as references to the envelope's Mentions — and a bridge renders either the body or the
+layout; a bridge that ignores `layout` is unaffected (journal D559, D560).
 
 **Buttons.** Each button has a label, a style hint — `primary`, `danger`, `neutral` or `success`, which a bridge maps to
 the closest style its messenger has or ignores — and opaque data of at most 64 ASCII bytes: the action id, the key id

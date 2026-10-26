@@ -127,6 +127,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   Alert, never a table: tables break words on phones (F-020). The label sections of C-12.FR-1 (items 4 to 6) are inside
   an expandable blockquote (`<blockquote expandable>`), collapsed until a person opens it. Rich Messages
   (`sendRichMessage`, F-019) are not used in L1.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the Root message follows the compact layout of C-29.FR-4: its fields as
+  lines, one line of key labels instead of the blockquote of label sections, and the Alerts still never a table.
 
 ## UI
 

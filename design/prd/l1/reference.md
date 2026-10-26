@@ -4,12 +4,16 @@
 
 Tables that several capabilities share. A capability's requirements point here instead of repeating a table; the
 capability named in each row is the one that implements it. Values of the form `area.setting` are defaults from
-[defaults.md](defaults.md).
+[defaults.md](defaults.md). The capabilities of L2 (`C-25` onwards, under [`l2/`](../l2/)) add their rows here too:
+where a table of L1 is checked against the code, such as the Roles and Permissions and the metrics catalogue, their
+rows stand in a table of their own until the story that implements them moves them into it.
 
-Contents: [Loud and Quiet](#loud-and-quiet) · [Buttons and links by status](#buttons-and-links-by-status) ·
+Contents: [Loud and Quiet](#loud-and-quiet) · [Lifecycle events added in L2](#lifecycle-events-added-in-l2) ·
+[Transports](#transports) · [Buttons and links by status](#buttons-and-links-by-status) ·
 [Banners, warnings and notices](#banners-warnings-and-notices) ·
 [Documentation links](#documentation-links) · [Roles and Permissions](#roles-and-permissions) ·
-[Internal alerts](#internal-alerts) · [Metrics catalogue](#metrics-catalogue) · [Chart rules](#chart-rules)
+[Internal alerts](#internal-alerts) · [Metrics catalogue](#metrics-catalogue) · [Chart rules](#chart-rules) ·
+[Metrics added in L2](#metrics-added-in-l2)
 
 ## Loud and Quiet
 
@@ -24,20 +28,24 @@ outgoing webhook events (C-15.FR-2).
 Mentions are symbolic: `owner`, `previous_owner`, or the name of a Destination setting of C-12.FR-8 (`new_alert_group`,
 `new_alerts`, `reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent`), which each Destination turns into real
 Mentions. A Reopen into acknowledged mentions only the Owner, whatever the Destination's settings.
+_Revised for L2 (2026-10-26):_ from L2 these names are the Loud events of a Destination's Mention entries
+(C-28.FR-1), which add `storm_started`, and `paged` names the people that an Escalation step Pages, listed in a field
+of its Timeline entry (C-32.FR-9).
 
 Delivery adds the rows below for one Destination (C-11). They are not lifecycle events: those about one Alert Group are
 recorded in its Timeline with the kind `delivery`, and none is sent as an outgoing webhook event.
 
 | Delivery event | Loud or Quiet | How it appears | Mentions |
 |---|---|---|---|
-| Publication into a newly added Destination | Quiet | new Root message | — |
-| Storm summary, first publication | Loud | new message | `new_alert_group` |
+| Publication into a newly added Destination — added to a Route, from L2 also to a Team, by "Also to the Teams from the label" turned on or by a changed Severity condition (C-26.FR-6) | Quiet | new Root message | — |
+| Storm summary, first publication | Loud | new message | `new_alert_group`; from L2 `storm_started` (C-28.FR-7) |
 | Storm summary updates and final state | Quiet | message update | — |
 | Gradual publication after a Storm | Quiet | new Root messages | — |
 | Delivered late (resolved while its first Publication waited for a `RetryAfter` or for `Transient` retries within the budget) | Quiet | new Root message with a note | — |
 | Publication after a Broken Destination recovers | Loud if the Alert Group is firing, otherwise Quiet | new Root message | `new_alert_group` when Loud |
 | Root message update after a Broken Destination recovers | Quiet | one edit to the current state | — |
-| Thread replies that came due while a Destination was Broken | not sent | — | — |
+| Thread replies that came due while a Destination was Broken, from L2 Pages among them (C-32.FR-10) | not sent | — | — |
+| Mention not delivered: a Mention entry names a person without an Account link in the Destination's Identity space (C-28.FR-3), from L2 | Quiet | Thread reply "Mention not delivered: …" | — |
 | Alert Group that resolved while its Destination was Broken, never published there | not published | Timeline and UI only | — |
 | Republication after a deleted Root message | Quiet | new Root message with a note; Thread starts over | — |
 | Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here"; for a Bridge Root message past its edit window, a Thread reply with the same text (C-22.FR-9); a Bridge Publication whose answer was lost before the Destination left is not withheld but posted again with its key, carrying the final text (C-22.FR-6): a replayed message is edited to it, otherwise the new message is the final one and a possible duplicate is recorded | — |
@@ -52,6 +60,46 @@ a Mention" (C-13.FR-8); a Mention also makes the person a follower of the Thread
 where its bridge declares `quiet_messages`, and otherwise as an ordinary message without Mentions (C-22.FR-6). Slack
 cannot send a message without a notification: whom a new message notifies follows each member's settings for the
 channel and the Thread, so Quiet means "without a Mention" there too (C-24.FR-6).
+
+## Lifecycle events added in L2
+
+The lifecycle events that the capabilities of L2 record, with the columns and meaning of the table of C-09.FR-22, and
+the capability that records each. Outgoing webhooks in events mode receive them one to one (C-15.FR-2), except
+`escalation_webhook`, which goes only to the outgoing webhook Destination its step names (C-32.FR-13). The events of L1
+keep their rows; L2 changes two of them: `unclaimed` is also recorded once every Escalation chain started on an Alert
+Group has run out (C-32.FR-7), and an Acknowledge through a Notification gateway records `acknowledged` with the
+Transport `gateway` (C-30.FR-6). The Timeline kind `escalation` is new and joins the filter of the Timeline
+(C-09.FR-14). Lifecycle events of the later part of L2 — Maintenance windows, Attach and Detach — are added with it.
+
+| Event | When | Loud or Quiet | Mentions | Timeline kind | In a messenger (C-11) | Capability |
+|---|---|---|---|---|---|---|
+| `team_joined` | a Team joins the Teams of the Alert Group (C-25.FR-6) | Quiet | — | `alerts` | Root message update | C-25 |
+| `unknown_team_value` | an Alert's Team label names no Team, once per value (C-25.FR-7) | Quiet | — | `system` | nothing | C-25 |
+| `destination_joined` | the Alert Group reaches a Destination after its first Publication elsewhere, while it is firing (C-26.FR-5) | Loud | `new_alert_group` | `system` | new Root message in that Destination | C-26 |
+| `destination_joined` | the same, while it is acknowledged or snoozed | Quiet | — | `system` | new Root message in that Destination | C-26 |
+| `paged` | an Escalation step, or an action of a Notification rule, Pages people, a Team or everyone in the chat by Mention (C-32.FR-9) | Loud | `paged` (the people), or the Team mention or token of the step | `escalation` | Thread reply in the Threads of the chain (C-32.FR-8) | C-32 |
+| `paged` | the same by a call through a Notification gateway (C-30.FR-4) | Quiet | — | `escalation` | nothing; the gateway calls | C-30, C-32 |
+| `page_not_delivered` | a Page reached its person nowhere (C-32.FR-10), or a call ended Not delivered (C-30.FR-7) | Quiet | — | `escalation` | nothing; the Thread reply of the Page already names the person where it could | C-30, C-32 |
+| `escalation_step_skipped` | a step is skipped, with its reason (C-32.FR-14) | Quiet | — | `escalation` | nothing | C-32 |
+| `assignees_changed` | the Assignees change (C-32.FR-12) | Quiet | — | `escalation` | Root message update | C-32 |
+| `escalation_webhook` | a step sends to an outgoing webhook (C-32.FR-13) | Quiet | — | `escalation` | nothing; sent only to the outgoing webhook Destination of the step | C-32 |
+
+## Transports
+
+The way a Command reaches Muster, recorded with every Command in the Timeline and the Audit log (C-10.FR-3) and counted
+in `muster_commands_total{transport}`.
+
+| Transport | Commands from | Since |
+|---|---|---|
+| `ui` | the web UI | L1 |
+| `api` | the API, with a Personal access token or a Service account token | L1 |
+| `mattermost`, `telegram`, `slack`, `bridge` | presses and, through Bridges, Text commands | L1 |
+| `system` | Muster itself: system transitions, from L2 also the steps of Escalation chains | L1 |
+| `gateway` | an acknowledgement reported by a Notification gateway, only while nobody owns the Alert Group (C-30.FR-6) | L2, 0.2.0 |
+| `mcp` | the MCP server, with a Personal access token (ADR-0016) | L2, specified later |
+
+The Audit log also records `cli` for the CLI commands that take `--actor` (C-03.FR-14); it is not a Transport of
+Commands.
 
 ## Buttons and links by status
 
@@ -81,6 +129,11 @@ bridge declares `buttons`, with the style hints Ack and "Still on it" `primary`,
 the longest; without buttons, a Root message that is not resolved names the Text commands of its status in a line "Reply
 in the Thread: …" ("Reply in the Thread, mentioning the bot: …" when the bridge forwards only those) when the bridge
 forwards Thread messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
+
+_Revised for L2 (2026-10-26):_ a Destination's button set (C-28.FR-8) — the Organization's, which shows all of them by
+default, or its own — chooses which of these buttons its Root messages show: Acknowledge with Unacknowledge, Resolve,
+each Snooze duration and each Snooze preset; Unsnooze is not part of the set. The buttons of Reminders, the Text
+commands of Bridges, the UI and the API keep every action.
 
 ## Banners, warnings and notices
 
@@ -146,6 +199,20 @@ forwards Thread messages, and otherwise offers only the link to Muster (C-22.FR-
 | Severity levels | unmapped values seen | "These values have no mapping and count as warning: {values}." | C-20 |
 | Keyring | an older key is no longer needed | "Key {id} is no longer used and can be removed from MUSTER_SECRET_KEYS." | C-20 |
 | Keyring | activation refused | "Replicas {names} do not hold key {id} yet." | C-20 |
+| Teams page | values of the Team label that name no Team | "Unknown values of {team label}: Alerts arrived with these values, but there is no such Team: no channels of a Team are added and nobody is Paged." | C-25 |
+| Team page, Team mention · Destination form, an unavailable Mention target | the Connection cannot mention a group | "Needs the scope usergroups:read" · "The bridge declares no group mentions" · "Telegram cannot mention everyone or groups" | C-25, C-28 |
+| Route form | "Also to the Teams from the label" on and the Team label not in the Group key | "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add {team label} to the key if each Team needs its own." | C-26 |
+| Route form | it names an Escalation chain and no Destination, and does not deliver to Teams | "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination." | C-32 |
+| Thread reply | a Mention entry names a person without an Account link | "Mention not delivered: {name} has no linked {messenger} account" | C-28 |
+| Thread reply | a Page of a person without an Account link | "Page not delivered: @{login} has no linked {messenger} account" | C-32 |
+| Thread reply | a Page by Mention | "Step {n}: {Mentions}, you are needed" and "Chain of the Route {Route} · On-call of {Team} {Schedule} · normal" (or "· important, again in {N} min") | C-32 |
+| Root message | not acknowledged while Escalation chains Page | "Assignees: {person} ({Team}), …" | C-29, C-32 |
+| Root message | acknowledged while Escalation chains ran | "Acknowledged by {user} ({Team}) · Escalation chains stopped" | C-29, C-32 |
+| Schedule page, "On call now" | warnings | "Gap: {from} – {to}" · "Disabled: @{login} in {Rotation layer}" · "@{login} is a Viewer" · "@{login} is not in the Team" · "Unreachable in {messenger}: no linked account." with "A call through the Notification gateway works." where it does | C-27 |
+| Schedule page, Overrides | always (hint) | "Any Responder of the Team; no messages." | C-27 |
+| Profile, Escalation steps, Notification rules | no Notification gateway exists | "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)" | C-30, C-31, C-32 |
+| Answer to a person in a call | an acknowledgement of an Alert Group someone owns · a resolved one | "Already taken by {name}" · "Already resolved" | C-30 |
+| Bridge Connection in the role `gateway` | Broken | "Broken since HH:MM: {reason}. Muster tries again every {interval}." | C-30 |
 
 ## Documentation links
 
@@ -286,8 +353,9 @@ with the C-03 sign-in story (P-42).
 | `organization:write` | Change Organization settings, the outbound address policy and the outgoing heartbeat | ✓ | — | — |
 | `audit-log:read`, `system-status:read` | Read the Audit log and the System status | ✓ | — | — |
 
-Without a Permission, for every signed-in identity: own profile, TOTP, Account links and Personal access tokens (the
-operations that change them need the web session, C-03.FR-27), the profile's short list of Connections to link an
+Without a Permission, for every signed-in identity: own profile, TOTP, Account links and Personal access tokens, and
+from L2 own Notification rules, contacts of Notification gateways and iCal feed (the operations that change them need
+the web session, C-03.FR-27), the profile's short list of Connections to link an
 account through (only the id, the name and the messenger of each, C-18.FR-10), the basic read of the `organization`
 resource (the outgoing heartbeat URL masked), system notices and live updates. A bulk command needs the Permission of
 the command it runs. A Personal access token can only narrow its owner's Permissions; a Service account has its Role's
@@ -300,6 +368,23 @@ keys. Reads return only whether a value is set and when it last changed; Audit l
 test results, previews, Timeline errors and logs show it masked. Outgoing webhook URL and header templates are readable
 by everyone who can read Destinations because they contain only references (`{{ .Secrets.<name> }}`), never the values
 (C-15.FR-10). A Personal access token can only narrow its owner's Permissions.
+
+### Permissions added in L2
+
+The capabilities of L2 add these Permissions, with the same rules. Each joins the table above, the `Permission` schema
+and the allocation that the migrations seed in the story that implements it; until then this table holds them.
+Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and changing another
+User's Notification rules and removing their gateway contacts need `users:read` and `users:write`.
+
+| L2 Permission | Allows | Admin | Responder | Viewer | Capability |
+|---|---|---|---|---|---|
+| `teams:read` | Read Teams, the people in them, their Team mentions, Destinations and Working hours, and the Team label values seen without a Team | ✓ | ✓ | ✓ | C-25, C-26 |
+| `teams:write` | Create, edit and delete Teams, the people in them, their identity provider entries, Team matchers, Team mentions, Working hours, Destinations and Escalation chains | ✓ | — | — | C-25, C-26, C-32 |
+| `schedules:read` | Read Schedules, Rotation layers, Overrides, the On-call, gaps and "On call now" | ✓ | ✓ | ✓ | C-27 |
+| `schedules:write` | Create, edit and delete Schedules and Rotation layers, and choose a Team's main Schedule | ✓ | — | — | C-27 |
+| `schedule-overrides:write` | Create, change and delete Overrides, when the caller is in the Team or is an Admin (C-27.FR-6) | ✓ | ✓ | — | C-27 |
+| `escalation-chains:read` | Read Escalation chains | ✓ | ✓ | ✓ | C-32 |
+| `escalation-chains:write` | Create, edit and delete Escalation chains | ✓ | — | — | C-32 |
 
 ## Internal alerts
 
@@ -316,6 +401,16 @@ Internal alert and a chart rule for the same condition share one name and one ru
 | `MusterDestinationBroken` | critical | a Destination is Broken | `destination`, `destination_name` | C-11 |
 | `MusterTemplateError` | warning | a template of a Route or Destination keeps failing | `route` and `route_name`, or `destination` and `destination_name`; `template` | C-12, C-15 |
 | `MusterOIDCSecretExpiring` | warning | the OIDC client secret expires within `oidc.secret_expiry_lead` | — | C-19 |
+
+### Internal alerts added in L2
+
+Each joins the registry, with a chart rule of the same name ([below](#chart-rules-added-in-l2)) and a runbook page, in
+the story that implements it.
+
+| Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
+|---|---|---|---|---|
+| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap that starts within `schedule.gap_alert_horizon` | `schedule`, `schedule_name`, `team`, `team_name` | C-27 |
+| `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken | `connection`, `connection_name` | C-30 |
 
 ## Metrics catalogue
 
@@ -395,3 +490,30 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | `MusterTemplateError` | warning | `sum by (route, destination, template) (increase(muster_template_errors_total{job="muster"}[15m])) > 0` | 0m | templates failed in the last 15 minutes |
 | `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2` | 5m | a replica's clock is off |
 | `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20` | 0m | a burst of failed sign-ins |
+
+### Chart rules added in L2
+
+Each joins the table above, the chart and the rule unit tests in the story that implements it; their thresholds and
+windows are _provisional_ (P-88), as those of L1 were.
+
+| Rule | Severity | Default expression | For | Meaning |
+|---|---|---|---|---|
+| `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule has a gap ahead; the backup for the Internal alert |
+| `MusterNotificationGatewayBroken` | critical | `max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1` | 5m | a Notification gateway is Broken |
+
+## Metrics added in L2
+
+The metrics that the capabilities of L2 add. Each joins the [metrics catalogue](#metrics-catalogue) and the registry,
+with the entity labels it needs in the label policy of ADR-0014, in the story that implements it; until then this table
+holds them, outside the catalogue that the code checks. The value `gateway` joins the `transport` values of
+`muster_commands_total` (C-30.FR-10).
+
+| Metric | Type | Labels | Exported from |
+|---|---|---|---|
+| `muster_team_info` | gauge | `team`, `name` | C-25 |
+| `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
+| `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while a gap starts within `schedule.gap_alert_horizon` | C-27 |
+| `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |
+| `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) | C-30 |
+| `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
+| `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) | C-32 |

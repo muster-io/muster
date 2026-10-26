@@ -54,6 +54,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   the user is created), and the proxy of FR-19. Users are created on first sign-in (FR-28).
   While the expiry date is less than `oidc.secret_expiry_lead` away, the OIDC settings page shows the expiry warning;
   the Internal alert for it is C-19.FR-5.
+  _Revised for L2 (2026-10-26):_ every entry of the mapping names a group and, optionally, the claim it reads — by
+  default the groups claim of these settings — so that any identity provider works without a preset, such as GitLab with
+  its claims `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer` (issue #369). A claim is read
+  from the ID token, then from userinfo. An entry `a/b/*` matches `a/b` and every group below it, at `/` boundaries
+  only, so `a/bx` does not match; every other entry matches exactly, and there are no globs or regular expressions. The
+  highest Role found over all entries wins. The mapping editor suggests the claims that discovery lists in
+  `claims_supported`. Teams map groups the same way (C-25.FR-4).
 - **C-03.FR-6** Saving OIDC settings with an empty mapping and no Role for unmatched users shows the warning
   `nobody_can_sign_in`, "Nobody will be able to sign in through OIDC". The warning `groups_claim_missing` says that no
   sign-in has carried the groups claim yet, so group mappings have not matched anyone yet. It exists only while no
@@ -64,8 +71,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   sign-in without the claim changes nothing, since identity providers leave it out for a user in no group. Saving
   another groups claim, issuer, client ID or scopes forgets that the claim was seen. It has its own text, which names
   the groups claim (reference.md). The settings carry the warning kinds, with `secret_expiring` of FR-5.
+  _Revised for L2 (2026-10-26):_ the warning `groups_claim_missing` is kept for each claim that an entry names, the
+  groups claim included: it names that claim, is raised by a check that finds it not advertised, and is cleared for good
+  by a sign-in that carries it (C-03.FR-5).
 - **C-03.FR-7** A refused OIDC sign-in shows "You have no access to Muster. Contact your administrator." and writes an
   Audit log entry with the groups from the claim.
+  _Revised for L2 (2026-10-26):_ the Audit log entry `session.oidc_refused` lists the values of every claim the sign-in
+  read for the mapping (C-03.FR-5).
 - **C-03.FR-8** OIDC needs the back channel: Muster fetches discovery and key sets and exchanges the code itself,
   through the outbound HTTP package (C-02.FR-20). The OIDC settings page offers a connection check that fetches
   discovery and shows the scopes a sign-in requests and whether the IdP offers `offline_access` (FR-30); an IdP that
@@ -116,6 +128,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Service account token used, and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, or `cli` for the
   `--actor` CLI commands). Each capability adds its own entry types. The Audit log is append-only, kept for
   `retention.audit_log`, and every entry is also written to stdout as a registered log event.
+  _Revised for L2 (2026-10-26):_ the Transport `gateway` joins them for acknowledgements through a Notification gateway
+  (C-30.FR-6), and `mcp` comes with the MCP server later in L2 ([reference.md](reference.md#transports)).
 - **C-03.FR-15** The Audit log page lists entries newest first, filtered by time range, actor, action type and resource.
 - **C-03.FR-16** The SPA is served with a Content Security Policy and the usual security headers.
 - **C-03.FR-17** The documentation contains a complete Keycloak walkthrough (client, groups mapper, claim, and the
@@ -225,6 +239,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   re-checked in the background:
   an OIDC session ends at most `auth.oidc_fallback_session_lifetime` after sign-in, and the user's Personal access
   tokens follow the grace rule of C-04.FR-8, which applies only to such users.
+  _Revised for L2 (2026-10-26):_ on success, the people in Teams also follow the identity provider entries of the Teams
+  (C-25.FR-4), with or without `oidc.sync_role`; without an offline token they follow them only at sign-in.
 - **C-03.FR-31** The Organization always keeps an active Admin: disabling, deleting or giving a lower Role to the last
   active User with the Admin Role is refused with `409` and the code `last_admin`, whoever asks, that Admin included.
 - **C-03.FR-32** Role sync from the identity provider (`oidc.sync_role`, at an OIDC sign-in or a background re-check,
@@ -243,6 +259,9 @@ local); Access → OIDC settings with the group mapping editor, the client secre
 that the last active Admin keeps the Role, the proxy form and the connection check; Organization → Security with the
 TOTP policy; Organization → Audit log. The main navigation has one "Access" entry whose sub-navigation holds Users,
 Service accounts (C-04) and OIDC settings.
+
+_Revised for L2 (2026-10-26):_ the group mapping editor has a claim for each entry and suggests the claims of discovery
+(C-03.FR-5).
 
 ## API surface
 
@@ -332,6 +351,11 @@ Permissions); `oidc-settings` (read, update); `oidc-settings/checks` (create →
   the fake Mattermost gets the Loud message "The owner was disabled — this Alert Group has no owner now.", and its ack
   timeout starts over; enabling the user again leaves it firing. Deleting a user does the same with `owner_deleted` and
   "The owner was deleted — this Alert Group has no owner now."
+- **C-03.AC-28** _Added for L2 (2026-10-26)._ Against the fake OIDC server in its GitLab mode, the entries
+  `https://gitlab.org/claims/groups/owner` `example/platform/infra` → Admin and `groups` `example/platform/*` → Viewer
+  make an Owner of `example/platform/infra` an Admin and a person in `example/platform/apps` a Viewer, whether the claim
+  comes in the ID token or in userinfo; `example/platformx` matches neither, and a person whom they refuse gets a
+  `session.oidc_refused` entry with the values of both claims.
 
 ## Related ADRs
 

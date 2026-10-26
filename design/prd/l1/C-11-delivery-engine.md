@@ -37,12 +37,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   free. The interactive path serves only calls a person waits for; the Broken probe never uses it (FR-9). Through the API
   such a call answers `503` with `Retry-After`; a Destination test records the step with the error class `limited`
   (C-16).
+  _Revised for L2 (2026-10-26):_ a Page by Mention is a Thread reply that the delivery worker sends (C-32.FR-9); calls
+  through a Notification gateway have a sender of their own, outside reconciliation (C-30.FR-4), and with the
+  interactive path are the only callers of the gateway; Muster sends no direct messages to Page people.
 - **C-11.FR-3** Each Destination and each Connection has a limiter; a delivery waits for both (outgoing webhooks have
   only the Destination's). Every call takes one token, a send and an edit alike, since Telegram counts both against one
   budget per chat (C-14.FR-2). The limiters are shared by all replicas: their token buckets live in PostgreSQL, so
   adding a replica never raises the rate. Defaults are set per type (C-13 to C-15), at half of the messenger's
   documented limit where one exists. Urgent Alert Groups go first in the queue but never bypass a limiter. Rate-limit
   pressure delays updates; it never drops them.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the Urgent Alert Groups that go first are the critical ones (C-26.FR-8).
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again
@@ -58,6 +62,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   first publication and has no ack timeout; an Alert Group's ack timeout starts at its own Publication.
   `muster_storm_active{route}` shows the state. Storms apply to messengers and to the template mode of outgoing
   webhooks; the events mode is not subject to them and receives every event (C-15.FR-2).
+  _Revised for L2 (2026-10-26):_ the Destinations that a Route reaches through Teams take part in its Storm (C-26.FR-2),
+  and each pair of Route and Destination has a Storm summary of its own that counts only the Alert Groups sent to that
+  Destination; its first publication mentions the entries for `storm_started` (C-28.FR-7); a Storm summary starts no
+  Escalation chain, and the chains of an Alert Group it stands for start at its own Publication (C-32.FR-5).
 - **C-11.FR-7** Loudness follows the lifecycle event tables (C-09.FR-22) and the
   [Loud/Quiet table](reference.md#loud-and-quiet) of delivery events. A Loud event is always a new message — a Root
   message or a Thread reply; an edit is always Quiet, since an edit notifies nobody in either messenger
@@ -100,6 +108,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   still pending for its deleted Destinations, which end as Not delivered. An outgoing webhook in events mode has no
   Root message: deleting it abandons its queued events, which end as Not delivered, sends no final event and wipes its
   secrets at once (C-15.FR-12).
+  _Revised for L2 (2026-10-26):_ a Destination named on a Team, one that "Also to the Teams from the label" turned on
+  reaches, and one that a changed Severity condition now reaches receive the open Alert Groups the same way, Quietly; a
+  changed condition never removes a Root message (C-26.FR-6).
 - **C-11.FR-15** Delivery rows carry `next_attempt_at` and a lease, are claimed by any replica, and make HTTP calls
   outside database transactions through the outbound HTTP package.
 - **C-11.FR-16** The delivery state of each Alert Group and Destination — pending, delivered (with a link to the message
@@ -122,6 +133,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   lifecycle event tables says (C-09.FR-22, C-10.FR-15, C-17.FR-11), with the loudness of each row and the Mentions each
   Destination configures for it (C-12.FR-8); delivery's own events follow the
   [Loud/Quiet table](reference.md#loud-and-quiet).
+  _Revised for L2 (2026-10-26):_ the Mentions come from each Destination's Mention entries for the event (C-28.FR-3),
+  and the lifecycle events include those of the [L2 table](reference.md#lifecycle-events-added-in-l2).
 - **C-11.FR-21** Delivery events — what happens while delivering to a Destination, such as a Publication, the rows of
   the [Loud/Quiet table](reference.md#loud-and-quiet), a possible duplicate (FR-12), rejected markup (FR-8), Not
   delivered with its error (FR-10), a late Publication (FR-11), a deleted Root message (FR-13), a Thread not attached

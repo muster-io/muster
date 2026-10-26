@@ -48,6 +48,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   id, the workspace's name and id and the app's id. One Slack app serves one Slack Connection: in Socket Mode, two
   Connections on one app, of one installation or of two, would share its presses at random (FR-9), and in `http` mode
   an app has one Request URL. Deleting a Slack Connection follows C-13.FR-6.
+  _Revised for L2 (2026-10-26):_ the bot may also have the scope `usergroups:read`, which only Team mentions and user
+  group entries need (C-25.FR-8, C-28.FR-2); without it they are unavailable and nothing else changes. The manifest of
+  the documentation adds it, and the upgrade notes of 0.2.0 say that an installed app is reinstalled to get it.
 - **C-24.FR-2** The connection check (interactive) works in steps and shows the latency and path (direct or through the
   proxy) of each: `token` — `auth.test` with the bot token, which shows the bot's name and the workspace (F-072) and
   fails with `token_invalid` for `invalid_auth`, `not_authed`, `account_inactive`, `token_revoked` and `token_expired`,
@@ -66,6 +69,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   https://slack.com/api/auth.test` without `Authorization` through the draft's proxy, which passes on a `200` JSON
   answer `ok: false` with the `error` `not_authed` (F-070) and otherwise names what answered: `not_slack` (an answer
   that is not that JSON), `unexpected_status`, and the network codes of the other steps.
+  _Revised for L2 (2026-10-26):_ the step `scopes` reports `usergroups:read` as present or missing without failing, and
+  the Connection keeps the answer for the forms that need it.
 - **C-24.FR-3** A Slack Destination has a Connection, a channel id — a public or private channel, `C…` or `G…`; any
   other id, such as a direct chat's `D…` or a user's `U…`, to which a message would go as a direct message (F-096), is
   refused — its Mention settings (C-12.FR-8) and its limiter (`destination.slack.limiter`), which counts sends and
@@ -99,6 +104,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   use the `markdown` block, which the server turns into `rich_text` (F-081). Thread replies and Storm summaries follow
   the same rules — their text in a `section`, a short `text`, no attachment, and a Reminder's buttons in an `actions`
   block — and a test message is laid out as a Root message.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the blocks follow the compact layout of C-29.FR-4, with the fields of its
+  item 2 as the `fields` of one `section`.
 - **C-24.FR-5** A Root message carries the buttons of its status
   ([reference.md](reference.md#buttons-and-links-by-status)), a Reminder "Still on it" and "Unack" (C-17.FR-4). Slack
   has two button styles, `primary` (filled green) and `danger` (filled red), and asks for one `primary` per set (F-074):
@@ -119,6 +126,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   Destination's Mention settings ask. A Slack Destination takes nobody, `channel`, `here` and chosen users, and refuses
   `all` and messenger groups. The footer names a User linked for the Connection by `<@U…>`, in edits and new messages
   alike (C-12.FR-12).
+  _Revised for L2 (2026-10-26):_ a Slack Destination also takes `everyone` (`<!everyone>`) and, with `usergroups:read`,
+  user groups and Team mentions as `<!subteam^ID>` (C-28.FR-2).
 - **C-24.FR-7** The adapter escapes alert data for Slack's mrkdwn (C-12.FR-7): `&`, `<` and `>` become `&amp;`,
   `&lt;` and `&gt;`, so that nothing in alert data becomes a link, a Mention, `<!channel>` or `<!here>` (F-097); `@`
   gets the zero-width space of C-12.FR-7; and since mrkdwn has no escape for `*`, `_`, `~` and `` ` `` (F-097), each of

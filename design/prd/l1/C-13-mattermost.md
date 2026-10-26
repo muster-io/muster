@@ -72,6 +72,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   server's post length limit of 16,383 characters (F-057): the adapter declares that limit, so a longer Root message is
   shortened as C-12.FR-11 says — its Alert list is cut and ends with "…and N more" — and the Mentions, the link to
   Muster and the footer always stay; a Mentions line too long to fit loses whole Mentions from its end.
+  _Revised for L2 (2026-10-26):_ from 0.2.0 the attachment holds the compact layout of C-29.FR-4, with the fields of its
+  item 2 as the attachment's `fields`.
 - **C-13.FR-4** Each button carries only an opaque action id signed with the button-signature key and its key id. A
   press arrives at `MUSTER_INGEST_URL` as a request from the Mattermost server (F-023); Muster verifies the signature
   with the key it names, checks that the press's `post_id` and `channel_id` belong to the Root message or Thread reply
@@ -127,10 +129,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   an edit notifies nobody, even one that adds a Mention (F-029). A Quiet new message carries no Mention; a Loud one
   carries the Mentions the event asks for: a Loud Root message or Storm summary as the first line of its attachment's
   text, a Loud Thread reply in its `message` (FR-3, F-056, F-113).
+  _Revised for L2 (2026-10-26):_ a Mattermost Destination also mentions Mattermost groups, as `@` and the group's name,
+  for its group entries and for the Team mentions of Teams (C-25.FR-8, C-28.FR-2).
 - **C-13.FR-9** The shared Destination pages, reused by C-14 and C-15: the Destinations list (all types, with health,
   Routes and the Broken banner), the Destination page with its health, its Routes, the Mention and limiter sections and,
   for types that have a Destination check, "Check"; and the delivery state per Destination on the Alert Group page
   (C-11.FR-16).
+  _Revised for L2 (2026-10-26):_ from L2 the Destination page also has the Mention entries and the button set
+  (C-28.FR-10), and the Route and Team forms name Destinations with Severity conditions (C-26.FR-1).
 - **C-13.FR-10** The Destination check of a Mattermost Destination verifies that the Connection's token works and that
   the bot is a member of the channel. It runs when the Destination is saved (FR-2) and from "Check" on the Destination
   page — both through the interactive path, because a person waits for them — as the Broken probe when nothing is

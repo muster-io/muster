@@ -29,15 +29,22 @@ FR-11.
   an auto-unacknowledge. Acknowledge, Snooze and Resolve stop it. An Alert Group that has not been published — a Route
   without Destinations, or only Broken ones — has no ack timeout until its first Publication. For an outgoing webhook
   in events mode, which has no Root message, the delivered `created` event counts as the Publication.
+  _Revised for L2 (2026-10-26):_ where Escalation chains run on an Alert Group, the first chain that starts stops its
+  ack timeout, and when the Alert Group becomes firing again the ack timeout starts over only if none of its chains
+  starts (C-32.FR-6); the chains share the points above (C-32.FR-5).
 - **C-17.FR-2** Notices come at doubling intervals from the Route's first interval F (`route.ack_timeout`) — F, 2F and
   4F, that is F, 3F and 7F after the start — and there are at most three. They are Loud Thread replies whose text is the
   Route's ack timeout template (C-12); Mentions follow each Destination's setting. The ack timeout can be turned off per
   Route; it is a Route policy field added here, with the profile values of defaults.md.
+  _Revised for L2 (2026-10-26):_ the Mentions are those of each Destination's Mention entries for `ack_timeout`
+  (C-28.FR-1).
 - **C-17.FR-3** After the last notice the Alert Group is Unclaimed: the Root message and the UI show "Nobody has taken
   this", and the Alert Group list gains an Unclaimed filter, column and badge. Unclaimed ends when the Alert Group stops
   being firing — it is acknowledged, snoozed, or resolved by a person or by the system — and the status change that ends
   it removes the mark from the Root message. If the Alert Group becomes firing again, its ack timeout starts over and it
   is Unclaimed again only after the last notice of that ack timeout.
+  _Revised for L2 (2026-10-26):_ an Alert Group with Escalation chains is Unclaimed once every chain started on it has
+  run out without an acknowledgement, and records `unclaimed` then (C-32.FR-7).
 - **C-17.FR-4** Reminders follow `route.reminders`: the first comes one base interval after the acknowledgement, and
   each next interval doubles up to the cap. Each is a Loud Thread reply mentioning the Owner, with the buttons "Still on
   it" and "Unack". "Still on it" is recorded in the Timeline and does not reset the interval; "Unack" runs
@@ -74,6 +81,9 @@ FR-11.
   | `reminder_answered` | "Still on it" from a messenger, the UI or the API | Quiet | — | `timers` | nothing; the press is answered privately |
   | `auto_unacknowledged` | auto-unacknowledge (FR-5) | Loud | `owner` (the Owner before the transition, who loses the Alert Group; C-09.FR-22) | `status` | Thread reply with the reason |
   | `notices_missed` | overdue notices of one Alert Group collapsed after downtime (FR-7) | Loud | as the notices it stands for: `ack_timeout` for ack timeout notices, `owner` for Reminders | `timers` | one Thread reply saying how many were missed |
+
+  _Revised for L2 (2026-10-26):_ `unclaimed` is also recorded when the last Escalation chain of an Alert Group runs out
+  (C-32.FR-7).
 
 ## UI
 
