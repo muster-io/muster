@@ -4,7 +4,7 @@ title: Teams, people added by hand, the owning Team of Routes and Destinations, 
 capability: C-25
 kind: be
 layer: L2
-depends_on: []
+depends_on: [S-166]
 covers: [C-25.FR-1, C-25.FR-2, C-25.FR-3, C-25.FR-9, C-25.FR-10, C-25.FR-11, C-25.FR-12, C-25.AC-6, C-25.AC-8, C-25.AC-9, C-25.AC-11, C-25.AC-12, C-03.FR-13, C-08.FR-1, C-20.FR-1, C-20.FR-9]
 files_touched:
   - api/openapi.yaml
@@ -46,6 +46,7 @@ files_touched:
   - design/prd/l1/defaults.md
   - design/prd/L2.md
   - test/e2e/teams_test.go
+  - web/src/test/fixtures/destinations.ts
   - docs/concepts/teams.md
   - mkdocs.yml
   - docs/install/versions.md
@@ -153,6 +154,7 @@ issue: null
 - **Shared tables**: reference.md moves `teams:read` and `teams:write` from "Permissions added in L2" into the main
   table and the `Permission` schema; defaults.md marks `team.slug_format` and the rule of P-63 decided; L2.md §5.3
   moves P-63 and P-74 to "Decided since they were first listed".
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `owning_team` (null), so `make generate` leaves the TypeScript check of the web tests green.
 - **Settings**: `team.slug_format` (P-74), `team.working_hours`, `organization.working_hours`,
   `organization.workday_start`, `organization.time_zone`.
 - **Documentation**: the new page `docs/concepts/teams.md` — "What a Team is", "People" and "Working hours" — in the
@@ -245,7 +247,7 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 42 files the story is at the edge of the size signal; the Working hours of the Organization and of a Team are
+- With 43 files (the builder of S-166 included) the story is at the edge of the size signal; the Working hours of the Organization and of a Team are
   one rule (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
 
 ## Coverage

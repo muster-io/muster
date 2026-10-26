@@ -4,7 +4,7 @@ title: Teams list and Team page with people, identity provider groups and Workin
 capability: C-25
 kind: fe
 layer: L2
-depends_on: [S-115, S-117, S-112]
+depends_on: [S-115, S-117, S-118, S-121, S-112]
 covers: [C-25.FR-2, C-25.FR-3, C-25.FR-4, C-25.FR-9, C-25.AC-10, C-25.AC-11, C-26.FR-7, C-03.FR-5, C-20.FR-1, C-20.FR-9]
 files_touched:
   - web/src/routes/teams.index.tsx
@@ -12,6 +12,7 @@ files_touched:
   - web/src/routes/teams.$teamId.tsx
   - web/src/components/team-form.tsx
   - web/src/components/team-form.test.tsx
+  - web/src/test/fixtures/teams.ts
   - web/src/components/team-people.tsx
   - web/src/components/team-people.test.tsx
   - web/src/components/claim-entries-editor.tsx
@@ -92,6 +93,7 @@ issue: null
 - **Forms**: "Owning Team" (a select of the Teams with "None") in the section "Severity, Escalation chains and owner"
   of `route-severity-and-owner.tsx` and in `destination-form.tsx`, with the hint above; the Audit log names
   `/owning_team_id` "Owning Team", `/idp_entries` "Identity provider groups", `/working_hours` "Working hours".
+- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, new): `teamRead` builds a complete `Team` read with neutral values, overridable field by field, as S-166's builders do for Destinations and Connections; this story's tests and every later one build Team reads only through it, and a later story that adds a required field to the Team read (S-139) sets its neutral value there. This story waits for S-118 and S-121, which add Team fields before it.
 - **Documentation links** (`docs-links.json`): `page.teams` → `concepts/teams.md`, `field.team_idp` →
   `concepts/teams.md#membership-from-the-identity-provider`, `field.working_hours` → `concepts/teams.md#working-hours`;
   the anchors exist from S-115 and S-117.

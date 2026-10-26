@@ -16,7 +16,7 @@ part; this page joins them.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) · [C-28](#c-28) · [C-29](#c-29) · [L1 requirements revised for L2](#l1-requirements-revised-for-l2)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) · [C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [L1 requirements revised for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
 
@@ -46,9 +46,10 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22 Bridge | Bridge | 52 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093 | yes | 52 of 52 |
 | C-23 Request log | Bridge | 13 | S-088, S-089, S-090, S-097, S-100, S-101 | yes | 13 of 13 |
 | C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
-| C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124, S-125; open S-131, S-139, S-143, S-144, S-154 | in part | 17 of 26 |
-| C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-119, S-121, S-122, S-123, S-124; open S-140 | yes | 23 of 24 |
-| C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114; open S-140, S-143, S-144 | in part | 3 of 20 |
+| C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124, S-125, S-131, S-133, S-138, S-139, S-140, S-141, S-142, S-143, S-144; open S-154 | in part | 23 of 26 |
+| C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-119, S-121, S-122, S-123, S-124, S-140 | yes | 24 of 24 |
+| C-27 Schedules | L2 On call | 24 | S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137; open S-145, S-150, S-154, S-155 | yes | 21 of 24 |
+| C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114, S-138, S-139, S-140, S-165, S-141, S-142, S-143, S-144 | yes | 20 of 20 |
 | C-29 Compact message layout | L2 Teams | 16 | S-125, S-126, S-127, S-128, S-129, S-130; open S-155 | yes | 15 of 16 |
 
 ## C-01
@@ -907,23 +908,23 @@ the stories that implement and check its parts. A story that proves an NFR says 
 
 ## C-25
 
-[Teams](../prd/l2/C-25-teams.md) · L2 Teams · stories: S-115, S-116, S-117, S-118, S-163, S-119, S-120, S-121, S-124,
-S-125; later S-131, S-139, S-143, S-144, S-154
+[Teams](../prd/l2/C-25-teams.md) · L2 Teams, L2 On call (Team mentions) · stories: S-115, S-116, S-117, S-118,
+S-163, S-119, S-120, S-121, S-124, S-125, S-131, S-133, S-138, S-139, S-140, S-141, S-142, S-143, S-144; later S-154
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-25.FR-1 | S-115 (part), S-117 (part), S-118 (part) | open: S-139 | Team mentions; the Destinations, Schedules and chains of a Team are C-26, C-27 and C-32 |
-| C-25.FR-2 | S-115 (part), S-118 (part), S-119 (part), S-120 (part) | open: S-154 | the owning Team of Escalation chains and the filters of the lists of Schedules (S-131, S-135) and chains (S-154, S-158) |
+| C-25.FR-1 | S-115 (part), S-117 (part), S-118 (part), S-131 (part), S-139 (part) | open: S-154 | the Destinations of a Team are C-26 (S-121); its Escalation chains come with S-154 |
+| C-25.FR-2 | S-115 (part), S-118 (part), S-119 (part), S-120 (part), S-131 (part), S-135 (part) | open: S-154 | the owning Team of Escalation chains and the filter of their list (S-154, S-158) |
 | C-25.FR-3 | S-115 (part), S-119 (part) | complete |  |
 | C-25.FR-4 | S-116 (part), S-117 (part), S-119 (part) | complete | GitLab's role claims checked by the spike S-116 |
-| C-25.FR-5 | S-118 (part), S-163 (part), S-120 (part) | complete | the Team's slug on Internal alerts about a Team's object comes with `MusterScheduleGap` (S-133) |
+| C-25.FR-5 | S-118 (part), S-163 (part), S-120 (part), S-133 (part) | complete | the Team's slug under the Team label on `MusterScheduleGap` (S-133) |
 | C-25.FR-6 | S-118 (part), S-120 (part), S-125 (part) | complete |  |
 | C-25.FR-7 | S-118 (part), S-163 (part), S-120 (part) | complete |  |
-| C-25.FR-8 | — | open: S-139 | after the spike S-138; "How to mention the Team" on the Team page is S-143 |
+| C-25.FR-8 | S-138 (part), S-139 (part), S-140 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; Mentions of the Team in messages S-140; the bridge libraries S-141, S-142 |
 | C-25.FR-9 | S-115 (part), S-119 (part) | complete | Escalation steps limited to Working hours use them from S-154 |
-| C-25.FR-10 | S-115 (part), S-118 (part), S-121 (part) | open: S-131 | the refusal `team_in_use` for Schedules (S-131) and chains (S-154); P-64 confirmed with S-131 |
-| C-25.FR-11 | S-115 (part), S-117 (part), S-118 (part) | open: S-139 | Team mentions' locking and Audit log |
-| C-25.FR-12 | S-115 (part), S-117 (part), S-118 (part), S-124 (part) | open: S-144 | Team mentions per messenger |
+| C-25.FR-10 | S-115 (part), S-118 (part), S-121 (part), S-131 (part) | open: S-154 | the refusal `team_in_use` for chains (S-154); P-64 confirmed with S-131 |
+| C-25.FR-11 | S-115 (part), S-117 (part), S-118 (part), S-139 (part) | complete |  |
+| C-25.FR-12 | S-115 (part), S-117 (part), S-118 (part), S-124 (part), S-139 (part), S-144 (part) | complete |  |
 | C-25.FR-13 | S-163 (part), S-121 (part) | complete |  |
 | C-25.AC-1 | S-118 (part), S-163 (part) | complete |  |
 | C-25.AC-2 | S-118 | complete |  |
@@ -931,10 +932,10 @@ S-125; later S-131, S-139, S-143, S-144, S-154
 | C-25.AC-4 | S-117 | complete | the fake OIDC server's GitLab mode follows S-116's facts |
 | C-25.AC-5 | S-118 | complete |  |
 | C-25.AC-6 | S-115 | complete |  |
-| C-25.AC-7 | — | open: S-139 |  |
+| C-25.AC-7 | S-139 | complete |  |
 | C-25.AC-8 | S-115 | complete |  |
-| C-25.AC-9 | S-115 (part), S-118 (part) | open: S-131 | the Team with a Schedule |
-| C-25.AC-10 | S-119 (part), S-120 (part) | open: S-143 | the Team mention field of each Connection, or its reason |
+| C-25.AC-9 | S-115 (part), S-118 (part), S-131 (part) | complete |  |
+| C-25.AC-10 | S-119 (part), S-120 (part), S-143 (part) | complete |  |
 | C-25.AC-11 | S-115 (part), S-118 (part), S-119 (part), S-120 (part) | complete |  |
 | C-25.AC-12 | S-115 | complete |  |
 | C-25.AC-13 | S-163 (part), S-121 (part) | complete | "starts no Escalation chain" holds while chains do not exist; S-154 keeps it |
@@ -942,15 +943,15 @@ S-125; later S-131, S-139, S-143, S-144, S-154
 ## C-26
 
 [Routing to Teams and by Severity](../prd/l2/C-26-routing-to-teams-and-by-severity.md) · L2 Teams · stories: S-111,
-S-162, S-112, S-119, S-121, S-122, S-123, S-124
+S-162, S-112, S-119, S-121, S-122, S-123, S-124, S-140
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-26.FR-1 | S-121 (part), S-123 (part) | complete | the Mention entry "Team {Team}" that naming a Destination of the Team adds is C-28.FR-6, S-140 |
+| C-26.FR-1 | S-121 (part), S-123 (part), S-140 (part) | complete | the Mention entry "Team {Team}" that naming a Destination of the Team adds is C-28.FR-6, S-140 |
 | C-26.FR-2 | S-121 (part), S-123 (part) | complete | "Run the Teams' Escalation chains" acts on chains with C-32.FR-4, S-154 |
 | C-26.FR-3 | S-121 | complete |  |
 | C-26.FR-4 | S-121 | complete |  |
-| C-26.FR-5 | S-121 (part), S-123 (part) | open: S-140 | the Mentions of the Destination's entries for `new_alert_group` (C-28.FR-1); the delay by Maintenance windows is specified later |
+| C-26.FR-5 | S-121 (part), S-123 (part), S-140 (part) | complete | the Mentions of the Destination's entries for `new_alert_group` (S-140); the delay by Maintenance windows is specified later |
 | C-26.FR-6 | S-121 | complete |  |
 | C-26.FR-7 | S-119 (part), S-121 (part) | complete |  |
 | C-26.FR-8 | S-111 (part), S-112 (part) | complete |  |
@@ -971,33 +972,65 @@ S-162, S-112, S-119, S-121, S-122, S-123, S-124
 | C-26.AC-10 | S-121 | complete |  |
 | C-26.AC-11 | S-111 (part), S-121 (part) | complete |  |
 
-## C-28
+## C-27
 
-[Mentions and buttons of a Destination](../prd/l2/C-28-mentions-and-buttons-of-a-destination.md) · L2 Teams (buttons),
-L2 On call (Mentions) · stories: S-113, S-114; later S-140, S-143, S-144
+[Schedules](../prd/l2/C-27-schedules.md) · L2 On call · stories: S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137;
+later S-145, S-150, S-154, S-155
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-28.FR-1 | — | open: S-140 | the grid on the Destination form is S-143 |
-| C-28.FR-2 | — | open: S-140 | the group and everyone-in-the-chat mentions of Connections come with S-139 |
-| C-28.FR-3 | — | open: S-140 |  |
-| C-28.FR-4 | — | open: S-140 |  |
-| C-28.FR-5 | — | open: S-140 |  |
-| C-28.FR-6 | — | open: S-140 |  |
-| C-28.FR-7 | — | open: S-140 |  |
+| C-27.FR-1 | S-131 (part), S-135 (part), S-136 (part) | complete | P-90 confirmed with S-131 |
+| C-27.FR-2 | S-131 (part), S-135 (part) | complete |  |
+| C-27.FR-3 | S-131 (part), S-135 (part) | complete | P-65 and P-91 confirmed with S-131 |
+| C-27.FR-4 | S-131 (part), S-135 (part) | complete |  |
+| C-27.FR-5 | S-131 (part), S-135 (part) | complete |  |
+| C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
+| C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 and P-88 stay provisional until the test environment confirms them |
+| C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part) | open: S-145, S-150, S-155 | the Destinations of the Team; the Threads of the chains that Page the Schedule come with S-155, and whether a gateway call still reaches the person with S-145 (API) and S-150 (pages) |
+| C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
+| C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
+| C-27.FR-11 | S-131 | complete |  |
+| C-27.FR-12 | S-131 (part) | open: S-154 | `schedule_in_use` is raised once Escalation steps name Schedules; P-66 confirmed with S-131 |
+| C-27.FR-13 | S-131 (part), S-135 (part) | complete |  |
+| C-27.FR-14 | S-131 (part), S-133 (part), S-164 (part), S-134 (part), S-137 (part) | complete |  |
+| C-27.AC-1 | S-131 | complete |  |
+| C-27.AC-2 | S-131 (part), S-135 (part) | complete |  |
+| C-27.AC-3 | S-131 | complete |  |
+| C-27.AC-4 | S-131 | complete |  |
+| C-27.AC-5 | S-133 | complete |  |
+| C-27.AC-6 | S-164 (part), S-135 (part), S-136 (part) | complete |  |
+| C-27.AC-7 | S-134 | complete |  |
+| C-27.AC-8 | S-131 (part), S-133 (part) | open: S-154 | deleting a Schedule that an Escalation step names gets `schedule_in_use` from S-154 |
+| C-27.AC-9 | S-135 (part), S-136 (part) | complete |  |
+| C-27.AC-10 | S-131 | complete |  |
+
+## C-28
+
+[Mentions and buttons of a Destination](../prd/l2/C-28-mentions-and-buttons-of-a-destination.md) · L2 Teams (buttons),
+L2 On call (Mentions) · stories: S-113, S-114, S-138, S-139, S-140, S-165, S-141, S-142, S-143, S-144
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-28.FR-1 | S-140 (part), S-143 (part) | complete |  |
+| C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the bridge libraries S-141, S-142 |
+| C-28.FR-3 | S-140 (part), S-165 (part), S-143 (part) | complete |  |
+| C-28.FR-4 | S-140 | complete |  |
+| C-28.FR-5 | S-140 | complete |  |
+| C-28.FR-6 | S-140 | complete |  |
+| C-28.FR-7 | S-140 | complete |  |
 | C-28.FR-8 | S-113 (part), S-114 (part) | complete |  |
 | C-28.FR-9 | S-113 | complete |  |
-| C-28.FR-10 | S-113 (part), S-114 (part) | open: S-143 | the Mentions on the Destination form |
-| C-28.FR-11 | S-114 (part) | open: S-144 | the page on whom a message mentions |
-| C-28.AC-1 | — | open: S-140 |  |
-| C-28.AC-2 | — | open: S-140 |  |
-| C-28.AC-3 | — | open: S-140 |  |
-| C-28.AC-4 | — | open: S-140 |  |
-| C-28.AC-5 | — | open: S-140 |  |
-| C-28.AC-6 | — | open: S-140 |  |
+| C-28.FR-10 | S-113 (part), S-114 (part), S-140 (part), S-143 (part) | complete |  |
+| C-28.FR-11 | S-114 (part), S-144 (part) | complete |  |
+| C-28.AC-1 | S-140 | complete |  |
+| C-28.AC-2 | S-140 | complete |  |
+| C-28.AC-3 | S-140 (part), S-165 (part) | complete |  |
+| C-28.AC-4 | S-165 | complete |  |
+| C-28.AC-5 | S-140 | complete |  |
+| C-28.AC-6 | S-140 | complete |  |
 | C-28.AC-7 | S-113 | complete |  |
-| C-28.AC-8 | — | open: S-140 |  |
-| C-28.AC-9 | S-114 (part) | open: S-143 | the Telegram Destination's unavailable targets |
+| C-28.AC-8 | S-140 | complete |  |
+| C-28.AC-9 | S-114 (part), S-143 (part) | complete |  |
 
 ## C-29
 
@@ -1056,21 +1089,33 @@ Revised requirements that only later batches carry may still be added.
 | C-10.FR-3 | — | open: S-148 | the Transport `gateway` |
 | C-10.AC-23 | S-162 (part), S-113 (part) | complete |  |
 | C-11.FR-3 | S-111 | complete |  |
-| C-11.FR-6 | S-121 (part) | open: S-140 | `storm_started` |
+| C-11.FR-6 | S-121 (part), S-140 (part) | open: S-154 | Storms with Team Destinations (S-121); `storm_started` (S-140); the chains of an Alert Group that a summary stood for start at its own Publication (C-32.FR-5) with S-154 |
 | C-11.FR-14 | S-121 | complete |  |
-| C-11.FR-21 | — | open: S-140 | the delivery event "Mention not delivered" |
+| C-11.FR-20 | S-118 (part), S-121 (part), S-140 (part) | open: S-155 | the L2 lifecycle events of C-25 and C-26 (S-118, S-121); the Mentions of each Destination's entries (S-140); the events of C-32 (`paged`, `assignees_changed`, …) come with S-155 |
+| C-11.FR-21 | S-165 | complete | the delivery event "Mention not delivered" |
 | C-12.FR-1 | S-125 (part), S-126 (part) | complete |  |
 | C-12.FR-2 | S-125 | complete |  |
-| C-12.FR-3 | S-125 (part) | open: S-155 | the built-in texts of C-28, C-30 and C-32 come with their stories |
+| C-12.FR-3 | S-125 (part), S-143 (part) | open: S-155 | the texts of undelivered Mentions in both languages (S-143); the Mentions of a Storm summary (S-140) need no new text, since they are the messenger's own mention tokens before the summary's text; those of C-30 and C-32 come with their stories |
+| C-12.FR-8 | S-140 (part), S-143 (part) | complete | the Mention entries in delivery and on the form |
 | C-12.FR-11 | S-125 | complete |  |
+| C-12.FR-12 | S-140 (part), S-165 (part) | open: S-155 | an unlinked person left out and recorded; the Assignees named like the footer's users come with S-155 |
 | C-12 UI | S-129 | complete | "Labels in the message" and the preview of the layout |
 | C-13.FR-3 | S-125 | complete |  |
-| C-13.FR-9 | S-114 (part) | open: S-143 | the Mention entries on the Destination page |
+| C-13.FR-8 | S-140 | complete | Mattermost groups for group entries and Team mentions |
+| C-13.FR-9 | S-114 (part), S-143 (part) | complete | the button set (S-114) and the Mention entries (S-143); the Route and Team forms with Severity conditions are S-123's, under C-26.FR-1 |
 | C-14.FR-16 | S-125 | complete |  |
 | C-15.FR-2 | S-118 (part), S-121 (part) | open: S-156 | the Assignees in `alert_group` and `escalation_webhook` |
+| C-15.FR-11 | S-140 (part) | open: S-155 | Teams and the On-call as targets; the people that `paged` names come with S-155 |
 | C-16.FR-4 | S-113 (part), S-125 (part) | complete |  |
+| C-17.FR-2 | S-140 | complete | the Mentions of the entries for `ack_timeout` |
 | C-20.FR-1 | S-111 (part), S-112 (part), S-113 (part), S-114 (part), S-115 (part), S-118 (part), S-119 (part), S-120 (part) | open: S-152 | the default Notification rules (S-152, S-153) |
 | C-20.FR-9 | S-115 (part), S-119 (part) | complete |  |
+| C-22.FR-2 | S-139 (part) | open: S-145 | group mentions and mentions of everyone in `info`; the roles come with S-145 |
+| C-22.FR-3 | S-140 (part) | open: S-145 | the Mention entries of a Bridge Destination; a Connection whose only role is `gateway` has no Destination from S-145 |
 | C-22.FR-4 | S-126 | complete |  |
+| C-22.FR-16 | S-140 (part), S-165 (part) | complete | group and everyone entries in `mentions` (S-140); the record of a linked person named by the plain name (S-165) |
 | C-22.FR-21 | S-126 (part) | open: S-145 | the check accepts `layout`; it checks the role `gateway` with C-30 |
+| C-24.FR-1 | S-139 | complete | the optional scope `usergroups:read` |
+| C-24.FR-2 | S-139 | complete | the step `scopes` reports it and the Connection keeps it |
 | C-24.FR-4 | S-125 | complete |  |
+| C-24.FR-6 | S-140 | complete | `<!everyone>` and `<!subteam^ID>` |

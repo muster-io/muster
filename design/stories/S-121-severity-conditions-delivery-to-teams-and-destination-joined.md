@@ -5,7 +5,7 @@ capability: C-26
 kind: be
 layer: L2
 depends_on: [S-111, S-118, S-163]
-covers: [C-26.FR-1, C-26.FR-2, C-26.FR-3, C-26.FR-4, C-26.FR-5, C-26.FR-6, C-26.FR-7, C-26.FR-9, C-26.FR-13, C-26.AC-1, C-26.AC-2, C-26.AC-3, C-26.AC-4, C-26.AC-5, C-26.AC-6, C-26.AC-10, C-26.AC-11, C-25.FR-10, C-25.FR-13, C-25.AC-13, C-08.FR-1, C-09.FR-22, C-11.FR-6, C-11.FR-14, C-15.FR-2]
+covers: [C-26.FR-1, C-26.FR-2, C-26.FR-3, C-26.FR-4, C-26.FR-5, C-26.FR-6, C-26.FR-7, C-26.FR-9, C-26.FR-13, C-26.AC-1, C-26.AC-2, C-26.AC-3, C-26.AC-4, C-26.AC-5, C-26.AC-6, C-26.AC-10, C-26.AC-11, C-25.FR-10, C-25.FR-13, C-25.AC-13, C-08.FR-1, C-09.FR-22, C-11.FR-6, C-11.FR-14, C-11.FR-20, C-15.FR-2]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0027_destination_entries_and_teams.up.sql
@@ -43,6 +43,7 @@ files_touched:
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/fakemattermost_test.go
   - test/e2e/routing_teams_test.go
+  - web/src/test/fixtures/destinations.ts
   - docs/concepts/routing-to-teams.md
   - mkdocs.yml
   - docs/install/versions.md
@@ -150,6 +151,7 @@ issue: null
 - **Fake Mattermost server** (`internal/fakes/fakemattermost`): the channels `ch-infra-critical`, `ch-infra-notice`,
   `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice`, with the bot a member, for the checks of this
   capability.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `teams` (`[]`), so `make generate` leaves the TypeScript check of the web tests green.
 - **Settings**: `route.deliver_to_teams`, `route.run_team_chains`, the Severity condition of a Route's or a Team's
   Destination (`any`), `route.storm_threshold`.
 - **Log events, metrics**: none new.
@@ -267,6 +269,7 @@ None.
 | C-25.AC-13 | partial | the Quiet publication in the Team's Destinations |
 | C-08.FR-1 | partial | revised for L2: Destination entries and the option |
 | C-09.FR-22 | partial | revised for L2: `destination_joined` |
+| C-11.FR-20 | partial | revised for L2: delivery publishes `destination_joined` as a new Root message; its Mentions are S-140 |
 | C-11.FR-6 | partial | revised for L2: Storms with Team Destinations; `storm_started` is S-140 |
 | C-11.FR-14 | full | revised for L2 |
 | C-15.FR-2 | partial | revised for L2: `destination_joined` in events mode |

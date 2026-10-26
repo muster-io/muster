@@ -5,7 +5,7 @@ capability: C-25
 kind: be
 layer: L2
 depends_on: [S-115]
-covers: [C-25.FR-1, C-25.FR-2, C-25.FR-5, C-25.FR-6, C-25.FR-7, C-25.FR-10, C-25.FR-11, C-25.FR-12, C-25.AC-1, C-25.AC-2, C-25.AC-5, C-25.AC-9, C-25.AC-11, C-06.FR-19, C-09.FR-1, C-09.FR-11, C-09.FR-13, C-09.FR-22, C-15.FR-2, C-20.FR-1]
+covers: [C-25.FR-1, C-25.FR-2, C-25.FR-5, C-25.FR-6, C-25.FR-7, C-25.FR-10, C-25.FR-11, C-25.FR-12, C-25.AC-1, C-25.AC-2, C-25.AC-5, C-25.AC-9, C-25.AC-11, C-06.FR-19, C-09.FR-1, C-09.FR-11, C-09.FR-13, C-09.FR-22, C-11.FR-20, C-15.FR-2, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0025_team_label_and_matchers.up.sql
@@ -250,5 +250,6 @@ None.
 | C-09.FR-11 | partial | revised for L2: `team_joined` and `unknown_team_value` in the Timeline; the page is S-120 |
 | C-09.FR-13 | partial | revised for L2: the Teams filter in the API; the column and filter on the page are S-120 |
 | C-09.FR-22 | partial | revised for L2: `team_joined`, `unknown_team_value`; `destination_joined` is S-121, the events of C-32 later |
+| C-11.FR-20 | partial | revised for L2: delivery turns `team_joined` into a Root message update and `unknown_team_value` into nothing; the entries' Mentions are S-140, the events of C-32 S-155 |
 | C-15.FR-2 | partial | revised for L2: the Teams and the two events; `destination_joined` S-121, Assignees and `escalation_webhook` later |
 | C-20.FR-1 | partial | revised for L2: the Team label in the API; the General page is S-120 |

@@ -4,7 +4,7 @@ title: Button sets of the Organization and the Destinations (BE)
 capability: C-28
 kind: be
 layer: L2
-depends_on: [S-111]
+depends_on: [S-111, S-166]
 covers: [C-28.FR-8, C-28.FR-9, C-28.FR-10, C-28.AC-7, C-10.AC-23, C-16.FR-4, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
@@ -43,6 +43,7 @@ files_touched:
   - internal/groups/updates_test.go
   - internal/groups/query.sql
   - test/e2e/button_sets_test.go
+  - web/src/test/fixtures/destinations.ts
   - docs/concepts/statuses-and-commands.md
 acceptance:
   - "[C-28.FR-8, C-28.FR-10] `getOrganization` carries `buttons` `{\"all\": true}` on a new database and after the migration; `updateOrganization` takes `{\"all\": false, \"items\": [...]}` whose items are `{\"button\": \"acknowledge\"}`, `{\"button\": \"resolve\"}`, `{\"button\": \"snooze\", \"snooze_seconds\": N}` or `{\"button\": \"snooze_preset\", \"preset\": \"tomorrow\" | \"week_start\"}`, records the change in the diff of `organization.updated` and keeps the set when the field is omitted; a duplicate item, a `snooze` without `snooze_seconds` above 0 and a `snooze_preset` without `preset` are refused with 422 (`duplicate`, `required`, `out_of_range`) at the item's pointer (`organization_test.go`)."
@@ -120,6 +121,7 @@ issue: null
   whose Desired state changed, Quietly. Safe to run twice: the second run finds every hash unchanged.
 - **Audit log and live updates**: `organization.updated` and `destination.updated` carry `/buttons` in their diffs; the
   `organization` and `destination` hints as for every field.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `buttons` (`{"source": "organization"}`), so `make generate` leaves the TypeScript check of the web tests green.
 - **Settings**: `organization.buttons`, `destination.buttons`, `route.snooze_durations`; reference.md "Buttons and
   links by status" already holds the revised rule.
 - **Log events, metrics**: none new; the worker's `open_group_update_done` names the new kinds.
