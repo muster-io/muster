@@ -2886,9 +2886,10 @@ exactly that, with <code>database.host</code>, <code>database.port</code>, <code
 and the password from a key of the Secret as <code>MUSTER_DATABASE_PASSWORD_FILE</code>. Use the URL when you need a setting that
 has no field, such as <code>pool_max_conns</code> or <code>sslrootcert</code>; in the chart, <code>database.urlKey</code> names the key of the Secret that
 holds the whole URL, and the field values are then ignored.</p>
-<p>A replica's main pool holds <code>max(10, CPUs)</code> connections unless the URL sets <code>pool_max_conns</code>. On top of that, each
-replica keeps about three session connections (see <a href="#pgbouncer">PgBouncer</a>). Size <code>max_connections</code> of PostgreSQL for all
-replicas together.</p>
+<p>A replica's main pool holds <code>max(10, CPUs)</code> connections unless the URL sets <code>pool_max_conns</code>. The <code>pool_*</code> parameters
+size the main pool only: a session connection derived from the URL drops them, and one given by
+<code>MUSTER_DATABASE_SESSION_URL</code> ignores them. On top of that, each replica keeps about three session connections (see
+<a href="#pgbouncer">PgBouncer</a>). Size <code>max_connections</code> of PostgreSQL for all replicas together.</p>
 <p>Create the database and its user before the first start. The user owns the database, because Muster creates its tables,
 indexes and partitions itself:</p>
 <div class="highlight"><pre><span></span><code><span class="k">CREATE</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">muster</span><span class="w"> </span><span class="n">LOGIN</span><span class="w"> </span><span class="n">PASSWORD</span><span class="w"> </span><span class="s1">'&lt;password&gt;'</span><span class="p">;</span>
@@ -2973,7 +2974,8 @@ PostgreSQL directly or through a pooler in session mode:</p>
 <dd>A whole URL for the session connection.</dd>
 <dt><code>MUSTER_DATABASE_SESSION_HOST</code></dt>
 <dt><code>MUSTER_DATABASE_SESSION_PORT</code></dt>
-<dd>Only the host and the port; the user, password, database and <code>sslmode</code> are those of the main connection.</dd>
+<dd>Only the host and the port; the user, password, database, <code>sslmode</code> and the other parameters are those of the main
+connection, without its <code>pool_*</code> parameters.</dd>
 </dl>
 <p>In the chart, these are <code>database.sessionHost</code> and <code>database.sessionPort</code>. With CloudNativePG, the main connection can
 use a <code>Pooler</code> object in transaction mode, whose Service takes the <code>Pooler</code>'s name, here <code>muster-db-pooler-rw</code>, and the
