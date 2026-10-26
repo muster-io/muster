@@ -291,6 +291,20 @@ func TestDerivedSessionDropsPoolSettings(t *testing.T) {
 			derived: true,
 		},
 		{
+			name:    "pool key first",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?pool_max_conns=5&sslmode=require"),
+			main:    "postgres://u:p@db:5432/m?pool_max_conns=5&sslmode=require",
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require",
+			derived: true,
+		},
+		{
+			// The raw filter keeps a percent-encoded key; db.Open drops it from the session connection.
+			name:    "percent-encoded key left for db.Open",
+			vars:    with(base(), "MUSTER_DATABASE_URL", "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5"),
+			main:    "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5",
+			wantURL: "postgres://u:p@db:5432/m?sslmode=require&pool%5Fmax_conns=5",
+		},
+		{
 			name: "explicit session URL",
 			vars: with(base(), "MUSTER_DATABASE_URL", pooled,
 				"MUSTER_DATABASE_SESSION_URL", "postgres://a@b:5432/c?sslmode=disable&pool_max_conns=2"),

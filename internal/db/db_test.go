@@ -359,10 +359,14 @@ func TestPoolSize(t *testing.T) {
 }
 
 // TestSessionWithoutPoolSettings: the pool_* parameters of a session URL never reach PostgreSQL, which refuses the
-// connection over them, while the main pool still takes its size from its own URL.
+// connection over them, while the main pool still takes its size from its own URL. A percent-encoded key, which the
+// configuration leaves in a derived URL, is removed here too.
 func TestSessionWithoutPoolSettings(t *testing.T) {
-	const pooled = "postgres://muster@127.0.0.1:5432/muster?sslmode=disable&application_name=muster" +
-		"&pool_max_conns=5&pool_min_conns=1"
+	const (
+		pooled = "postgres://muster@127.0.0.1:1/muster?sslmode=disable&application_name=muster" +
+			"&pool_max_conns=5&pool_max_conn_lifetime=1h"
+		encoded = "postgres://muster@127.0.0.1:1/muster?sslmode=disable&pool%5Fmax_conns=5"
+	)
 	db := config.Database{URL: pooled}
 	d, err := Open(t.Context(), db, db)
 	if err != nil {
@@ -380,12 +384,22 @@ func TestSessionWithoutPoolSettings(t *testing.T) {
 	if got := d.Pool.Config().MaxConns; got != 5 {
 		t.Errorf("the main pool has %d connections, want 5", got)
 	}
-	parsed, err := pgx.ParseConfig(pooled)
+	for _, u := range []string{pooled, encoded} {
+		parsed, err := pgx.ParseConfig(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := parsed.RuntimeParams["pool_max_conns"]; !ok {
+			t.Errorf("pgx no longer keeps pool_max_conns of %s as a run-time parameter; this test proves nothing", u)
+		}
+	}
+	e, err := Open(t.Context(), unreachable, config.Database{URL: encoded})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := parsed.RuntimeParams["pool_max_conns"]; !ok {
-		t.Error("pgx no longer keeps pool_max_conns as a run-time parameter; withoutPoolSettings may be obsolete")
+	defer e.Close()
+	if _, ok := e.sessionConfig.RuntimeParams["pool_max_conns"]; ok {
+		t.Error("the session connection sends the percent-encoded pool_max_conns")
 	}
 }
 

@@ -568,7 +568,8 @@ func sslMode(u *url.URL) string {
 
 // withoutPoolSettings copies the main connection's URL for a session connection derived from it, without its pool_*
 // parameters: they size the main pool, and PostgreSQL rejects them as run-time parameters of a session. It filters the
-// raw pairs, so the other parameters keep their order and their encoding.
+// raw pairs, so the other parameters keep their order and their encoding. It only keeps the derived URL clean: db.Open
+// is the final guard, for an explicit session URL and a percent-encoded key alike.
 func withoutPoolSettings(main *url.URL) *url.URL {
 	session := *main
 	pairs := strings.Split(main.RawQuery, "&")
