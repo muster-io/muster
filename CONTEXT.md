@@ -278,7 +278,8 @@ such as weekdays 9–18. Where a higher Rotation layer has a Shift, it overrides
 _Avoid_: Rotation (on its own), Layer (on its own)
 
 **Shift**:
-A span of time during which one person is On-call in a Schedule.
+A span of time that one person takes in turn in a Rotation layer of a Schedule. They are On-call in it unless a higher
+Rotation layer or an Override takes the time.
 _Avoid_: Duty
 
 **Override**:
@@ -310,8 +311,9 @@ Notification gateway.
 _Avoid_: Alert (as a verb)
 
 **Notification rules**:
-A person's own two sequences, normal and important, that say how to Page them, such as a Mention in the Thread and a
-call through a Notification gateway five minutes later. An Escalation step Pages a person by one of the two.
+A person's own two sequences, normal and important, that say how to Page them, such as a Mention in the Thread
+together with a call through a Notification gateway, and the Mention again five minutes later. An Escalation step Pages
+a person by one of the two.
 _Avoid_: Notification policy, Contact method
 
 **Notification gateway**:

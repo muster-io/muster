@@ -46,7 +46,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   8. the buttons of the Destination's set (C-28.FR-8);
   9. the links of C-12.FR-9, starting with "Open in Muster".
 
-  Names in items 7 are Mentions where the person has an Account link in the Destination's Identity space, as C-12.FR-12
+  Names in item 7 are Mentions where the person has an Account link in the Destination's Identity space, as C-12.FR-12
   says for the footer. A Loud message carries its Mentions first, as before (C-12.FR-1). The Alert Group page shows all
   labels and annotations, and the message leaves them out.
 - **C-29.FR-2** "Labels in the message" is a Route setting (`route.message_labels`): a list of label names, by default
@@ -156,7 +156,7 @@ Assignees of item 7 appear from C-32 on.
 
 ## Suggested story split
 
-- **BE** — the layout in the renderer and the adapters, "Labels in the message", `layout` in the Bridge protocol with
-  the fake bridge.
+- **BE** — the layout in the renderer and the adapters of Mattermost, Slack and Telegram, with "Labels in the message".
+- **BE** — `layout` in the Bridge protocol, the Bridge adapter and the fake bridge.
 - **FE** — "Labels in the message" and the preview for every markup.
 - In `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python` — types for `layout`.

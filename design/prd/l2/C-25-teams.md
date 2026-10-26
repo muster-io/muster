@@ -58,9 +58,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   the value of its Team label, with the Static labels of its Integration (C-05), equals the Team's slug — exactly, so
   `Payments` is not `payments` — or when one of the Team's Team matchers picks it. Team matchers use the syntax of Route
   Matchers (C-08.FR-2) on any label, and each is enough on its own: an Alert that any one of them picks belongs to the
-  Team. An Alert may belong to several Teams. Muster decides the Teams of an Alert when the Alert starts firing and
-  records them, with the rule that matched — the Team label, or the matcher by its text — on the Alert; the Alerts view
-  of its Integration (C-06.FR-19) and the Alert Group page show them; saving a Team evaluates them again (FR-13).
+  Team. An Alert may belong to several Teams. The Team label may not be the name of a label that an Internal alert sets
+  itself, such as `schedule` or `team_id` (C-27.FR-7); setting it to one is refused with `422`. Muster decides the Teams
+  of an Alert when the Alert starts firing and records them, with the rule that matched — the Team label, or the matcher
+  by its text — on the Alert; the Alerts view of its Integration (C-06.FR-19) and the Alert Group page show them; saving
+  a Team evaluates them again (FR-13).
 - **C-25.FR-6** The Teams of an Alert Group are the Teams of all the Alerts that ever joined it. They only grow: a Team
   stays among them after its Alerts resolve (ADR-0018). Each Team that joins records the lifecycle event `team_joined`,
   which names the Team and the rule that brought it. The Teams of an Alert Group are shown in the header of the Alert
@@ -104,7 +106,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   to joins its Alert Group with `team_joined` (FR-6), the Destinations it adds receive the Alert Group Quietly, as a
   configuration change does (from C-26 on, C-26.FR-6), and no Escalation chain starts. A Team that an Alert no longer
   belongs to stays where it is. So "Create Team" next to a value of the Team label also brings the open Alert Groups of
-  that value to the new Team.
+  that value to the new Team. The save writes, in its own transaction, a durable row for the evaluation, which any
+  replica claims with a lease, like a timer row (ADR-0007), so that a crash after the save loses nothing; the evaluation
+  updates the Teams recorded on each Alert (FR-5) as well as those of its Alert Group, only adds, and is safe to run
+  twice.
 
 ## UI
 
@@ -129,8 +134,10 @@ Routes, Destinations, Schedules, Escalation chains and Alert Groups gain the fil
 
 ## API surface
 
-`teams` (list, create, read, update, delete); `teams/{id}/users` (list, add, remove); identity provider entries, Team
-matchers, Team mentions and Working hours as fields of `teams`; `team-label-values` (list the values seen without a
+`teams` (list, create, read, update, delete); `teams/{id}/users` (list, add, remove); `connections/{id}/groups` (list
+the Mattermost groups or Slack user groups that a Connection reads, for the Team mention and the group entries of C-28;
+its exact form follows the spikes on groups in [facts, Pending](../../facts.md#pending)); identity provider entries,
+Team matchers, Team mentions and Working hours as fields of `teams`; `team-label-values` (list the values seen without a
 Team); the owning Team as a field of `routes`, `destinations` and `escalation-chains`; the Teams of an Alert and of an
 Alert Group, with the rule that brought each, on `alert-groups` and `alerts`; the filters by Team of the list
 operations.

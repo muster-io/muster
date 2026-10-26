@@ -66,14 +66,17 @@ channel and the Thread, so Quiet means "without a Mention" there too (C-24.FR-6)
 The lifecycle events that the capabilities of L2 record, with the columns and meaning of the table of C-09.FR-22, and
 the capability that records each. Outgoing webhooks in events mode receive them one to one (C-15.FR-2), except
 `escalation_webhook`, which goes only to the outgoing webhook Destination its step names (C-32.FR-13). The events of L1
-keep their rows; L2 adds causes to some of them: `unclaimed` is also recorded once every Escalation chain started on an Alert Group has run out (C-32.FR-7); an Acknowledge through a Notification gateway records `acknowledged` with the Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route records the Quiet `severity_raised` or `urgency_raised` with its reason (C-26.FR-9). The Timeline kind `escalation` is new and joins the filter of the Timeline
+keep their rows; L2 adds causes to some of them: `unclaimed` is also recorded once every Escalation chain started on an
+Alert Group has run out (C-32.FR-7); an Acknowledge through a Notification gateway records `acknowledged` with the
+Transport `gateway` (C-30.FR-6); and a raised Minimum severity of a Route records the Quiet `severity_raised` or
+`urgency_raised` with its reason (C-26.FR-9). The Timeline kind `escalation` is new and joins the filter of the Timeline
 (C-09.FR-14). Lifecycle events of the later part of L2 — Maintenance windows, Attach and Detach — are added with it.
 
 | Event | When | Loud or Quiet | Mentions | Timeline kind | In a messenger (C-11) | Capability |
 |---|---|---|---|---|---|---|
 | `team_joined` | a Team joins the Teams of the Alert Group (C-25.FR-6) | Quiet | — | `alerts` | Root message update | C-25 |
 | `unknown_team_value` | an Alert's Team label names no Team, once per value (C-25.FR-7) | Quiet | — | `system` | nothing | C-25 |
-| `destination_joined` | the Alert Group reaches a Destination after its first Publication elsewhere, while it is firing (C-26.FR-5) | Loud | `new_alert_group` | `system` | new Root message in that Destination | C-26 |
+| `destination_joined` | the Alert Group reaches a Destination after its first Publication elsewhere, by its Alerts and not by a change of configuration, while it is firing (C-26.FR-5) | Loud | `new_alert_group` | `system` | new Root message in that Destination | C-26 |
 | `destination_joined` | the same, while it is acknowledged or snoozed | Quiet | — | `system` | new Root message in that Destination | C-26 |
 | `paged` | an Escalation step, or an action of a Notification rule, Pages people, a Team or everyone in the chat by Mention (C-32.FR-9) | Loud | `paged` (the people), or the Team mention or token of the step | `escalation` | Thread reply in the Threads of the chain (C-32.FR-8) | C-32 |
 | `paged` | the same by a call through a Notification gateway (C-30.FR-4) | Quiet | — | `escalation` | nothing; the gateway calls | C-30, C-32 |
@@ -390,7 +393,10 @@ The closed L1 registry (C-06.FR-14). Each is an Alert of the built-in "Muster" I
 deduplicated by fingerprint, resolved explicitly and never Gone or Stale. A configuration entity appears by its immutable
 id, with its current name in a separate `*_name` label; the fingerprint is computed from `alertname` and the id labels
 only, so renaming the entity updates the name label of the open Internal alert instead of starting a new one. An
-Internal alert and a chart rule for the same condition share one name and one runbook page.
+Internal alert and a chart rule for the same condition share one name and one runbook page. From L2, an Internal alert
+about a Team's object also carries the Team's slug under the Organization's Team label, outside the fingerprint, so
+that it belongs to the Team (C-25.FR-5); the Team label may not be the name of a label an Internal alert sets itself,
+such as `schedule` or `team_id`, and setting it to one is refused with `422` (C-25.FR-5).
 
 | Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
 |---|---|---|---|---|
@@ -407,7 +413,7 @@ the story that implements it.
 
 | Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
 |---|---|---|---|---|
-| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap now or one that starts within `schedule.gap_alert_horizon` | `schedule`, `schedule_name`, `team`, `team_name` | C-27 |
+| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap now or one that starts within `schedule.gap_alert_horizon`; an annotation says when the nearest gap starts | `schedule`, `schedule_name`, `team_id`, `team_name`, and the Team's slug under the Organization's Team label, outside the fingerprint, so that the alert belongs to its Team (C-25.FR-5) | C-27 |
 | `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken | `connection`, `connection_name` | C-30 |
 
 ## Metrics catalogue

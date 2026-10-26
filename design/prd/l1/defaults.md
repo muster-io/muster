@@ -151,7 +151,7 @@ Other lifecycle values:
 | `template.lookups_per_render` | 100 rows read by `lookup` in one render; the 101st is a template error | built in | C-12 | P-47 |
 | `lookup_table.page_max` | 50 Lookup tables per page of `listLookupTables`, since each carries its rows; a larger `limit` is lowered to it | built in | C-12 | P-48 |
 | `destination.mentions` | nobody, for every kind of Loud event; from 0.2.0 an empty list of Mention entries, and a Destination of a Team gets the entry "Team {Team}" for every Loud event (C-28.FR-6); the L1 settings move into entries unchanged (C-28.FR-5) | Destination | C-12, C-28 | decided |
-| `organization.buttons` | every button: Acknowledge, Resolve, each Snooze duration and both Snooze presets | Organization | C-28 | decided |
+| `organization.buttons` | all: every button — Acknowledge, Resolve, each Snooze duration, durations added to a Route later included, and both Snooze presets — until an Admin lists the buttons | Organization | C-28 | decided |
 | `destination.buttons` | as in the Organization (`organization.buttons`) | Destination | C-28 | decided |
 | `message.compact_alerts_listed` | 5 values of the distinguishing label, then "…and K more" (C-29.FR-3) | built in | C-29 | P-83 |
 
@@ -231,7 +231,7 @@ Other lifecycle values:
 | `organization.team_label` | `team` | Organization | C-25 | decided |
 | `organization.team_values_window` | values of the Team label without a Team seen in the last 14 days, like `organization.severity_values_window` | built in | C-25 | P-75 |
 | `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone` | Organization | C-25 | decided |
-| `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; the profile's switch "Also call through the Notification gateway" gives a User the Organization's important rule with a call at its first Mention (C-31.FR-5) | Organization | C-31 | decided |
+| `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; a User follows them "As in the Organization" until they choose "Call" or "Don't call", which keep the rules as they were then, or custom rules are set through the API or by an Admin (C-31.FR-2) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
 | `retention.alert_details` | 90 days (Alerts in Alert Groups, Timeline entries, delivery events; never Notes) | Organization | C-09, C-20 | decided |
@@ -248,16 +248,16 @@ Other lifecycle values:
 | `team.working_hours` | the Organization's (`organization.working_hours`) | Team | C-25 | decided |
 | `schedule.time_zone` | `organization.time_zone` | Schedule | C-27 | P-77 |
 | `schedule.gap_view` | the next 14 days | built in | C-27 | decided |
-| `schedule.gap_alert` | on | Schedule | C-27 | P-78 |
+| `schedule.gap_alert` | by default: on while the Schedule is its Team's main one, off otherwise; an Admin may set it on or off | Schedule | C-27 | decided |
 | `schedule.gap_alert_horizon` | 7 days: `MusterScheduleGap` is raised while there is a gap now or one that starts within it | built in | C-27 | decided |
 | `schedule.gap_scan_interval` | 5 min, the Leader's scan for gaps | built in | C-27 | P-80 |
-| `ical.window` | the Shifts from 7 days back to 60 days ahead | built in | C-27 | P-81 |
+| `ical.window` | the segments of the Result in which the User is On-call, from 7 days back to 60 days ahead | built in | C-27 | P-81 |
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | P-82 |
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | P-85 |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
-| `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the calls that come due after it go together, no sooner than this after the previous call | built in | C-30 | P-87 |
+| `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |
 | Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | P-88 |
 
 ## Self-observation and chart

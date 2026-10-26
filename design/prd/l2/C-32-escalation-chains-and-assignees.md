@@ -71,15 +71,17 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   | the Alert Group's first Publication; for one that a Storm summary stood for, its own Publication; for an outgoing webhook in events mode, its delivered `created` event | the chains that apply start at their first step |
   | the Alert Group is created while no Destination reaches it, or only Broken ones | the chains that apply start at once |
   | it becomes firing again: a Reopen into firing, Unacknowledge, Unsnooze, the end of a Snooze, Unresolve, a rise to critical that ends an acknowledgement or a Snooze, an auto-unacknowledge, its Owner disabled or deleted (C-03.FR-13) | the chains that apply start over at their first step |
-  | its Severity level rises while it is firing and nobody owns it | the chains whose condition it now meets start; running chains go on |
-  | a Team joins it (C-25.FR-6) while it is firing and nobody owns it | that Team's chains start, where the Route runs the chains of Teams |
+  | its Severity level rises by its Alerts while it is firing and nobody owns it | the chains whose condition it now meets start; running chains go on |
+  | a Team joins it by a new Alert (C-25.FR-6) while it is firing and nobody owns it | that Team's chains start, where the Route runs the chains of Teams |
+  | a change of configuration: saving a Team (C-25.FR-13), turning on "Also to the Teams from the label" or "Run the Teams' Escalation chains", naming a chain on a Route or a Team or changing its Severity condition, changing the Severity condition of a Destination, changing the Minimum severity (C-26.FR-9) | no chain starts, and the running chains go on |
   | Acknowledge, Snooze, Resolve | every chain stops |
 
-  A chain whose condition the Alert Group no longer meets after its Severity level falls goes on (_provisional_, P-71).
-  New Alerts that remove an acknowledgement, where a Route allows it, become a point of starting over with the Route's
-  Loud and Quiet settings, and how a Maintenance window keeps chains waiting is specified with Maintenance windows; both
-  come later in L2. Steps are timer rows that any replica claims (ADR-0007); every step is a system transition of the
-  dispatcher with Muster as the actor (ADR-0016).
+  A chain whose condition the Alert Group no longer meets after its Severity level falls goes on (ADR-0018, journal
+  D469). A chain that a change of configuration would apply to starts at the next point of the table that starts or
+  starts over the chains, such as Unacknowledge. New Alerts that remove an acknowledgement, where a Route allows it,
+  become a point of starting over with the Route's Loud and Quiet settings, and how a Maintenance window keeps chains
+  waiting is specified with Maintenance windows; both come later in L2. Steps are timer rows that any replica claims
+  (ADR-0007); every step is a system transition of the dispatcher with Muster as the actor (ADR-0016).
 - **C-32.FR-6** When the first chain of an Alert Group starts, its running ack timeout stops and sends no more notices.
   When the Alert Group becomes firing again, its ack timeout starts over only if none of its chains starts; an Alert
   Group on which no chain applies keeps the ack timeout of C-17.
@@ -244,6 +246,9 @@ C-11.
   Notification gateway can reach anyone from this Escalation chain: the Route has no Destination."; with a Destination
   named, the warning is gone. `escalation-chains/{id}/runs` lists the last run of the chain with its Pages and the
   acknowledgement that stopped it.
+- **C-32.AC-18** On a firing Alert Group that nobody owns, saving a Team that its Alerts now belong to, turning "Run the
+  Teams' Escalation chains" on, naming a new chain on its Route and raising its Route's Minimum severity to critical
+  each start no chain and record no step; after an Acknowledge and an Unacknowledge, the chains that now apply start.
 
 ## Related ADRs
 
@@ -261,7 +266,7 @@ C-28 — what each messenger can mention; C-30 — Notification gateways; C-31 �
 - **BE** — Pages by Mention in their own Threads, undelivered Pages, Assignees, with the Assignees of the layout
   (C-29.FR-1, C-29.FR-8).
 - **BE** — `escalation_webhook`.
-- **BE** — calls through a gateway from steps and rules, with combining.
+- **BE** — Pages through a gateway from steps and rules, queued as calls; the queue and its combining are C-30's.
 - **FE** — the chain page, chains on the Route form and the Team page, running chains and Assignees on the Alert Group
   page, the Assignee filter, "I am an Assignee" on the Home page.
 - **Docs** — Escalation chains and "How an alert reaches people".

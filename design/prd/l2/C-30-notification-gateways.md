@@ -36,11 +36,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-30.FR-2** The Bridge protocol gains, additively in version 1 (ADR-0017): `sendNotification` (`POST
   /v1/notifications`), which takes the person's contact, a plain text, signed action data like a button's (C-22.FR-5)
   and an `Idempotency-Key`; and the event `notification_acknowledged`, which returns that action data when the person
-  acknowledges. A gateway implements `info`, `sendNotification`, `answerEvent` — during a call that needs the push mode,
-  so that the answer comes while the person is still on the line — and events in at least one delivery mode
-  (C-22.FR-11); Bridge polling takes the events of a gateway in the poll mode. `muster bridge check` (C-22.FR-21) checks
-  the role, the fake bridge of `muster dev` serves a gateway bot, and the bridge libraries for Go and Python support the
-  role in releases of their own.
+  acknowledges. The action data names the call (FR-4) — a subject of its own kind with the call's `public_id` — so that
+  it stays within the 64 bytes of a button's data however many Alert Groups the call is about. A gateway implements
+  `info`, `sendNotification`, `answerEvent` — during a call that needs the push mode, so that the answer comes while the
+  person is still on the line — and events in at least one delivery mode (C-22.FR-11); Bridge polling takes the events
+  of a gateway in the poll mode. `muster bridge check` (C-22.FR-21) checks the role, the fake bridge of `muster dev`
+  serves a gateway bot, and the bridge libraries for Go and Python support the role in releases of their own.
 - **C-30.FR-3** A person adds, in their profile and from their own web session (C-03.FR-27), one contact for each
   Notification gateway — a phone number or another address the gateway understands, as text — and confirms it: "Send
   code" sends a code (`gateway.contact_code`) through that gateway with `sendNotification`, without action data since
@@ -51,26 +52,31 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Request log masks it (C-23); deleting the User erases it, and the Audit log shows it as `[erased]` in earlier diffs
   (C-03.FR-13). Adding, confirming and removing a contact are recorded in the Audit log.
 - **C-30.FR-4** A call — from an Escalation step (C-32.FR-3) or a Notification rule (C-31.FR-3) — is a row per person
-  and gateway with `next_attempt_at` and a lease, which any replica claims, sent at least once under an
-  `Idempotency-Key` through the gateway Connection's limiter (`connection.bridge.limiter`), calls for critical Alert
-  Groups first. Its failures are classified and retried in the delivery client class within `delivery.transient_backoff`
-  and `delivery.transient_budget`, as deliveries are (C-11.FR-8). Calls are not reconciled: a call has no Root message
-  and no Desired state (ADR-0005). The first call to a person through a gateway goes at once; the calls to the same
-  person through the same gateway that come due after it wait and go together, as one call about all of their Alert
-  Groups whose action data names each of them, no sooner than `gateway.combine_window` after the previous call to that
-  person was sent. Mentions are never combined.
+  and gateway, with a `public_id`, the Alert Groups it is about, `next_attempt_at` and a lease, which any replica
+  claims; it is sent at least once under an `Idempotency-Key` through the gateway Connection's limiter
+  (`connection.bridge.limiter`), calls about critical Alert Groups first. Its failures are classified and retried in the
+  delivery client class within `delivery.transient_backoff` and `delivery.transient_budget`, as deliveries are
+  (C-11.FR-8). Calls are not reconciled: a call has no Root message and no Desired state (ADR-0005). The first call to a
+  person through a gateway goes at once. A Page through the same gateway to the same person that comes due while a call
+  to them is waiting, being retried, or within `gateway.combine_window` after the previous call ended — accepted by the
+  gateway or Not delivered — joins the next call, which goes once that window has passed, as one call about all of its
+  Alert Groups. Right before its first attempt, Muster drops from a call the Alert Groups on which the chain or the rule
+  that Paged has stopped — acknowledged, snoozed, resolved or started over — and a call left without any is not sent.
+  From its first attempt on, a call keeps its Alert Groups and its text, which its `Idempotency-Key` stands for: it
+  takes no more, and when every Alert Group of a call being retried has stopped, its retries end. Mentions are never
+  combined.
 - **C-30.FR-5** The text of a call names the Alert Groups — number, title and Severity level — and how to acknowledge,
   in the language of the person's profile. Only the gateway sender and the interactive path call `sendNotification`
   (ADR-0016, lint 3).
 - **C-30.FR-6** A `notification_acknowledged` event whose action data verifies runs Acknowledge with the Transport
-  `gateway` as the person the call was for — taken from Muster's signature, never from the contact (ADR-0013) — for each
-  Alert Group the data names, under a precondition of its own (ADR-0004): a firing or snoozed Alert Group becomes
-  acknowledged; one that someone owns, the same person included, stays as it is, and the gateway's answer to the person
-  says "Already taken by {name}"; a resolved one stays resolved, answered "Already resolved". A Takeover is never made
-  through a gateway. The person's Role and state apply as for a press (C-18.FR-8). An Acknowledge that runs is recorded
-  in the Audit log and the Timeline like any Acknowledge; one that its precondition refuses changes nothing and is
-  logged as a refusal, like any refused Command (C-10.AC-4). The answer goes through `answerEvent` on the interactive
-  path. Events are handled once per id (C-22.FR-11).
+  `gateway` as the person the call was for — taken from Muster's signature and the call it names, never from the contact
+  (ADR-0013) — for each Alert Group of that call, under a precondition of its own (ADR-0004): a firing or snoozed Alert
+  Group becomes acknowledged; one that someone owns, the same person included, stays as it is, and the gateway's answer
+  to the person says "Already taken by {name}"; a resolved one stays resolved, answered "Already resolved". A Takeover
+  is never made through a gateway. The person's Role and state apply as for a press (C-18.FR-8). An Acknowledge that
+  runs is recorded in the Audit log and the Timeline like any Acknowledge; one that its precondition refuses changes
+  nothing and is logged as a refusal, like any refused Command (C-10.AC-4). The answer goes through `answerEvent` on the
+  interactive path. Events are handled once per id (C-22.FR-11).
 - **C-30.FR-7** A call the person does not acknowledge lets the Escalation chain and the Notification rules go on. A
   call that ends Not delivered — refused, an unknown answer, or the retry budget used up — records the lifecycle event
   `page_not_delivered` naming the person and the gateway.
@@ -79,9 +85,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   `muster_notification_gateway_broken{connection}` is 1, and the Internal alert `MusterNotificationGatewayBroken`
   ([reference.md](../l1/reference.md#internal-alerts-added-in-l2)) is raised, with a chart rule and a runbook page of
   the same name. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or check
-  ends the state. Calls that come due while it is Broken end Not delivered and are not sent after it recovers
-  (_provisional_, P-68). A gateway's failures never make a Destination Broken, nor do a Destination's make its gateway
-  Broken, even for a bridge with both roles.
+  ends the state. Calls that come due while it is Broken end Not delivered and are not sent after it recovers, as Pages
+  that a Broken Destination could not deliver are not (ADR-0018). A gateway's failures never make a Destination Broken,
+  nor do a Destination's make its gateway Broken, even for a bridge with both roles.
 - **C-30.FR-9** Escalation steps and Notification rule actions that call through a gateway are offered only while a
   Bridge Connection in the role `gateway` exists; otherwise the UI shows "Unavailable: a Notification gateway is needed
   (a bridge for calls and SMS)" with a link to the documentation, and a step or action whose gateway was deleted is
@@ -122,9 +128,13 @@ them through the call sender directly.
 - **C-30.AC-2** A contact is confirmed only with the code the fake gateway received through `sendNotification`; a wrong
   code is refused with the attempts left; an Admin's request to set a contact for another User gets `403`, and the Admin
   removes it; the Request log shows the contact masked; deleting the User shows it as `[erased]` in the Audit log.
-- **C-30.AC-3** A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` until it is
-  accepted; of three calls to one person within `gateway.combine_window`, the first reaches the fake gateway at once and
-  the other two as one call when the window after it has passed.
+- **C-30.AC-3** A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` and the same
+  text until it is accepted, and its retries end once all its Alert Groups are acknowledged; of three Pages to one
+  person within `gateway.combine_window`, the first reaches the fake gateway at once and the other two as one call when
+  the window after it has passed — and when the second Alert Group is acknowledged meanwhile, that call is about the
+  third only; a call whose Alert Groups were all acknowledged before it went is not sent; after a call that ends Not
+  delivered, the next one goes once the window after it has passed. The action data of a call about two Alert Groups is
+  at most 64 bytes, and acknowledging it acknowledges both.
 - **C-30.AC-4** `notification_acknowledged` for a firing Alert Group acknowledges it as the person the call was for,
   with the Transport `gateway` in the Timeline and the Audit log; for an Alert Group another User owns it changes
   nothing, is logged as a refusal, and the gateway's answer says "Already taken by" that User; replaying the event
@@ -149,7 +159,9 @@ Bridge Connections; C-23 — the Request log.
 ## Suggested story split
 
 - **BE** — the role in `info`, `sendNotification` and `notification_acknowledged` in `api/bridge.yaml` and the fake
-  bridge, contacts with the code, the call queue with combining, the Acknowledge of the Transport `gateway`, Broken with
-  its Internal alert, chart rule and runbook.
+  bridge, contacts with the code and its limits.
+- **BE** — the queue of calls with combining, the Acknowledge of the Transport `gateway`; the calls themselves come from
+  C-31 and C-32.
+- **BE** — Broken gateways with their Internal alert, chart rule and runbook.
 - **FE** — the contact in the profile, the roles and health on the Connection page.
 - In `muster-io/muster-bridge-go` and `muster-io/muster-bridge-python` — the role `gateway`.

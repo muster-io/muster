@@ -6,6 +6,11 @@
   over every Rotation layer, so it also closes gaps, and only the person who takes the Shift must be in the Team and not
   a Viewer; the Shifts of people who may not be Paged are skipped, and the Rotation layer below decides, so a gap is a
   time when no Override and no Rotation layer has someone who may be Paged
+- Amended: 2026-10-26 — with the L2 PRD (journal D567, D569): a change of configuration — saving a Team, the options of
+  a Route, naming a chain or changing its condition, the Minimum severity — starts no Escalation chain and adds
+  Destinations Quietly, without `destination_joined`; only Alerts and Commands start chains and publish Loudly; the
+  person who takes an Override may not be disabled either; the iCal feed shows the times when each person is On-call,
+  not the whole Shifts of the Rotation layers
 
 ## Context
 
@@ -84,7 +89,8 @@ because its Severity level rose into the Destination's condition or because a Te
 `destination_joined` publishes it there: Loudly, with the Mentions of a new Alert Group, if it is firing; Quietly if it
 is acknowledged or snoozed; and only once a Maintenance window that keeps it back has ended. An Admin who changes a
 Severity condition adds Destinations the way a Destination added to a Route does, Quietly, and removes none (ADR-0005;
-journal D512).
+journal D512); so does every other change of configuration — saving a Team, the options of a Route, the Minimum
+severity — which publishes Quietly, without `destination_joined`, and starts no Escalation chain (journal D567, D569).
 
 **Mentions of Teams.** A Destination's Mentions become one list of whom to mention — everyone in the chat, a person, a
 messenger group, a Team or the On-call of a Team — each entry with the Loud events it applies to, all of them by
@@ -101,11 +107,11 @@ a Team mention the Team by default, which rings only where a Team mention is set
 **Schedules.** A Schedule belongs to a Team and has Rotation layers — the people of a Rotation layer take Shifts in
 turn, a day, a week or a length of its own, with a handover time, optional limits such as "weekdays 9–18", and the
 Schedule's time zone, and a higher Rotation layer overrides the lower ones wherever it has a Shift — with Overrides on
-top, set in the UI or through the API, and an iCal feed of each person's own Shifts (journal D470). A weekly 24×7
-Rotation layer under a "working hours 11–19" Rotation layer with other people in it is one Schedule (journal D526). A
-Team may have several Schedules, such as a first and a second line; one of them is its main Schedule, which names the
-Team's On-call, and an Escalation step may Page the On-call of any Schedule (journal D526). Schedules are not imported
-from iCal.
+top, set in the UI or through the API, and an iCal feed of the times when each person is On-call (journal D470, D569). A
+weekly 24×7 Rotation layer under a "working hours 11–19" Rotation layer with other people in it is one Schedule (journal
+D526). A Team may have several Schedules, such as a first and a second line; one of them is its main Schedule, which
+names the Team's On-call, and an Escalation step may Page the On-call of any Schedule (journal D526). Schedules are not
+imported from iCal.
 
 **Gaps.** A time in which nobody who may be Paged has a Shift, Overrides included, is a gap. A step that would Page the
 On-call of a Schedule with nobody on Shift is skipped with a Timeline entry, and the chain goes on with its next step.
@@ -117,11 +123,12 @@ about each (journal D514, D567).
 
 **Overrides and permissions.** Only an Admin changes the structure: Teams, Rotation layers, Escalation chains and
 Routes. An Override needs the Permission `schedule-overrides:write`, which Responders and Admins have, and a
-precondition: the caller is in the Team or is an Admin, and the person who takes the Shift is in the Team and is not a
-Viewer. An Override makes that person On-call from one time to another over every Rotation layer, so it also closes a
-gap; the person whose Shift it takes may be named for the record (journal D567). Overrides need no approval and send no message; the Audit log records them, and the UI, its "on call now" view
-and the iCal feed show them (journal D483, D514, D534). Shifts send no messages either: who is on call is shown in the
-UI and the iCal feed, and no messenger command answers it (journal D504, D515).
+precondition: the caller is in the Team or is an Admin, and the person who takes the Shift is in the Team, is not a
+Viewer and is not disabled. An Override makes that person On-call from one time to another over every Rotation layer, so
+it also closes a gap; the person whose Shift it takes may be named for the record (journal D567). Overrides need no
+approval and send no message; the Audit log records them, and the UI, its "on call now" view and the iCal feed show them
+(journal D483, D514, D534). Shifts send no messages either: who is on call is shown in the UI and the iCal feed, and no
+messenger command answers it (journal D504, D515).
 
 **Escalation chains.** An Escalation chain is an object of its own: Routes and Teams name the chains that run on their
 Alert Groups, as they name Destinations, and each may limit a chain it names to some Severity levels. A Team's chains
@@ -143,11 +150,12 @@ allows it — and stops on Acknowledge, Snooze and Resolve (journal D507, D546, 
 that can publish it — none at all, or only Broken ones — starts its chains when it is created (journal D528). In a
 Storm, the chain of an Alert Group waits for that Alert Group's own Publication, and a Maintenance window keeps chains
 waiting. A rise in Severity level of a firing Alert Group that nobody owns restarts no running chain; it only starts the
-chains whose condition it now meets, such as those for critical only (journal D555). When the first chain of an Alert
-Group starts, its running ack timeout stops and sends no more notices: the steps take their place, while an Alert Group
-without a chain keeps the ack timeout of L1 (journal D487, D535). The Alert Group is Unclaimed once every chain started
-on it has run out without an acknowledgement; a chain that starts later, for a Team that joins, starts as usual (journal
-D507, D535).
+chains whose condition it now meets, such as those for critical only (journal D555). A change of configuration starts no
+chain: a chain that it makes apply starts at the next point that starts the chains (journal D567, D569). When the first
+chain of an Alert Group starts, its running ack timeout stops and sends no more notices: the steps take their place,
+while an Alert Group without a chain keeps the ack timeout of L1 (journal D487, D535). The Alert Group is Unclaimed once
+every chain started on it has run out without an acknowledgement; a chain that starts later, for a Team that joins,
+starts as usual (journal D507, D535).
 
 **Where a chain Pages.** A Route's chain writes in the Threads of the Route's Destinations; a Team's chain writes in the
 Threads of that Team's Destinations or, where the Alert Group is delivered to none of them, in those of the Route's
@@ -173,12 +181,13 @@ Pages.
 Mentions in the Thread and calls through a Notification gateway, with waits between them; a step that Pages the On-call
 or chosen people Pages each of them by one of the two. By default the normal rule is a Mention in the Thread and the
 important rule a Mention repeated after five minutes; the Organization sets the defaults, each person changes their own
-rules in the profile, and an Admin sees and may change them (journal D473, D490, D503). Rules and steps that call
-through a Notification gateway are offered only while a Bridge in the role `gateway` is connected; otherwise the UI says
-that a gateway is needed and links to the documentation (journal D540). Calls through a gateway to the same person
-within a short window are combined into one call about several Alert Groups; Mentions are not combined, because every
-Alert Group has a Thread of its own (journal D507, D529). The push of a mobile app can later become one more way to Page
-in the same rules (journal D472, D473).
+rules in the profile — in L2 by a switch that adds an immediate call to the important rule — and an Admin sees and may
+change them (journal D473, D490, D503, D567, D569). Rules and steps that call through a Notification gateway are offered
+only while a Bridge in the role `gateway` exists; otherwise the UI says that a gateway is needed and links to the
+documentation (journal D540). Calls through a gateway to the same person within a short window are combined into one
+call about several Alert Groups, whose signed data names the call that Muster keeps with its Alert Groups; Mentions are
+not combined, because every Alert Group has a Thread of its own (journal D507, D529). The push of a mobile app can later
+become one more way to Page in the same rules (journal D472, D473).
 
 **Notification gateways.** Calls and SMS come from bridges in the role `gateway`, called Notification gateways
 (ADR-0017; journal D505, D542). A person adds their contact for a gateway in the profile, from their own web session,

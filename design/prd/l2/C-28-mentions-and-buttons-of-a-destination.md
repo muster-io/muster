@@ -88,12 +88,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 ### Buttons
 
 - **C-28.FR-8** The buttons a Root message shows come from a button set: the Organization's (`organization.buttons`),
-  which shows all of them by default, or the Destination's own (`destination.buttons`). A set chooses Acknowledge (with
-  Unacknowledge), Resolve, each Snooze duration by its value, "Until tomorrow" and "Until {first day of the week}"
-  (C-10.FR-18); the form offers the distinct Snooze durations of the Organization's Routes. A Root message shows, in the
-  order of [reference.md](../l1/reference.md#buttons-and-links-by-status), the buttons its status offers that the set
-  includes: of the Route's Snooze durations only those in the set, and the presets only on a Route that has Snooze
-  durations. Unsnooze on a snoozed Root message is not part of the set and always shows. A Destination with "As in the
+  which by default is "all" — every button, durations a Route gains later included — until an Admin lists the buttons,
+  or the Destination's own (`destination.buttons`). A set lists Acknowledge (with Unacknowledge), Resolve, each Snooze
+  duration by its value, "Until tomorrow" and "Until {first day of the week}" (C-10.FR-18); the form offers the distinct
+  Snooze durations of the Organization's Routes. A Root message shows, in the order of
+  [reference.md](../l1/reference.md#buttons-and-links-by-status), the buttons its status offers that the set includes:
+  of the Route's Snooze durations only those in the set, and the presets only on a Route that has Snooze durations.
+  Unsnooze on a snoozed Root message is not part of the set and always shows. A Destination with "As in the
   Organization" follows later changes of the Organization's set.
 - **C-28.FR-9** The set changes only the buttons of Root messages: the buttons of Reminders ("Still on it", "Unack"),
   the Text commands of Bridges (C-22.FR-14), the UI and the API keep every action. Each messenger lays out the shown
@@ -159,7 +160,8 @@ Checked through the recording test adapter of C-11 and the fake messenger server
 - **C-28.AC-7** A Destination whose own set has only Acknowledge, "Snooze 24 h" and "Until tomorrow" shows exactly those
   on a firing Root message of a Route with the durations 1 h, 4 h and 24 h, and Unack, "Snooze 24 h" and "Until
   tomorrow" when it is acknowledged; a Reminder in its Thread still carries "Still on it" and "Unack", and the Text
-  command `resolve` through a Bridge still resolves.
+  command `resolve` through a Bridge still resolves. With the Organization's set left "all", a Snooze duration of 2 h
+  added to the Route later shows on the next re-render of a Destination that follows the Organization.
 - **C-28.AC-8** Naming a Destination of the Team "payments" adds the entry "Team payments" when it had none.
 - **C-28.AC-9** In a real browser, the Destination form of a Telegram Destination shows `@channel`, groups and Teams
   unavailable with "Telegram cannot mention everyone or groups", and the Buttons preview follows the tick boxes, in

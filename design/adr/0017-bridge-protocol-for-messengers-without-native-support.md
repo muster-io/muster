@@ -34,7 +34,9 @@
   listed with their total, labels as key and value, and people as references to the Mentions, so that a bridge may
   render the message natively instead of translating markup; and (journal D540, D567) a bridge may declare in `info`
   which mentions of everyone in the chat its messenger has, by the symbolic names `channel`, `here`, `all` and
-  `everyone`, which Mention entries and Escalation steps then offer and Muster sends as entries of their own kind; both
+  `everyone`, which Mention entries and Escalation steps then offer and Muster sends as entries of their own kind; and
+  (journal D569) the signed action data of a call through a Notification gateway names the call, which Muster keeps with
+  its person and Alert Groups, so that one call about several Alert Groups fits the size of a button's data; all
   additive in version 1
 
 ## Context
@@ -206,14 +208,16 @@ which makes the bridge a Notification gateway (ADR-0018) that reaches people out
 for example. A bridge may have both. A gateway implements `info`; `POST /v1/notifications`, which takes the person's
 contact, a text, signed action data like a button's and an `Idempotency-Key`; answering the person behind an event,
 which during a call needs the push mode, so that the answer comes while the person is still on the line; and the event
-`notification_acknowledged`, which returns the action data when the person acknowledges. Muster takes the actor from its
-own signature on that data, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only
-role is `gateway` cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing
-becomes Broken and raises an Internal alert. For a bridge with both roles, failed calls make its gateway Broken and
-failed deliveries its Destinations, never the other way round. Its events in the poll mode come through Bridge polling,
-its calls go through a queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same
-`POST /v1/notifications` (ADR-0013). The bridge libraries for Go and Python support the role in releases of their own
-(journal D505, D517, D532, D542).
+`notification_acknowledged`, which returns the action data when the person acknowledges. The action data names the call,
+which Muster keeps with the person and the Alert Groups it is about, so a call about several Alert Groups fits the 64
+bytes of a button's data (journal D569). Muster takes the actor from its own signature on that data and the call it
+names, never from the contact, so a gateway needs no Identity space. A Bridge Connection whose only role is `gateway`
+cannot be a Destination. Muster checks a gateway through its `info`, and a gateway that keeps failing becomes Broken and
+raises an Internal alert. For a bridge with both roles, failed calls make its gateway Broken and failed deliveries its
+Destinations, never the other way round. Its events in the poll mode come through Bridge polling, its calls go through a
+queue of their own (ADR-0005), and the confirmation code of a contact goes out through the same `POST /v1/notifications`
+(ADR-0013). The bridge libraries for Go and Python support the role in releases of their own (journal D505, D517, D532,
+D542).
 
 **Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
 through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are

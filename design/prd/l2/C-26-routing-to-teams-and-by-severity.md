@@ -55,14 +55,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Destinations whose condition its Severity level meets, and a rise of its Severity level adds the Destinations whose
   condition it now meets, of the Route and of its Teams. A Severity level that falls again, or a Team whose Alerts
   resolved, leaves every Root message in place, kept current until its final state.
-- **C-26.FR-5** When an Alert Group reaches a Destination after its first Publication elsewhere — because its Severity
-  level rose into the Destination's condition or because a Team joined — the lifecycle event `destination_joined`
-  publishes it there: Loudly, with the Mentions of the Destination's entries for `new_alert_group` (C-28.FR-1), when it
-  is firing; Quietly when it is acknowledged or snoozed. One event is recorded for each Destination it joins; the other
-  Destinations see only a Root message update. A Destination that a Team or a rise adds before the first Publication is
-  part of that Publication. During a Storm of the Route, the Destination counts the Alert Group in its own Storm summary
-  unless the Alert Group is Urgent (C-11.FR-6). How a Maintenance window delays `destination_joined` is specified with
-  Maintenance windows.
+- **C-26.FR-5** When an Alert Group reaches a Destination after its first Publication elsewhere — because its Alerts
+  raised its Severity level into the Destination's condition or a new Alert brought a Team — the lifecycle event
+  `destination_joined` publishes it there: Loudly, with the Mentions of the Destination's entries for `new_alert_group`
+  (C-28.FR-1), when it is firing; Quietly when it is acknowledged or snoozed. One event is recorded for each Destination
+  it joins; the other Destinations see only a Root message update. A Destination that a Team or a rise adds before the
+  first Publication is part of that Publication. During a Storm of the Route, the Destination counts the Alert Group in
+  its own Storm summary unless the Alert Group is Urgent (C-11.FR-6). A Destination that a change of configuration adds
+  — saving a Team (C-25.FR-13), a changed Minimum severity (FR-9) or the changes of FR-6 — receives the Alert Group
+  Quietly, without `destination_joined` and without starting an Escalation chain (C-32.FR-5). How a Maintenance window
+  delays `destination_joined` is specified with Maintenance windows.
 - **C-26.FR-6** Configuration changes add Destinations Quietly and remove none by a condition: naming a Destination on a
   Route or a Team, turning "Also to the Teams from the label" on, or changing a condition so that open Alert Groups now
   meet it publishes them there Quietly, within its limits, as a Destination added to a Route (C-11.FR-14). A condition
@@ -182,7 +184,8 @@ Checked with the fake Alertmanager, the fake messenger servers and the recording
   the label", delivers an Alert Group of `team="payments"` only to its own Destinations. Turning "Also to the Teams from
   the label" off gives the final edit of C-11.FR-14 in each Team Destination that no other entry reaches.
 - **C-26.AC-11** Raising the Minimum severity of a Route to critical records a Quiet `urgency_raised` with the reason
-  "Minimum severity of the Route" on its open warning Alert Groups and removes no acknowledgement.
+  "Minimum severity of the Route" on its open warning Alert Groups, removes no acknowledgement, and publishes them
+  Quietly in the Route's Destinations limited to critical, without `destination_joined`.
 
 ## Related ADRs
 
