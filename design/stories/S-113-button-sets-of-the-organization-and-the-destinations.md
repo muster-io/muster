@@ -54,6 +54,7 @@ files_touched:
   - test/e2e/button_sets_test.go
   - web/src/test/fixtures/destinations.ts
   - docs/concepts/statuses-and-commands.md
+  - docs/install/versions.md
 acceptance:
   - "[C-28.FR-8, C-28.FR-10] `getOrganization` carries `buttons` `{\"all\": true}` on a new database and after the migration; `updateOrganization` takes `{\"all\": false, \"items\": [...]}` whose items are `{\"button\": \"acknowledge\"}`, `{\"button\": \"resolve\"}`, `{\"button\": \"snooze\", \"snooze_seconds\": N}` or `{\"button\": \"snooze_preset\", \"preset\": \"tomorrow\" | \"week_start\"}`, records the change in the diff of `organization.updated` and keeps the set when the field is omitted; a duplicate item, a `snooze` without `snooze_seconds` above 0 and a `snooze_preset` without `preset` are refused with 422 (`duplicate`, `required`, `out_of_range`) at the item's pointer (`organization_test.go`)."
   - "[C-28.FR-8, C-28.FR-10] Every messenger Destination — Mattermost, Telegram, Bridge and Slack — reads `buttons` `{\"source\": \"organization\"}` until an update sends `{\"source\": \"own\", \"items\": [...]}`, with the same items and refusals; the change is in the diff of `destination.updated`, and an update with a stale `If-Match` gets 412 (`write_test.go`)."
@@ -224,6 +225,14 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
   or `required`, where this contract asks for `422` `out_of_range` and `required` at the item's pointer, which the
   domain validation gives.
 - Depends on S-111 for `open_group_updates`; it needs neither Teams nor Schedules.
+- A re-render without lifecycle events — a changed button set, as a changed Minimum severity of S-111 — is a change
+  of configuration and publishes Quietly: a delivery it revives that was never published (Not delivered) is published
+  Quiet, and an Urgent Alert Group it releases from a Storm is released Quiet. The worker walks the Alert Groups of a
+  batch in the order (Route, id), the order in which the deletion of a Destination takes the membership locks of its
+  Routes. The upgrade notes (`docs/install/versions.md`) give the recovery of a failed 0023 and what a rolling update
+  from 0.1 means for button sets.
+- The commands line of a Bridge without buttons lists the Text commands of the shown buttons only, as it lists those
+  of the buttons of the status (C-22.FR-5); every other Text command still works (C-28.FR-9).
 - Migration `0023`: the story map gave it `0022`, which S-115 (`0022_teams`) took by merging first, so it takes the
   next free number as §4 of the stories README says; a story merged out of that order renumbers its migration to the
   next free number in its own pull request and re-versions the CHECKs it replaces, listing every value present
