@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
@@ -44,12 +45,16 @@ func TestMinimumSeverity(t *testing.T) {
 		}
 	}
 	policy := string(profiles.Items[0].Policy)
-	route := func(name, minimum string, destinations ...string) string {
+	routeWith := func(name, minimum, policy string, destinations ...string) string {
 		t.Helper()
 		ids, _ := json.Marshal(append([]string{}, destinations...))
 		return api.json(http.MethodPost, "/api/v1/routes", `{"name":"`+name+`","matchers":[{"label":"team","op":"=",`+
 			`"value":"`+name+`"}],"minimum_severity":"`+minimum+`","group_key":["alertname","cluster"],`+
 			`"destination_ids":`+string(ids)+`,"policy":`+policy+`}`, http.StatusCreated)["id"].(string)
+	}
+	route := func(name, minimum string, destinations ...string) string {
+		t.Helper()
+		return routeWith(name, minimum, policy, destinations...)
 	}
 	type routeView struct {
 		MinimumSeverity string `json:"minimum_severity"`
@@ -162,7 +167,9 @@ func TestMinimumSeverity(t *testing.T) {
 	// Group and an info one.
 	conn := e.connection(50)
 	dest := e.destination("sev-mm", conn, fakemattermost.ChannelAlertsProd, nil, 50)
-	db := route("db", "none", dest)
+	// The Root message template shows the Severity level, so that the re-render after a raise edits it.
+	db := routeWith("db", "none", strings.Replace(policy, `"root_message":null`,
+		`"root_message":"{{ .AlertGroup.Title }} is {{ .AlertGroup.SeverityLevel }}"`, 1), dest)
 	e.group("d1", "Slow")
 	e.alert("d1", "b", `{"team":"db","cluster":"d1","severity":"warning"}`, "")
 	e.alert("d1", "i", `{"team":"db","cluster":"d2","severity":"info"}`, "")
@@ -172,6 +179,9 @@ func TestMinimumSeverity(t *testing.T) {
 		t.Fatal("acknowledge")
 	}
 	root := e.root(e.number(g2))
+	eventually(t, "the deliveries to settle", func() bool {
+		return h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`) == 0
+	})
 	replies := len(e.replies(root.ID))
 	edits := len(e.calls(http.MethodPut, "/api/v4/posts/"+root.ID+"/patch"))
 	type entry struct {
@@ -213,7 +223,8 @@ func TestMinimumSeverity(t *testing.T) {
 		t.Errorf("g2 entry %+v", x)
 	}
 	eventually(t, "the root message to be edited", func() bool {
-		return len(e.calls(http.MethodPut, "/api/v4/posts/"+root.ID+"/patch")) > edits
+		return len(e.calls(http.MethodPut, "/api/v4/posts/"+root.ID+"/patch")) > edits &&
+			strings.Contains(e.post(root.ID).Message+e.post(root.ID).title()+string(e.post(root.ID).Props), "is critical")
 	})
 	if got := len(e.replies(root.ID)); got != replies {
 		t.Errorf("%d thread replies after the raise, want %d", got, replies)
