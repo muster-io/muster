@@ -44,7 +44,7 @@
   (`oidc_settings.groups_claim_seen_at`, C-03.FR-6) and
   [`0021_minimum_severity`](../../internal/db/migrations/0021_minimum_severity.up.sql)
   (`routes.minimum_severity` and the queue `open_group_updates`, C-26.FR-8 to FR-10) and
-  [`0023_teams`](../../internal/db/migrations/0023_teams.up.sql)
+  [`0022_teams`](../../internal/db/migrations/0022_teams.up.sql)
   (Teams, the people in them, the owning Team of Routes and Destinations and the Organization's Working hours, C-25,
   S-115), in
   `internal/db/migrations/` — golang-migrate
@@ -142,7 +142,7 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
 indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `request_log` (0013), the queue of
 changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), and the Teams, `teams` and
-`team_users` (0023), which makes 62 tables.
+`team_users` (0022), which makes 62 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -643,9 +643,9 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   `CHECK` keeps `workday_start` a valid time of day and `week_start` a day of the week; the defaults of migration 0015,
   `09:00` and `monday`, gave the Organization that existed before it its values, and the start-up step sets both for a
   new one. A Snooze stores its end as an instant, so a later change of either never moves one already set. The
-  Organization's Working hours (`organization.working_hours`, C-25.FR-9, migration 0023) are `working_days`, `monday` to
+  Organization's Working hours (`organization.working_hours`, C-25.FR-9, migration 0022) are `working_days`, `monday` to
   `sunday`, at least one, and `workday_end`, `HH:MM`, from `workday_start` in `time_zone`; `CHECK (workday_end >
-  workday_start)` keeps the end later than the start on the same day (P-63). Migration 0023 added the CHECKs `NOT
+  workday_start)` keeps the end later than the start on the same day (P-63). Migration 0022 added the CHECKs `NOT
   VALID` and validated them in a second transaction, after giving an Organization whose working day started at 18:00
   or later the end `23:59` (and the start `23:58` where it was `23:59`); the API refuses an update that breaks the order
   with `422` `out_of_range` at the field it changes.
@@ -790,7 +790,7 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   (`bridge_channel_name`). A Slack Destination stores its channel id as entered (`slack_channel_id`, `C…` or `G…`) and
   the channel's name its Destination check (`conversations.info`) answered (`slack_channel_name`); its `CHECK` leaves
   every other type's column null, and theirs leave the Slack columns null. `owning_team_id` names the Team that owns the
-  Destination (C-25.FR-2, migration 0023), with the partial index `destinations_owning_team_idx` on
+  Destination (C-25.FR-2, migration 0022), with the partial index `destinations_owning_team_idx` on
   `(org_id, owning_team_id)` for the filters by Team; it never makes the Destination one of the Team's Destinations.
   **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or `unavailable`), `broken_reason` (masked) and
   `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event. The
@@ -973,7 +973,7 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
 - **`route_destinations`** — Destinations of a Route with `added_at`, which drives the Quiet publication of the Route's
   open Alert Groups into a newly added Destination (C-11.FR-14).
 - **`route_suggestion_dismissals`** — suggestions (`heartbeat_lost`, `internal_alerts`) dismissed per user (C-08.FR-11).
-- **`routes.owning_team_id`** — the Team that owns the Route (C-25.FR-2, migration 0023), which only organizes and
+- **`routes.owning_team_id`** — the Team that owns the Route (C-25.FR-2, migration 0022), which only organizes and
   filters and never adds delivery, with the partial index `routes_owning_team_idx` on `(org_id, owning_team_id)`.
 
 ### 4.9 Alert Groups, Alerts inside them and the Timeline
@@ -1337,7 +1337,7 @@ appears in the view, so a new secret field cannot be forgotten by rotation.
 
 ### 4.15 Teams
 
-Serves C-25 (from 0.2.0, migration 0023); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
+Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
 
 - **`teams`** — a name, unique ignoring case among the Teams that are not deleted (`teams_name_key` on
   `(org_id, lower(name)) WHERE deleted_at IS NULL`), a slug, the value of the Team label (`team.slug_format`:

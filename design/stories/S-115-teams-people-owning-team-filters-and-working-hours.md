@@ -9,8 +9,8 @@ covers: [C-25.FR-1, C-25.FR-2, C-25.FR-3, C-25.FR-9, C-25.FR-10, C-25.FR-11, C-2
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0023_teams.up.sql
-  - internal/db/migrations/0023_teams.down.sql
+  - internal/db/migrations/0022_teams.up.sql
+  - internal/db/migrations/0022_teams.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -55,6 +55,8 @@ files_touched:
   - docs/install/versions.md
   - design/prd/l2/C-25-teams.md
   - internal/tools/refgen/main.go
+  - internal/api/middleware.go
+  - design/adr/0014-metrics-and-logging-policy.md
   - sqlc.yaml
   - internal/api/server_test.go
   - internal/api/routes_test.go
@@ -136,7 +138,7 @@ issue: 404
 - **Problems** (`internal/api/problem.go`): `problemFor` maps the errors of `teams` — not found (`404`), `name_taken`
   and `slug_taken` (`409`), a stale version (`412`), and the declared `team_in_use` — as it maps those of the L1
   domains.
-- **Schema** (migration `0023_teams`, expand only; `schema.md` §2, a new §4.15 Teams, §4.2, §4.5, §4.8):
+- **Schema** (migration `0022_teams`, expand only; `schema.md` §2, a new §4.15 Teams, §4.2, §4.5, §4.8):
   - `teams`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^TM[0-9A-HJKMNP-TV-Z]{12}$')`), `name`, `slug`
     (`CHECK (slug ~ '^[a-z0-9][a-z0-9._-]{0,62}$')`), `description`, `own_working_hours boolean NOT NULL DEFAULT
     false`, `working_days text[]`, `working_start`, `working_end`, `working_time_zone` (all set exactly when
@@ -281,10 +283,11 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 59 files — 13 of them test fakes, counts and call sites that the new fields and Permissions touch — the story
+- With 61 files — 13 of them test fakes, counts and call sites that the new fields and Permissions touch, and the
+  request validation and ADR-0014 changes the review asked for — the story
   is past the size signal and kept whole: the Working hours of the Organization and of a Team are one rule
   (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
-- Migration `0023` follows the story map; a story merged out of that order renumbers its migration to the next free
+- Migration `0022` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
 
 ## Coverage
