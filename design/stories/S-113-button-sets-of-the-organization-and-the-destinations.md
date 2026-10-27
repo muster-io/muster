@@ -194,7 +194,7 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $(curl -s "${A[@]}" $API/organization | j
   | jq -c '{status, p: .errors[0].pointer, c: .errors[0].code}'           # {"status":422,"p":"/buttons/items/1","c":"duplicate"}
 
 # C-16.FR-4: the test message shows the set
-curl -s "${A[@]}" -X POST $API/destinations/$D/tests -d '{}' > /dev/null; sleep 1
+curl -s "${A[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' > /dev/null; sleep 1
 curl -s $FMM/posts | jq -c '[.[] | select(.channel_id == "ch-alerts" and (.props.attachments[0].text // "" | test("Test message")))] | last | [.props.attachments[0].actions[].name]'
 # ["Ack","Resolve"]
 ```
